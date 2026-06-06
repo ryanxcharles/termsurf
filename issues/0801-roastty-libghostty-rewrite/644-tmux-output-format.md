@@ -3,6 +3,11 @@
 agent = "codex"
 model = "gpt-5"
 reasoning = "high"
+
+[review.result]
+agent = "codex"
+session = "019e9a9a-ee48-7ec2-bb17-ea152a97b42d"
+verdict = "approved_with_nits"
 +++
 
 # Experiment 644: Tmux Output Format Helpers
@@ -104,3 +109,61 @@ Follow-up review in the same session approved the revised design for
 implementation. The reviewer confirmed that split semantics, direct parse error
 contract, single-byte delimiter scope, zero-variable formatting tests, and
 README wording were all resolved.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has standalone tmux output-format helpers in
+`roastty/src/terminal/tmux.rs`.
+
+The helper layer ports the runtime behavior from
+`vendor/ghostty/src/terminal/tmux/output.zig` while replacing Zig's comptime
+generated structs with explicit Rust values:
+
+- `OutputVariable` covers upstream tmux output variables;
+- `OutputValue` stores parsed booleans, numbers, and text values;
+- `OutputParseError` reports missing entries, extra entries, and format errors;
+- `OutputVariable::parse_value` parses direct variable values and intentionally
+  collapses direct Rust parse failures to `FormatError`;
+- `parse_output_values` returns one ordered `OutputValue` per requested variable
+  and preserves upstream `splitScalar` behavior for empty fields and trailing
+  delimiters;
+- `format_output_variables` emits tmux `#{variable}` format strings with a
+  single-byte ASCII delimiter.
+
+The implementation preserves the key upstream semantics: booleans are true only
+for exactly `1`, unsigned numeric fields reject malformed input, `$` / `@` / `%`
+prefixes are required for session/window/pane IDs, text variables preserve empty
+strings, and aggregate parsing collapses per-field parse failures to
+`FormatError`.
+
+Verification passed:
+
+- `cargo test -p roastty terminal::tmux` — 61 passed
+- `cargo fmt -p roastty` — passed
+- `cargo fmt -p roastty -- --check` — passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/644-tmux-output-format.md`
+  — passed
+- `git diff --check` — passed
+
+Source comparison was performed against:
+
+- `vendor/ghostty/src/terminal/tmux.zig`
+- `vendor/ghostty/src/terminal/tmux/output.zig`
+- `vendor/ghostty/src/terminal/tmux/viewer.zig` `Format` and `Command` usage
+  sites
+
+Completion review in Codex session `019e9a9a-ee48-7ec2-bb17-ea152a97b42d`
+approved the result with no blocking findings. The reviewer agreed that the
+helper matches upstream `output.zig` runtime behavior within the approved Rust
+contract and that scope stayed limited to output helpers. The review nits were
+to complete the result-review provenance tag and document the ASCII delimiter
+boundary for the `String`-based formatter before the result commit.
+
+## Conclusion
+
+The tmux output variable parsing and format-string helper layer is complete. The
+overall terminal-core `tmux` checklist item remains open because concrete viewer
+command formatting, DCS entry, viewer state, PTY read/write integration, and
+App/Surface wiring are still missing.

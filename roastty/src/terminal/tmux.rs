@@ -79,6 +79,56 @@ pub(crate) enum LayoutParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputVariable {
+    AlternateOn,
+    AlternateSavedX,
+    AlternateSavedY,
+    BracketedPaste,
+    CursorBlinking,
+    CursorColour,
+    CursorFlag,
+    CursorShape,
+    CursorX,
+    CursorY,
+    FocusFlag,
+    InsertFlag,
+    KeypadCursorFlag,
+    KeypadFlag,
+    MouseAllFlag,
+    MouseAnyFlag,
+    MouseButtonFlag,
+    MouseSgrFlag,
+    MouseStandardFlag,
+    MouseUtf8Flag,
+    OriginFlag,
+    PaneId,
+    PaneTabs,
+    ScrollRegionLower,
+    ScrollRegionUpper,
+    SessionId,
+    Version,
+    WindowId,
+    WindowWidth,
+    WindowHeight,
+    WindowLayout,
+    WrapFlag,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OutputValue {
+    Bool(bool),
+    Number(usize),
+    Text(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputParseError {
+    MissingEntry,
+    ExtraEntry,
+    FormatError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LayoutChecksum(u16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,6 +361,118 @@ impl LayoutChecksum {
     }
 }
 
+impl OutputVariable {
+    pub(crate) fn parse_value(self, value: &str) -> Result<OutputValue, OutputParseError> {
+        match self {
+            Self::AlternateOn
+            | Self::BracketedPaste
+            | Self::CursorBlinking
+            | Self::CursorFlag
+            | Self::FocusFlag
+            | Self::InsertFlag
+            | Self::KeypadCursorFlag
+            | Self::KeypadFlag
+            | Self::MouseAllFlag
+            | Self::MouseAnyFlag
+            | Self::MouseButtonFlag
+            | Self::MouseSgrFlag
+            | Self::MouseStandardFlag
+            | Self::MouseUtf8Flag
+            | Self::OriginFlag
+            | Self::WrapFlag => Ok(OutputValue::Bool(value == "1")),
+            Self::AlternateSavedX
+            | Self::AlternateSavedY
+            | Self::CursorX
+            | Self::CursorY
+            | Self::ScrollRegionLower
+            | Self::ScrollRegionUpper
+            | Self::WindowWidth
+            | Self::WindowHeight => parse_output_number(value),
+            Self::SessionId => parse_prefixed_output_number(value, b'$'),
+            Self::WindowId => parse_prefixed_output_number(value, b'@'),
+            Self::PaneId => parse_prefixed_output_number(value, b'%'),
+            Self::CursorColour
+            | Self::CursorShape
+            | Self::PaneTabs
+            | Self::Version
+            | Self::WindowLayout => Ok(OutputValue::Text(value.to_owned())),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::AlternateOn => "alternate_on",
+            Self::AlternateSavedX => "alternate_saved_x",
+            Self::AlternateSavedY => "alternate_saved_y",
+            Self::BracketedPaste => "bracketed_paste",
+            Self::CursorBlinking => "cursor_blinking",
+            Self::CursorColour => "cursor_colour",
+            Self::CursorFlag => "cursor_flag",
+            Self::CursorShape => "cursor_shape",
+            Self::CursorX => "cursor_x",
+            Self::CursorY => "cursor_y",
+            Self::FocusFlag => "focus_flag",
+            Self::InsertFlag => "insert_flag",
+            Self::KeypadCursorFlag => "keypad_cursor_flag",
+            Self::KeypadFlag => "keypad_flag",
+            Self::MouseAllFlag => "mouse_all_flag",
+            Self::MouseAnyFlag => "mouse_any_flag",
+            Self::MouseButtonFlag => "mouse_button_flag",
+            Self::MouseSgrFlag => "mouse_sgr_flag",
+            Self::MouseStandardFlag => "mouse_standard_flag",
+            Self::MouseUtf8Flag => "mouse_utf8_flag",
+            Self::OriginFlag => "origin_flag",
+            Self::PaneId => "pane_id",
+            Self::PaneTabs => "pane_tabs",
+            Self::ScrollRegionLower => "scroll_region_lower",
+            Self::ScrollRegionUpper => "scroll_region_upper",
+            Self::SessionId => "session_id",
+            Self::Version => "version",
+            Self::WindowId => "window_id",
+            Self::WindowWidth => "window_width",
+            Self::WindowHeight => "window_height",
+            Self::WindowLayout => "window_layout",
+            Self::WrapFlag => "wrap_flag",
+        }
+    }
+}
+
+pub(crate) fn parse_output_values(
+    variables: &[OutputVariable],
+    text: &str,
+    delimiter: u8,
+) -> Result<Vec<OutputValue>, OutputParseError> {
+    let mut parts = text.as_bytes().split(|byte| *byte == delimiter);
+    let mut values = Vec::with_capacity(variables.len());
+
+    for variable in variables {
+        let part = parts.next().ok_or(OutputParseError::MissingEntry)?;
+        let part = std::str::from_utf8(part).map_err(|_| OutputParseError::FormatError)?;
+        values.push(variable.parse_value(part)?);
+    }
+
+    if parts.next().is_some() {
+        return Err(OutputParseError::ExtraEntry);
+    }
+
+    Ok(values)
+}
+
+pub(crate) fn format_output_variables(variables: &[OutputVariable], delimiter: u8) -> String {
+    assert!(delimiter.is_ascii(), "tmux output delimiters must be ASCII");
+
+    let mut output = String::new();
+    for (index, variable) in variables.iter().enumerate() {
+        if index != 0 {
+            output.push(char::from(delimiter));
+        }
+        output.push_str("#{");
+        output.push_str(variable.name());
+        output.push('}');
+    }
+    output
+}
+
 fn parse_notification_line(line: &str) -> Option<ControlNotification> {
     let cmd = line.split_once(' ').map_or(line, |(cmd, _)| cmd);
 
@@ -412,6 +574,20 @@ fn parse_usize_exact(value: &str) -> Option<usize> {
         return None;
     }
     value.parse().ok()
+}
+
+fn parse_output_number(value: &str) -> Result<OutputValue, OutputParseError> {
+    parse_usize_exact(value)
+        .map(OutputValue::Number)
+        .ok_or(OutputParseError::FormatError)
+}
+
+fn parse_prefixed_output_number(value: &str, prefix: u8) -> Result<OutputValue, OutputParseError> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 2 || bytes[0] != prefix {
+        return Err(OutputParseError::FormatError);
+    }
+    parse_output_number(&value[1..])
 }
 
 fn parse_usize_field(value: &str) -> Option<(usize, &str)> {
@@ -748,6 +924,274 @@ mod tests {
         assert_eq!(
             LayoutChecksum::calculate(b"159x48,0,0{79x48,0,0,79x48,80,0}").as_string(),
             *b"bb62"
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_bool_variables() {
+        for variable in [
+            OutputVariable::AlternateOn,
+            OutputVariable::BracketedPaste,
+            OutputVariable::CursorBlinking,
+            OutputVariable::CursorFlag,
+            OutputVariable::FocusFlag,
+            OutputVariable::InsertFlag,
+            OutputVariable::KeypadCursorFlag,
+            OutputVariable::KeypadFlag,
+            OutputVariable::MouseAllFlag,
+            OutputVariable::MouseAnyFlag,
+            OutputVariable::MouseButtonFlag,
+            OutputVariable::MouseSgrFlag,
+            OutputVariable::MouseStandardFlag,
+            OutputVariable::MouseUtf8Flag,
+            OutputVariable::OriginFlag,
+            OutputVariable::WrapFlag,
+        ] {
+            assert_eq!(variable.parse_value("1"), Ok(OutputValue::Bool(true)));
+            assert_eq!(variable.parse_value("0"), Ok(OutputValue::Bool(false)));
+            assert_eq!(variable.parse_value(""), Ok(OutputValue::Bool(false)));
+            assert_eq!(variable.parse_value("true"), Ok(OutputValue::Bool(false)));
+        }
+    }
+
+    #[test]
+    fn tmux_output_parse_number_variables() {
+        for variable in [
+            OutputVariable::AlternateSavedX,
+            OutputVariable::AlternateSavedY,
+            OutputVariable::CursorX,
+            OutputVariable::CursorY,
+            OutputVariable::ScrollRegionLower,
+            OutputVariable::ScrollRegionUpper,
+            OutputVariable::WindowWidth,
+            OutputVariable::WindowHeight,
+        ] {
+            assert_eq!(variable.parse_value("0"), Ok(OutputValue::Number(0)));
+            assert_eq!(variable.parse_value("42"), Ok(OutputValue::Number(42)));
+            assert_eq!(
+                variable.parse_value("abc"),
+                Err(OutputParseError::FormatError)
+            );
+            assert_eq!(
+                variable.parse_value("-1"),
+                Err(OutputParseError::FormatError)
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_output_parse_prefixed_ids() {
+        assert_eq!(
+            OutputVariable::SessionId.parse_value("$42"),
+            Ok(OutputValue::Number(42))
+        );
+        assert_eq!(
+            OutputVariable::SessionId.parse_value("42"),
+            Err(OutputParseError::FormatError)
+        );
+        assert_eq!(
+            OutputVariable::SessionId.parse_value("$"),
+            Err(OutputParseError::FormatError)
+        );
+        assert_eq!(
+            OutputVariable::SessionId.parse_value("$abc"),
+            Err(OutputParseError::FormatError)
+        );
+
+        assert_eq!(
+            OutputVariable::WindowId.parse_value("@12345"),
+            Ok(OutputValue::Number(12345))
+        );
+        assert_eq!(
+            OutputVariable::WindowId.parse_value("$0"),
+            Err(OutputParseError::FormatError)
+        );
+
+        assert_eq!(
+            OutputVariable::PaneId.parse_value("%0"),
+            Ok(OutputValue::Number(0))
+        );
+        assert_eq!(
+            OutputVariable::PaneId.parse_value("@0"),
+            Err(OutputParseError::FormatError)
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_text_variables() {
+        for (variable, value) in [
+            (OutputVariable::CursorColour, "red"),
+            (OutputVariable::CursorShape, "underline"),
+            (OutputVariable::PaneTabs, "0,8,16,24"),
+            (OutputVariable::Version, "3.5a"),
+            (OutputVariable::WindowLayout, "a]b,c{d}e(f)"),
+        ] {
+            assert_eq!(
+                variable.parse_value(value),
+                Ok(OutputValue::Text(value.to_owned()))
+            );
+            assert_eq!(
+                variable.parse_value(""),
+                Ok(OutputValue::Text(String::new()))
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_output_parse_values_single_field() {
+        assert_eq!(
+            parse_output_values(&[OutputVariable::SessionId], "$42", b' '),
+            Ok(vec![OutputValue::Number(42)])
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_values_multiple_fields() {
+        assert_eq!(
+            parse_output_values(
+                &[
+                    OutputVariable::SessionId,
+                    OutputVariable::WindowId,
+                    OutputVariable::WindowWidth,
+                    OutputVariable::WindowHeight,
+                ],
+                "$1 @2 80 24",
+                b' ',
+            ),
+            Ok(vec![
+                OutputValue::Number(1),
+                OutputValue::Number(2),
+                OutputValue::Number(80),
+                OutputValue::Number(24),
+            ])
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_values_with_string_field() {
+        assert_eq!(
+            parse_output_values(
+                &[OutputVariable::WindowId, OutputVariable::WindowLayout],
+                "@5,abc123",
+                b',',
+            ),
+            Ok(vec![
+                OutputValue::Number(5),
+                OutputValue::Text("abc123".to_owned()),
+            ])
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_values_different_delimiter() {
+        assert_eq!(
+            parse_output_values(
+                &[OutputVariable::WindowWidth, OutputVariable::WindowHeight],
+                "120\t40",
+                b'\t',
+            ),
+            Ok(vec![OutputValue::Number(120), OutputValue::Number(40)])
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_values_missing_entry() {
+        assert_eq!(
+            parse_output_values(
+                &[OutputVariable::SessionId, OutputVariable::WindowId],
+                "$1",
+                b' ',
+            ),
+            Err(OutputParseError::MissingEntry)
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_values_extra_entry() {
+        assert_eq!(
+            parse_output_values(&[OutputVariable::SessionId], "$1 @2", b' '),
+            Err(OutputParseError::ExtraEntry)
+        );
+        assert_eq!(
+            parse_output_values(&[OutputVariable::SessionId], "$1 ", b' '),
+            Err(OutputParseError::ExtraEntry)
+        );
+    }
+
+    #[test]
+    fn tmux_output_parse_values_format_error() {
+        for value in ["42", "@42", "$abc", ""] {
+            assert_eq!(
+                parse_output_values(&[OutputVariable::SessionId], value, b' '),
+                Err(OutputParseError::FormatError)
+            );
+        }
+    }
+
+    #[test]
+    fn tmux_output_parse_values_preserves_empty_layout_field() {
+        assert_eq!(
+            parse_output_values(
+                &[OutputVariable::SessionId, OutputVariable::WindowLayout],
+                "$1,",
+                b',',
+            ),
+            Ok(vec![
+                OutputValue::Number(1),
+                OutputValue::Text(String::new())
+            ])
+        );
+    }
+
+    #[test]
+    fn tmux_output_format_variables() {
+        assert_eq!(format_output_variables(&[], b' '), "");
+        assert_eq!(
+            format_output_variables(&[OutputVariable::SessionId], b' '),
+            "#{session_id}"
+        );
+        assert_eq!(
+            format_output_variables(
+                &[
+                    OutputVariable::SessionId,
+                    OutputVariable::WindowId,
+                    OutputVariable::WindowWidth,
+                    OutputVariable::WindowHeight,
+                ],
+                b' ',
+            ),
+            "#{session_id} #{window_id} #{window_width} #{window_height}"
+        );
+        assert_eq!(
+            format_output_variables(
+                &[OutputVariable::WindowId, OutputVariable::WindowLayout],
+                b',',
+            ),
+            "#{window_id},#{window_layout}"
+        );
+        assert_eq!(
+            format_output_variables(
+                &[OutputVariable::WindowWidth, OutputVariable::WindowHeight],
+                b'\t',
+            ),
+            "#{window_width}\t#{window_height}"
+        );
+    }
+
+    #[test]
+    fn tmux_output_format_representative_all_variables() {
+        assert_eq!(
+            format_output_variables(
+                &[
+                    OutputVariable::SessionId,
+                    OutputVariable::WindowId,
+                    OutputVariable::WindowWidth,
+                    OutputVariable::WindowHeight,
+                    OutputVariable::WindowLayout,
+                ],
+                b' ',
+            ),
+            "#{session_id} #{window_id} #{window_width} #{window_height} #{window_layout}"
         );
     }
 

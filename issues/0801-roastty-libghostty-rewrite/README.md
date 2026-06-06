@@ -195,7 +195,7 @@ Experiment 246).
 - [x] Scrollback `search` + `StringMap` — terminal-core search, Search thread,
       and StringMap complete using Rust `regex` byte matching instead of
       Oniguruma
-- [ ] `tmux` control mode — control and layout parsers done; DCS entry, output,
+- [ ] `tmux` control mode — control/layout/output helpers done; DCS entry,
       viewer, PTY, and App integration missing
 - [x] `sys` (PNG-decode abstraction) — implemented and tested via C ABI
 
@@ -1747,7 +1747,7 @@ are past the correctness-critical foundation.
 - [Experiment 643: Tmux Layout Parser](643-tmux-layout-parser.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 644: Tmux Output Format Helpers](644-tmux-output-format.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
