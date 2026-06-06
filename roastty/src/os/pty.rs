@@ -155,6 +155,20 @@ pub(crate) struct PtyChild {
     child: Child,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PtyReadiness {
+    pub(crate) readable: bool,
+    pub(crate) hangup: bool,
+    pub(crate) error: bool,
+    pub(crate) invalid: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PtyRead {
+    pub(crate) bytes_read: usize,
+    pub(crate) eof: bool,
+}
+
 impl PtyChild {
     pub(crate) fn master_fd(&self) -> RawFd {
         self.pty.master_fd()
@@ -166,6 +180,108 @@ impl PtyChild {
 
     pub(crate) fn child_id(&self) -> u32 {
         self.child.id()
+    }
+
+    pub(crate) fn set_nonblocking(&self) -> io::Result<()> {
+        let fd = self.master_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn write(&self, data: &[u8]) -> io::Result<usize> {
+        let written = unsafe {
+            libc::write(
+                self.master_fd(),
+                data.as_ptr() as *const libc::c_void,
+                data.len(),
+            )
+        };
+        if written < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(written as usize)
+    }
+
+    pub(crate) fn poll(&self, timeout_ms: i32) -> io::Result<PtyReadiness> {
+        let mut pollfd = libc::pollfd {
+            fd: self.master_fd(),
+            events: libc::POLLIN | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
+        if ready < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if ready == 0 {
+            return Ok(PtyReadiness::default());
+        }
+        Ok(PtyReadiness {
+            readable: pollfd.revents & libc::POLLIN != 0,
+            hangup: pollfd.revents & libc::POLLHUP != 0,
+            error: pollfd.revents & libc::POLLERR != 0,
+            invalid: pollfd.revents & libc::POLLNVAL != 0,
+        })
+    }
+
+    pub(crate) fn read_available(
+        &self,
+        out: &mut Vec<u8>,
+        max_bytes: usize,
+    ) -> io::Result<PtyRead> {
+        let mut total = 0;
+        let mut buf = [0u8; 1024];
+        while total < max_bytes {
+            let limit = (max_bytes - total).min(buf.len());
+            let got = unsafe {
+                libc::read(
+                    self.master_fd(),
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    limit,
+                )
+            };
+            if got > 0 {
+                let got = got as usize;
+                out.extend_from_slice(&buf[..got]);
+                total += got;
+                continue;
+            }
+            if got == 0 {
+                return Ok(PtyRead {
+                    bytes_read: total,
+                    eof: true,
+                });
+            }
+
+            let err = io::Error::last_os_error();
+            match err.raw_os_error() {
+                Some(code) if code == libc::EAGAIN || code == libc::EWOULDBLOCK => break,
+                Some(code) if code == libc::EIO => {
+                    return Ok(PtyRead {
+                        bytes_read: total,
+                        eof: true,
+                    });
+                }
+                _ => return Err(err),
+            }
+        }
+        Ok(PtyRead {
+            bytes_read: total,
+            eof: false,
+        })
+    }
+
+    pub(crate) fn resize(&self, size: PtySize) -> io::Result<()> {
+        self.pty.set_size(size)
+    }
+
+    pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.child.try_wait()
     }
 
     pub(crate) fn wait(&mut self) -> io::Result<ExitStatus> {
@@ -208,6 +324,9 @@ fn dup_owned(fd: RawFd) -> io::Result<OwnedFd> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static PTY_COMMAND_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_size() -> PtySize {
         PtySize {
@@ -374,6 +493,7 @@ mod tests {
 
     #[test]
     fn pty_command_reads_child_output_from_master() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command.arg("-c").arg("printf hello");
 
@@ -387,6 +507,7 @@ mod tests {
 
     #[test]
     fn pty_command_attaches_stdio_to_tty() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command
             .arg("-c")
@@ -401,6 +522,7 @@ mod tests {
 
     #[test]
     fn pty_child_drop_kills_and_reaps_running_child() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
         let pid = {
             let mut command = PtyCommand::new("/bin/sleep", test_size());
             command.arg("5");
@@ -413,5 +535,126 @@ mod tests {
         let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
         assert_eq!(result, -1);
         assert_eq!(io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
+
+    #[test]
+    fn pty_child_write_and_read_available_round_trip() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sh", test_size());
+        command
+            .arg("-c")
+            .arg("stty -echo; printf ready; IFS= read line; printf 'out:%s' \"$line\"");
+        let mut child = command.spawn().expect("spawn child");
+        child.set_nonblocking().expect("set nonblocking");
+
+        let readiness = child.poll(500).expect("poll ready");
+        assert!(
+            readiness.readable || readiness.hangup,
+            "expected ready output: {readiness:?}"
+        );
+        let mut ready = Vec::new();
+        let read = child.read_available(&mut ready, 16).expect("read ready");
+        assert_eq!(read.bytes_read, ready.len());
+        assert_eq!(ready, b"ready");
+
+        assert_eq!(child.write(b"hello\n").expect("write input"), 6);
+        let readiness = child.poll(500).expect("poll output");
+        assert!(
+            readiness.readable || readiness.hangup,
+            "expected output readiness: {readiness:?}"
+        );
+
+        let mut output = Vec::new();
+        let read = child
+            .read_available(&mut output, 32)
+            .expect("read available");
+        assert_eq!(read.bytes_read, output.len());
+        assert_eq!(output, b"out:hello");
+        assert!(child.wait().expect("wait child").success());
+    }
+
+    #[test]
+    fn pty_child_read_available_empty_nonblocking_returns_promptly() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sleep", test_size());
+        command.arg("1");
+        let child = command.spawn().expect("spawn child");
+        child.set_nonblocking().expect("set nonblocking");
+
+        let mut output = Vec::new();
+        let read = child
+            .read_available(&mut output, 64)
+            .expect("read available");
+
+        assert_eq!(read, PtyRead::default());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn pty_child_resize_updates_reported_size_after_spawn() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sleep", test_size());
+        command.arg("1");
+        let child = command.spawn().expect("spawn child");
+        let resized = PtySize {
+            rows: 33,
+            cols: 101,
+            width_px: 1001,
+            height_px: 777,
+        };
+
+        child.resize(resized).expect("resize pty child");
+
+        assert_eq!(pty_size(child.master_fd()).expect("get pty size"), resized);
+    }
+
+    #[test]
+    fn pty_child_try_wait_reports_running_then_exited() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sleep", test_size());
+        command.arg("1");
+        let mut child = command.spawn().expect("spawn child");
+
+        assert!(child.try_wait().expect("try wait running").is_none());
+        assert!(child.wait().expect("wait child").success());
+        assert!(child.try_wait().expect("try wait exited").is_some());
+    }
+
+    #[test]
+    fn pty_child_poll_and_read_available_report_eof_for_short_lived_child() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sh", test_size());
+        command.arg("-c").arg("printf done");
+        let mut child = command.spawn().expect("spawn child");
+        child.set_nonblocking().expect("set nonblocking");
+
+        let readiness = child.poll(500).expect("poll output");
+        assert!(
+            readiness.readable || readiness.hangup || readiness.error,
+            "expected output or exit readiness: {readiness:?}"
+        );
+
+        let mut output = Vec::new();
+        let first = child
+            .read_available(&mut output, 16)
+            .expect("read available");
+        assert_eq!(first.bytes_read, output.len());
+        assert!(output.starts_with(b"done"));
+        assert!(child.wait().expect("wait child").success());
+
+        let mut saw_eof = first.eof;
+        for _ in 0..10 {
+            if saw_eof {
+                break;
+            }
+            let readiness = child.poll(100).expect("poll eof");
+            if readiness.hangup || readiness.error || readiness.readable {
+                let read = child
+                    .read_available(&mut output, 16)
+                    .expect("read remaining");
+                saw_eof = read.eof;
+            }
+        }
+        assert!(saw_eof, "expected EOF after short-lived child exit");
     }
 }

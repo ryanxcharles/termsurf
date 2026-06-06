@@ -97,3 +97,49 @@ behavior exactly, treats PTY-master `EIO` as EOF, documents `write` as a
 single-syscall operation, and disables shell echo in the round-trip test. Codex
 re-reviewed the amended design and approved it for plan commit and
 implementation with no remaining blockers.
+
+## Result
+
+**Result:** Pass.
+
+`PtyChild` now exposes bounded synchronous master-side IO primitives:
+`set_nonblocking`, single-syscall `write`, `poll`, bounded `read_available`,
+`resize`, and `try_wait`. `PtyReadiness` reports readable, hangup, error, and
+invalid readiness bits, while `PtyRead` reports the number of bytes read and
+whether EOF was reached. `read_available` stops at the requested byte limit,
+`WouldBlock`, EOF, or PTY-master `EIO`.
+
+Focused tests cover a shell round trip with echo disabled, prompt return from an
+empty nonblocking read, resize after spawn, running/exited `try_wait`, and
+readable output plus EOF for a short-lived child.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty os::pty` — 13 passed, 0 failed
+
+## Conclusion
+
+Roastty now has tested PTY child IO primitives for the future termio loop. The
+remaining PTY/termio gap is coordinating these primitives in a persistent
+read/write loop with quit signaling, terminal processing, process wait handling,
+and App/surface integration.
+
+## Completion Review
+
+**Result:** Approved after test fix.
+
+Codex found no bounded-read, readiness mapping, EOF/EIO, write, resize, or
+implementation correctness issues. It found one test-stability issue:
+`pty_child_try_wait_reports_running_then_exited` originally used
+`/bin/sh -c "sleep 0.1"`, which could complete before `try_wait()` observed the
+running state on a slow runner.
+
+The test now spawns `/bin/sleep 1` directly before asserting `try_wait()`
+returns `None`. Codex re-reviewed the corrected diff and approved it for result
+commit with no remaining findings.
+
+Final verification later exposed a parallel-test flake while multiple PTY tests
+spawned controlling-terminal children at once. The spawning PTY tests now use a
+test-only static mutex to serialize those subprocess cases, and
+`cargo test -p roastty os::pty` was rerun successfully.
