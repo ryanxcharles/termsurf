@@ -248,6 +248,56 @@ impl Screen {
         true
     }
 
+    pub(super) fn scroll_to_selection_endpoint(
+        &mut self,
+        endpoint: GridRef,
+    ) -> Result<bool, GridRefPointError> {
+        let endpoint_pin = self
+            .pages
+            .pin_from_grid_ref(endpoint.node, endpoint.x, endpoint.y)?;
+        let Some((viewport_top_left, viewport_bottom_right)) = self.viewport_bounds() else {
+            return Ok(false);
+        };
+        let viewport_top_left = self.pages.pin_from_grid_ref(
+            viewport_top_left.node,
+            viewport_top_left.x,
+            viewport_top_left.y,
+        )?;
+        let viewport_bottom_right = self.pages.pin_from_grid_ref(
+            viewport_bottom_right.node,
+            viewport_bottom_right.x,
+            viewport_bottom_right.y,
+        )?;
+
+        let endpoint_before_viewport = self
+            .pages
+            .pin_before(endpoint_pin, viewport_top_left)
+            .ok_or(GridRefPointError::NoValue)?;
+        let viewport_before_endpoint = self
+            .pages
+            .pin_before(viewport_bottom_right, endpoint_pin)
+            .ok_or(GridRefPointError::NoValue)?;
+        if !endpoint_before_viewport && !viewport_before_endpoint {
+            return Ok(false);
+        }
+
+        if endpoint_before_viewport {
+            self.pages.scroll_to_pin(endpoint_pin);
+            return Ok(true);
+        }
+
+        let endpoint =
+            self.point_from_grid_ref(endpoint.node, endpoint.x, endpoint.y, point::Tag::Screen)?;
+        let rows = self.rows();
+        let row = if rows <= 1 {
+            endpoint.y
+        } else {
+            endpoint.y.saturating_sub(u32::from(rows - 1))
+        };
+        self.pages.scroll_to_row(row as usize);
+        Ok(true)
+    }
+
     /// Flatten `selection` to a `StringMap` (text + a per-byte map back to screen pins) for regex
     /// search (upstream `Screen.selectionString` with a `StringMap` out-parameter). `unwrap` is
     /// always `true` (so soft-wrapped lines join, as upstream's `selectionString`); `trim` is the

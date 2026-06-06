@@ -1935,6 +1935,28 @@ impl Surface {
         true
     }
 
+    fn adjust_selection(&mut self, adjustment: TerminalSelectionAdjustment) -> bool {
+        if self.app.is_null() {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        let adjusted = match worker
+            .with_termio_mut(|termio| termio.terminal_mut().adjust_active_selection(adjustment))
+        {
+            Ok(adjusted) => adjusted,
+            Err(err) => {
+                self.apply_termio_event(termio::TermioWorkerEvent::Error(format!("{err:?}")));
+                return false;
+            }
+        };
+        if adjusted {
+            self.request_render();
+        }
+        adjusted
+    }
+
     fn scroll_viewport_to_top(&mut self) {
         if self.app.is_null() {
             return;
@@ -2620,6 +2642,7 @@ enum ParsedBindingAction {
     Reset,
     ClearScreen,
     SelectAll,
+    AdjustSelection(TerminalSelectionAdjustment),
     ScrollToTop,
     ScrollToBottom,
     ScrollToRow(usize),
@@ -2715,6 +2738,9 @@ fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindin
             }
             Some(ParsedBindingAction::SelectAll)
         }
+        b"adjust_selection" => Some(ParsedBindingAction::AdjustSelection(
+            selection_adjustment_from_str(parameter?)?,
+        )),
         b"scroll_to_top" => {
             if parameter.is_some() {
                 return None;
@@ -5053,6 +5079,22 @@ fn selection_order_from_raw(value: c_int) -> Result<TerminalSelectionOrder, c_in
 
 fn selection_adjustment_from_raw(value: c_int) -> Result<TerminalSelectionAdjustment, c_int> {
     TerminalSelectionAdjustment::from_raw(value).ok_or(ROASTTY_INVALID_VALUE)
+}
+
+fn selection_adjustment_from_str(value: &[u8]) -> Option<TerminalSelectionAdjustment> {
+    match value {
+        b"left" => Some(TerminalSelectionAdjustment::Left),
+        b"right" => Some(TerminalSelectionAdjustment::Right),
+        b"up" => Some(TerminalSelectionAdjustment::Up),
+        b"down" => Some(TerminalSelectionAdjustment::Down),
+        b"page_up" => Some(TerminalSelectionAdjustment::PageUp),
+        b"page_down" => Some(TerminalSelectionAdjustment::PageDown),
+        b"home" => Some(TerminalSelectionAdjustment::Home),
+        b"end" => Some(TerminalSelectionAdjustment::End),
+        b"beginning_of_line" => Some(TerminalSelectionAdjustment::BeginningOfLine),
+        b"end_of_line" => Some(TerminalSelectionAdjustment::EndOfLine),
+        _ => None,
+    }
 }
 
 fn grid_ref_error_result(error: TerminalGridRefPointError) -> c_int {
@@ -10789,6 +10831,12 @@ pub extern "C" fn roastty_surface_binding_action(
             }
             surface.select_all()
         }
+        ParsedBindingAction::AdjustSelection(adjustment) => {
+            if surface.app.is_null() {
+                return false;
+            }
+            surface.adjust_selection(adjustment)
+        }
         ParsedBindingAction::ScrollToTop => {
             if surface.app.is_null() {
                 return false;
@@ -12691,6 +12739,12 @@ mod tests {
             "clear_screen:now",
             "select_all:",
             "select_all:now",
+            "adjust_selection",
+            "adjust_selection:",
+            "adjust_selection:left:right",
+            "adjust_selection: left",
+            "adjust_selection:left ",
+            "adjust_selection:diagonal",
             "scroll_to_top:",
             "scroll_to_top:now",
             "scroll_to_bottom:",
@@ -13351,6 +13405,251 @@ mod tests {
         assert!(binding_action(surface, "select_all"));
         assert_eq!(surface_worker_active_selection(surface), Some(expected));
         assert!(roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_adjust_selection_false_for_null_detached_and_no_worker() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!binding_action(ptr::null_mut(), "adjust_selection:right"));
+        for direction in [
+            "left",
+            "right",
+            "up",
+            "down",
+            "page_up",
+            "page_down",
+            "home",
+            "end",
+            "beginning_of_line",
+            "end_of_line",
+        ] {
+            assert!(
+                !binding_action(surface, &format!("adjust_selection:{direction}")),
+                "{direction}"
+            );
+        }
+        roastty_app_free(app);
+        assert!(!binding_action(surface, "adjust_selection:right"));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_binding_action_adjust_selection_false_without_active_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'l0\\nl1\\nl2\\n'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l2"));
+        assert!(!roastty_surface_needs_render(surface));
+        assert!(!binding_action(surface, "adjust_selection:right"));
+        assert_eq!(surface_worker_active_selection(surface), None);
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    fn assert_surface_adjusts_selection(
+        surface: RoasttySurface,
+        action: &str,
+        adjustment: TerminalSelectionAdjustment,
+    ) {
+        let expected = {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio(|termio| {
+                let selection = termio.terminal().active_selection().unwrap();
+                termio
+                    .terminal()
+                    .selection_adjust(selection, adjustment)
+                    .unwrap()
+                    .unwrap()
+            })
+        };
+
+        assert!(binding_action(surface, action), "{action}");
+        assert_eq!(surface_worker_active_selection(surface), Some(expected));
+    }
+
+    #[test]
+    fn surface_binding_action_adjust_selection_updates_active_selection() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio_mut(|termio| {
+                termio.terminal_mut().reset();
+                termio
+                    .terminal_mut()
+                    .next_slice(b"alpha\nbravo\ncharlie\n")
+                    .unwrap();
+            });
+        }
+
+        for (action, adjustment) in [
+            ("adjust_selection:right", TerminalSelectionAdjustment::Right),
+            ("adjust_selection:down", TerminalSelectionAdjustment::Down),
+            (
+                "adjust_selection:page_up",
+                TerminalSelectionAdjustment::PageUp,
+            ),
+            ("adjust_selection:home", TerminalSelectionAdjustment::Home),
+            ("adjust_selection:end", TerminalSelectionAdjustment::End),
+            (
+                "adjust_selection:beginning_of_line",
+                TerminalSelectionAdjustment::BeginningOfLine,
+            ),
+            (
+                "adjust_selection:end_of_line",
+                TerminalSelectionAdjustment::EndOfLine,
+            ),
+        ] {
+            let selection = surface_worker_selection(surface, (1, 1), (3, 1));
+            set_surface_worker_active_selection(surface, Some(selection));
+            assert_surface_adjusts_selection(surface, action, adjustment);
+        }
+        assert!(roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_adjust_selection_boundary_noop_still_consumes_and_renders() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio_mut(|termio| {
+                termio.terminal_mut().reset();
+                termio.terminal_mut().next_slice(b"abc\n").unwrap();
+            });
+        }
+        let selection = surface_worker_selection(surface, (0, 0), (0, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        let before = surface_worker_active_selection(surface);
+
+        assert!(!roastty_surface_needs_render(surface));
+        assert!(binding_action(surface, "adjust_selection:left"));
+        assert_eq!(surface_worker_active_selection(surface), before);
+        assert!(roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_adjust_selection_scrolls_endpoint_into_view() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command =
+            CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\n'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l7"));
+
+        assert!(binding_action(surface, "scroll_to_top"));
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 5), (1, 5))),
+        );
+        assert_surface_adjusts_selection(
+            surface,
+            "adjust_selection:end_of_line",
+            TerminalSelectionAdjustment::EndOfLine,
+        );
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 3)
+        );
+
+        assert!(binding_action(surface, "scroll_to_bottom"));
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 1), (1, 1))),
+        );
+        assert_surface_adjusts_selection(
+            surface,
+            "adjust_selection:end_of_line",
+            TerminalSelectionAdjustment::EndOfLine,
+        );
+        assert_eq!(
+            surface_worker_viewport_top_left_screen(surface),
+            point::Coordinate::new(0, 1)
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn terminal_adjust_selection_one_row_endpoint_scroll_falls_back_to_endpoint() {
+        let mut terminal = InnerTerminal::init(10, 1, None).unwrap();
+        terminal.next_slice(b"l0\nl1\nl2\nl3\nl4").unwrap();
+        terminal.scroll_viewport_to_row(0);
+        let selection = TerminalSelection {
+            start: terminal
+                .grid_ref(TerminalPointTag::Screen, point::Coordinate::new(0, 3))
+                .unwrap(),
+            end: terminal
+                .grid_ref(TerminalPointTag::Screen, point::Coordinate::new(1, 3))
+                .unwrap(),
+            rectangle: false,
+        };
+        terminal.set_selection(Some(selection)).unwrap();
+
+        assert!(terminal
+            .adjust_active_selection(TerminalSelectionAdjustment::EndOfLine)
+            .unwrap());
+        assert_eq!(
+            terminal_viewport_top_left_screen(&terminal),
+            point::Coordinate::new(0, 3)
+        );
+    }
+
+    #[test]
+    fn surface_binding_action_adjust_selection_visible_endpoint_keeps_viewport() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 10, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("l5"));
+
+        assert!(binding_action(surface, "scroll_to_row:1"));
+        let top = surface_worker_viewport_top_left_screen(surface);
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 2), (1, 2))),
+        );
+        assert_surface_adjusts_selection(
+            surface,
+            "adjust_selection:right",
+            TerminalSelectionAdjustment::Right,
+        );
+        assert_eq!(surface_worker_viewport_top_left_screen(surface), top);
         roastty_surface_free(surface);
         roastty_app_free(app);
     }

@@ -1719,6 +1719,16 @@ impl Terminal {
         self.screens.active_mut().scroll_to_selection()
     }
 
+    pub(crate) fn scroll_viewport_to_selection_endpoint(
+        &mut self,
+        endpoint: TerminalGridRef,
+    ) -> Result<bool, TerminalGridRefPointError> {
+        self.screens
+            .active_mut()
+            .scroll_to_selection_endpoint(endpoint.into())
+            .map_err(Into::into)
+    }
+
     pub(crate) fn scroll_viewport_to_prompt(&mut self, delta: isize) {
         self.screens.active_mut().scroll_delta_prompt(delta);
     }
@@ -1989,6 +1999,21 @@ impl Terminal {
             )
             .map(Self::selection_from_tuple)
             .map_err(Into::into)
+    }
+
+    pub(crate) fn adjust_active_selection(
+        &mut self,
+        adjustment: TerminalSelectionAdjustment,
+    ) -> Result<bool, TerminalGridRefPointError> {
+        let Some(selection) = self.active_selection() else {
+            return Ok(false);
+        };
+        let adjusted = self
+            .selection_adjust(selection, adjustment)?
+            .unwrap_or(selection);
+        self.set_selection(Some(adjusted))?;
+        self.scroll_viewport_to_selection_endpoint(adjusted.end)?;
+        Ok(true)
     }
 
     pub(crate) fn selection_order(

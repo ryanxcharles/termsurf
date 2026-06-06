@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 716: Binding Action Adjust Selection
@@ -115,6 +120,52 @@ Run:
 - `cargo fmt -p roastty -- --check`
 - `git diff --check`
 
+## Result
+
+**Result:** Pass
+
+Roastty now accepts `adjust_selection:<direction>` as a surface binding action
+for all ten Ghostty direction names: `left`, `right`, `up`, `down`, `page_up`,
+`page_down`, `home`, `end`, `beginning_of_line`, and `end_of_line`.
+Parameterized malformed forms, missing parameters, whitespace-padded names,
+extra-colon forms, and unknown directions are rejected.
+
+Attached worker-backed surfaces now reuse the existing terminal selection
+adjustment implementation. If no active selection exists, the action returns
+`false` and does not request render. If an active selection exists, the action
+adjusts it, installs the adjusted selection, scrolls the adjusted endpoint into
+view, requests render, and returns `true`. Boundary no-op adjustments with an
+active selection are still consumed as `true`, preserve the selection, and
+request render, matching upstream fall-through semantics.
+
+Endpoint scrolling follows the upstream rule. Already-visible endpoints leave
+the viewport unchanged. Endpoints above the viewport scroll to the endpoint.
+Endpoints below the viewport scroll so the endpoint lands on the bottom visible
+row. The one-row fallback scrolls to the endpoint row and relies on existing
+viewport clamping.
+
+The C ABI harness now smoke-tests malformed `adjust_selection` forms and valid
+no-worker adjustment forms.
+
+Verification run:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty adjust_selection -- --nocapture --test-threads=1` — 7
+  passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1` — 62
+  passed
+- `cargo test -p roastty --test abi_harness` — 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Experiment 716 completes the selection-adjustment binding-action path using the
+existing terminal selection machinery plus a new endpoint-specific viewport
+scroll helper. Remaining binding-action gaps are now outside local selection
+mutation: clipboard actions, search actions, write-file actions, cursor-key
+actions, and keybind storage/dispatch.
+
 ## Design Review
 
 Codex reviewed the Experiment 716 design and found the scope otherwise matches
@@ -134,3 +185,26 @@ The review also raised the normal workflow provenance requirement. Design-review
 frontmatter and this review section are now present, and the README provenance
 tuple will be updated to `Codex/Codex/-` before the plan commit. Result-review
 provenance will be added only after implementation and completion review.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 716 diff and first found one real
+semantic issue: active-selection boundary/no-op adjustments could return `false`
+if `Terminal::selection_adjust` returned `None`, while upstream only falls
+through when there is no active selection. The implementation now preserves the
+existing selection with `unwrap_or(selection)`, scrolls the endpoint, returns
+`true`, and lets the surface request render. A focused test now covers this
+boundary no-op behavior.
+
+Codex re-reviewed the corrected diff and found no remaining code blockers. The
+review confirmed that parser coverage includes all ten direction names,
+malformed forms are rejected, no-selection returns `false` without render,
+successful adjustments install the expected selection, boundary no-op
+adjustments preserve selection while consuming and rendering, and endpoint
+scrolling covers above, below, visible, and one-row fallback behavior.
+
+The only remaining required finding was workflow provenance: the result-review
+frontmatter, this completion-review section, and the README provenance tuple
+needed to be recorded before the result commit. Those fields are now present.
+The review noted that the result lists `cargo fmt -p roastty`; that command was
+run before the focused test command.
