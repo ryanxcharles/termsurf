@@ -1868,6 +1868,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 689: Surface Mouse Callback Foundation](689-surface-mouse-callback-foundation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 690: Surface Key Callback Foundation](690-surface-key-callback-foundation.md)
+  — **Designed** · Codex/-/-
 
 ## Non-Goals
 
