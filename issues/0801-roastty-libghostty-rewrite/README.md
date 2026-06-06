@@ -1951,6 +1951,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 720: Binding Action Title](720-binding-action-title.md) — **Pass**
   · Codex/Codex/Codex
+- [Experiment 721: Binding Action Tab Window Forwarding](721-binding-action-tab-window-forwarding.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
