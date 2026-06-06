@@ -1,10 +1,10 @@
 //! A CoreText-backed font face (`CTFont`).
 //!
 //! Faithful (macOS) port of the `CTFont` plumbing in upstream
-//! `font/face/coretext.zig`. This slice provides face construction and raw
-//! OpenType table access (`CTFontCopyTable`), the building block
-//! `Face::get_metrics` will use to read `head`/`hhea`/`OS/2`/`post`. The full
-//! metric assembly and glyph rasterization land in later experiments.
+//! `font/face/coretext.zig`. This module provides face construction, raw
+//! OpenType table access (`CTFontCopyTable`), face-metric extraction,
+//! glyph measurement, shaping, glyph rasterization, and atlas-backed glyph
+//! rendering.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;

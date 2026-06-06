@@ -214,7 +214,7 @@ Experiment 246).
       missing)
 - [ ] Sprite `draw/` glyph tables (box/block/braille/powerline/geometric/legacy)
       — missing
-- [ ] CoreText `Face` (rasterization + face-metric extraction) — missing
+- [x] CoreText `Face` (rasterization + face-metric extraction)
 - [ ] Shaper (CoreText shaping, run, cache, feature) — missing
 - [ ] `Collection` / `CodepointResolver` / `CodepointMap` / `DeferredFace` /
       `discovery` / `library` / `backend` — missing
@@ -1701,8 +1701,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 627: sys PNG decode abstraction audit](627-sys-png-decode-audit.md)
   — **Pass** · Codex/Codex/Codex
-- [Experiment 628: CoreText Face audit](628-coretext-face-audit.md) —
-  **Designed**
+- [Experiment 628: CoreText Face audit](628-coretext-face-audit.md) — **Pass** ·
+  Codex/Codex/Codex
 
 ## Non-Goals
 
