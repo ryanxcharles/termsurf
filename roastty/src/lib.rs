@@ -103,6 +103,13 @@ const ROASTTY_SURFACE_CONTEXT_TAB: c_int = 1;
 const ROASTTY_SURFACE_CONTEXT_SPLIT: c_int = 2;
 
 const ROASTTY_TARGET_SURFACE: c_int = 1;
+#[allow(dead_code)]
+const ROASTTY_CLIPBOARD_REQUEST_PASTE: c_int = 0;
+#[allow(dead_code)]
+const ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ: c_int = 1;
+#[allow(dead_code)]
+const ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE: c_int = 2;
+
 const ROASTTY_ACTION_NEW_SPLIT: c_int = 4;
 const ROASTTY_ACTION_GOTO_SPLIT: c_int = 16;
 const ROASTTY_ACTION_RESIZE_SPLIT: c_int = 18;
@@ -10006,6 +10013,21 @@ pub extern "C" fn roastty_surface_ime_point(
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_complete_clipboard_request(
+    surface: RoasttySurface,
+    text: *const c_char,
+    _state: *mut c_void,
+    _confirmed: bool,
+) {
+    let Some(surface) = surface_from_handle(surface) else {
+        return;
+    };
+    if surface.app.is_null() || text.is_null() {
+        return;
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_mouse_captured(surface: RoasttySurface) -> bool {
     let Some(surface) = surface_from_handle(surface) else {
         return false;
@@ -12295,6 +12317,76 @@ mod tests {
         );
         roastty_app_free(app);
         roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn clipboard_request_constants_match_upstream() {
+        assert_eq!(ROASTTY_CLIPBOARD_REQUEST_PASTE, 0);
+        assert_eq!(ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ, 1);
+        assert_eq!(ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE, 2);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_null_and_default_noop() {
+        roastty_surface_complete_clipboard_request(
+            ptr::null_mut(),
+            ptr::null(),
+            ptr::null_mut(),
+            false,
+        );
+
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let text = CString::new("paste").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, ptr::null(), ptr::null_mut(), false);
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), ptr::null_mut(), false);
+        roastty_surface_complete_clipboard_request(
+            surface,
+            text.as_ptr(),
+            ptr::dangling_mut(),
+            true,
+        );
+
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_detached_noop() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let text = CString::new("paste").unwrap();
+        roastty_app_free(app);
+
+        roastty_surface_complete_clipboard_request(
+            surface,
+            text.as_ptr(),
+            ptr::dangling_mut(),
+            true,
+        );
+
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_without_state_does_not_wakeup_or_dirty() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        WAKEUP_COUNT.store(0, Ordering::SeqCst);
+        WAKEUP_USERDATA.store(0, Ordering::SeqCst);
+        let app = new_test_app_with_wakeup(0xC11F);
+        let surface = new_test_surface(app);
+        let text = CString::new("paste").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), ptr::null_mut(), true);
+
+        assert!(!roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     #[test]

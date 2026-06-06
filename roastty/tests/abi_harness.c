@@ -3963,6 +3963,9 @@ static void assert_terminal_abi(void) {
 
 int main(int argc, char **argv) {
   assert(roastty_init((uintptr_t)argc, argv) == ROASTTY_SUCCESS);
+  assert(ROASTTY_CLIPBOARD_REQUEST_PASTE == 0);
+  assert(ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ == 1);
+  assert(ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE == 2);
 
   roastty_config_free(NULL);
   roastty_app_free(NULL);
@@ -4006,6 +4009,7 @@ int main(int argc, char **argv) {
   roastty_surface_update_config(NULL, NULL);
   assert(!roastty_surface_needs_confirm_quit(NULL));
   assert(!roastty_surface_process_exited(NULL));
+  roastty_surface_complete_clipboard_request(NULL, NULL, NULL, false);
   roastty_surface_refresh(NULL);
   roastty_surface_set_content_scale(NULL, 1.0, 1.0);
   roastty_surface_set_display_id(NULL, 42);
@@ -4257,6 +4261,8 @@ int main(int argc, char **argv) {
   assert(roastty_surface_foreground_pid(surface) == 0);
   assert(!roastty_surface_needs_confirm_quit(surface));
   assert(!roastty_surface_process_exited(surface));
+  roastty_surface_complete_clipboard_request(surface, NULL, NULL, false);
+  roastty_surface_complete_clipboard_request(surface, "paste", NULL, true);
   assert(!roastty_surface_needs_render(surface));
   roastty_surface_draw(surface);
   assert(roastty_surface_needs_render(surface));

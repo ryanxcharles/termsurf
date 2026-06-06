@@ -1175,8 +1175,9 @@ typedef enum {
 } roastty_clipboard_e;
 
 typedef enum {
-  ROASTTY_CLIPBOARD_REQUEST_STANDARD,
-  ROASTTY_CLIPBOARD_REQUEST_SELECTION,
+  ROASTTY_CLIPBOARD_REQUEST_PASTE = 0,
+  ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ = 1,
+  ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE = 2,
 } roastty_clipboard_request_e;
 
 typedef struct {
@@ -1929,6 +1930,10 @@ ROASTTY_API void roastty_surface_ime_point(roastty_surface_t,
                                            double*,
                                            double*,
                                            double*);
+ROASTTY_API void roastty_surface_complete_clipboard_request(roastty_surface_t,
+                                                            const char*,
+                                                            void*,
+                                                            bool);
 ROASTTY_API bool roastty_surface_mouse_captured(roastty_surface_t);
 ROASTTY_API bool roastty_surface_mouse_button(roastty_surface_t,
                                               roastty_mouse_button_state_e,

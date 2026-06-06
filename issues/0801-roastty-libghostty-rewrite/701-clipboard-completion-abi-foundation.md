@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 701: Clipboard Completion ABI Foundation
@@ -99,3 +104,49 @@ request-intent values is necessary because clipboard identity remains in
 no-op is honest progress before request allocation and completion behavior
 exist. The review accepted the callback ABI compatibility and proposed Rust/C
 harness coverage.
+
+## Result
+
+**Result:** Pass
+
+Implemented the clipboard completion ABI foundation:
+
+- Corrected `roastty_clipboard_request_e` to upstream request-intent values:
+  paste, OSC 52 read, and OSC 52 write.
+- Added `roastty_surface_complete_clipboard_request`.
+- Implemented completion as a no-op for null surfaces, null text, null state,
+  detached surfaces, and default surfaces while no request state exists.
+- Preserved runtime clipboard callback storage and existing callback signatures.
+- Added Rust tests for enum values and no-op side effects.
+- Added C harness smoke coverage for the corrected enum values and completion
+  symbol.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty clipboard -- --nocapture`
+- `cargo test -p roastty --test abi_harness`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has the upstream-shaped clipboard completion C boundary and request
+enum semantics. Real clipboard behavior remains for later experiments:
+allocating request state, invoking runtime read/confirm/write callbacks from
+terminal actions, inserting paste data, replying to OSC 52 reads, and
+invalidating completed requests.
+
+## Completion Review
+
+Codex reviewed the staged completed Experiment 701 result. The review found no
+code correctness blockers: corrected request enum values match upstream,
+clipboard identity remains separate,
+`roastty_surface_complete_clipboard_request` is safe for
+null/default/detached/no-state calls, no dirty/wakeup side effects are covered,
+callback field shapes remain compatible, and the C harness covers the corrected
+enum values plus the new completion symbol.
+
+The review initially blocked the result commit only because completion-review
+provenance had not yet been recorded. This section, the `[review.result]`
+frontmatter, and the README tuple update resolve that workflow finding.
