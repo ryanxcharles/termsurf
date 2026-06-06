@@ -1937,6 +1937,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 713: Binding Action Clear Screen](713-binding-action-clear-screen.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 714: Binding Action Jump To Prompt](714-binding-action-jump-to-prompt.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
