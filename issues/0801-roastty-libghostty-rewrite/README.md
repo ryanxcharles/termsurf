@@ -282,8 +282,8 @@ Experiment 246).
       action callback forwarding done; surface key default terminal dispatch
       done; terminal-derived key encoder options done; surface text viewport
       metadata done; config/surface key-is-binding false-path foundation done;
-      keybinding/action dispatch, frontend selection routing, and split
-      tree/frontend mutations missing
+      keybinding/action dispatch, frontend selection routing, binding-action
+      string invocation, and split tree/frontend mutations missing
 - [ ] Inspector ABI — non-Metal handle lifecycle and input forwarding foundation
       done; Metal renderer integration, inspector UI rendering, and core
       inspector data collection missing
@@ -306,8 +306,8 @@ Experiment 246).
       font-grid integration exists; confirm-close policy and request-close
       propagation done; clipboard completion ABI no-active-request foundation
       done; splits, frontend selection routing, renderer display-ID delivery,
-      Quicklook UI/font integration, clipboard request allocation/handling, and
-      full frontend presentation missing
+      binding-action string invocation, Quicklook UI/font integration, clipboard
+      request allocation/handling, and full frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
@@ -1905,6 +1905,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 701: Clipboard Completion ABI Foundation](701-clipboard-completion-abi-foundation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 702: Surface Binding Action ABI Foundation](702-surface-binding-action-abi-foundation.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
