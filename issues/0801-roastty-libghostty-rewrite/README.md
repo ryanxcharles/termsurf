@@ -1750,6 +1750,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 645: Tmux DCS Entry](645-tmux-dcs-entry.md) — **Pass** ·
   Codex/Codex/Codex
+- [Experiment 646: Tmux Command Formatting](646-tmux-command-formatting.md) —
+  **Designed**
 
 ## Non-Goals
 
