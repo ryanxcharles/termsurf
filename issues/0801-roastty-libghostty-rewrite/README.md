@@ -289,8 +289,8 @@ Experiment 246).
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
       done; surface command/cwd/env/initial-input worker launch done; configured
-      shell policy beyond `/bin/sh`, foreground pid, renderer wakeups, and full
-      renderer integration missing
+      shell policy beyond `/bin/sh`, renderer wakeups, and full renderer
+      integration missing
 - [ ] `os/` utilities (tmpdir / file / env / hostname / locale) — ad hoc Rust
       stdlib; no dedicated module
 
@@ -1826,7 +1826,7 @@ are past the correctness-critical foundation.
 - [Experiment 673: Surface TTY Name](673-surface-tty-name.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 674: Surface Foreground PID](674-surface-foreground-pid.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

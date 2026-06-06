@@ -142,6 +142,10 @@ impl Termio {
         self.child.child_id()
     }
 
+    pub(crate) fn foreground_pid(&self) -> Option<u64> {
+        self.child.foreground_pid()
+    }
+
     pub(crate) fn tty_name(&self) -> Option<&str> {
         self.child.tty_name()
     }
@@ -569,6 +573,7 @@ mod tests {
         let mut termio = Termio::spawn("/bin/sleep", ["1"], test_size()).expect("spawn termio");
 
         assert!(termio.child_id() > 0);
+        assert_eq!(termio.foreground_pid(), Some(u64::from(termio.child_id())));
         let tty_name = termio.tty_name().expect("tty name");
         assert!(tty_name.starts_with("/dev/"), "{tty_name}");
         assert_eq!(termio.pending_write_bytes(), 0);

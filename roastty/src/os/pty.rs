@@ -203,6 +203,15 @@ impl PtyChild {
         self.child.id()
     }
 
+    pub(crate) fn foreground_pid(&self) -> Option<u64> {
+        let pid = unsafe { libc::tcgetpgrp(self.master_fd()) };
+        if pid > 0 {
+            Some(pid as u64)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn tty_name(&self) -> Option<&str> {
         self.pty.tty_name()
     }
@@ -572,6 +581,17 @@ mod tests {
         assert!(child.slave_fd().is_none());
         let tty_name = child.tty_name().expect("tty name");
         assert!(tty_name.starts_with("/dev/"), "{tty_name}");
+    }
+
+    #[test]
+    fn pty_child_reports_simple_foreground_pid() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut command = PtyCommand::new("/bin/sleep", test_size());
+        command.arg("1");
+
+        let child = command.spawn().expect("spawn child");
+
+        assert_eq!(child.foreground_pid(), Some(u64::from(child.child_id())));
     }
 
     #[test]

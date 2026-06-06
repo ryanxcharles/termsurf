@@ -8573,8 +8573,15 @@ pub extern "C" fn roastty_surface_size(surface: RoasttySurface) -> RoasttySurfac
 }
 
 #[no_mangle]
-pub extern "C" fn roastty_surface_foreground_pid(_surface: RoasttySurface) -> u64 {
-    0
+pub extern "C" fn roastty_surface_foreground_pid(surface: RoasttySurface) -> u64 {
+    surface_from_handle(surface)
+        .and_then(|surface| {
+            surface
+                .termio_worker
+                .as_ref()
+                .and_then(|worker| worker.with_termio(|termio| termio.foreground_pid()))
+        })
+        .unwrap_or(0)
 }
 
 #[no_mangle]
@@ -8992,6 +8999,51 @@ mod tests {
         assert_eq!(first_pid, second_pid);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_foreground_pid_without_worker_returns_zero() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_foreground_pid(surface), 0);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_foreground_pid_reports_worker_foreground_pid_after_start() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        let child_id = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.child_id());
+
+        assert_eq!(roastty_surface_foreground_pid(surface), u64::from(child_id));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_foreground_pid_returns_zero_after_app_detach() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        roastty_app_free(app);
+
+        assert_eq!(roastty_surface_foreground_pid(surface), 0);
+
+        roastty_surface_free(surface);
     }
 
     #[test]

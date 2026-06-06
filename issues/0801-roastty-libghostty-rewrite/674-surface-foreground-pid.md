@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 674: Surface Foreground PID
@@ -86,3 +91,50 @@ group id when available, with `None` internally and `0` at the C ABI when
 unavailable. Tests may compare the value to `child.id()` only in deterministic
 simple-child fixtures where the initial child is the session and process group
 leader.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now reports the PTY foreground process group through the worker-backed
+surface ABI. `PtyChild::foreground_pid` calls `tcgetpgrp(master_fd)` and returns
+`Some(pid)` only for positive process group ids. `Termio::foreground_pid`
+forwards that value internally. `roastty_surface_foreground_pid(surface)`
+returns the attached worker foreground pid when available and keeps returning
+`0` for null, dormant, or detached surfaces.
+
+Focused tests cover PTY-level foreground pid reporting, Termio forwarding, a
+surface without a worker returning `0`, a started surface returning the simple
+worker fixture's foreground pid, and a live surface returning `0` after
+`roastty_app_free` detaches and clears the worker.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `cargo test -p roastty os::pty` — 17 passed, 0 failed
+- `cargo test -p roastty termio` — 17 passed, 0 failed
+- `cargo test -p roastty surface` — 30 passed, 0 failed
+- `git diff --check`
+
+## Conclusion
+
+Surface worker launch now exposes the real PTY foreground process group through
+`roastty_surface_foreground_pid`, while preserving the Ghostty-style `0`
+fallback when the value is unavailable. The remaining PTY/frontend launch gaps
+are configured shell policy beyond `/bin/sh`, renderer wakeups, terminal grid
+resize, and the broader draw/refresh lifecycle.
+
+## Completion Review
+
+**Result:** Approved after provenance fix.
+
+Codex found no implementation bugs or test-scope regressions in the staged
+result. It confirmed that the `tcgetpgrp(master_fd)` path, positive-pid `Option`
+handling, C ABI `0` fallback, and simple-child equality tests match the amended
+design. It also confirmed the README checklist update removing foreground PID
+from the remaining PTY gaps is accurate.
+
+The only result-review finding was missing provenance and completion-review
+recording. The experiment frontmatter and README agent tuple now record the
+result review, and this completion-review section records the review outcome.
