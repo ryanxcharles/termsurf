@@ -4925,6 +4925,14 @@ impl PageList {
             .expect("scroll result must preserve PageList integrity");
     }
 
+    pub(super) fn scroll_top(&mut self) {
+        self.scroll(Scroll::Top);
+    }
+
+    pub(super) fn scroll_active(&mut self) {
+        self.scroll(Scroll::Active);
+    }
+
     fn scroll_to_pin(&mut self, mut pin: Pin) {
         pin.x = 0;
         if self.pin_is_active(pin) {

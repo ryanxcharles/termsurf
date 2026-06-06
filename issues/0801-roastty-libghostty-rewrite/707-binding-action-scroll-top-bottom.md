@@ -10,9 +10,9 @@ model = "gpt-5"
 reasoning = "medium"
 
 [review.result]
-agent = "pending"
-model = "pending"
-reasoning = "pending"
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 707: Binding Action Scroll Top and Bottom
@@ -120,3 +120,59 @@ bottom actions.
 Third, malformed-input coverage only mentioned one empty-colon form and one
 non-empty-colon form. The plan now requires both empty and non-empty colon
 variants for `scroll_to_top` and `scroll_to_bottom`.
+
+## Result
+
+**Result:** Pass
+
+Implemented exact `scroll_to_top` and `scroll_to_bottom` binding-action support
+for attached surfaces. `parse_binding_action` now accepts only the exact
+parameterless forms and rejects colon-bearing variants for both actions.
+Dispatch returns `false` for null or detached surfaces, returns `true` for
+attached surfaces, and routes worker-backed surfaces through a narrowly scoped
+terminal viewport helper.
+
+The terminal helper path keeps `PageList::scroll` and the private `Scroll` enum
+inside `page_list.rs`. `page_list.rs` exposes only `scroll_top` and
+`scroll_active` to `screen.rs`, `screen.rs` exposes matching helpers to
+`terminal.rs`, and `terminal.rs` exposes the crate-local surface-facing helpers.
+
+The Rust tests cover malformed top/bottom forms, null/detached surfaces,
+attached no-worker surfaces, exact worker-backed viewport top and bottom
+endpoints, and unchanged binding-action behavior around split, close, `text:`,
+`csi:`, `esc:`, and `reset`. The C ABI harness now rejects colon-bearing
+top/bottom forms and accepts exact `scroll_to_top` / `scroll_to_bottom`.
+
+Verification:
+
+- `cargo fmt -p roastty` passed.
+- `cargo test -p roastty binding_action -- --nocapture` passed: 27 tests.
+- `cargo test -p roastty scroll_to_top -- --nocapture` passed: 1 test.
+- `cargo test -p roastty scroll_to_bottom -- --nocapture` passed: 2 tests,
+  including the new endpoint test and one existing config default test.
+- `cargo test -p roastty --test abi_harness` passed.
+- `cargo fmt -p roastty -- --check` passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The top/bottom viewport endpoint slice now follows upstream's void-action
+parsing contract and uses Roastty's existing viewport model without widening
+private page-list internals. The remaining viewport binding-action work can
+build on this path for row, selection, page, fractional, line, and prompt
+scrolling actions.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 707 diff and found no implementation
+blockers. The review confirmed that both actions reject colon-bearing
+parameters, return `false` for null/detached surfaces, consume attached
+no-worker actions, and route worker-backed surfaces through the scoped viewport
+helper path.
+
+The review also confirmed that the helper path keeps `Scroll` private inside
+`page_list.rs` and only exposes narrow `scroll_top` / `scroll_active` wrappers
+through `screen.rs` and `terminal.rs`. The only required fix was workflow
+provenance: replacing the pending result-review metadata, adding this
+completion-review note, and updating the README provenance tuple to
+`Codex/Codex/Codex`.

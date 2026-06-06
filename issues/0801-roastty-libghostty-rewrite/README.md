@@ -282,9 +282,10 @@ Experiment 246).
       action callback forwarding done; surface key default terminal dispatch
       done; terminal-derived key encoder options done; surface text viewport
       metadata done; config/surface key-is-binding false-path foundation done;
-      split, close, text, CSI, ESC, and reset binding-action string invocation
-      foundations done; keybinding/action dispatch, frontend selection routing,
-      full binding-action parsing, and split tree/frontend mutations missing
+      split, close, text, CSI, ESC, reset, scroll-to-top, and scroll-to-bottom
+      binding-action string invocation foundations done; keybinding/action
+      dispatch, frontend selection routing, full binding-action parsing, and
+      split tree/frontend mutations missing
 - [ ] Inspector ABI — non-Metal handle lifecycle and input forwarding foundation
       done; Metal renderer integration, inspector UI rendering, and core
       inspector data collection missing
@@ -306,11 +307,11 @@ Experiment 246).
       word ABI foundation done with font handle returning null until CoreText
       font-grid integration exists; confirm-close policy and request-close
       propagation done; clipboard completion ABI no-active-request foundation
-      done; split, close, text, CSI, ESC, and reset binding-action string
-      invocation foundations done; splits, frontend selection routing, renderer
-      display-ID delivery, full binding-action parsing, Quicklook UI/font
-      integration, clipboard request allocation/handling, and full frontend
-      presentation missing
+      done; split, close, text, CSI, ESC, reset, scroll-to-top, and
+      scroll-to-bottom binding-action string invocation foundations done;
+      splits, frontend selection routing, renderer display-ID delivery, full
+      binding-action parsing, Quicklook UI/font integration, clipboard request
+      allocation/handling, and full frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
@@ -1919,7 +1920,7 @@ are past the correctness-critical foundation.
 - [Experiment 706: Binding Action Reset](706-binding-action-reset.md) — **Pass**
   · Codex/Codex/Codex
 - [Experiment 707: Binding Action Scroll Top and Bottom](707-binding-action-scroll-top-bottom.md)
-  — **Designed** · Codex/Codex/-
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

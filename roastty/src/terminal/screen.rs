@@ -221,6 +221,14 @@ impl Screen {
         self.pages.scroll_to_pin_for_search(pin);
     }
 
+    pub(super) fn scroll_top(&mut self) {
+        self.pages.scroll_top();
+    }
+
+    pub(super) fn scroll_active(&mut self) {
+        self.pages.scroll_active();
+    }
+
     /// Flatten `selection` to a `StringMap` (text + a per-byte map back to screen pins) for regex
     /// search (upstream `Screen.selectionString` with a `StringMap` out-parameter). `unwrap` is
     /// always `true` (so soft-wrapped lines join, as upstream's `selectionString`); `trim` is the
