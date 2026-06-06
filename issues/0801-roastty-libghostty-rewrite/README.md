@@ -1967,6 +1967,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 726: Binding Action Toggle Readonly](726-binding-action-toggle-readonly.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 727: Binding Action Copy Title To Clipboard](727-binding-action-copy-title-to-clipboard.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
