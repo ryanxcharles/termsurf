@@ -1857,6 +1857,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 685: Surface Mouse Captured](685-surface-mouse-captured.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 686: Surface Inherited Config](686-surface-inherited-config.md) —
+  **Designed** · Codex/-/-
 
 ## Non-Goals
 
