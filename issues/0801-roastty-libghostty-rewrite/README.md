@@ -1719,6 +1719,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 636: SharedGrid Codepoint Cache](636-shared-grid-codepoint-cache.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 637: Font Checklist Audit](637-font-checklist-audit.md) —
+  **Designed**
 
 ## Non-Goals
 
