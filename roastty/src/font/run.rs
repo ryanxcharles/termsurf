@@ -14,6 +14,7 @@ use crate::config::FontShapingBreak;
 use crate::font::codepoint_resolver::CodepointResolver;
 use crate::font::collection::Index;
 use crate::font::shape::{self, Codepoint};
+use crate::font::shaper_cache::ShaperCache;
 use crate::font::{Presentation, Style};
 use crate::terminal::kitty::graphics_unicode::PLACEHOLDER;
 use crate::terminal::style::{Color, Style as TermStyle};
@@ -204,6 +205,23 @@ pub(crate) struct ShapedRun {
 /// Faithful port of upstream's renderer per-row driver loop
 /// (`while (run_iter.next()) |run| shape(run)`).
 pub(crate) fn shape_row(opts: &RunOptions, resolver: &mut CodepointResolver) -> Vec<ShapedRun> {
+    shape_row_with(opts, resolver, None)
+}
+
+/// Shape a terminal row end to end, using `cache` for shaped runs when possible.
+pub(crate) fn shape_row_cached(
+    opts: &RunOptions,
+    resolver: &mut CodepointResolver,
+    cache: &mut ShaperCache,
+) -> Vec<ShapedRun> {
+    shape_row_with(opts, resolver, Some(cache))
+}
+
+fn shape_row_with(
+    opts: &RunOptions,
+    resolver: &mut CodepointResolver,
+    mut cache: Option<&mut ShaperCache>,
+) -> Vec<ShapedRun> {
     // Drain the iterator first so its `&mut resolver` borrow is released before we
     // re-borrow the resolver's collection to fetch faces.
     let mut runs = Vec::new();
@@ -220,6 +238,15 @@ pub(crate) fn shape_row(opts: &RunOptions, resolver: &mut CodepointResolver) -> 
         if out.run.font_index.special_kind().is_some() {
             continue;
         }
+        if let Some(cache) = cache.as_deref_mut() {
+            if let Some(glyphs) = cache.get(out.run) {
+                shaped.push(ShapedRun {
+                    run: out.run,
+                    glyphs: glyphs.to_vec(),
+                });
+                continue;
+            }
+        }
         // A non-special index from the run iterator must be face-backed
         // (`resolve_font` resolves it through the resolver, and `get_face` only
         // rejects special/out-of-bounds indices). A non-special error means a
@@ -229,6 +256,9 @@ pub(crate) fn shape_row(opts: &RunOptions, resolver: &mut CodepointResolver) -> 
             .get_face(out.run.font_index)
             .expect("a text run's font index must be face-backed");
         let glyphs = face.shape_run(&out.codepoints);
+        if let Some(cache) = cache.as_deref_mut() {
+            cache.put(out.run, &glyphs);
+        }
         shaped.push(ShapedRun {
             run: out.run,
             glyphs,
@@ -733,6 +763,63 @@ mod tests {
         );
         assert_eq!(sr.glyphs[0].x, 0);
         assert_eq!(sr.glyphs[1].x, 1);
+    }
+
+    #[test]
+    fn shape_row_cached_matches_uncached_and_populates_cache() {
+        let opts = RunOptions {
+            cells: vec![narrow('A' as u32), narrow('B' as u32)],
+            ..Default::default()
+        };
+        let mut uncached_resolver = menlo_resolver();
+        let uncached = shape_row(&opts, &mut uncached_resolver);
+
+        let mut cached_resolver = menlo_resolver();
+        let mut cache = ShaperCache::new();
+        let cached = shape_row_cached(&opts, &mut cached_resolver, &mut cache);
+
+        assert_eq!(cached, uncached);
+        assert_eq!(cache.slot_count(), 1, "the shaped run was cached");
+
+        let again = shape_row_cached(&opts, &mut cached_resolver, &mut cache);
+        assert_eq!(again, uncached);
+        assert_eq!(
+            cache.slot_count(),
+            1,
+            "the repeated run reused the cached slot"
+        );
+    }
+
+    #[test]
+    fn shape_row_cached_returns_prepopulated_hit() {
+        let opts = RunOptions {
+            cells: vec![narrow('A' as u32), narrow('B' as u32)],
+            ..Default::default()
+        };
+
+        let mut hash_resolver = menlo_resolver();
+        let mut iter = RunIterator::new(&opts, &mut hash_resolver);
+        let run = iter.next().expect("one text run").run;
+        assert!(iter.next().is_none());
+
+        let sentinel = vec![shape::Cell {
+            x: 7,
+            x_offset: -3,
+            y_offset: 2,
+            glyph_index: 999,
+        }];
+        let mut cache = ShaperCache::new();
+        cache.put(run, &sentinel);
+
+        let mut resolver = menlo_resolver();
+        let shaped = shape_row_cached(&opts, &mut resolver, &mut cache);
+
+        assert_eq!(shaped.len(), 1);
+        assert_eq!(shaped[0].run, run);
+        assert_eq!(
+            shaped[0].glyphs, sentinel,
+            "a prepopulated cache hit is returned instead of freshly shaped cells"
+        );
     }
 
     #[test]

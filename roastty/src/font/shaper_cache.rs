@@ -83,7 +83,7 @@ impl ShaperCache {
     }
 
     #[cfg(test)]
-    fn slot_count(&self) -> usize {
+    pub(crate) fn slot_count(&self) -> usize {
         self.slots.len()
     }
 }

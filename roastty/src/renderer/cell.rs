@@ -22,7 +22,7 @@ use crate::font::face::constraint::{Constraint, Size};
 use crate::font::face::coretext::RenderOptions;
 use crate::font::face::nerd_font_attributes::get_constraint;
 use crate::font::metrics::Metrics;
-use crate::font::run::{shape_row, RunCell, RunOptions, ShapedRun, Wide};
+use crate::font::run::{shape_row_cached, RunCell, RunOptions, ShapedRun, Wide};
 use crate::font::shape;
 use crate::font::shared_grid::SharedGrid;
 use crate::font::sprite::draw::Sprite;
@@ -1000,10 +1000,10 @@ pub(crate) fn rebuild_row(
 /// `highlights` is the per-row search highlight lists and `link_ranges` the per-row
 /// hovered-link column ranges (both parallel to `rows`, like upstream's
 /// `row_highlights`; a row beyond either array has none). For each row, write its
-/// backgrounds ([`rebuild_bg_row`]) then shape it into [`ShapedRun`]s ([`shape_row`]
-/// over the grid's resolver) and assemble its foreground ([`rebuild_row`]) — one
-/// pass per row, as upstream `rebuildCells`. The decorations, cursor, and Metal
-/// upload remain separate.
+/// backgrounds ([`rebuild_bg_row`]) then shape it into [`ShapedRun`]s with
+/// [`shape_row_cached`] over the grid's resolver and shaper cache, and assemble
+/// its foreground ([`rebuild_row`]) — one pass per row, as upstream
+/// `rebuildCells`. The decorations, cursor, and Metal upload remain separate.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rebuild_viewport(
     contents: &mut Contents,
@@ -1051,10 +1051,10 @@ pub(crate) fn rebuild_viewport(
             background_opacity,
         );
 
-        // Then the foreground: shape the row (this borrows the grid's resolver) —
-        // `runs` is owned, releasing that borrow before `rebuild_row` borrows the
-        // grid.
-        let runs = shape_row(opts, &mut grid.resolver);
+        // Then the foreground: shape the row through the grid's resolver and
+        // shaper cache. `runs` is owned, releasing those field borrows before
+        // `rebuild_row` borrows the whole grid.
+        let runs = shape_row_cached(opts, &mut grid.resolver, &mut grid.shaper_cache);
         rebuild_row(
             contents,
             grid,

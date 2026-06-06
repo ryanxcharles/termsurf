@@ -15,6 +15,7 @@ use crate::font::face::constraint::{Align, Constraint, Size};
 use crate::font::face::coretext::{RenderGlyphError, RenderOptions};
 use crate::font::glyph::Glyph;
 use crate::font::metrics::Metrics;
+use crate::font::shaper_cache::ShaperCache;
 use crate::font::{Presentation, Style};
 
 /// Initial atlas edge length in pixels. Matches upstream `SharedGrid.init`.
@@ -73,6 +74,7 @@ pub(crate) struct SharedGrid {
     pub atlas_color: Atlas,
     pub resolver: CodepointResolver,
     pub metrics: Metrics,
+    pub shaper_cache: ShaperCache,
     /// The glyph cache: each distinct glyph is rasterized into an atlas once.
     glyphs: HashMap<GlyphKey, Render>,
 }
@@ -91,6 +93,7 @@ impl SharedGrid {
             atlas_color: Atlas::new(ATLAS_INITIAL_SIZE, Format::Bgra),
             resolver,
             metrics,
+            shaper_cache: ShaperCache::new(),
             glyphs: HashMap::new(),
         }
     }
