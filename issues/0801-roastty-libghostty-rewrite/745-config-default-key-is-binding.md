@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 745: Config Default Key Is Binding
@@ -108,3 +113,51 @@ Experiment 744 has both required commits:
 The remaining workflow requirement from the review was to record
 `[review.design]`, this review section, and the README tuple before the
 Experiment 745 plan commit; those records are now present.
+
+## Result
+
+**Result:** Pass
+
+`roastty_config_key_is_binding` now recognizes the static default binding set
+for press and repeat events. The matcher returns `false` for null config, null
+event, and release events; checks physical keys first; checks a single UTF-8
+codepoint next; and falls back to `unshifted_codepoint`. Modifier matching uses
+binding modifiers, so lock keys and side-specific modifier bits do not prevent
+default keybind matches.
+
+The implemented default event set includes the default reverse-trigger actions
+from Experiments 742 through 744 and the performable defaults that upstream
+`Config.keyEventIsBinding` treats as bindings, including command-C/command-V,
+command-K, undo/redo, search, selection expansion, scroll-to-selection, Escape,
+and natural text-editing keys.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty config_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_trigger -- --nocapture --test-threads=1`
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+- `cargo test -p roastty --test abi_harness -- --nocapture`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+The default-keybind query now has a useful static implementation while still
+leaving custom user keybind storage, key tables, sequences, unbinds, and surface
+keybinding dispatch for later experiments. The next slice can build on this by
+adding real keybind storage or by moving the static defaults into the surface
+dispatch path, depending on which upstream behavior is needed next.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 745 diff and found one real technical
+gap: command-`=` was missing from the key-event matcher even though upstream
+keeps both command-`=` and command-`+` as default font-size bindings. The
+implementation now includes command-`=` under `ROASTTY_MODS_SUPER`, with Rust
+and C ABI coverage.
+
+Codex re-reviewed the fixed diff and reported no remaining blocking technical
+issues. The review confirmed the lookup order, modifier normalization,
+repeat/release behavior, physical precedence, unshifted fallback, and
+representative performable defaults match the experiment design.

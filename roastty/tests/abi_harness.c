@@ -1284,6 +1284,49 @@ static roastty_key_mods_s empty_key_mods(void) {
   return mods;
 }
 
+static roastty_key_mods_s key_mods_from_flags(roastty_input_mods_e flags) {
+  roastty_key_mods_s mods = empty_key_mods();
+  mods.shift = (flags & ROASTTY_MODS_SHIFT) != 0;
+  mods.ctrl = (flags & ROASTTY_MODS_CTRL) != 0;
+  mods.alt = (flags & ROASTTY_MODS_ALT) != 0;
+  mods.super = (flags & ROASTTY_MODS_SUPER) != 0;
+  mods.caps_lock = (flags & ROASTTY_MODS_CAPS) != 0;
+  mods.num_lock = (flags & ROASTTY_MODS_NUM) != 0;
+  if ((flags & ROASTTY_MODS_SHIFT_RIGHT) != 0) {
+    mods.shift_side = ROASTTY_KEY_SIDE_RIGHT;
+  }
+  if ((flags & ROASTTY_MODS_CTRL_RIGHT) != 0) {
+    mods.ctrl_side = ROASTTY_KEY_SIDE_RIGHT;
+  }
+  if ((flags & ROASTTY_MODS_ALT_RIGHT) != 0) {
+    mods.alt_side = ROASTTY_KEY_SIDE_RIGHT;
+  }
+  if ((flags & ROASTTY_MODS_SUPER_RIGHT) != 0) {
+    mods.super_side = ROASTTY_KEY_SIDE_RIGHT;
+  }
+  return mods;
+}
+
+static void set_config_binding_event(roastty_key_event_t event,
+                                     roastty_key_action_e action,
+                                     roastty_key_e key,
+                                     roastty_input_mods_e flags,
+                                     const char *utf8,
+                                     uint32_t unshifted) {
+  assert(roastty_key_event_set_action(event, action) == ROASTTY_SUCCESS);
+  assert(roastty_key_event_set_key(event, key) == ROASTTY_SUCCESS);
+  assert(roastty_key_event_set_mods(event, key_mods_from_flags(flags)) ==
+         ROASTTY_SUCCESS);
+  if (utf8 != NULL) {
+    assert(roastty_key_event_set_utf8(event, (const uint8_t *)utf8,
+                                      strlen(utf8)) == ROASTTY_SUCCESS);
+  } else {
+    assert(roastty_key_event_set_utf8(event, NULL, 0) == ROASTTY_SUCCESS);
+  }
+  assert(roastty_key_event_set_unshifted_codepoint(event, unshifted) ==
+         ROASTTY_SUCCESS);
+}
+
 static void set_key_encoder_option(roastty_key_encoder_t encoder,
                                    roastty_key_encoder_option_e option,
                                    const void *value) {
@@ -4459,6 +4502,38 @@ int main(int argc, char **argv) {
   assert(trigger.key.physical == ROASTTY_KEY_UNIDENTIFIED);
   assert(trigger.mods == ROASTTY_MODS_NONE);
   assert(!roastty_config_key_is_binding(config, NULL));
+
+  roastty_key_event_t binding_event = NULL;
+  assert(roastty_key_event_new(&binding_event) == ROASTTY_SUCCESS);
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_COPY, ROASTTY_MODS_NONE, NULL, 0);
+  assert(roastty_config_key_is_binding(config, binding_event));
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_C, ROASTTY_MODS_SUPER, "c", 0);
+  assert(roastty_config_key_is_binding(config, binding_event));
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_EQUAL, ROASTTY_MODS_SUPER, "=", 0);
+  assert(roastty_config_key_is_binding(config, binding_event));
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_UNIDENTIFIED, ROASTTY_MODS_SUPER, NULL,
+                           'n');
+  assert(roastty_config_key_is_binding(config, binding_event));
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_REPEAT,
+                           ROASTTY_KEY_ARROW_UP,
+                           (roastty_input_mods_e)(ROASTTY_MODS_SUPER |
+                                                  ROASTTY_MODS_CAPS |
+                                                  ROASTTY_MODS_NUM |
+                                                  ROASTTY_MODS_SUPER_RIGHT),
+                           NULL, 0);
+  assert(roastty_config_key_is_binding(config, binding_event));
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_RELEASE,
+                           ROASTTY_KEY_COPY, ROASTTY_MODS_NONE, NULL, 0);
+  assert(!roastty_config_key_is_binding(config, binding_event));
+  set_config_binding_event(binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_KEY_C, ROASTTY_MODS_CTRL, "c", 0);
+  assert(!roastty_config_key_is_binding(config, binding_event));
+  roastty_key_event_free(binding_event);
+
   assert(!roastty_app_needs_confirm_quit(app));
   assert(!roastty_app_has_global_keybinds(app));
 

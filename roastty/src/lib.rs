@@ -4603,6 +4603,87 @@ fn default_config_trigger(action: &[u8]) -> RoasttyInputTrigger {
     }
 }
 
+fn default_physical_key_is_binding(key: key::Key, mods: c_int) -> bool {
+    match key {
+        key::Key::Copy | key::Key::Paste | key::Key::Escape => mods == ROASTTY_MODS_NONE,
+        key::Key::Insert => mods == ROASTTY_MODS_SHIFT,
+        key::Key::Tab => {
+            mods == ROASTTY_MODS_CTRL || mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SHIFT)
+        }
+        key::Key::Enter => {
+            mods == ROASTTY_MODS_SUPER || mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+        }
+        key::Key::Home | key::Key::End | key::Key::PageUp | key::Key::PageDown => {
+            mods == ROASTTY_MODS_SHIFT || mods == ROASTTY_MODS_SUPER
+        }
+        key::Key::ArrowUp | key::Key::ArrowDown => {
+            mods == ROASTTY_MODS_SHIFT
+                || mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+                || mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+                || mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER)
+                || mods == ROASTTY_MODS_SUPER
+        }
+        key::Key::ArrowLeft | key::Key::ArrowRight => {
+            mods == ROASTTY_MODS_SHIFT
+                || mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER)
+                || mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER)
+                || mods == ROASTTY_MODS_SUPER
+                || mods == ROASTTY_MODS_ALT
+        }
+        key::Key::Backspace => mods == ROASTTY_MODS_SUPER,
+        _ => false,
+    }
+}
+
+fn default_unicode_key_is_binding(codepoint: u32, mods: c_int) -> bool {
+    match mods {
+        ROASTTY_MODS_SUPER => matches!(
+            codepoint,
+            44 | 99 | 118 | 43 | 45 | 48 | 61 | 113 | 97 | 49
+                ..=57 | 110 | 119 | 116 | 100 | 91 | 93 | 122 | 107 | 102 | 101 | 103 | 106
+        ),
+        mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER) => matches!(
+            codepoint,
+            44 | 106 | 119 | 91 | 93 | 100 | 116 | 122 | 102 | 103 | 118 | 112
+        ),
+        mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) => {
+            codepoint == u32::from(b'j')
+        }
+        mods if mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) => {
+            codepoint == u32::from(b'j') || codepoint == u32::from(b'w')
+        }
+        mods if mods == (ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER) => {
+            codepoint == u32::from(b'w') || codepoint == u32::from(b'i')
+        }
+        mods if mods == (ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER) => {
+            codepoint == u32::from(b'=') || codepoint == u32::from(b'f')
+        }
+        _ => false,
+    }
+}
+
+fn default_key_event_is_binding(event: &key::KeyEvent) -> bool {
+    if event.action == key::KeyAction::Release {
+        return false;
+    }
+
+    let mods = key_mods_to_raw(event.mods.binding());
+    if default_physical_key_is_binding(event.key, mods) {
+        return true;
+    }
+
+    if let Ok(text) = std::str::from_utf8(&event.utf8) {
+        let mut chars = text.chars();
+        if let Some(ch) = chars.next() {
+            if chars.next().is_none() && default_unicode_key_is_binding(ch as u32, mods) {
+                return true;
+            }
+        }
+    }
+
+    event.unshifted_codepoint > 0 && default_unicode_key_is_binding(event.unshifted_codepoint, mods)
+}
+
 fn empty_text() -> RoasttyText {
     RoasttyText {
         tl_px_x: -1.0,
@@ -7873,10 +7954,10 @@ pub extern "C" fn roastty_config_key_is_binding(
     if config_from_handle(config).is_none() {
         return false;
     }
-    let Some(_event) = key_event_from_handle(event) else {
+    let Some(event) = key_event_from_handle(event) else {
         return false;
     };
-    false
+    default_key_event_is_binding(&event.event)
 }
 
 #[no_mangle]
@@ -14022,6 +14103,184 @@ mod tests {
         assert!(!roastty_config_key_is_binding(ptr::null_mut(), event));
         assert!(!roastty_config_key_is_binding(config, ptr::null_mut()));
         assert!(!roastty_config_key_is_binding(config, event));
+
+        roastty_key_event_free(event);
+        roastty_config_free(config);
+    }
+
+    fn set_key_event(
+        event: RoasttyKeyEvent,
+        action: key::KeyAction,
+        key: key::Key,
+        mods: c_int,
+        utf8: &[u8],
+        unshifted: u32,
+    ) {
+        assert_eq!(
+            roastty_key_event_set_action(event, action as c_int),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_key_event_set_key(event, key as c_int),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_key_event_set_mods(event, key_mods_to_abi(key_mods_from_raw(mods))),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_key_event_set_utf8(event, utf8.as_ptr(), utf8.len()),
+            ROASTTY_SUCCESS
+        );
+        assert_eq!(
+            roastty_key_event_set_unshifted_codepoint(event, unshifted),
+            ROASTTY_SUCCESS
+        );
+    }
+
+    #[test]
+    fn config_key_is_binding_matches_default_physical_keys() {
+        let config = roastty_config_new();
+        let event = new_key_event();
+
+        for (key, mods) in [
+            (key::Key::Copy, ROASTTY_MODS_NONE),
+            (key::Key::Paste, ROASTTY_MODS_NONE),
+            (key::Key::ArrowRight, ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER),
+            (key::Key::Home, ROASTTY_MODS_SUPER),
+            (key::Key::Enter, ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER),
+            (key::Key::ArrowLeft, ROASTTY_MODS_SHIFT),
+            (key::Key::Escape, ROASTTY_MODS_NONE),
+            (key::Key::Backspace, ROASTTY_MODS_SUPER),
+            (key::Key::Insert, ROASTTY_MODS_SHIFT),
+        ] {
+            set_key_event(event, key::KeyAction::Press, key, mods, &[], 0);
+            assert!(roastty_config_key_is_binding(config, event), "{key:?}");
+        }
+
+        roastty_key_event_free(event);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_key_is_binding_matches_utf8_and_unshifted_defaults() {
+        let config = roastty_config_new();
+        let event = new_key_event();
+
+        for (utf8, mods) in [
+            (b",".as_slice(), ROASTTY_MODS_SUPER),
+            (b"c".as_slice(), ROASTTY_MODS_SUPER),
+            (b"v".as_slice(), ROASTTY_MODS_SUPER),
+            (b"=".as_slice(), ROASTTY_MODS_SUPER),
+            (b"k".as_slice(), ROASTTY_MODS_SUPER),
+            (b"z".as_slice(), ROASTTY_MODS_SUPER),
+            (b"f".as_slice(), ROASTTY_MODS_SUPER),
+            (b"g".as_slice(), ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER),
+            (
+                b"j".as_slice(),
+                ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
+            ),
+        ] {
+            set_key_event(
+                event,
+                key::KeyAction::Press,
+                key::Key::Unidentified,
+                mods,
+                utf8,
+                0,
+            );
+            assert!(
+                roastty_config_key_is_binding(config, event),
+                "{utf8:?} {mods}"
+            );
+        }
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::Unidentified,
+            ROASTTY_MODS_SUPER,
+            &[],
+            u32::from(b'n'),
+        );
+        assert!(roastty_config_key_is_binding(config, event));
+
+        roastty_key_event_free(event);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_key_is_binding_matches_repeat_ignores_locks_and_prefers_physical() {
+        let config = roastty_config_new();
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Repeat,
+            key::Key::ArrowUp,
+            ROASTTY_MODS_SUPER | ROASTTY_MODS_CAPS | ROASTTY_MODS_NUM | ROASTTY_MODS_SUPER_RIGHT,
+            &[],
+            0,
+        );
+        assert!(roastty_config_key_is_binding(config, event));
+
+        set_key_event(
+            event,
+            key::KeyAction::Press,
+            key::Key::Copy,
+            ROASTTY_MODS_NONE,
+            b"x",
+            0,
+        );
+        assert!(roastty_config_key_is_binding(config, event));
+
+        roastty_key_event_free(event);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_key_is_binding_rejects_release_and_nonmatching_defaults() {
+        let config = roastty_config_new();
+        let event = new_key_event();
+
+        set_key_event(
+            event,
+            key::KeyAction::Release,
+            key::Key::Copy,
+            ROASTTY_MODS_NONE,
+            &[],
+            0,
+        );
+        assert!(!roastty_config_key_is_binding(config, event));
+
+        for (key, mods, utf8, unshifted) in [
+            (key::Key::KeyX, ROASTTY_MODS_SUPER, b"x".as_slice(), 0),
+            (key::Key::ArrowRight, ROASTTY_MODS_CTRL, b"".as_slice(), 0),
+            (
+                key::Key::Unidentified,
+                ROASTTY_MODS_CTRL,
+                b"c".as_slice(),
+                0,
+            ),
+            (
+                key::Key::Unidentified,
+                ROASTTY_MODS_SUPER,
+                b"xy".as_slice(),
+                0,
+            ),
+            (
+                key::Key::Unidentified,
+                ROASTTY_MODS_CTRL,
+                b"".as_slice(),
+                u32::from(b'n'),
+            ),
+        ] {
+            set_key_event(event, key::KeyAction::Press, key, mods, utf8, unshifted);
+            assert!(
+                !roastty_config_key_is_binding(config, event),
+                "{key:?} {mods} {utf8:?} {unshifted}"
+            );
+        }
 
         roastty_key_event_free(event);
         roastty_config_free(config);
