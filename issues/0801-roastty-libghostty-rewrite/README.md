@@ -1960,6 +1960,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 723: Binding Action Runtime UI Toggles](723-binding-action-runtime-ui-toggles.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 724: Binding Action Runtime Control Forwarding](724-binding-action-runtime-control-forwarding.md)
+  — **Designed** · Codex/Codex/-
 
 ## Non-Goals
 
