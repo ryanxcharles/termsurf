@@ -270,8 +270,8 @@ Experiment 246).
       setters)
 - [ ] `config_get` (12 defaults only) + keybind triggers — partial
 - [ ] App/surface key dispatch, surface draw/refresh, IME/text/preedit, surface
-      mouse dispatch, selection read, splits — surface draw wakeup done; refresh
-      and the remaining dispatch/read/split paths missing
+      mouse dispatch, selection read, splits — surface draw and refresh wakeups
+      done; the remaining dispatch/read/split paths missing
 - [ ] Inspector ABI — missing
 
 ### App / Surface / IO — partial
@@ -284,7 +284,7 @@ Experiment 246).
       display-id, occlusion, quicklook, inspector, splits, selection + text
       reads) — lifecycle handle, basic setters, app detachment, worker event
       draining, dirty/process-exit/error state, and surface render-state
-      snapshots, surface worker start, and surface draw wakeup done; refresh,
+      snapshots, surface worker start, and surface draw/refresh wakeups done;
       splits, text reads, and full frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
@@ -1836,7 +1836,7 @@ are past the correctness-critical foundation.
 - [Experiment 677: Surface Draw Wakeup](677-surface-draw-wakeup.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 678: Surface Refresh Wakeup](678-surface-refresh-wakeup.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

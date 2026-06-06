@@ -3939,6 +3939,7 @@ int main(int argc, char **argv) {
   roastty_surface_update_config(NULL, NULL);
   assert(!roastty_surface_needs_confirm_quit(NULL));
   assert(!roastty_surface_process_exited(NULL));
+  roastty_surface_refresh(NULL);
   roastty_surface_set_content_scale(NULL, 1.0, 1.0);
   roastty_surface_set_focus(NULL, true);
   roastty_surface_set_occlusion(NULL, true);
@@ -4110,6 +4111,13 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_needs_render(surface));
   roastty_surface_draw(surface);
   assert(roastty_surface_needs_render(surface));
+
+  roastty_surface_t refresh_surface = roastty_surface_new(app, &surface_config);
+  assert(refresh_surface != NULL);
+  assert(!roastty_surface_needs_render(refresh_surface));
+  roastty_surface_refresh(refresh_surface);
+  assert(roastty_surface_needs_render(refresh_surface));
+  roastty_surface_free(refresh_surface);
 
   roastty_string_s tty_name = roastty_surface_tty_name(surface);
   assert(tty_name.ptr != NULL);

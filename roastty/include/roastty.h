@@ -1783,6 +1783,7 @@ ROASTTY_API void roastty_surface_update_config(roastty_surface_t,
 ROASTTY_API bool roastty_surface_needs_confirm_quit(roastty_surface_t);
 ROASTTY_API bool roastty_surface_process_exited(roastty_surface_t);
 ROASTTY_API bool roastty_surface_needs_render(roastty_surface_t);
+ROASTTY_API void roastty_surface_refresh(roastty_surface_t);
 ROASTTY_API void roastty_surface_draw(roastty_surface_t);
 ROASTTY_API roastty_result_e
 roastty_surface_render_state_update(roastty_surface_t, roastty_render_state_t);

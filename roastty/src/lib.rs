@@ -1400,9 +1400,17 @@ impl Surface {
         }
     }
 
-    fn draw(&mut self) {
+    fn request_render(&mut self) {
         self.dirty = true;
         self.wakeup_app();
+    }
+
+    fn refresh(&mut self) {
+        self.request_render();
+    }
+
+    fn draw(&mut self) {
+        self.request_render();
     }
 
     fn wakeup_app(&self) {
@@ -8577,6 +8585,13 @@ pub extern "C" fn roastty_surface_needs_render(surface: RoasttySurface) -> bool 
 }
 
 #[no_mangle]
+pub extern "C" fn roastty_surface_refresh(surface: RoasttySurface) {
+    if let Some(surface) = surface_from_handle(surface) {
+        surface.refresh();
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn roastty_surface_draw(surface: RoasttySurface) {
     if let Some(surface) = surface_from_handle(surface) {
         surface.draw();
@@ -9072,12 +9087,30 @@ mod tests {
     }
 
     #[test]
+    fn surface_refresh_null_is_noop() {
+        roastty_surface_refresh(ptr::null_mut());
+    }
+
+    #[test]
     fn surface_draw_marks_surface_needs_render() {
         let app = new_test_app();
         let surface = new_test_surface(app);
 
         assert!(!roastty_surface_needs_render(surface));
         roastty_surface_draw(surface);
+
+        assert!(roastty_surface_needs_render(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_refresh_marks_surface_needs_render() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_surface_refresh(surface);
 
         assert!(roastty_surface_needs_render(surface));
         roastty_surface_free(surface);
@@ -9099,6 +9132,20 @@ mod tests {
     }
 
     #[test]
+    fn surface_refresh_invokes_runtime_wakeup_with_userdata() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xBEEF);
+        let surface = new_test_surface(app);
+
+        roastty_surface_refresh(surface);
+
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0xBEEF);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
     fn surface_draw_repeatedly_invokes_runtime_wakeup() {
         let _guard = WAKEUP_LOCK.lock().unwrap();
         let app = new_test_app_with_wakeup(0xFACE);
@@ -9110,6 +9157,22 @@ mod tests {
         assert!(roastty_surface_needs_render(surface));
         assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 2);
         assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0xFACE);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_refresh_repeatedly_invokes_runtime_wakeup() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xCAFE);
+        let surface = new_test_surface(app);
+
+        roastty_surface_refresh(surface);
+        roastty_surface_refresh(surface);
+
+        assert!(roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(WAKEUP_USERDATA.load(Ordering::SeqCst), 0xCAFE);
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
@@ -9129,6 +9192,20 @@ mod tests {
     }
 
     #[test]
+    fn surface_refresh_after_app_detach_marks_dirty_without_wakeup() {
+        let _guard = WAKEUP_LOCK.lock().unwrap();
+        let app = new_test_app_with_wakeup(0xA12);
+        let surface = new_test_surface(app);
+        roastty_app_free(app);
+
+        roastty_surface_refresh(surface);
+
+        assert!(roastty_surface_needs_render(surface));
+        assert_eq!(WAKEUP_COUNT.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+    }
+
+    #[test]
     fn surface_render_state_update_clears_draw_requested_dirty_state() {
         let _guard = PTY_COMMAND_LOCK.lock().unwrap();
         let app = new_test_app();
@@ -9136,6 +9213,27 @@ mod tests {
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
 
         roastty_surface_draw(surface);
+        assert!(roastty_surface_needs_render(surface));
+        let state = new_render_state();
+        assert_eq!(
+            roastty_surface_render_state_update(surface, state),
+            ROASTTY_SUCCESS
+        );
+
+        assert!(!roastty_surface_needs_render(surface));
+        roastty_render_state_free(state);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_render_state_update_clears_refresh_requested_dirty_state() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        roastty_surface_refresh(surface);
         assert!(roastty_surface_needs_render(surface));
         let state = new_render_state();
         assert_eq!(
