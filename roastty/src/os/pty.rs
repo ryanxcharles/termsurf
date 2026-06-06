@@ -75,6 +75,24 @@ impl Pty {
         Ok(())
     }
 
+    pub(crate) fn size(&self) -> io::Result<PtySize> {
+        let mut winsize = libc::winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        if unsafe { libc::ioctl(self.master.as_raw_fd(), libc::TIOCGWINSZ, &mut winsize) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(PtySize {
+            rows: winsize.ws_row,
+            cols: winsize.ws_col,
+            width_px: winsize.ws_xpixel,
+            height_px: winsize.ws_ypixel,
+        })
+    }
+
     pub(crate) fn master_fd(&self) -> RawFd {
         self.master.as_raw_fd()
     }
@@ -314,6 +332,10 @@ impl PtyChild {
         self.pty.set_size(size)
     }
 
+    pub(crate) fn size(&self) -> io::Result<PtySize> {
+        self.pty.size()
+    }
+
     pub(crate) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         self.child.try_wait()
     }
@@ -377,24 +399,6 @@ mod tests {
             width_px: 800,
             height_px: 600,
         }
-    }
-
-    fn pty_size(fd: RawFd) -> io::Result<PtySize> {
-        let mut winsize = libc::winsize {
-            ws_row: 0,
-            ws_col: 0,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut winsize) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(PtySize {
-            rows: winsize.ws_row,
-            cols: winsize.ws_col,
-            width_px: winsize.ws_xpixel,
-            height_px: winsize.ws_ypixel,
-        })
     }
 
     fn fd_cloexec(fd: RawFd) -> bool {
@@ -476,10 +480,7 @@ mod tests {
     fn pty_open_applies_initial_size() {
         let pty = Pty::open(test_size()).expect("open pty");
 
-        assert_eq!(
-            pty_size(pty.master_fd()).expect("get pty size"),
-            test_size()
-        );
+        assert_eq!(pty.size().expect("get pty size"), test_size());
     }
 
     #[test]
@@ -502,7 +503,7 @@ mod tests {
 
         pty.set_size(resized).expect("set pty size");
 
-        assert_eq!(pty_size(pty.master_fd()).expect("get pty size"), resized);
+        assert_eq!(pty.size().expect("get pty size"), resized);
     }
 
     #[test]
@@ -695,7 +696,7 @@ mod tests {
 
         child.resize(resized).expect("resize pty child");
 
-        assert_eq!(pty_size(child.master_fd()).expect("get pty size"), resized);
+        assert_eq!(child.size().expect("get pty size"), resized);
     }
 
     #[test]

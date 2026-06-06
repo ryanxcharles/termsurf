@@ -1348,6 +1348,18 @@ impl Surface {
         ROASTTY_SUCCESS
     }
 
+    fn set_size(&mut self, width: u32, height: u32) {
+        self.size.width_px = width;
+        self.size.height_px = height;
+
+        let size = self.pty_size();
+        if let Some(worker) = &self.termio_worker {
+            if let Err(err) = worker.resize_pty(size) {
+                self.apply_termio_event(termio::TermioWorkerEvent::Error(format!("{err:?}")));
+            }
+        }
+    }
+
     fn tick_termio(&mut self) {
         #[cfg(test)]
         while let Some(event) = self.test_termio_events.pop_front() {
@@ -8553,8 +8565,7 @@ pub extern "C" fn roastty_surface_set_occlusion(surface: RoasttySurface, occlude
 #[no_mangle]
 pub extern "C" fn roastty_surface_set_size(surface: RoasttySurface, width: u32, height: u32) {
     if let Some(surface) = surface_from_handle(surface) {
-        surface.size.width_px = width;
-        surface.size.height_px = height;
+        surface.set_size(width, height);
     }
 }
 
@@ -8999,6 +9010,120 @@ mod tests {
         assert_eq!(first_pid, second_pid);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_size_without_worker_updates_stored_size() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        roastty_surface_set_size(surface, 640, 480);
+
+        let size = roastty_surface_size(surface);
+        assert_eq!(size.width_px, 640);
+        assert_eq!(size.height_px, 480);
+        assert_eq!(size.columns, 0);
+        assert_eq!(size.rows, 0);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_size_resizes_attached_worker_pty() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.size.rows = 43;
+            surface_ref.size.columns = 121;
+        }
+        let expected = os::pty::PtySize {
+            rows: 43,
+            cols: 121,
+            width_px: 1210,
+            height_px: 860,
+        };
+
+        roastty_surface_set_size(surface, 1210, 860);
+
+        wait_until(|| {
+            surface_from_handle(surface)
+                .unwrap()
+                .termio_worker
+                .as_ref()
+                .unwrap()
+                .with_termio(|termio| termio.pty_size().expect("pty size") == expected)
+        });
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_size_records_error_for_disconnected_worker() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let command = CString::new("printf done").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            roastty_surface_process_exited(surface)
+        });
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert!(surface_ref.termio_worker.is_some());
+            assert!(surface_ref.last_termio_error.is_none());
+            surface_ref.dirty = false;
+        }
+
+        roastty_surface_set_size(surface, 640, 480);
+
+        wait_until(|| {
+            surface_from_handle(surface)
+                .unwrap()
+                .last_termio_error
+                .is_some()
+        });
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.process_exited);
+        assert!(surface_ref.dirty);
+        assert!(surface_ref
+            .last_termio_error
+            .as_deref()
+            .unwrap()
+            .contains("CommandDisconnected"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_set_size_after_app_detach_updates_stored_size_only() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        roastty_app_free(app);
+
+        roastty_surface_set_size(surface, 700, 500);
+
+        let size = roastty_surface_size(surface);
+        assert_eq!(size.width_px, 700);
+        assert_eq!(size.height_px, 500);
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .is_none());
+
+        roastty_surface_free(surface);
     }
 
     #[test]

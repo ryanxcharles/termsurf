@@ -288,9 +288,10 @@ Experiment 246).
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
-      done; surface command/cwd/env/initial-input worker launch done; configured
-      shell policy beyond `/bin/sh`, renderer wakeups, and full renderer
-      integration missing
+      done; surface command/cwd/env/initial-input worker launch done; surface
+      worker resize forwarding done; configured shell policy beyond `/bin/sh`,
+      renderer wakeups, renderer/grid calculation, and full renderer integration
+      missing
 - [ ] `os/` utilities (tmpdir / file / env / hostname / locale) — ad hoc Rust
       stdlib; no dedicated module
 
@@ -1828,7 +1829,7 @@ are past the correctness-critical foundation.
 - [Experiment 674: Surface Foreground PID](674-surface-foreground-pid.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 675: Surface Worker Resize](675-surface-worker-resize.md) —
-  **Designed** · Codex/Codex/-
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

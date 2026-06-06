@@ -203,6 +203,10 @@ impl Termio {
         Ok(())
     }
 
+    pub(crate) fn pty_size(&self) -> Result<PtySize, TermioError> {
+        Ok(self.child.size()?)
+    }
+
     fn collect_terminal_response(&mut self) {
         if self.terminal.pty_response().is_empty() {
             return;
@@ -398,7 +402,6 @@ mod tests {
     use super::*;
     use crate::os::pty::PTY_COMMAND_LOCK;
     use std::ffi::c_void;
-    use std::os::fd::RawFd;
     use std::thread;
     use std::time::Duration;
 
@@ -411,24 +414,6 @@ mod tests {
             width_px: 800,
             height_px: 600,
         }
-    }
-
-    fn pty_size(fd: RawFd) -> io::Result<PtySize> {
-        let mut winsize = libc::winsize {
-            ws_row: 0,
-            ws_col: 0,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut winsize) } < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(PtySize {
-            rows: winsize.ws_row,
-            cols: winsize.ws_col,
-            width_px: winsize.ws_xpixel,
-            height_px: winsize.ws_ypixel,
-        })
     }
 
     fn spawn_shell(script: &str) -> Termio {
@@ -551,10 +536,7 @@ mod tests {
 
         termio.resize_pty(resized).expect("resize pty");
 
-        assert_eq!(
-            pty_size(termio.child.master_fd()).expect("get pty size"),
-            resized
-        );
+        assert_eq!(termio.pty_size().expect("get pty size"), resized);
     }
 
     #[test]
@@ -719,9 +701,7 @@ mod tests {
 
         worker.resize_pty(resized).expect("queue resize");
         wait_until(|| {
-            worker.with_termio(|termio| {
-                pty_size(termio.child.master_fd()).expect("get pty size") == resized
-            })
+            worker.with_termio(|termio| termio.pty_size().expect("get pty size") == resized)
         });
 
         worker.shutdown().expect("shutdown worker");
