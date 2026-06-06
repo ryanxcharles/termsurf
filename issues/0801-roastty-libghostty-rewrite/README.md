@@ -1723,6 +1723,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 637: Font Checklist Audit](637-font-checklist-audit.md) — **Pass**
   · Codex/Codex/Codex
+- [Experiment 638: OpenType Glyf Parser](638-opentype-glyf-parser.md) —
+  **Designed**
 
 ## Non-Goals
 
