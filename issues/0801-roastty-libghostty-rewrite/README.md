@@ -1986,7 +1986,7 @@ are past the correctness-critical foundation.
 - [Experiment 735: Binding Action Write Selection File Paste](735-binding-action-write-selection-file-paste.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 736: Binding Action Write Screen File Copy](736-binding-action-write-screen-file-copy.md)
-  — **Designed** · Codex/Codex/-
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "gpt-5"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "gpt-5"
+reasoning = "medium"
 +++
 
 # Experiment 736: Binding Action Write Screen File Copy
@@ -90,3 +95,57 @@ records added, the review approved the screen-copy-only scope, deferred
 paste/open/scrollback behavior, retained-temp-directory model, clipboard path
 model, no-active-selection requirement, and existing selection-file regression
 coverage.
+
+## Result
+
+**Result:** Pass
+
+Experiment 736 added `write_screen_file:copy` support. The write-file helper now
+accepts an explicit target, preserving the existing selection target behavior
+while adding a screen target that formats the active screen with no active
+selection required.
+
+The parser now accepts `write_screen_file:copy`, `copy,plain`, `copy,vt`, and
+`copy,html`. Unsupported `write_screen_file:paste`, `open`, malformed formats,
+empty parameters, whitespace variants, and NUL-containing forms remain rejected.
+
+Screen-copy files are written to retained temporary directories as `screen.txt`
+for plain/vt output and `screen.html` for html output. On success, Roastty
+copies the canonical file path to the standard clipboard as `text/plain` without
+confirmation. Existing `write_selection_file:copy` and
+`write_selection_file:paste` behavior still uses `selection.txt` /
+`selection.html` and passed regression coverage after the helper refactor.
+
+Verification passed:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty write_screen_file -- --nocapture --test-threads=1`
+  - 2 passed
+- `cargo test -p roastty write_selection_file -- --nocapture --test-threads=1`
+  - 5 passed
+- `cargo test -p roastty binding_action -- --nocapture --test-threads=1`
+  - 119 passed
+- `cargo test -p roastty --test abi_harness`
+  - 1 passed
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has the copy side of both selection-file and screen-file binding
+targets. The remaining write-file actions are screen paste/open, selection-file
+open, and scrollback-file support. The existing target-aware helper can support
+those future slices, but open still needs a runtime URL/open integration
+decision.
+
+## Completion Review
+
+Codex reviewed the completed Experiment 736 result and implementation diff. It
+found no implementation blockers.
+
+The review confirmed that `write_screen_file:copy*` parses only the intended
+copy forms, rejects paste/open/malformed inputs, formats the active screen with
+unwrap enabled and trim disabled, writes `screen.txt` / `screen.html`, copies
+the canonical path as `text/plain` without confirmation, preserves
+selection-file behavior through the helper refactor, and records verification
+that matches the implemented coverage.

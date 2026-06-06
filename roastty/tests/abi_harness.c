@@ -4537,6 +4537,18 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(
       surface, "write_selection_file:paste,html,extra", 37));
   assert(!roastty_surface_binding_action(surface, "write_selection_file:open", 25));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file", 17));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:", 18));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:copy,", 23));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:,plain", 24));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:copy,rtf", 26));
+  assert(!roastty_surface_binding_action(
+      surface, "write_screen_file:copy,html,extra", 33));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:paste", 23));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:paste,plain", 29));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:paste,vt", 26));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:paste,html", 28));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:open", 22));
   assert(!roastty_surface_binding_action(surface, "copy_title_to_clipboard:", 24));
   assert(!roastty_surface_binding_action(surface, "copy_title_to_clipboard:now", 27));
   assert(!roastty_surface_binding_action(surface, "paste_from_clipboard:", 21));
@@ -4661,6 +4673,10 @@ int main(int argc, char **argv) {
   assert(!roastty_surface_binding_action(surface, "write_selection_file:paste,plain", 32));
   assert(!roastty_surface_binding_action(surface, "write_selection_file:paste,vt", 29));
   assert(!roastty_surface_binding_action(surface, "write_selection_file:paste,html", 31));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:copy", 22));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:copy,plain", 28));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:copy,vt", 25));
+  assert(!roastty_surface_binding_action(surface, "write_screen_file:copy,html", 27));
   assert(!roastty_surface_binding_action(surface, "copy_title_to_clipboard", 23));
   assert(!roastty_surface_binding_action(surface, "paste_from_clipboard", 20));
   assert(!roastty_surface_binding_action(surface, "paste_from_selection", 20));
