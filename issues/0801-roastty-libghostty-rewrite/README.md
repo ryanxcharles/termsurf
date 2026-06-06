@@ -1699,6 +1699,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 626: os locale ensureLocale core](626-os-locale-ensure.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 627: sys PNG decode abstraction audit](627-sys-png-decode-audit.md)
+  — **Designed**
 
 ## Non-Goals
 
