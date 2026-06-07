@@ -2176,6 +2176,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 799: Supporting Subsystems Checklist Sync](799-supporting-subsystems-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 800: SharedGridSet Foundation](800-shared-grid-set-foundation.md)
+  — **Designed**
 
 ## Non-Goals
 
