@@ -2051,6 +2051,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 768: Config Get App Lifecycle Bools](768-config-get-app-lifecycle-bools.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 769: Config Get Background Opacity](769-config-get-background-opacity.md)
+  — **Designed**
 
 ## Non-Goals
 
