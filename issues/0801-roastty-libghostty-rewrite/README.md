@@ -2251,6 +2251,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 820: Apply Cursor Uniforms](820-apply-cursor-uniforms.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 821: Apply Custom Shader Frame Updates](821-apply-custom-shader-frame.md)
+  — **Designed** · Codex/Codex
 
 ## Non-Goals
 
