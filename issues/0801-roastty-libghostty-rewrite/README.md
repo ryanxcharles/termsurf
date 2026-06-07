@@ -2257,6 +2257,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 822: Present Metal Frame](822-present-metal-frame.md) — **Pass** ·
   Codex/Codex/Codex
+- [Experiment 823: Apply Rebuild Uniforms](823-apply-rebuild-uniforms.md) —
+  **Designed** · Codex/Codex
 
 ## Non-Goals
 
