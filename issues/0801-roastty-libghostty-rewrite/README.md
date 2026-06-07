@@ -2048,7 +2048,7 @@ are past the correctness-critical foundation.
 - [Experiment 766: Config Get Window Theme](766-config-get-window-theme.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 767: Config Get Window Save State](767-config-get-window-save-state.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

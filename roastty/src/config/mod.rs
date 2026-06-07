@@ -94,6 +94,8 @@ pub(crate) struct Config {
     pub window_decoration: WindowDecoration,
     /// `window-theme`.
     pub window_theme: WindowTheme,
+    /// `window-save-state`.
+    pub window_save_state: WindowSaveState,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `macos-non-native-fullscreen`.
@@ -168,6 +170,7 @@ impl Default for Config {
             window_subtitle: WindowSubtitle::False,
             window_decoration: WindowDecoration::Auto,
             window_theme: WindowTheme::Auto,
+            window_save_state: WindowSaveState::Default,
             fullscreen: Fullscreen::False,
             macos_non_native_fullscreen: NonNativeFullscreen::False,
             macos_titlebar_style: MacTitlebarStyle::Transparent,
@@ -262,6 +265,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("window-decoration", out));
         self.window_theme
             .format_entry(&mut EntryFormatter::new("window-theme", out));
+        self.window_save_state
+            .format_entry(&mut EntryFormatter::new("window-save-state", out));
         self.window_colorspace
             .format_entry(&mut EntryFormatter::new("window-colorspace", out));
         self.clipboard_read
@@ -431,6 +436,13 @@ impl Config {
             "window-theme" => {
                 self.window_theme =
                     set_enum_field(value, default.window_theme, WindowTheme::from_keyword)?
+            }
+            "window-save-state" => {
+                self.window_save_state = set_enum_field(
+                    value,
+                    default.window_save_state,
+                    WindowSaveState::from_keyword,
+                )?
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -1937,6 +1949,41 @@ impl WindowTheme {
             "light" => Some(WindowTheme::Light),
             "dark" => Some(WindowTheme::Dark),
             "ghostty" => Some(WindowTheme::Ghostty),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `window-save-state` config (upstream `WindowSaveState`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowSaveState {
+    Default,
+    Never,
+    Always,
+}
+
+impl WindowSaveState {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowSaveState::Default => "default",
+            WindowSaveState::Never => "never",
+            WindowSaveState::Always => "always",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "default" => Some(WindowSaveState::Default),
+            "never" => Some(WindowSaveState::Never),
+            "always" => Some(WindowSaveState::Always),
             _ => None,
         }
     }
@@ -3890,8 +3937,8 @@ mod tests {
         SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
         ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
         WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowPadding,
-        WindowPaddingColor, WindowPaddingParseError, WindowSubtitle, WindowTheme, WorkingDirectory,
-        WorkingDirectoryParseError,
+        WindowPaddingColor, WindowPaddingParseError, WindowSaveState, WindowSubtitle, WindowTheme,
+        WorkingDirectory, WorkingDirectoryParseError,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
@@ -4102,6 +4149,7 @@ mod tests {
         assert_eq!(d.window_subtitle, WindowSubtitle::False);
         assert_eq!(d.window_decoration, WindowDecoration::Auto);
         assert_eq!(d.window_theme, WindowTheme::Auto);
+        assert_eq!(d.window_save_state, WindowSaveState::Default);
         // macOS-window group (Experiment 469).
         assert_eq!(d.fullscreen, Fullscreen::False);
         assert_eq!(d.macos_non_native_fullscreen, NonNativeFullscreen::False);
@@ -6716,6 +6764,27 @@ mod tests {
     }
 
     #[test]
+    fn window_save_state_keywords_and_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (WindowSaveState::Default, "default"),
+            (WindowSaveState::Never, "never"),
+            (WindowSaveState::Always, "always"),
+        ] {
+            assert_eq!(variant.keyword(), kw);
+            assert_eq!(WindowSaveState::from_keyword(kw), Some(variant));
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        assert_eq!(WindowSaveState::from_keyword("nope"), None);
+    }
+
+    #[test]
     fn theme_format_entry() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
@@ -7397,6 +7466,7 @@ mod tests {
                 "window-subtitle",
                 "window-decoration",
                 "window-theme",
+                "window-save-state",
                 "window-colorspace",
                 "clipboard-read",
                 "clipboard-write",
@@ -7451,6 +7521,7 @@ mod tests {
             ("window-subtitle", "working-directory"),
             ("window-decoration", "server"),
             ("window-theme", "dark"),
+            ("window-save-state", "always"),
             ("fullscreen", "non-native"),
             ("macos-non-native-fullscreen", "visible-menu"),
             ("macos-titlebar-style", "tabs"),
@@ -7476,10 +7547,12 @@ mod tests {
         let mut cfg = Config::default();
         cfg.set("window-decoration", Some("server")).unwrap();
         cfg.set("window-theme", Some("dark")).unwrap();
+        cfg.set("window-save-state", Some("always")).unwrap();
         let mut out = String::new();
         cfg.format_config(&mut out);
         assert!(out.lines().any(|line| line == "window-decoration = server"));
         assert!(out.lines().any(|line| line == "window-theme = dark"));
+        assert!(out.lines().any(|line| line == "window-save-state = always"));
 
         // A missing value is `ValueRequired`; an invalid value is `InvalidValue`;
         // an unknown key is `UnknownField`.
@@ -7502,6 +7575,14 @@ mod tests {
         );
         assert_eq!(
             cfg.set("window-theme", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("window-save-state", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-save-state", Some("nope")),
             Err(ConfigSetError::InvalidValue)
         );
         assert_eq!(

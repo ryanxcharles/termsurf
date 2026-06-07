@@ -68,3 +68,41 @@ Non-blocking suggestions from the review: test all three ABI variants
 (`default`, `never`, and `always`), include bare CLI `--window-save-state` as
 `ValueRequired`, include unknown values as `InvalidValue`, and include empty
 reset coverage.
+
+## Result
+
+**Result:** Pass
+
+Implemented `WindowSaveState` as a simple keyword enum with all three upstream
+variants: `default`, `never`, and `always`. `config::Config` now stores
+`window_save_state`, defaults it to `WindowSaveState::Default`, formats it
+through `format_config`, and routes `Config::set("window-save-state", ...)`
+through the existing enum-field helper.
+
+`roastty_config_get("window-save-state")` now reads parsed config state and
+returns stable nul-terminated C string pointers for every variant.
+
+Verification passed:
+
+- `cargo test -p roastty window_save_state -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_get_window_save_state -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_ -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings or
+non-blocking suggestions. The review confirmed that `WindowSaveState` is stored
+in aggregate `Config`, defaults to `default`, routes through `set_enum_field`,
+formats correctly, produces `ValueRequired` / `InvalidValue` diagnostics for
+bare / unknown CLI input, and returns stable parsed C strings through
+`roastty_config_get("window-save-state")`.
+
+## Conclusion
+
+`roastty_config_get("window-save-state")` now reports direct parsed config state
+instead of a hard-coded default. Window restoration behavior remains a separate
+macOS app/runtime slice; this experiment completes the direct config lookup for
+the field itself.
