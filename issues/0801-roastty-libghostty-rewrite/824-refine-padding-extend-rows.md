@@ -129,3 +129,67 @@ remaining blockers. The re-review confirmed that zero-row behavior, malformed
 zero-row rejection, before/after mutation metadata, one-row top-branch behavior,
 `Background`/`ExtendAlways` no-op handling, and prepared `row_never_extend`
 scope now match the intended experiment.
+
+## Result
+
+**Result:** Pass
+
+Roastty can now apply prepared row-level padding-extension refinement:
+
+- `roastty/src/renderer/frame_rebuild.rs` adds `FramePaddingExtendInput`,
+  `FramePaddingExtendValidationError`, and `FramePaddingExtendApplication`.
+- `FrameRebuildPlan::refine_padding_extend_rows` validates duplicate rebuilt
+  rows, out-of-bounds rebuilt rows, and missing boundary `row_never_extend`
+  inputs before mutating uniforms.
+- In `WindowPaddingColor::Extend` mode, rebuilt top and bottom rows call
+  `MetalUniforms::refine_padding_extend` with prepared per-row `never_extend`
+  values.
+- Zero-row plans with no rebuilt rows are no-ops; malformed nonempty zero-row
+  plans reject before mutation.
+- `Background` and `ExtendAlways` skip row refinement and do not require row
+  inputs.
+- Application metadata records refined boundary rows and reports
+  `padding_extend_mutated` by comparing the uniform field before and after all
+  refinement calls.
+- Tests cover top-row and bottom-row edge clearing, middle-row and clean-plan
+  no-ops, one-row top-branch behavior, zero-row behavior, non-refining padding
+  modes, refined-but-unchanged metadata, missing prepared inputs, duplicate
+  rebuilt rows, and out-of-bounds rebuilt rows.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/generic.zig` `rebuildRow`
+  padding-extension branch.
+- Inspected `vendor/ghostty/src/renderer/row.zig` `neverExtendBg`.
+- Inspected `roastty/src/renderer/metal/shaders.rs`
+  `MetalUniforms::refine_padding_extend`.
+- Inspected `roastty/src/renderer/frame_rebuild.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture` — passed, 89
+  tests.
+- `cargo test -p roastty renderer::metal::shaders::tests::refine_padding_extend -- --nocapture`
+  — passed, 1 test.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/824-refine-padding-extend-rows.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 824 connects the prepared frame rebuild path to upstream's per-row
+padding-extension refinement for rebuilt boundary rows. The renderer foundation
+can now reset padding extension on full rebuilds and refine it from prepared
+row-level `never_extend` decisions. Remaining work still includes deriving
+`rowNeverExtendBg` from live terminal row/cell/style data, live terminal-state
+collection, custom shader enablement/upload, pacing, renderer-thread
+integration, and surface lifecycle integration.
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no implementation
+correctness issues. It found two documentation issues: the README experiment
+index was missing the required `Codex/Codex/Codex` provenance tag, and the
+Result verification list omitted the markdown formatting and `git diff --check`
+steps. Both documentation issues were fixed before result commit.
+
+Codex re-reviewed the fixed result record and approved the experiment for the
+result commit with no remaining findings.

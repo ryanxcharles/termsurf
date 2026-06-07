@@ -404,6 +404,25 @@ pub(crate) struct FrameRebuildUniformApplication {
     pub(crate) effective_grid: GridSize,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FramePaddingExtendInput<'a> {
+    pub(crate) padding_color: WindowPaddingColor,
+    pub(crate) row_never_extend: &'a [bool],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FramePaddingExtendValidationError {
+    DuplicateRebuildRow { row: Unit },
+    RebuildRowOutOfBounds { row: Unit, rows: Unit },
+    MissingRowNeverExtend { row: Unit, rows: usize },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FramePaddingExtendApplication {
+    pub(crate) refined_rows: Vec<Unit>,
+    pub(crate) padding_extend_mutated: bool,
+}
+
 impl FrameRebuildPlan {
     pub(crate) fn build(input: FrameRebuildInput<'_>) -> Result<Self, FrameRebuildPlanError> {
         let needed_dirty_rows = input.terminal_grid.rows as usize;
@@ -771,6 +790,43 @@ impl FrameRebuildPlan {
         })
     }
 
+    pub(crate) fn refine_padding_extend_rows(
+        &self,
+        uniforms: &mut MetalUniforms,
+        input: FramePaddingExtendInput<'_>,
+    ) -> Result<FramePaddingExtendApplication, FramePaddingExtendValidationError> {
+        self.validate_padding_extend_rows(&input)?;
+
+        let before = uniforms.padding_extend;
+        let mut refined_rows = Vec::new();
+
+        if input.padding_color == WindowPaddingColor::Extend && self.effective_grid.rows > 0 {
+            let last_row = self.effective_grid.rows - 1;
+
+            for row in &self.rows_to_rebuild {
+                let is_first_row = *row == 0;
+                let is_last_row = *row == last_row;
+                if !is_first_row && !is_last_row {
+                    continue;
+                }
+
+                let never_extend = input.row_never_extend[*row as usize];
+                uniforms.refine_padding_extend(
+                    input.padding_color,
+                    is_first_row,
+                    is_last_row,
+                    never_extend,
+                );
+                refined_rows.push(*row);
+            }
+        }
+
+        Ok(FramePaddingExtendApplication {
+            refined_rows,
+            padding_extend_mutated: before != uniforms.padding_extend,
+        })
+    }
+
     fn validate_application(
         &self,
         contents: &Contents,
@@ -850,6 +906,40 @@ impl FrameRebuildPlan {
                 return Err(
                     FrameRebuildUniformValidationError::ResizeWithoutFullRebuild { resize_to },
                 );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_padding_extend_rows(
+        &self,
+        input: &FramePaddingExtendInput<'_>,
+    ) -> Result<(), FramePaddingExtendValidationError> {
+        let mut seen = HashSet::new();
+        for row in &self.rows_to_rebuild {
+            if !seen.insert(*row) {
+                return Err(FramePaddingExtendValidationError::DuplicateRebuildRow { row: *row });
+            }
+            if *row >= self.effective_grid.rows {
+                return Err(FramePaddingExtendValidationError::RebuildRowOutOfBounds {
+                    row: *row,
+                    rows: self.effective_grid.rows,
+                });
+            }
+        }
+
+        if input.padding_color == WindowPaddingColor::Extend && self.effective_grid.rows > 0 {
+            let last_row = self.effective_grid.rows - 1;
+            for row in &self.rows_to_rebuild {
+                if (*row == 0 || *row == last_row)
+                    && input.row_never_extend.get(*row as usize).is_none()
+                {
+                    return Err(FramePaddingExtendValidationError::MissingRowNeverExtend {
+                        row: *row,
+                        rows: input.row_never_extend.len(),
+                    });
+                }
             }
         }
 
@@ -3500,6 +3590,323 @@ mod tests {
             }
         );
         assert_eq!(uniforms.grid_size, before.grid_size);
+        assert_eq!(uniforms.padding_extend, before.padding_extend);
+    }
+
+    fn padding_extend_input(
+        padding_color: WindowPaddingColor,
+        row_never_extend: &[bool],
+    ) -> FramePaddingExtendInput<'_> {
+        FramePaddingExtendInput {
+            padding_color,
+            row_never_extend,
+        }
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_top_row_can_clear_up_edge() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(4, 3),
+            grid(4, 3),
+            RenderDirty::Partial,
+            &[true, false, false],
+        ))
+        .expect("plan");
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+
+        let applied = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[true]),
+            )
+            .expect("refine padding extend");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![0],
+                padding_extend_mutated: true,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 11);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_bottom_row_can_clear_down_edge() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(4, 3),
+            grid(4, 3),
+            RenderDirty::Partial,
+            &[false, false, true],
+        ))
+        .expect("plan");
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+
+        let applied = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[false, false, true]),
+            )
+            .expect("refine padding extend");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![2],
+                padding_extend_mutated: true,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 7);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_middle_row_and_clean_plan_are_noops() {
+        let middle = FrameRebuildPlan::build(input(
+            grid(4, 3),
+            grid(4, 3),
+            RenderDirty::Partial,
+            &[false, true, false],
+        ))
+        .expect("middle plan");
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+
+        let applied = middle
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[]),
+            )
+            .expect("middle row should not require row inputs");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![],
+                padding_extend_mutated: false,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 15);
+
+        let clean = FrameRebuildPlan::build(input(
+            grid(4, 3),
+            grid(4, 3),
+            RenderDirty::Clean,
+            &[false, false, false],
+        ))
+        .expect("clean plan");
+        let applied = clean
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[]),
+            )
+            .expect("clean plan should not require row inputs");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![],
+                padding_extend_mutated: false,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 15);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_one_row_grid_uses_top_branch_only() {
+        let plan = plan_for_grid(grid(4, 1));
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+
+        let applied = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[true]),
+            )
+            .expect("refine padding extend");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![0],
+                padding_extend_mutated: true,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 11);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_zero_row_plan_is_noop() {
+        let plan = plan_for_grid(grid(4, 0));
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+
+        let applied = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[]),
+            )
+            .expect("zero row plan should not require row inputs");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![],
+                padding_extend_mutated: false,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 15);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_background_and_extend_always_skip_row_inputs() {
+        let plan = plan_for_grid(grid(4, 3));
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 11;
+
+        let background = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Background, &[]),
+            )
+            .expect("background should skip refinement");
+
+        assert_eq!(
+            background,
+            FramePaddingExtendApplication {
+                refined_rows: vec![],
+                padding_extend_mutated: false,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 11);
+
+        let extend_always = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::ExtendAlways, &[]),
+            )
+            .expect("extend always should skip refinement");
+
+        assert_eq!(
+            extend_always,
+            FramePaddingExtendApplication {
+                refined_rows: vec![],
+                padding_extend_mutated: false,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 11);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_refined_boundary_can_leave_padding_unchanged() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(4, 3),
+            grid(4, 3),
+            RenderDirty::Partial,
+            &[true, false, false],
+        ))
+        .expect("plan");
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+
+        let applied = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[false]),
+            )
+            .expect("refine padding extend");
+
+        assert_eq!(
+            applied,
+            FramePaddingExtendApplication {
+                refined_rows: vec![0],
+                padding_extend_mutated: false,
+            }
+        );
+        assert_eq!(uniforms.padding_extend, 15);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_rejects_missing_boundary_input_without_mutation() {
+        let plan = plan_for_grid(grid(4, 3));
+        let mut uniforms = rebuild_uniforms();
+        let before = uniforms;
+
+        let err = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[]),
+            )
+            .expect_err("missing boundary input should reject");
+
+        assert_eq!(
+            err,
+            FramePaddingExtendValidationError::MissingRowNeverExtend { row: 0, rows: 0 }
+        );
+        assert_eq!(uniforms.padding_extend, before.padding_extend);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_rejects_duplicate_rebuild_row_without_mutation() {
+        let mut plan = plan_for_grid(grid(4, 3));
+        plan.rows_to_rebuild.push(0);
+        let mut uniforms = rebuild_uniforms();
+        let before = uniforms;
+
+        let err = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[false, false, false]),
+            )
+            .expect_err("duplicate row should reject");
+
+        assert_eq!(
+            err,
+            FramePaddingExtendValidationError::DuplicateRebuildRow { row: 0 }
+        );
+        assert_eq!(uniforms.padding_extend, before.padding_extend);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_rejects_out_of_bounds_row_without_mutation() {
+        let mut plan = plan_for_grid(grid(4, 3));
+        plan.rows_to_rebuild = vec![3];
+        let mut uniforms = rebuild_uniforms();
+        let before = uniforms;
+
+        let err = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[false, false, false, true]),
+            )
+            .expect_err("out of bounds row should reject");
+
+        assert_eq!(
+            err,
+            FramePaddingExtendValidationError::RebuildRowOutOfBounds { row: 3, rows: 3 }
+        );
+        assert_eq!(uniforms.padding_extend, before.padding_extend);
+    }
+
+    #[test]
+    fn refine_padding_extend_rows_rejects_nonempty_zero_row_plan_without_mutation() {
+        let mut plan = plan_for_grid(grid(4, 0));
+        plan.rows_to_rebuild = vec![0];
+        let mut uniforms = rebuild_uniforms();
+        let before = uniforms;
+
+        let err = plan
+            .refine_padding_extend_rows(
+                &mut uniforms,
+                padding_extend_input(WindowPaddingColor::Extend, &[true]),
+            )
+            .expect_err("nonempty zero row plan should reject");
+
+        assert_eq!(
+            err,
+            FramePaddingExtendValidationError::RebuildRowOutOfBounds { row: 0, rows: 0 }
+        );
         assert_eq!(uniforms.padding_extend, before.padding_extend);
     }
 }

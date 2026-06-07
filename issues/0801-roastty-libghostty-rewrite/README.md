@@ -247,7 +247,9 @@ Experiment 246).
       integration remain missing; prepared Metal frame presentation can sync
       contents/atlases and submit draw calls through the compositor; prepared
       rebuild uniform inputs can sync resize grid-size and full-rebuild padding
-      extension uniforms (critical)
+      extension uniforms, and prepared row-level padding-extension inputs can
+      refine rebuilt boundary rows while live `rowNeverExtendBg` derivation
+      remains missing (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
       partial: custom-shader uniforms, target enum, and per-frame/state update
       helpers exist; shader file loading, debug overlay, renderer thread, and
@@ -2262,7 +2264,7 @@ are past the correctness-critical foundation.
 - [Experiment 823: Apply Rebuild Uniforms](823-apply-rebuild-uniforms.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 824: Refine Padding Extend Rows](824-refine-padding-extend-rows.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
