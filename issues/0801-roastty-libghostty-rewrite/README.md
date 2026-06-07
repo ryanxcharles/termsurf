@@ -2369,6 +2369,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Claude/Claude
 - [Experiment 839: Compose rebuild-and-present (add the Metal presentation stage)](839-compose-rebuild-and-present.md)
   — **Pass** · Claude/Claude/Claude
+- [Experiment 840: A persistent FrameRenderer that owns state and drives update_frame](840-frame-renderer-update-frame.md)
+  — **Designed** · Claude/Claude/Claude
 
 ## Non-Goals
 
