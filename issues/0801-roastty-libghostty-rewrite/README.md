@@ -2146,7 +2146,7 @@ are past the correctness-critical foundation.
 - [Experiment 794: Config Checklist Sync](794-config-checklist-sync.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 795: Unicode Table Checklist Sync](795-unicode-table-checklist-sync.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
