@@ -237,8 +237,10 @@ Experiment 246).
       planner for resize/full/row-dirty/preedit decisions exists and can apply
       resize/reset/clear/mark-clean actions to `Contents`; a per-row driver
       restores upstream clear/mark-clean/rebuild sequencing for callbacks;
-      terminal row formatting, glyph upload/draw calls, pacing, and live
-      renderer integration remain missing (critical)
+      prepared row-formatting inputs can rebuild planned `Contents` rows; live
+      terminal-state collection, cursor/preedit glyph emission, glyph
+      upload/draw calls, pacing, and live renderer integration remain missing
+      (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
       partial: custom-shader uniforms, target enum, and per-frame/state update
       helpers exist; shader file loading, debug overlay, renderer thread, and
@@ -2240,8 +2242,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 817: Frame Row Rebuild Driver](817-frame-row-rebuild-driver.md) —
   **Pass** · Codex/Codex/Codex
-- [Experiment 818: Drive Row Formatting](818-drive-row-formatting.md) —
-  **Designed** · Codex/Codex/Codex
+- [Experiment 818: Drive Row Formatting](818-drive-row-formatting.md) — **Pass**
+  · Codex/Codex/Codex
 
 ## Non-Goals
 

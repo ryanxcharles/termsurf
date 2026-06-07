@@ -135,3 +135,69 @@ row render-error injection is not practical with the real formatting helpers,
 the test plan should explicitly rely on Experiment 817's callback-failure
 coverage and keep Experiment 818 focused on validation plus successful real row
 formatting.
+
+## Result
+
+**Result:** Pass
+
+Roastty can now format prepared row inputs through the frame rebuild plan:
+
+- `roastty/src/renderer/frame_rebuild.rs` adds `FrameRowFormatInput`,
+  `FrameRowFormatValidationError`, and `FrameRowRenderError`.
+- `FrameRebuildPlan::format_rows` pre-validates planned row data before any
+  mutation, rejecting missing rows and rows whose `RunOptions.cells.len()` does
+  not exactly match the effective grid columns.
+- The wrapper uses `drive_row_rebuilds` so successful row formatting follows the
+  upstream row-loop order: clear planned partial rows, mark rows clean, then
+  rebuild each planned row.
+- The row callback formats through the existing row helpers: `rebuild_bg_row`,
+  `font::run::shape_row_cached`, and `rebuild_row`.
+- The plan-owned preedit range is the only preedit mask source for this wrapper.
+- Tests cover partial planned-row formatting, full rebuild formatting, missing
+  row validation, row-width validation, plan-owned preedit masking, search
+  highlight/link threading, and driver validation propagation.
+- Deterministic row render-error injection is not added here; Experiment 817
+  already covers callback failure recovery. This experiment verifies validation
+  and successful real row formatting.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/generic.zig` `rebuildCells`.
+- Inspected `roastty/src/renderer/frame_rebuild.rs`.
+- Inspected `roastty/src/renderer/cell.rs`.
+- Inspected `roastty/src/font/run.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture` — passed, 38
+  tests.
+- `cargo test -p roastty renderer::cell::tests::rebuild_viewport -- --nocapture`
+  — passed, 5 tests.
+- `cargo test -p roastty renderer::cell::tests::rebuild_row -- --nocapture` —
+  passed, 11 tests.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/818-drive-row-formatting.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 818 connects the frame rebuild driver to real row formatting for
+prepared inputs. The renderer can now plan rows, apply upstream row sequencing,
+and rebuild only planned `Contents` rows through existing background,
+foreground, shaping, highlight, link, and preedit-mask logic. The remaining live
+render-loop work is still substantial: collecting terminal render state,
+threading real search/link inputs, drawing cursor/preedit glyphs, syncing GPU
+buffers, submitting Metal frames, pacing redraws, and integrating the renderer
+thread remain open.
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking correctness
+issues. The review confirmed that `format_rows` pre-validates planned row
+presence and width before mutation, delegates plan/content validation and row
+sequencing to `drive_row_rebuilds`, uses the same background, shaping, and
+foreground helpers as `rebuild_viewport`, and uses only `self.preedit_range` for
+the preedit mask. It also confirmed that relying on Experiment 817 for
+deterministic callback failure recovery is consistent with the amended design.
+
+The only finding was that the result verification record initially omitted the
+successful Prettier and `git diff --check` commands. Those bullets were added
+before the result commit.

@@ -10,10 +10,15 @@
 //! row. Actual terminal row formatting, glyph emission, cursor drawing, and
 //! `Contents` mutation remain later integration work.
 
-use crate::renderer::cell::Contents;
+use crate::font::codepoint_resolver::ResolverRenderError;
+use crate::font::run::{shape_row_cached, RunOptions};
+use crate::font::shared_grid::SharedGrid;
+use crate::renderer::cell::{rebuild_bg_row, rebuild_row, Contents, Highlight, SelectionConfig};
 use crate::renderer::size::{GridSize, Unit};
 use crate::renderer::state::{Preedit, PreeditRange};
+use crate::terminal::color::{Palette, Rgb};
 use crate::terminal::point::Coordinate;
+use crate::terminal::style::BoldColor;
 use std::collections::HashSet;
 
 /// Terminal render-state dirty mode. Mirrors upstream
@@ -124,6 +129,55 @@ pub(crate) struct FrameRowRebuildApplication<E> {
     pub(crate) marked_clean_rows: Vec<Unit>,
     pub(crate) rebuilt_rows: Vec<Unit>,
     pub(crate) failed_rows: Vec<FrameRowRebuildFailure<E>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameRowFormatInput<'a> {
+    pub(crate) rows: &'a [RunOptions],
+    pub(crate) highlights: &'a [Vec<Highlight>],
+    pub(crate) link_ranges: &'a [Vec<[u16; 2]>],
+    pub(crate) selection_config: &'a SelectionConfig,
+    pub(crate) default_fg: Rgb,
+    pub(crate) default_bg: Rgb,
+    pub(crate) palette: &'a Palette,
+    pub(crate) bold: Option<BoldColor>,
+    pub(crate) alpha: u8,
+    pub(crate) faint_opacity: u8,
+    pub(crate) thicken: bool,
+    pub(crate) thicken_strength: u8,
+    pub(crate) background_opacity_cells: bool,
+    pub(crate) background_opacity: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameRowFormatValidationError {
+    Driver(FrameRowRebuildValidationError),
+    MissingRow {
+        row: Unit,
+        rows: usize,
+    },
+    RowWidthMismatch {
+        row: Unit,
+        expected: Unit,
+        actual: usize,
+    },
+}
+
+impl From<FrameRowRebuildValidationError> for FrameRowFormatValidationError {
+    fn from(error: FrameRowRebuildValidationError) -> Self {
+        Self::Driver(error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameRowRenderError {
+    Render(ResolverRenderError),
+}
+
+impl From<ResolverRenderError> for FrameRowRenderError {
+    fn from(error: ResolverRenderError) -> Self {
+        Self::Render(error)
+    }
 }
 
 impl FrameRebuildPlan {
@@ -252,6 +306,76 @@ impl FrameRebuildPlan {
         })
     }
 
+    pub(crate) fn format_rows(
+        &self,
+        contents: &mut Contents,
+        grid: &mut SharedGrid,
+        row_dirty: &mut [bool],
+        input: FrameRowFormatInput<'_>,
+    ) -> Result<FrameRowRebuildApplication<FrameRowRenderError>, FrameRowFormatValidationError>
+    {
+        self.validate_format_rows_input(&input)?;
+
+        self.drive_row_rebuilds(contents, row_dirty, |contents, row| {
+            let opts = &input.rows[row as usize];
+            let row_highlights = input
+                .highlights
+                .get(row as usize)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let row_links = input
+                .link_ranges
+                .get(row as usize)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let row_preedit = self
+                .preedit_range
+                .filter(|range| range.row == row)
+                .map(|range| [range.range.start, range.range.end]);
+
+            rebuild_bg_row(
+                contents,
+                row,
+                &opts.cells,
+                opts.selection,
+                row_highlights,
+                input.selection_config,
+                input.default_fg,
+                input.default_bg,
+                input.palette,
+                input.bold,
+                input.alpha,
+                row_preedit,
+                input.background_opacity_cells,
+                input.background_opacity,
+            );
+
+            let runs = shape_row_cached(opts, &mut grid.resolver, &mut grid.shaper_cache);
+            rebuild_row(
+                contents,
+                grid,
+                row,
+                &runs,
+                &opts.cells,
+                opts.selection,
+                row_highlights,
+                input.selection_config,
+                input.default_fg,
+                input.default_bg,
+                input.palette,
+                input.bold,
+                input.alpha,
+                input.faint_opacity,
+                input.thicken,
+                input.thicken_strength,
+                row_links,
+                row_preedit,
+            )
+            .map_err(FrameRowRenderError::from)
+        })
+        .map_err(FrameRowFormatValidationError::from)
+    }
+
     fn validate_application(
         &self,
         contents: &Contents,
@@ -293,6 +417,29 @@ impl FrameRebuildPlan {
             });
         }
 
+        Ok(())
+    }
+
+    fn validate_format_rows_input(
+        &self,
+        input: &FrameRowFormatInput<'_>,
+    ) -> Result<(), FrameRowFormatValidationError> {
+        let expected = self.effective_grid.columns;
+        for row in &self.rows_to_rebuild {
+            let Some(opts) = input.rows.get(*row as usize) else {
+                return Err(FrameRowFormatValidationError::MissingRow {
+                    row: *row,
+                    rows: input.rows.len(),
+                });
+            };
+            if opts.cells.len() != expected as usize {
+                return Err(FrameRowFormatValidationError::RowWidthMismatch {
+                    row: *row,
+                    expected,
+                    actual: opts.cells.len(),
+                });
+            }
+        }
         Ok(())
     }
 
@@ -377,10 +524,12 @@ fn plan_preedit_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::renderer::cell::{Contents, Key};
+    use crate::renderer::cell::{Contents, Key, SelectionColor};
     use crate::renderer::cursor::Style as CursorStyle;
     use crate::renderer::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
     use crate::renderer::state::Codepoint;
+    use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
+    use crate::terminal::style::{Color, Style as TermStyle};
 
     fn grid(columns: Unit, rows: Unit) -> GridSize {
         GridSize { columns, rows }
@@ -438,6 +587,62 @@ mod tests {
             contents.add(Key::Text, dummy_vertex(row, row as u8 + 10));
         }
         contents
+    }
+
+    fn menlo_grid() -> SharedGrid {
+        use crate::font::codepoint_resolver::CodepointResolver;
+        use crate::font::collection::Collection;
+        use crate::font::face::coretext::Face;
+        use crate::font::Style;
+
+        let mut collection = Collection::new();
+        collection
+            .add(Face::new("Menlo", 32.0), Style::Regular, false)
+            .unwrap();
+        collection.update_metrics().unwrap();
+        let metrics = *collection.metrics().unwrap();
+        SharedGrid::new(CodepointResolver::new(collection), metrics)
+    }
+
+    fn run_cell(cp: u32, bg: Color) -> crate::font::run::RunCell {
+        crate::font::run::RunCell {
+            codepoint: cp,
+            graphemes: vec![],
+            style: TermStyle {
+                bg_color: bg,
+                ..TermStyle::default()
+            },
+            style_id: 0,
+            wide: crate::font::run::Wide::Narrow,
+            is_empty: cp == 0,
+            is_codepoint: cp != 0,
+        }
+    }
+
+    fn row(text: &[u8], bg: Color) -> RunOptions {
+        RunOptions {
+            cells: text.iter().map(|cp| run_cell(u32::from(*cp), bg)).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn format_input<'a>(rows: &'a [RunOptions]) -> FrameRowFormatInput<'a> {
+        FrameRowFormatInput {
+            rows,
+            highlights: &[],
+            link_ranges: &[],
+            selection_config: Box::leak(Box::new(SelectionConfig::default())),
+            default_fg: Rgb::new(200, 200, 200),
+            default_bg: Rgb::new(0, 0, 0),
+            palette: &DEFAULT_PALETTE,
+            bold: None,
+            alpha: 255,
+            faint_opacity: 128,
+            thicken: false,
+            thicken_strength: 255,
+            background_opacity_cells: false,
+            background_opacity: 1.0,
+        }
     }
 
     #[test]
@@ -1239,5 +1444,222 @@ mod tests {
         assert_eq!(contents.bg_cells(), bg);
         assert_eq!(contents.fg_rows(), fg);
         assert_eq!(row_dirty, vec![true, true]);
+    }
+
+    #[test]
+    fn format_rows_partial_formats_only_planned_rows() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Partial,
+            &[false, true],
+        ))
+        .expect("plan");
+        let rows = vec![row(b"AA", Color::Palette(1)), row(b"BC", Color::Palette(2))];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let preserved_bg = *contents.bg_cell(0, 0);
+        let preserved_fg = contents.fg_rows()[1].clone();
+        let mut row_dirty = vec![false, true];
+        let mut grid = menlo_grid();
+
+        let applied = plan
+            .format_rows(
+                &mut contents,
+                &mut grid,
+                &mut row_dirty,
+                format_input(&rows),
+            )
+            .expect("format rows");
+
+        assert_eq!(applied.rebuilt_rows, vec![1]);
+        assert!(applied.failed_rows.is_empty());
+        assert_eq!(row_dirty, vec![false, false]);
+        assert_eq!(*contents.bg_cell(0, 0), preserved_bg);
+        assert_eq!(contents.fg_rows()[1], preserved_fg);
+        let p2 = DEFAULT_PALETTE[2];
+        assert_eq!(*contents.bg_cell(1, 0), CellBg([p2.r, p2.g, p2.b, 255]));
+        assert_eq!(contents.fg_rows()[2].len(), 2);
+        assert_eq!(contents.fg_rows()[2][0].grid_pos, [0, 1]);
+
+        // Keep the stale-plan fields mutable inside this module; no mutation here.
+        plan.rows_to_rebuild = vec![1];
+    }
+
+    #[test]
+    fn format_rows_full_rebuild_formats_every_row_after_reset() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Full,
+            &[true, true],
+        ))
+        .expect("plan");
+        let rows = vec![row(b"AB", Color::Palette(1)), row(b"CD", Color::Palette(2))];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let mut row_dirty = vec![true, true];
+        let mut grid = menlo_grid();
+
+        let applied = plan
+            .format_rows(
+                &mut contents,
+                &mut grid,
+                &mut row_dirty,
+                format_input(&rows),
+            )
+            .expect("format rows");
+
+        assert!(applied.reset_contents);
+        assert_eq!(applied.rebuilt_rows, vec![0, 1]);
+        assert_eq!(row_dirty, vec![false, false]);
+        assert_eq!(contents.fg_rows()[1].len(), 2);
+        assert_eq!(contents.fg_rows()[2].len(), 2);
+        assert_eq!(contents.fg_rows()[1][0].grid_pos, [0, 0]);
+        assert_eq!(contents.fg_rows()[2][0].grid_pos, [0, 1]);
+    }
+
+    #[test]
+    fn format_rows_rejects_missing_row_without_mutation() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Full,
+            &[true, true],
+        ))
+        .expect("plan");
+        let rows = vec![row(b"AB", Color::Palette(1))];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![true, true];
+        let mut grid = menlo_grid();
+
+        let err = plan
+            .format_rows(
+                &mut contents,
+                &mut grid,
+                &mut row_dirty,
+                format_input(&rows),
+            )
+            .expect_err("missing row should validate before mutation");
+
+        assert_eq!(
+            err,
+            FrameRowFormatValidationError::MissingRow { row: 1, rows: 1 }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![true, true]);
+    }
+
+    #[test]
+    fn format_rows_rejects_wrong_row_width_without_mutation() {
+        let plan =
+            FrameRebuildPlan::build(input(grid(2, 1), grid(2, 1), RenderDirty::Full, &[true]))
+                .expect("plan");
+        let rows = vec![row(b"ABC", Color::Palette(1))];
+        let mut contents = contents_with_rows(grid(2, 1));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![true];
+        let mut grid = menlo_grid();
+
+        let err = plan
+            .format_rows(
+                &mut contents,
+                &mut grid,
+                &mut row_dirty,
+                format_input(&rows),
+            )
+            .expect_err("wrong width should validate before mutation");
+
+        assert_eq!(
+            err,
+            FrameRowFormatValidationError::RowWidthMismatch {
+                row: 0,
+                expected: 2,
+                actual: 3,
+            }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![true]);
+    }
+
+    #[test]
+    fn format_rows_threads_highlights_links_and_plan_preedit() {
+        let p = preedit(&[false]);
+        let plan = FrameRebuildPlan::build(FrameRebuildInput {
+            current_grid: grid(2, 1),
+            terminal_grid: grid(2, 1),
+            dirty: RenderDirty::Full,
+            row_dirty: &[true],
+            preedit: Some(&p),
+            cursor_viewport: Some(Coordinate::new(0, 0)),
+        })
+        .expect("plan");
+        let rows = vec![row(b"AB", Color::Palette(1))];
+        let highlights = vec![vec![Highlight {
+            range: [1, 1],
+            tag: crate::renderer::cell::HighlightTag::SearchMatch,
+        }]];
+        let links = vec![vec![[1, 1]]];
+        let selection_config = SelectionConfig {
+            search_background: SelectionColor::Color(Rgb::new(1, 2, 3)),
+            search_foreground: SelectionColor::Color(Rgb::new(4, 5, 6)),
+            ..SelectionConfig::default()
+        };
+        let mut input = format_input(&rows);
+        input.highlights = &highlights;
+        input.link_ranges = &links;
+        input.selection_config = &selection_config;
+        let mut contents = Contents::default();
+        contents.resize(grid(2, 1));
+        let mut row_dirty = vec![true];
+        let mut grid = menlo_grid();
+
+        plan.format_rows(&mut contents, &mut grid, &mut row_dirty, input)
+            .expect("format rows");
+
+        // Column 0 is under the plan-owned preedit mask, so it is transparent and
+        // has no foreground. Column 1 uses search colors and link underline.
+        assert_eq!(*contents.bg_cell(0, 0), CellBg([0, 0, 0, 0]));
+        assert!(contents.fg_rows()[1].iter().all(|v| v.grid_pos[0] != 0));
+        assert_eq!(*contents.bg_cell(0, 1), CellBg([1, 2, 3, 255]));
+        assert!(contents.fg_rows()[1].iter().any(|v| v.grid_pos == [1, 0]));
+        assert!(contents.fg_rows()[1].len() >= 2);
+        assert_eq!(row_dirty, vec![false]);
+    }
+
+    #[test]
+    fn format_rows_wraps_driver_validation_without_mutation() {
+        let mut plan =
+            FrameRebuildPlan::build(input(grid(2, 1), grid(2, 1), RenderDirty::Full, &[true]))
+                .expect("plan");
+        plan.rows_to_rebuild = vec![0, 0];
+        let rows = vec![row(b"AB", Color::Palette(1))];
+        let mut contents = contents_with_rows(grid(2, 1));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![true];
+        let mut grid = menlo_grid();
+
+        let err = plan
+            .format_rows(
+                &mut contents,
+                &mut grid,
+                &mut row_dirty,
+                format_input(&rows),
+            )
+            .expect_err("driver validation should propagate");
+
+        assert_eq!(
+            err,
+            FrameRowFormatValidationError::Driver(
+                FrameRowRebuildValidationError::DuplicateRebuildRow { row: 0 }
+            )
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![true]);
     }
 }
