@@ -34,6 +34,10 @@ use std::path::{Component, Path, PathBuf};
 /// later.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Config {
+    /// `initial-window`.
+    pub initial_window: bool,
+    /// `quit-after-last-window-closed`.
+    pub quit_after_last_window_closed: bool,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
     /// `clipboard-read`.
@@ -140,6 +144,8 @@ impl Default for Config {
     /// is `Allow`.
     fn default() -> Self {
         Self {
+            initial_window: true,
+            quit_after_last_window_closed: false,
             copy_on_select: CopyOnSelect::True,
             clipboard_read: ClipboardAccess::Ask,
             clipboard_write: ClipboardAccess::Allow,
@@ -206,6 +212,9 @@ impl Config {
     /// upstream `Config` declaration order (upstream `FileFormatter.format`,
     /// `config/formatter_file.zig`, the default non-docs / non-changed path).
     pub(crate) fn format_config(&self, out: &mut String) {
+        EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
+        EntryFormatter::new("quit-after-last-window-closed", out)
+            .entry_bool(self.quit_after_last_window_closed);
         self.font_style
             .format_entry(&mut EntryFormatter::new("font-style", out));
         self.font_style_bold
@@ -326,6 +335,13 @@ impl Config {
     ) -> Result<(), ConfigSetError> {
         let default = Config::default();
         match key {
+            "initial-window" => {
+                self.initial_window = set_bool_field(value, default.initial_window)?
+            }
+            "quit-after-last-window-closed" => {
+                self.quit_after_last_window_closed =
+                    set_bool_field(value, default.quit_after_last_window_closed)?
+            }
             "copy-on-select" => {
                 self.copy_on_select =
                     set_enum_field(value, default.copy_on_select, CopyOnSelect::from_keyword)?
@@ -4108,6 +4124,8 @@ mod tests {
     #[test]
     fn config_default_clipboard_group() {
         let d = Config::default();
+        assert!(d.initial_window);
+        assert!(!d.quit_after_last_window_closed);
         assert_eq!(d.copy_on_select, CopyOnSelect::True);
         assert_eq!(d.clipboard_read, ClipboardAccess::Ask);
         assert_eq!(d.clipboard_write, ClipboardAccess::Allow);
@@ -7437,6 +7455,8 @@ mod tests {
         assert_eq!(
             keys,
             vec![
+                "initial-window",
+                "quit-after-last-window-closed",
                 "font-style",
                 "font-style-bold",
                 "font-style-italic",
@@ -7656,6 +7676,22 @@ mod tests {
             line(&cfg, "background-image-repeat"),
             "background-image-repeat = true"
         );
+        let mut cfg = Config::default();
+        cfg.set("initial-window", Some("false")).unwrap();
+        assert_eq!(line(&cfg, "initial-window"), "initial-window = false");
+        cfg.set("initial-window", Some("")).unwrap();
+        assert_eq!(line(&cfg, "initial-window"), "initial-window = true");
+        let mut cfg = Config::default();
+        cfg.set("quit-after-last-window-closed", None).unwrap();
+        assert_eq!(
+            line(&cfg, "quit-after-last-window-closed"),
+            "quit-after-last-window-closed = true"
+        );
+        cfg.set("quit-after-last-window-closed", Some("")).unwrap();
+        assert_eq!(
+            line(&cfg, "quit-after-last-window-closed"),
+            "quit-after-last-window-closed = false"
+        );
 
         // Asymmetry: a missing value is `ValueRequired` for a packed struct…
         let mut cfg = Config::default();
@@ -7671,6 +7707,14 @@ mod tests {
         );
         assert_eq!(
             cfg.set("background-image-repeat", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("initial-window", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("quit-after-last-window-closed", Some("nope")),
             Err(ConfigSetError::InvalidValue)
         );
 

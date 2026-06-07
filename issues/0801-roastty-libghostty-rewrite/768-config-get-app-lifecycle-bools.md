@@ -67,3 +67,43 @@ Non-blocking suggestions from the review: include bare CLI coverage, especially
 for `--quit-after-last-window-closed`; include reset coverage for both fields;
 and note in the result that `quit-after-last-window-closed = false` is the
 macOS/default-for-this-port behavior.
+
+## Result
+
+**Result:** Pass
+
+Implemented aggregate config storage for `initial-window` and
+`quit-after-last-window-closed`. `config::Config` now stores both fields,
+defaults them to the macOS Roastty values (`initial-window = true` and
+`quit-after-last-window-closed = false`), formats them through `format_config`,
+and routes both keys through the existing boolean parser.
+
+`roastty_config_get("initial-window")` and
+`roastty_config_get("quit-after-last-window-closed")` now read parsed config
+state instead of hard-coded defaults.
+
+Verification passed:
+
+- `cargo test -p roastty config_get_app_lifecycle -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_ -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings. The
+first completion review suggested adding a bare `--initial-window` regression
+for symmetry with `--quit-after-last-window-closed`.
+
+That test was added, and Codex re-reviewed the final diff with no blocking
+findings or non-blocking suggestions. The final review confirmed aggregate
+storage, defaults, formatter output, setter routing through the existing bool
+parser, invalid diagnostics, bare CLI behavior, empty reset behavior, and ABI
+`config_get` reads from parsed state.
+
+## Conclusion
+
+The two app lifecycle boolean `config_get` keys now report parsed config state.
+The runtime effects of startup window creation and last-window shutdown policy
+remain separate app lifecycle slices.

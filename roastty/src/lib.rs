@@ -8881,11 +8881,19 @@ pub extern "C" fn roastty_config_get(
     unsafe {
         match key {
             b"initial-window" => {
-                output.cast::<bool>().write(true);
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output.cast::<bool>().write(config.parsed.initial_window);
                 true
             }
             b"quit-after-last-window-closed" => {
-                output.cast::<bool>().write(false);
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output
+                    .cast::<bool>()
+                    .write(config.parsed.quit_after_last_window_closed);
                 true
             }
             b"window-save-state" => {
@@ -16046,6 +16054,17 @@ mod tests {
         )
     }
 
+    fn config_get_bool(config: RoasttyConfig, key: &str) -> Option<bool> {
+        let mut value = false;
+        let ok = roastty_config_get(
+            config,
+            (&mut value as *mut bool).cast::<c_void>(),
+            key.as_ptr().cast(),
+            key.len(),
+        );
+        ok.then_some(value)
+    }
+
     fn unique_config_abi_test_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -17159,6 +17178,126 @@ mod tests {
                 roastty_config_free(config);
             });
         }
+    }
+
+    #[test]
+    fn config_get_app_lifecycle_bools_return_default_file_and_clone_values() {
+        let config = roastty_config_new();
+        assert_eq!(config_get_bool(config, "initial-window"), Some(true));
+        assert_eq!(
+            config_get_bool(config, "quit-after-last-window-closed"),
+            Some(false)
+        );
+        roastty_config_free(config);
+
+        let dir = unique_config_abi_test_dir("get-app-lifecycle-bools-file");
+        let path = dir.join("config.roastty");
+        write_config_file(
+            &path,
+            "initial-window = false\nquit-after-last-window-closed = true\n",
+        );
+        let path = c_path(&path);
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, path.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+        let clone = roastty_config_clone(config);
+        roastty_config_free(config);
+        assert_eq!(config_get_bool(clone, "initial-window"), Some(false));
+        assert_eq!(
+            config_get_bool(clone, "quit-after-last-window-closed"),
+            Some(true)
+        );
+
+        roastty_config_free(clone);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_get_app_lifecycle_bools_return_cli_bare_and_reset_values() {
+        with_init_args(
+            &[
+                "roastty",
+                "--initial-window=false",
+                "--initial-window",
+                "--quit-after-last-window-closed",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(config_get_bool(config, "initial-window"), Some(true));
+                assert_eq!(
+                    config_get_bool(config, "quit-after-last-window-closed"),
+                    Some(true)
+                );
+                roastty_config_free(config);
+            },
+        );
+
+        with_init_args(
+            &[
+                "roastty",
+                "--initial-window=false",
+                "--initial-window=",
+                "--quit-after-last-window-closed=true",
+                "--quit-after-last-window-closed=",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(config_get_bool(config, "initial-window"), Some(true));
+                assert_eq!(
+                    config_get_bool(config, "quit-after-last-window-closed"),
+                    Some(false)
+                );
+                roastty_config_free(config);
+            },
+        );
+    }
+
+    #[test]
+    fn config_get_app_lifecycle_bools_report_invalid_values() {
+        with_init_args(
+            &[
+                "roastty",
+                "--initial-window=nope",
+                "--quit-after-last-window-closed=nope",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 2);
+                let messages = (0..2)
+                    .map(|index| config_diagnostic_message(config, index))
+                    .collect::<Vec<_>>();
+                assert!(
+                    messages
+                        .iter()
+                        .any(|message| message.contains("initial-window")),
+                    "{messages:?}"
+                );
+                assert!(
+                    messages
+                        .iter()
+                        .any(|message| message.contains("quit-after-last-window-closed")),
+                    "{messages:?}"
+                );
+                assert!(
+                    messages
+                        .iter()
+                        .all(|message| message.contains("InvalidValue")),
+                    "{messages:?}"
+                );
+                assert_eq!(config_get_bool(config, "initial-window"), Some(true));
+                assert_eq!(
+                    config_get_bool(config, "quit-after-last-window-closed"),
+                    Some(false)
+                );
+                roastty_config_free(config);
+            },
+        );
     }
 
     #[test]
