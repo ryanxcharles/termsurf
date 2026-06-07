@@ -42,6 +42,7 @@ shift
 # always legible in the maintainer's clock from the log.
 central() { TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z'; }
 echo "START=$(central)" >>"$log"
+echo "CMD=$*" >>"$log"
 
 "$@" >>"$log" 2>&1 &
 pid=$!

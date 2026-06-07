@@ -2349,6 +2349,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Claude/Claude
 - [Experiment 832: Eliminate the surface snapshot first-render race](832-surface-snapshot-race.md)
   — **Partial** · Claude/Claude/Claude
+- [Experiment 833: Bound test parallelism to eliminate the contention flakes](833-bound-test-parallelism.md)
+  — **Designed** · Claude/Claude/Claude
 
 ## Non-Goals
 
