@@ -411,7 +411,9 @@ Out of scope / tooling: `build/`, `benchmark/`, `extra/`, `simd/`, `stb/`,
       `font/sprite/raster.rs` port used by `Canvas` line/stroke/fill path
       methods; CPU debug overlay work remains tracked in renderer rows
 - [ ] `libxev` (event loop) — not started
-- [ ] `zf` (fuzzy match) — not started
+- [ ] `zf` (fuzzy match) — partial: byte-oriented core rank/highlight helper
+      exists with filename/path scoring and Ghostty theme-list call-shape tests;
+      CLI/list-theme integration remains open
 - [ ] `wuffs` / `libpng` / `zlib` (image decode + inflate) — partial: Kitty
       graphics zlib-deflate payloads decompress through `flate2`, and PNG decode
       is wired through the `sys_decode_png` host callback path with
@@ -2186,8 +2188,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 801: Keymap Checklist Sync](801-keymap-checklist-sync.md) —
   **Pass** · Codex/Codex/Codex
-- [Experiment 802: zf Fuzzy Foundation](802-zf-fuzzy-foundation.md) —
-  **Designed**
+- [Experiment 802: zf Fuzzy Foundation](802-zf-fuzzy-foundation.md) — **Pass** ·
+  Codex/Codex/Codex
 
 ## Non-Goals
 

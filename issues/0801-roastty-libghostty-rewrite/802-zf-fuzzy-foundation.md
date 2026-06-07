@@ -97,3 +97,53 @@ helper-module foundation and noted one non-blocking implementation guard: only
 describe the helper as allocation-free if the API preserves upstream's
 caller-buffer highlight style; otherwise keep result wording to "byte-oriented
 core ranking/highlighting."
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a byte-oriented Rust `zf` helper module for the core fuzzy
+matching dependency:
+
+- `RankOptions`, `RankNeedleOptions`, `rank`, and `rank_needle`
+- `highlight` and `highlight_needle`
+- ASCII case-sensitive and case-insensitive matching
+- plain matching and path-aware filename matching
+- strict path matching when a query token contains path separators
+- multi-token highlight sorting and deduplication
+
+The helper returns owned highlight vectors rather than preserving upstream's
+caller-provided output buffer API, so the result intentionally does not claim an
+allocation-free port. CLI/list-theme integration also remains open.
+
+Verification:
+
+- Inspected:
+  - `vendor/zf/src/zf/zf.zig`
+  - `vendor/zf/src/zf/filter.zig`
+  - `vendor/ghostty/src/cli/list_themes.zig`
+- `cargo fmt -p roastty` — passed
+- `cargo test -p roastty zf -- --nocapture --test-threads=1` — 5 passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/802-zf-fuzzy-foundation.md`
+  — passed
+- `git diff --check` — passed
+
+## Conclusion
+
+The `zf` dependency replacement is no longer unstarted. Roastty has the core
+rank/highlight behavior needed for future theme-list filtering, including
+focused score-ordering coverage for filename priority, filename coverage,
+word-boundary starts, sequential matching, and strict path segment coverage. The
+remaining work is to wire this helper into CLI/list-theme UI once that tooling
+exists.
+
+## Completion Review
+
+Codex reviewed the staged result and found no blocking findings. The review
+approved the Rust port because it tracks upstream's byte-oriented
+ranking/highlighting model, including filename priority, strict path segment
+behavior, ASCII case-insensitive matching, multi-token rank summing, and
+highlight sort/dedup for multi-token queries. The review also approved the
+verification because the staged tests cover the previously missing rank-ordering
+behavior. The result and README wording were approved because they avoid
+allocation-free parity claims and leave CLI/list-theme integration open.
