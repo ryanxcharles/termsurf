@@ -2075,6 +2075,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 779: Surface Lifecycle Checklist Sync](779-surface-lifecycle-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 780: Clipboard Paste Request State](780-clipboard-paste-request-state.md)
+  — **Designed**
 
 ## Non-Goals
 
