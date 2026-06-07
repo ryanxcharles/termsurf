@@ -229,10 +229,13 @@ Experiment 246).
 - [x] `Metrics` (Metrics.zig complete)
 - [x] `Atlas` (Atlas.zig complete, minus WASM)
 - [x] `Glyph` value type
-- [ ] Sprite `Canvas` — partial (exact-pixel ops done; z2d path rendering
-      missing)
-- [ ] Sprite `draw/` glyph tables (box/block/braille/powerline/geometric/legacy)
-      — missing
+- [x] Sprite `Canvas` — canvas exact-pixel operations, clipping/trim/export, and
+      sprite path rasterization exist in `canvas.rs`/`raster.rs`
+- [x] Sprite `draw/` glyph tables (box/block/braille/powerline/geometric/legacy)
+      — procedural glyph inventory exists for box drawing, blocks, Braille,
+      Powerline, geometric/corner shapes, sextants, octants, cursor glyphs, and
+      text-decoration strokes; renderer upload/integration remains tracked in
+      renderer rows
 - [x] CoreText `Face` (rasterization + face-metric extraction)
 - [x] Shaper (CoreText shaping, run, cache, feature)
 - [x] `Collection` / `CodepointResolver` / `CodepointMap` / `DeferredFace` /
@@ -2117,6 +2120,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 791: Datastruct Utilities Checklist Sync](791-datastruct-utilities-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 792: Sprite Checklist Sync](792-sprite-checklist-sync.md) —
+  **Designed**
 
 ## Non-Goals
 
