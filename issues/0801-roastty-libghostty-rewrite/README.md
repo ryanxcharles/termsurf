@@ -2039,6 +2039,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 762: Config C ABI Recursive Files](762-config-c-abi-recursive-files.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 763: Config C ABI CLI Config Args](763-config-c-abi-cli-config-args.md)
+  — **Designed**
 
 ## Non-Goals
 
