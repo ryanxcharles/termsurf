@@ -78,3 +78,47 @@ Codex reviewed the design and found no blocking findings. The review approved
 the sprite-generation scope, unchanged renderer rows, explicit open work for
 renderer glyph upload/integration, live render loop, z2d debug overlay, and
 custom shaders, and the relevant focused test filters.
+
+## Result
+
+**Result:** Pass
+
+The sprite canvas, path rasterizer, procedural draw inventory, category
+coverage, and sprite render-codepoint path verified:
+
+- `cargo test -p roastty font::sprite::canvas -- --nocapture --test-threads=1`:
+  11 passed
+- `cargo test -p roastty font::sprite::raster -- --nocapture --test-threads=1`:
+  95 passed
+- `cargo test -p roastty font::sprite::draw -- --nocapture --test-threads=1`:
+  134 passed
+- `cargo test -p roastty powerline -- --nocapture --test-threads=1`: 23 passed
+- `cargo test -p roastty braille -- --nocapture --test-threads=1`: 7 passed
+- `cargo test -p roastty octant -- --nocapture --test-threads=1`: 6 passed
+- `cargo test -p roastty render_codepoint -- --nocapture --test-threads=1`: 11
+  passed
+
+Formatting and diff hygiene checks passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/792-sprite-checklist-sync.md`
+- `git diff --check`
+
+The README now marks the sprite canvas and procedural draw rows complete with
+wording scoped to sprite generation. Renderer glyph upload/integration, the live
+render loop, z2d debug overlay, and custom shader work remain tracked by the
+renderer checklist rows.
+
+## Conclusion
+
+The old sprite checklist wording was stale. Roastty now has canvas exact-pixel
+operations, path rasterization, procedural draw tables for the listed sprite
+families, and render-codepoint coverage. This closes the sprite generation rows
+without closing renderer integration or live rendering work.
+
+## Completion Review
+
+Codex reviewed the completed experiment and found no blocking findings. The
+review approved the sprite-generation scope, recorded verification counts plus
+Prettier and `git diff --check`, README status/provenance, and the open renderer
+work for glyph upload/integration, live render loop, z2d debug overlay, and
+custom shaders.

@@ -2121,7 +2121,7 @@ are past the correctness-critical foundation.
 - [Experiment 791: Datastruct Utilities Checklist Sync](791-datastruct-utilities-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 792: Sprite Checklist Sync](792-sprite-checklist-sync.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
