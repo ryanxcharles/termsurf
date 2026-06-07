@@ -2276,6 +2276,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 827: Build Snapshot Row Format Input](827-build-snapshot-row-format-input.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 828: Build Snapshot Overlay Inputs](828-build-snapshot-overlay-inputs.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
