@@ -29165,7 +29165,12 @@ mod tests {
             new_test_surface_with_config(app, &config)
         };
 
-        let text = surface_snapshot_text_after_start_until(app, surface, "owned");
+        // Key on the whole child-output token, not the bare "owned": with no
+        // `stty -echo`, the PTY echoes the input "owned" before the child prints
+        // "$(pwd):owned", so waiting for "owned" can return at the echo, before
+        // current_dir renders (Issue 801, Exp 834).
+        let needle = format!("{}:owned", current_dir.to_str().unwrap());
+        let text = surface_snapshot_text_after_start_until(app, surface, &needle);
 
         assert!(text.contains(current_dir.to_str().unwrap()));
         assert!(text.contains("owned"));

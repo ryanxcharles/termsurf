@@ -2359,7 +2359,7 @@ are past the correctness-critical foundation.
 - [Experiment 833: Bound test parallelism to eliminate the contention flakes](833-bound-test-parallelism.md)
   — **Partial** · Claude/Claude/Claude
 - [Experiment 834: Fix the surface_start snapshot KEY defeated by input echo](834-surface-start-echo-key.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 

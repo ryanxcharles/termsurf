@@ -132,6 +132,63 @@ honest. Four Optional/Nit findings, all adopted:
 - **Char-count nit.** `current_dir` is 32 chars / `current_dir:owned` 38;
   corrected (no-wrap conclusion unaffected).
 
+## Result
+
+**Result:** Pass
+
+The KEY change landed (`let needle = format!("{}:owned", current_dir…)` →
+`_until(&needle)`). Build clean (no warnings), fmt clean, no-ghostty clean,
+`git diff --check` clean; isolation pass.
+
+| run                | STATUS                | result               | `surface_start` |
+| ------------------ | --------------------- | -------------------- | --------------- |
+| threads=4 #1       | COMPLETED rc=0 241s   | 4360 passed / 0 fail | **ok**          |
+| threads=4 #2       | COMPLETED rc=0 195s   | 4360 passed / 0 fail | **ok**          |
+| threads=4 #3       | COMPLETED rc=0 176s   | 4360 passed / 0 fail | **ok**          |
+| default (no-regr.) | COMPLETED rc=101 231s | 4357 / 3 fail        | **ok**          |
+
+- **3/3 clean at threads=4** (`surface_start ... ok` each run; 0 panics, 0
+  `PoisonError`) — versus 2/3 failing in Exp 833. The echo-defeated KEY is
+  fixed: keying on `"<current_dir>:owned"` waits for the child's real output,
+  never the echo.
+- **No default-parallelism regression:** `surface_start ... ok` at default too.
+  The 3 default failures (`config_path_cli`,
+  `surface_key_default_natural_text_editing`,
+  `surface_key_default_performable_action`) are the **separate** contention/echo
+  class that threads=4 already masks and that this experiment does not touch.
+- All runs `START=`/`END=`/`CMD=` stamped, none hit `HARD_TIMEOUT`/`IDLE_KILL`.
+
 ## Conclusion
 
-_(to be written after the run)_
+The Exp 833 residual is gone: it was my Exp 832 KEY error (waiting for a token
+that the PTY echoes before the child runs), not contention or a wrap — proven by
+capturing the snapshot first, exactly as the result review insisted. **The
+threads=4 gate is now green** (3/3 clean).
+
+Remaining work to satisfy the user's goal of dropping the thread cap (tests
+robust at _any_ parallelism):
+
+- **Exp 835 (next):** `surface_key_default_natural_text_editing` and
+  `surface_key_default_performable_action` — fail at **default** parallelism
+  (pass at threads=4). Diagnose-first (capture their default-parallelism
+  snapshots, as done here) before fixing; earlier glimpses suggest a lost
+  key-echo render (`^E`) under load, but that must be **observed**, not assumed.
+- **Exp 836 (later):** `config_path_cli` — rare non-PTY `$HOME`/cwd flake.
+
+Once 835 (and 836) land, the suite is green at default parallelism and the gate
+can drop `--test-threads=4`; then feature work (URI/regex, remaining `os/`)
+resumes.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED — no Required/Optional/Nit findings.**
+Independently confirmed: the diff is exactly the one-site KEY change (4-line
+comment + `let needle` + `_until(&needle)`), test-code only, fmt/no-ghostty
+clean; v1/v2/v3 each `4360 passed; 0 failed` with `surface_start ... ok`, 0
+panics, 0 PoisonError, no timeout; v-default has `surface_start ... ok` with
+exactly the 3 out-of-scope failures (config + surface_key×2); and the fix is
+correct **by construction** (both asserted substrings are contained in the keyed
+needle, which appears only in the child's single-write output, never the echo —
+not 3/3 luck). Scope boundary and non-overclaim of default-green confirmed
+honest.
