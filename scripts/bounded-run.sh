@@ -38,6 +38,11 @@ log="$1"
 shift
 : >"$log"
 
+# Central US (the maintainer's) timezone, stamped at start/end so elapsed time is
+# always legible in the maintainer's clock from the log.
+central() { TZ='America/Chicago' date '+%Y-%m-%d %H:%M:%S %Z'; }
+echo "START=$(central)" >>"$log"
+
 "$@" >>"$log" 2>&1 &
 pid=$!
 start=$(date +%s)
@@ -56,12 +61,12 @@ while kill -0 "$pid" 2>/dev/null; do
 
   if [ "$elapsed" -ge "$HARD_CAP" ]; then
     kill_group
-    echo "STATUS=HARD_TIMEOUT elapsed=${elapsed}s (15-min ceiling; sample -> $log.hang)" >>"$log"
+    echo "STATUS=HARD_TIMEOUT elapsed=${elapsed}s END=$(central) (15-min ceiling; sample -> $log.hang)" >>"$log"
     exit 0
   fi
   if [ "$idle" -ge "$IDLE_CAP" ]; then
     kill_group
-    echo "STATUS=IDLE_KILL idle=${idle}s elapsed=${elapsed}s (no progress; sample -> $log.hang)" >>"$log"
+    echo "STATUS=IDLE_KILL idle=${idle}s elapsed=${elapsed}s END=$(central) (no progress; sample -> $log.hang)" >>"$log"
     exit 0
   fi
   sleep 5
@@ -69,5 +74,5 @@ done
 
 wait "$pid"
 rc=$?
-echo "STATUS=COMPLETED rc=${rc} elapsed=$(($(date +%s) - start))s" >>"$log"
+echo "STATUS=COMPLETED rc=${rc} elapsed=$(($(date +%s) - start))s END=$(central)" >>"$log"
 exit 0

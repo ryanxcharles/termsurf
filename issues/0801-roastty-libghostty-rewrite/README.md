@@ -522,6 +522,12 @@ make hangs loud and fatal rather than silent:
   if the command dies instantly or produces no output. There is no code path in
   which a run waits indefinitely. This is the hard guarantee; everything below
   is detection quality on top of it.
+- **Print the launch time in Central US time (the maintainer's timezone) every
+  time you start any task that could take an unbounded amount of time.** State
+  `TZ='America/Chicago' date` in the launch message so the start time is visible
+  in the conversation at a glance (not buried in a log) and elapsed time is
+  obvious to the maintainer. `bounded-run.sh` independently stamps
+  `START=`/`END=` in `America/Chicago` time in its log as the durable record.
 - **Launch the wrapper as a single tracked background task and wait only for
   that task's own completion notification** (guaranteed to fire within 15 min).
   NEVER wrap it in a `&`-launcher, and NEVER add a separate
