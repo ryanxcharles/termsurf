@@ -12,6 +12,41 @@ Reimplement the remaining `libghostty` library surface and behavior as
 macOS-only terminal implementation with Ghostty feature parity before TermSurf
 browser-overlay features are added.
 
+## Working directive — solve the deep arcs, do not stop
+
+This rewrite is **many deep, multi-experiment arcs**, not a list of small fixes.
+The remaining work spans whole subsystems (see the Subsystem checklist): the
+renderer's live render loop and its Surface / C-ABI wiring, font & text shaping
+and atlas/glyph rendering, the input layer, the configuration surface, the
+App/Surface/IO layer, and the supporting subsystems and dependencies. **Each of
+these is a deep arc made of many experiments, and every one of them must be
+solved.** Drive each arc — experiment after experiment — to completion, then
+move to the next, until the whole library reaches Ghostty feature parity. This
+is the standing directive for Issue 801.
+
+**Do not stop, pause, or hand back just because you hit a hard problem.** A hard
+problem is the work, not a reason to stop. When an arc is deep, sprawling, or
+blocked:
+
+- **Do not** end your turn to report a milestone, to ask whether to continue, or
+  to flag "this is a big/deep arc" as a reason to wait. Reaching a clean
+  milestone is a reason to **continue to the next slice**, not to report and
+  wait.
+- **Scope it down and proceed:** if an arc is too large for one experiment, pick
+  the smallest coherent slice that makes real progress and do it — then the next
+  slice, and the next. Incremental is required; stopping is not.
+- **Investigate, don't defer:** if you don't yet understand the config / surface
+  / terminal state a slice needs, read the code (and the vendored `ghostty/src`
+  reference) until you do, then design the slice. Unknowns are resolved by
+  investigation, not by handing back.
+- **A discovered bug / flake / deadlock becomes the immediate next experiment**
+  (see the Test execution gate) — never a tracking-issue deferral, and never a
+  reason to stop the arc.
+
+The only acceptable reasons to pause are: the user explicitly redirects, or a
+required review/gate genuinely cannot be satisfied — and even then the blocker
+is recorded as the next experiment and the work continues from there.
+
 ## Background
 
 Issue 800 created the Roastty foundation:
