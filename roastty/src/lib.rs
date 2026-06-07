@@ -3287,6 +3287,10 @@ static WINDOW_DECORATION_CLIENT: &[u8] = b"client\0";
 static WINDOW_DECORATION_SERVER: &[u8] = b"server\0";
 static WINDOW_DECORATION_NONE: &[u8] = b"none\0";
 static WINDOW_THEME_AUTO: &[u8] = b"auto\0";
+static WINDOW_THEME_SYSTEM: &[u8] = b"system\0";
+static WINDOW_THEME_LIGHT: &[u8] = b"light\0";
+static WINDOW_THEME_DARK: &[u8] = b"dark\0";
+static WINDOW_THEME_GHOSTTY: &[u8] = b"ghostty\0";
 
 fn window_decoration_keyword(value: config::WindowDecoration) -> *const c_char {
     match value {
@@ -3294,6 +3298,16 @@ fn window_decoration_keyword(value: config::WindowDecoration) -> *const c_char {
         config::WindowDecoration::Client => WINDOW_DECORATION_CLIENT.as_ptr().cast(),
         config::WindowDecoration::Server => WINDOW_DECORATION_SERVER.as_ptr().cast(),
         config::WindowDecoration::None => WINDOW_DECORATION_NONE.as_ptr().cast(),
+    }
+}
+
+fn window_theme_keyword(value: config::WindowTheme) -> *const c_char {
+    match value {
+        config::WindowTheme::Auto => WINDOW_THEME_AUTO.as_ptr().cast(),
+        config::WindowTheme::System => WINDOW_THEME_SYSTEM.as_ptr().cast(),
+        config::WindowTheme::Light => WINDOW_THEME_LIGHT.as_ptr().cast(),
+        config::WindowTheme::Dark => WINDOW_THEME_DARK.as_ptr().cast(),
+        config::WindowTheme::Ghostty => WINDOW_THEME_GHOSTTY.as_ptr().cast(),
     }
 }
 
@@ -8880,9 +8894,12 @@ pub extern "C" fn roastty_config_get(
                 true
             }
             b"window-theme" => {
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
                 output
                     .cast::<*const c_char>()
-                    .write(WINDOW_THEME_AUTO.as_ptr().cast());
+                    .write(window_theme_keyword(config.parsed.window_theme));
                 true
             }
             b"background-opacity" => {
@@ -16959,6 +16976,89 @@ mod tests {
             );
             roastty_config_free(config);
         });
+    }
+
+    #[test]
+    fn config_get_window_theme_returns_default_and_file_values() {
+        let config = roastty_config_new();
+        assert_eq!(
+            config_get_string(config, "window-theme").as_deref(),
+            Some("auto")
+        );
+        roastty_config_free(config);
+
+        for value in ["auto", "system", "light", "dark", "ghostty"] {
+            let dir = unique_config_abi_test_dir(&format!("get-window-theme-{value}"));
+            let path = dir.join("config.roastty");
+            write_config_file(&path, &format!("window-theme = {value}\n"));
+            let path = c_path(&path);
+
+            let config = roastty_config_new();
+            roastty_config_load_file(config, path.as_ptr());
+            assert_eq!(roastty_config_diagnostics_count(config), 0);
+            assert_eq!(
+                config_get_string(config, "window-theme").as_deref(),
+                Some(value)
+            );
+
+            roastty_config_free(config);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    #[test]
+    fn config_get_window_theme_returns_cli_values_and_clone() {
+        for value in ["system", "light", "dark", "ghostty"] {
+            let arg = format!("--window-theme={value}");
+            with_init_args(&["roastty", &arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                let clone = roastty_config_clone(config);
+                roastty_config_free(config);
+                assert_eq!(
+                    config_get_string(clone, "window-theme").as_deref(),
+                    Some(value)
+                );
+                roastty_config_free(clone);
+            });
+        }
+    }
+
+    #[test]
+    fn config_get_window_theme_reports_invalid_and_bare_cli_values() {
+        with_init_args(
+            &["roastty", "--window-theme=dark", "--window-theme="],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(
+                    config_get_string(config, "window-theme").as_deref(),
+                    Some("auto")
+                );
+                roastty_config_free(config);
+            },
+        );
+
+        for (arg, error) in [
+            ("--window-theme=nope", "InvalidValue"),
+            ("--window-theme", "ValueRequired"),
+        ] {
+            with_init_args(&["roastty", arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 1);
+                let message = config_diagnostic_message(config, 0);
+                assert!(message.contains("window-theme"), "{message}");
+                assert!(message.contains(error), "{message}");
+                assert_eq!(
+                    config_get_string(config, "window-theme").as_deref(),
+                    Some("auto")
+                );
+                roastty_config_free(config);
+            });
+        }
     }
 
     #[test]

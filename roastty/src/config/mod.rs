@@ -92,6 +92,8 @@ pub(crate) struct Config {
     pub window_subtitle: WindowSubtitle,
     /// `window-decoration`.
     pub window_decoration: WindowDecoration,
+    /// `window-theme`.
+    pub window_theme: WindowTheme,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `macos-non-native-fullscreen`.
@@ -165,6 +167,7 @@ impl Default for Config {
             link_previews: LinkPreviews::True,
             window_subtitle: WindowSubtitle::False,
             window_decoration: WindowDecoration::Auto,
+            window_theme: WindowTheme::Auto,
             fullscreen: Fullscreen::False,
             macos_non_native_fullscreen: NonNativeFullscreen::False,
             macos_titlebar_style: MacTitlebarStyle::Transparent,
@@ -257,6 +260,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("window-subtitle", out));
         self.window_decoration
             .format_entry(&mut EntryFormatter::new("window-decoration", out));
+        self.window_theme
+            .format_entry(&mut EntryFormatter::new("window-theme", out));
         self.window_colorspace
             .format_entry(&mut EntryFormatter::new("window-colorspace", out));
         self.clipboard_read
@@ -422,6 +427,10 @@ impl Config {
             }
             "window-decoration" => {
                 self.window_decoration = WindowDecoration::parse_cli(value)?;
+            }
+            "window-theme" => {
+                self.window_theme =
+                    set_enum_field(value, default.window_theme, WindowTheme::from_keyword)?
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -1888,6 +1897,47 @@ impl WindowDecoration {
             WindowDecoration::Client => "client",
             WindowDecoration::Server => "server",
             WindowDecoration::None => "none",
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `window-theme` config (upstream `WindowTheme`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowTheme {
+    Auto,
+    System,
+    Light,
+    Dark,
+    Ghostty,
+}
+
+impl WindowTheme {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowTheme::Auto => "auto",
+            WindowTheme::System => "system",
+            WindowTheme::Light => "light",
+            WindowTheme::Dark => "dark",
+            WindowTheme::Ghostty => "ghostty",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(WindowTheme::Auto),
+            "system" => Some(WindowTheme::System),
+            "light" => Some(WindowTheme::Light),
+            "dark" => Some(WindowTheme::Dark),
+            "ghostty" => Some(WindowTheme::Ghostty),
+            _ => None,
         }
     }
 
@@ -3840,7 +3890,7 @@ mod tests {
         SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
         ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
         WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowPadding,
-        WindowPaddingColor, WindowPaddingParseError, WindowSubtitle, WorkingDirectory,
+        WindowPaddingColor, WindowPaddingParseError, WindowSubtitle, WindowTheme, WorkingDirectory,
         WorkingDirectoryParseError,
     };
     use crate::terminal::color::Rgb;
@@ -4051,6 +4101,7 @@ mod tests {
         assert_eq!(d.link_previews, LinkPreviews::True);
         assert_eq!(d.window_subtitle, WindowSubtitle::False);
         assert_eq!(d.window_decoration, WindowDecoration::Auto);
+        assert_eq!(d.window_theme, WindowTheme::Auto);
         // macOS-window group (Experiment 469).
         assert_eq!(d.fullscreen, Fullscreen::False);
         assert_eq!(d.macos_non_native_fullscreen, NonNativeFullscreen::False);
@@ -6642,6 +6693,29 @@ mod tests {
     }
 
     #[test]
+    fn window_theme_keywords_and_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (WindowTheme::Auto, "auto"),
+            (WindowTheme::System, "system"),
+            (WindowTheme::Light, "light"),
+            (WindowTheme::Dark, "dark"),
+            (WindowTheme::Ghostty, "ghostty"),
+        ] {
+            assert_eq!(variant.keyword(), kw);
+            assert_eq!(WindowTheme::from_keyword(kw), Some(variant));
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        assert_eq!(WindowTheme::from_keyword("nope"), None);
+    }
+
+    #[test]
     fn theme_format_entry() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
@@ -7322,6 +7396,7 @@ mod tests {
                 "window-padding-color",
                 "window-subtitle",
                 "window-decoration",
+                "window-theme",
                 "window-colorspace",
                 "clipboard-read",
                 "clipboard-write",
@@ -7375,6 +7450,7 @@ mod tests {
             ("link-previews", "osc8"),
             ("window-subtitle", "working-directory"),
             ("window-decoration", "server"),
+            ("window-theme", "dark"),
             ("fullscreen", "non-native"),
             ("macos-non-native-fullscreen", "visible-menu"),
             ("macos-titlebar-style", "tabs"),
@@ -7399,9 +7475,11 @@ mod tests {
 
         let mut cfg = Config::default();
         cfg.set("window-decoration", Some("server")).unwrap();
+        cfg.set("window-theme", Some("dark")).unwrap();
         let mut out = String::new();
         cfg.format_config(&mut out);
         assert!(out.lines().any(|line| line == "window-decoration = server"));
+        assert!(out.lines().any(|line| line == "window-theme = dark"));
 
         // A missing value is `ValueRequired`; an invalid value is `InvalidValue`;
         // an unknown key is `UnknownField`.
@@ -7416,6 +7494,14 @@ mod tests {
         );
         assert_eq!(
             cfg.set("window-decoration", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("window-theme", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-theme", Some("nope")),
             Err(ConfigSetError::InvalidValue)
         );
         assert_eq!(

@@ -69,3 +69,45 @@ case for `window-theme = nope`, test all five ABI string variants from at least
 one load path plus clone/default, and add a bare `--window-theme` CLI test
 expecting `ValueRequired` because this is a plain enum field rather than a
 custom parser.
+
+## Result
+
+**Result:** Pass
+
+Implemented `WindowTheme` as a simple keyword enum with all five upstream
+variants: `auto`, `system`, `light`, `dark`, and `ghostty`. `config::Config` now
+stores `window_theme`, defaults it to `WindowTheme::Auto`, formats it through
+`format_config`, and routes `Config::set("window-theme", ...)` through the
+existing enum-field helper.
+
+`roastty_config_get("window-theme")` now reads parsed config state and returns
+stable nul-terminated C string pointers for every variant.
+
+Verification passed:
+
+- `cargo test -p roastty window_theme -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_get_window_theme -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_ -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings. The
+first review confirmed the approved design and suggested optional empty-reset
+coverage for `--window-theme=`.
+
+The empty-reset test was added, and Codex re-reviewed the final diff with no
+blocking findings or non-blocking suggestions. The final review confirmed that
+`window-theme` is stored, defaults to `auto`, routes through `set_enum_field`,
+formats correctly, rejects bare/invalid CLI input, supports empty reset back to
+default, and returns stable parsed C strings across default/file/CLI/clone
+paths.
+
+## Conclusion
+
+`roastty_config_get("window-theme")` now reports direct parsed config state
+instead of a hard-coded default. Theme-derived finalization behavior remains a
+separate future slice; this experiment completes the app-facing direct config
+lookup for the `window-theme` field itself.

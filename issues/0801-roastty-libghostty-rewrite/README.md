@@ -2046,7 +2046,7 @@ are past the correctness-critical foundation.
 - [Experiment 765: Config Get Window Decoration](765-config-get-window-decoration.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 766: Config Get Window Theme](766-config-get-window-theme.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
