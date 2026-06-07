@@ -504,6 +504,38 @@ Feature parity is not considered achieved for a subsystem until both the
 implementation and its corresponding tests or documented test-equivalent checks
 exist.
 
+### Test execution gate (deadlock-proof)
+
+The Roastty test suite spawns real child processes and background threads (PTY
+workers), so a regression can **deadlock** a test instead of failing it. Rust
+has no per-test timeout, and a self-reported pass count cannot tell "passed"
+apart from "hung." This issue ran 828 experiments before an intermittent
+PTY-worker deadlock was caught — and only because a run was stopped by hand. To
+make hangs loud and fatal rather than silent:
+
+- **Run tests under a per-test kill-timeout.** Use
+  `cargo nextest run -p roastty` with
+  `slow-timeout = { period = "30s", terminate-after = 1 }` in
+  `.config/nextest.toml`. A test that blocks past the window is terminated and
+  reported as a failure **by name**, turning a deadlock into a diagnosable
+  failing test instead of an indefinite wait. (Experiment 829 establishes this
+  config and fixes the first deadlock it exposes.)
+- **Run the full suite at the result gate** — never silently filter out the slow
+  or PTY tests. A recorded representative subset may be used while iterating,
+  but the result gate runs everything.
+- **Never background-and-poll the test command.** Run it in the foreground under
+  the timeout, so a hang surfaces as a failure and not as "still running."
+- **A timeout or hang is a first-class `Fail`** that blocks the result commit.
+  When a hang or deadlock is found, the **very next experiment must be designed
+  to fix it** — record the hang in the current experiment, then make the fix the
+  immediate next experiment. No new feature work is designed until the hang is
+  resolved. Deferring it to a tracking issue is not allowed.
+- **Guard against intermittency.** These deadlocks are racy, so the result-gate
+  run executes the suite multiple times (default three) with `--retries 0`; any
+  single hang is a `Fail`.
+- Each experiment's **Verification** section states the timeout used and
+  confirms the suite completed within it across all repeats.
+
 ## Process
 
 This is a long parent issue. Do not attempt a big-bang rewrite. Each experiment
@@ -2278,6 +2310,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 828: Build Snapshot Overlay Inputs](828-build-snapshot-overlay-inputs.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 829: Deadlock-proof test gate and PTY worker deadlock fix](829-deadlock-proof-test-gate.md)
+  — **Designed** · Claude/Claude/Claude
 
 ## Non-Goals
 
