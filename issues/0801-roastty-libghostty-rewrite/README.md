@@ -2261,6 +2261,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 823: Apply Rebuild Uniforms](823-apply-rebuild-uniforms.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 824: Refine Padding Extend Rows](824-refine-padding-extend-rows.md)
+  — **Designed**
 
 ## Non-Goals
 
