@@ -133,6 +133,69 @@ Exp 839's types is exact (no new types).
   considered later); with the present-error test added, the happy/across-frames
   tests are success-only smoke checks.
 
+## Result
+
+**Result:** Pass
+
+`FrameRenderer::update_and_present_frame` landed (reusing the Exp 839 types; the
+test module added `metal_device`/`metal_compositor`/atlas helpers). Production
+`cargo build -p roastty` and `--tests` both clean (no warnings); fmt clean,
+no-ghostty clean, `git diff --check` clean.
+
+Four new Metal-device-guarded tests (ran on this GPU), all passing; the four Exp
+840 `update_frame` tests still pass untouched:
+
+- **`update_and_present_rebuilds_and_presents`** — fresh `FrameRenderer` against
+  a 4×3 terminal: rebuild (`rows [0,1,2]`) + present at 8×6, `current_grid` →
+  4×3.
+- **`update_and_present_second_frame_is_partial_and_still_presents`** — after a
+  `clear_dirty_for_tests`, a no-reset partial that still presents;
+  `current_grid` stays 4×3.
+- **`update_and_present_rebuild_error_skips_present_and_grid`** — too-short
+  `row_never_extend` → `Rebuild(PaddingExtend(..))`, `current_grid` stays 0×0
+  (present never reached).
+- **`update_and_present_present_error_does_not_advance_grid_then_self_heals`**
+  (the novel behavior) — invalid `contents_scale` (0.0) → `Present(..)`
+  **after** the rebuild mutated the owned state, `current_grid` stays 0×0; a
+  subsequent valid frame **self-heals** (full re-resize, `current_grid` → 4×3,
+  presents).
+
+**Full suite (default parallelism, `scripts/bounded-run.sh`):**
+`4375 passed; 0 failed` (4371 + 4 new), 0 panics, 0 `PoisonError`,
+`STATUS=COMPLETED rc=0`, 185 s — green.
+
 ## Conclusion
 
-_(to be written after the run)_
+`FrameRenderer` now drives a full frame end to end against its own persistent
+state — `update_frame` (rebuild only) and `update_and_present_frame` (rebuild +
+Metal present) — the roastty analogue of ghostty's `updateFrame` + `drawFrame`,
+with the present-error self-heal proven. The frame-rebuild pipeline (815–839)
+now has a stateful owner (840) that can present (841).
+
+Remaining toward the live draw path (`surface.draw()`):
+
+- **Exp 842:** derive the `FramePreparedRebuildInput` from the surface's
+  config/state (selection, cursor, colors, font knobs) — replacing the
+  caller-supplied parameter — so a caller no longer hand-builds the input
+  bundle.
+- **Later:** `FrameRenderer` owns the `MetalFrameCompositor` + atlases (needs
+  the device + atlas population); clear the terminal's dirty bits after a frame;
+  then wire `FrameRenderer` into `surface.draw()` / the C ABI so the live path
+  renders through the new pipeline.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Independently reproduced the gates: build clean (no warnings), fmt
+clean, the slice = 8 passed / 0 failed (4 new + 4 untouched 840); v1.log shows
+4375 passed / 0 failed, rc=0, default parallelism, no timeout, the 4 new tests
+`... ok` (Metal present, not skipped). Confirmed: only `frame_renderer.rs`
+changed (`update_frame` untouched); `?` returns before `self.current_grid = ...`
+so a `Present` error provably does not advance the grid; the self-heal test is
+genuine (asserts `Present(_)` + grid 0×0, then `reset_contents` + grid → 4×3 +
+width 8). **Verdict: CHANGES REQUIRED → fixed.**
+
+- **Required — stale README index status.** The 841 index line still read
+  `Designed`. **Fixed:** flipped to `Pass`.
+- **Nit (no change required):** the happy/across-frames tests are success-only
+  smoke checks; the present-error test carries the novel-behavior coverage.

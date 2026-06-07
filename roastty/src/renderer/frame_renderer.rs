@@ -10,6 +10,7 @@
 use crate::font::shared_grid::SharedGrid;
 use crate::renderer::cell::Contents;
 use crate::renderer::frame_rebuild::{
+    FramePreparedFrameApplication, FramePreparedFrameError, FramePreparedPresentationInput,
     FramePreparedRebuildApplication, FramePreparedRebuildError, FramePreparedRebuildInput,
     FramePreparedRebuildTargets, FrameTerminalSnapshot, RenderDirty,
 };
@@ -78,6 +79,40 @@ impl FrameRenderer {
         Ok(app)
     }
 
+    /// Collect a snapshot, rebuild this renderer's owned `contents`/`uniforms`,
+    /// and present via Metal — the full frame, end to end (Issue 801, Exp 841).
+    /// `current_grid` advances only on full success (both rebuild and present); a
+    /// present-stage error leaves the rebuild's mutations in place but the grid
+    /// unadvanced, so the next frame re-resizes idempotently.
+    pub(crate) fn update_and_present_frame(
+        &mut self,
+        terminal: &Terminal,
+        grid: &mut SharedGrid,
+        dirty: RenderDirty,
+        preedit: Option<Preedit>,
+        input: FramePreparedRebuildInput<'_>,
+        presentation: FramePreparedPresentationInput<'_>,
+    ) -> Result<FramePreparedFrameApplication, FramePreparedFrameError> {
+        let snapshot = FrameTerminalSnapshot::collect(terminal, self.current_grid, dirty, preedit);
+
+        self.row_dirty.clear();
+        self.row_dirty.extend_from_slice(&snapshot.row_dirty);
+
+        let app = snapshot.rebuild_and_present_frame(
+            FramePreparedRebuildTargets {
+                contents: &mut self.contents,
+                grid,
+                row_dirty: &mut self.row_dirty,
+                uniforms: &mut self.uniforms,
+            },
+            input,
+            presentation,
+        )?;
+
+        self.current_grid = snapshot.terminal_grid;
+        Ok(app)
+    }
+
     pub(crate) fn contents(&self) -> &Contents {
         &self.contents
     }
@@ -105,6 +140,37 @@ mod tests {
     };
     use crate::terminal::color::{Rgb, DEFAULT_PALETTE};
     use crate::terminal::style::BoldColor;
+
+    use crate::font::atlas::{Atlas, Format};
+    use crate::renderer::metal::api::{MetalPixelFormat, MetalResourceOptions, MetalStorageMode};
+    use crate::renderer::metal::compositor::{MetalFrameCompositor, MetalFrameCompositorOptions};
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
+
+    fn metal_device() -> Option<Retained<ProtocolObject<dyn MTLDevice>>> {
+        MTLCreateSystemDefaultDevice()
+    }
+
+    fn metal_compositor(
+        device: Retained<ProtocolObject<dyn MTLDevice>>,
+        width: usize,
+        height: usize,
+        grayscale: &Atlas,
+        color: &Atlas,
+    ) -> MetalFrameCompositor {
+        MetalFrameCompositor::new(MetalFrameCompositorOptions {
+            device,
+            width,
+            height,
+            pixel_format: MetalPixelFormat::Bgra8Unorm,
+            storage_mode: MetalStorageMode::Shared,
+            resource_options: MetalResourceOptions::image(MetalStorageMode::Shared),
+            grayscale_atlas: grayscale,
+            color_atlas: color,
+        })
+        .expect("compositor should be created")
+    }
 
     fn grid(columns: u16, rows: u16) -> GridSize {
         GridSize { columns, rows }
@@ -312,5 +378,210 @@ mod tests {
         assert!(matches!(err, FramePreparedRebuildError::PaddingExtend(_)));
         // The frame did not complete, so the grid is not advanced off 0x0.
         assert_eq!(renderer.current_grid(), grid(0, 0));
+    }
+
+    #[test]
+    fn update_and_present_rebuilds_and_presents() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let term = terminal(4, 3);
+        let mut shared = menlo_grid();
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = metal_compositor(device, 8, 6, &grayscale, &color);
+        let mut renderer = FrameRenderer::new(uniforms());
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection = SelectionConfig::default();
+        let never = [false, false, false, false];
+
+        let app = renderer
+            .update_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                frame_input(&highlights, &links, &selection, &never),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect("update and present");
+
+        assert_eq!(app.rebuild.rows.rebuilt_rows, vec![0, 1, 2]);
+        assert_eq!(renderer.current_grid(), grid(4, 3));
+        assert_eq!(app.present.presentation.width, 8);
+        assert_eq!(app.present.presentation.height, 6);
+    }
+
+    #[test]
+    fn update_and_present_second_frame_is_partial_and_still_presents() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let mut term = terminal(4, 3);
+        let mut shared = menlo_grid();
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = metal_compositor(device, 8, 6, &grayscale, &color);
+        let mut renderer = FrameRenderer::new(uniforms());
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection = SelectionConfig::default();
+        let never = [false, false, false, false];
+
+        renderer
+            .update_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                frame_input(&highlights, &links, &selection, &never),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect("first frame");
+
+        term.clear_dirty_for_tests();
+        let app = renderer
+            .update_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                frame_input(&highlights, &links, &selection, &never),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect("second frame");
+
+        assert!(!app.rebuild.rows.reset_contents);
+        assert!(app.rebuild.rows.rebuilt_rows.is_empty());
+        assert_eq!(renderer.current_grid(), grid(4, 3));
+        assert_eq!(app.present.presentation.width, 8);
+    }
+
+    #[test]
+    fn update_and_present_rebuild_error_skips_present_and_grid() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let term = terminal(4, 3);
+        let mut shared = menlo_grid();
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = metal_compositor(device, 8, 6, &grayscale, &color);
+        let mut renderer = FrameRenderer::new(uniforms());
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection = SelectionConfig::default();
+        let never: [bool; 0] = [];
+
+        let err = renderer
+            .update_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                frame_input(&highlights, &links, &selection, &never),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect_err("rebuild should fail before present");
+
+        // A rebuild-side error, not a present error, and the grid is unchanged.
+        assert!(matches!(
+            err,
+            FramePreparedFrameError::Rebuild(FramePreparedRebuildError::PaddingExtend(_))
+        ));
+        assert_eq!(renderer.current_grid(), grid(0, 0));
+    }
+
+    #[test]
+    fn update_and_present_present_error_does_not_advance_grid_then_self_heals() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let term = terminal(4, 3);
+        let mut shared = menlo_grid();
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = metal_compositor(device, 8, 6, &grayscale, &color);
+        let mut renderer = FrameRenderer::new(uniforms());
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection = SelectionConfig::default();
+        let never = [false, false, false, false];
+
+        // Invalid contents_scale makes the compositor reject *after* the rebuild
+        // already mutated the owned contents/uniforms.
+        let err = renderer
+            .update_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                frame_input(&highlights, &links, &selection, &never),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 0.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect_err("invalid scale should fail at present");
+
+        assert!(matches!(err, FramePreparedFrameError::Present(_)));
+        // The frame did not present, so the grid stays at 0x0.
+        assert_eq!(renderer.current_grid(), grid(0, 0));
+
+        // A valid frame self-heals: stale grid -> full re-resize, presents.
+        let app = renderer
+            .update_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                frame_input(&highlights, &links, &selection, &never),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect("self-heal frame");
+
+        assert!(app.rebuild.rows.reset_contents);
+        assert_eq!(renderer.current_grid(), grid(4, 3));
+        assert_eq!(app.present.presentation.width, 8);
     }
 }
