@@ -513,6 +513,23 @@ apart from "hung." This issue ran 828 experiments before an intermittent
 PTY-worker deadlock was caught — and only because a run was stopped by hand. To
 make hangs loud and fatal rather than silent:
 
+- **Every run that can hang is bounded at 15 minutes by
+  `scripts/bounded-run.sh`.** No `cargo test`, `cargo nextest`, or verification
+  command is ever run unwrapped. The wrapper enforces an **absolute 900 s
+  wall-clock kill** (plus a 90 s no-progress kill that `sample`s the process
+  group first), **always** writes a final `STATUS=` line (`COMPLETED` /
+  `HARD_TIMEOUT` / `IDLE_KILL`), and **always** exits within 15 minutes — even
+  if the command dies instantly or produces no output. There is no code path in
+  which a run waits indefinitely. This is the hard guarantee; everything below
+  is detection quality on top of it.
+- **Launch the wrapper as a single tracked background task and wait only for
+  that task's own completion notification** (guaranteed to fire within 15 min).
+  NEVER wrap it in a `&`-launcher, and NEVER add a separate
+  `until grep …; sleep` watcher that polls for a success marker — a marker that
+  is never written (e.g. a run that died) is an unbounded wait, the exact
+  failure this gate exists to kill. Treat an instant `STATUS=COMPLETED`, an
+  empty log, or a missing `STATUS` line as a **failure to investigate**, never a
+  pass.
 - **Run tests under a per-test kill-timeout.** Use
   `cargo nextest run -p roastty` with
   `slow-timeout = { period = "30s", terminate-after = 1 }` in
@@ -528,8 +545,11 @@ make hangs loud and fatal rather than silent:
 - **Run the full suite at the result gate** — never silently filter out the slow
   or PTY tests. A recorded representative subset may be used while iterating,
   but the result gate runs everything.
-- **Never background-and-poll the test command.** Run it in the foreground under
-  the timeout, so a hang surfaces as a failure and not as "still running."
+- **Never hand-roll a poll-watcher.** The only sanctioned way to run a
+  possibly-hanging command is `scripts/bounded-run.sh` as a single tracked
+  background task (above). Do not background a raw command with `&` and watch it
+  with your own `until grep …; sleep` loop — that is the unbounded-wait pattern
+  that once sat idle for an hour on a run that had silently died.
 - **A timeout or hang is a first-class `Fail`** that blocks the result commit.
   When a hang or deadlock is found, the **very next experiment must be designed
   to fix it** — record the hang in the current experiment, then make the fix the
