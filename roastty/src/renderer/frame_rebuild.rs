@@ -11,12 +11,13 @@
 //! `Contents` mutation remain later integration work.
 
 use crate::font::codepoint_resolver::ResolverRenderError;
-use crate::font::run::{shape_row_cached, RunOptions};
+use crate::font::run::{shape_row_cached, RunOptions, Wide};
 use crate::font::shared_grid::SharedGrid;
 use crate::renderer::cell::{
     add_cursor, add_preedit, rebuild_bg_row, rebuild_row, Contents, Highlight, SelectionConfig,
 };
 use crate::renderer::cursor::Style as CursorStyle;
+use crate::renderer::metal::shaders::MetalUniforms;
 use crate::renderer::size::{GridSize, Unit};
 use crate::renderer::state::{Preedit, PreeditRange};
 use crate::terminal::color::{Palette, Rgb};
@@ -269,6 +270,31 @@ pub(crate) struct FrameTextOverlayApplication {
     pub(crate) cursor_cleared: bool,
     pub(crate) cursor_drawn: Option<CursorStyle>,
     pub(crate) preedit_drawn: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameBlockCursorUniform {
+    pub(crate) grid_pos: [u16; 2],
+    pub(crate) wide: Wide,
+    pub(crate) color: Rgb,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameCursorUniformInput {
+    pub(crate) preedit_active: bool,
+    pub(crate) block_cursor: Option<FrameBlockCursorUniform>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameCursorUniformValidationError {
+    CursorOutOfBounds { grid_pos: [u16; 2], size: GridSize },
+    WideCursorOutOfBounds { grid_pos: [u16; 2], columns: Unit },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FrameCursorUniformApplication {
+    pub(crate) cursor_cleared: bool,
+    pub(crate) block_cursor_applied: bool,
 }
 
 impl FrameRebuildPlan {
@@ -525,6 +551,35 @@ impl FrameRebuildPlan {
         })
     }
 
+    pub(crate) fn apply_cursor_uniforms(
+        &self,
+        uniforms: &mut MetalUniforms,
+        input: FrameCursorUniformInput,
+    ) -> Result<FrameCursorUniformApplication, FrameCursorUniformValidationError> {
+        self.validate_cursor_uniform_input(input)?;
+
+        uniforms.clear_cursor();
+
+        if input.preedit_active {
+            return Ok(FrameCursorUniformApplication {
+                cursor_cleared: true,
+                block_cursor_applied: false,
+            });
+        }
+
+        let mut block_cursor_applied = false;
+        if let Some(cursor) = input.block_cursor {
+            let [x, y] = cursor.grid_pos;
+            uniforms.update_block_cursor(x, y, cursor.wide, cursor.color);
+            block_cursor_applied = true;
+        }
+
+        Ok(FrameCursorUniformApplication {
+            cursor_cleared: true,
+            block_cursor_applied,
+        })
+    }
+
     fn validate_application(
         &self,
         contents: &Contents,
@@ -589,6 +644,29 @@ impl FrameRebuildPlan {
                 });
             }
         }
+        Ok(())
+    }
+
+    fn validate_cursor_uniform_input(
+        &self,
+        input: FrameCursorUniformInput,
+    ) -> Result<(), FrameCursorUniformValidationError> {
+        if let Some(cursor) = input.block_cursor {
+            let [x, y] = cursor.grid_pos;
+            if x >= self.effective_grid.columns || y >= self.effective_grid.rows {
+                return Err(FrameCursorUniformValidationError::CursorOutOfBounds {
+                    grid_pos: cursor.grid_pos,
+                    size: self.effective_grid,
+                });
+            }
+            if matches!(cursor.wide, Wide::Wide) && x + 1 >= self.effective_grid.columns {
+                return Err(FrameCursorUniformValidationError::WideCursorOutOfBounds {
+                    grid_pos: cursor.grid_pos,
+                    columns: self.effective_grid.columns,
+                });
+            }
+        }
+
         Ok(())
     }
 
@@ -2318,5 +2396,157 @@ mod tests {
             FrameTextOverlayError::Validation(FrameTextOverlayValidationError::MissingPreedit)
         );
         assert_eq!(contents.fg_rows(), fg);
+    }
+
+    fn cursor_uniform_input(
+        preedit_active: bool,
+        block_cursor: Option<FrameBlockCursorUniform>,
+    ) -> FrameCursorUniformInput {
+        FrameCursorUniformInput {
+            preedit_active,
+            block_cursor,
+        }
+    }
+
+    fn block_cursor_uniform(grid_pos: [u16; 2], wide: Wide, color: Rgb) -> FrameBlockCursorUniform {
+        FrameBlockCursorUniform {
+            grid_pos,
+            wide,
+            color,
+        }
+    }
+
+    fn uniforms_with_stale_cursor() -> MetalUniforms {
+        let mut uniforms =
+            MetalUniforms::test_with_grid([2, 3], [4, 5], [6.0, 7.0], [0.0; 4], 0, [1, 2, 3, 4]);
+        uniforms.cursor_pos = [1, 2];
+        uniforms.cursor_color = [9, 9, 9, 9];
+        uniforms.bools.cursor_wide = true;
+        uniforms
+    }
+
+    #[test]
+    fn apply_cursor_uniforms_clears_position_without_cursor() {
+        let plan = plan_for_grid(grid(4, 2));
+        let mut uniforms = uniforms_with_stale_cursor();
+
+        let applied = plan
+            .apply_cursor_uniforms(&mut uniforms, cursor_uniform_input(false, None))
+            .expect("apply cursor uniforms");
+
+        assert_eq!(
+            applied,
+            FrameCursorUniformApplication {
+                cursor_cleared: true,
+                block_cursor_applied: false,
+            }
+        );
+        assert_eq!(uniforms.cursor_pos, [u16::MAX, u16::MAX]);
+        assert_eq!(uniforms.cursor_color, [9, 9, 9, 9]);
+        assert!(uniforms.bools.cursor_wide);
+    }
+
+    #[test]
+    fn apply_cursor_uniforms_preedit_suppresses_block_cursor() {
+        let plan = plan_for_grid(grid(4, 2));
+        let mut uniforms = uniforms_with_stale_cursor();
+        let cursor = block_cursor_uniform([1, 0], Wide::Narrow, Rgb::new(10, 20, 30));
+
+        let applied = plan
+            .apply_cursor_uniforms(&mut uniforms, cursor_uniform_input(true, Some(cursor)))
+            .expect("apply cursor uniforms");
+
+        assert_eq!(
+            applied,
+            FrameCursorUniformApplication {
+                cursor_cleared: true,
+                block_cursor_applied: false,
+            }
+        );
+        assert_eq!(uniforms.cursor_pos, [u16::MAX, u16::MAX]);
+        assert_eq!(uniforms.cursor_color, [9, 9, 9, 9]);
+        assert!(uniforms.bools.cursor_wide);
+    }
+
+    #[test]
+    fn apply_cursor_uniforms_sets_block_cursor() {
+        let plan = plan_for_grid(grid(5, 3));
+        let mut uniforms = uniforms_with_stale_cursor();
+        let cursor = block_cursor_uniform([4, 2], Wide::SpacerTail, Rgb::new(10, 20, 30));
+
+        let applied = plan
+            .apply_cursor_uniforms(&mut uniforms, cursor_uniform_input(false, Some(cursor)))
+            .expect("apply cursor uniforms");
+
+        assert_eq!(
+            applied,
+            FrameCursorUniformApplication {
+                cursor_cleared: true,
+                block_cursor_applied: true,
+            }
+        );
+        assert_eq!(uniforms.cursor_pos, [3, 2]);
+        assert!(uniforms.bools.cursor_wide);
+        assert_eq!(uniforms.cursor_color, [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn apply_cursor_uniforms_keeps_spacer_tail_zero_backstep() {
+        let plan = plan_for_grid(grid(2, 1));
+        let mut uniforms = uniforms_with_stale_cursor();
+        let cursor = block_cursor_uniform([0, 0], Wide::SpacerTail, Rgb::new(1, 2, 3));
+
+        plan.apply_cursor_uniforms(&mut uniforms, cursor_uniform_input(false, Some(cursor)))
+            .expect("apply cursor uniforms");
+
+        assert_eq!(uniforms.cursor_pos, [0, 0]);
+        assert!(uniforms.bools.cursor_wide);
+        assert_eq!(uniforms.cursor_color, [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn apply_cursor_uniforms_rejects_out_of_bounds_without_mutation() {
+        let plan = plan_for_grid(grid(2, 1));
+        let mut uniforms = uniforms_with_stale_cursor();
+        let before = uniforms;
+        let cursor = block_cursor_uniform([2, 0], Wide::Narrow, Rgb::new(10, 20, 30));
+
+        let err = plan
+            .apply_cursor_uniforms(&mut uniforms, cursor_uniform_input(false, Some(cursor)))
+            .expect_err("out-of-bounds cursor should reject");
+
+        assert_eq!(
+            err,
+            FrameCursorUniformValidationError::CursorOutOfBounds {
+                grid_pos: [2, 0],
+                size: grid(2, 1),
+            }
+        );
+        assert_eq!(uniforms.cursor_pos, before.cursor_pos);
+        assert_eq!(uniforms.cursor_color, before.cursor_color);
+        assert_eq!(uniforms.bools.cursor_wide, before.bools.cursor_wide);
+    }
+
+    #[test]
+    fn apply_cursor_uniforms_rejects_wide_last_column_without_mutation() {
+        let plan = plan_for_grid(grid(2, 1));
+        let mut uniforms = uniforms_with_stale_cursor();
+        let before = uniforms;
+        let cursor = block_cursor_uniform([1, 0], Wide::Wide, Rgb::new(10, 20, 30));
+
+        let err = plan
+            .apply_cursor_uniforms(&mut uniforms, cursor_uniform_input(false, Some(cursor)))
+            .expect_err("wide cursor should reject");
+
+        assert_eq!(
+            err,
+            FrameCursorUniformValidationError::WideCursorOutOfBounds {
+                grid_pos: [1, 0],
+                columns: 2,
+            }
+        );
+        assert_eq!(uniforms.cursor_pos, before.cursor_pos);
+        assert_eq!(uniforms.cursor_color, before.cursor_color);
+        assert_eq!(uniforms.bools.cursor_wide, before.bools.cursor_wide);
     }
 }

@@ -126,3 +126,68 @@ Codex re-reviewed the amended design and approved it for implementation with no
 remaining blockers. The re-review confirmed that the `Wide::Wide` last-column
 validation, `Wide::SpacerTail` helper path, and active-preedit stale-field
 assertions resolve the prior findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty can now apply prepared block cursor uniforms after text overlays:
+
+- `roastty/src/renderer/frame_rebuild.rs` adds `FrameBlockCursorUniform`,
+  `FrameCursorUniformInput`, `FrameCursorUniformValidationError`, and
+  `FrameCursorUniformApplication`.
+- `FrameRebuildPlan::apply_cursor_uniforms` validates prepared block cursor
+  uniform input before mutation, always clears `MetalUniforms.cursor_pos` after
+  validation, suppresses block cursor uniforms while preedit is active, and
+  applies visible block cursor uniforms through
+  `MetalUniforms::update_block_cursor`.
+- Validation rejects cursor anchors outside the effective grid and rejects
+  `Wide::Wide` cursors whose second cell would extend past the grid.
+- `Wide::SpacerTail` remains on the existing helper path, preserving the
+  upstream-compatible saturating backstep behavior.
+- Tests cover clear-only frames, active-preedit block suppression while stale
+  color/wide fields remain untouched, spacer-tail block cursor application,
+  spacer-tail-at-zero backstep behavior, out-of-bounds rejection before
+  mutation, and wide-last-column rejection before mutation.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/generic.zig` `rebuildCells` cursor
+  uniform section.
+- Inspected `roastty/src/renderer/frame_rebuild.rs`.
+- Inspected `roastty/src/renderer/metal/shaders.rs`.
+- Inspected `roastty/src/renderer/cell.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture` — passed, 56
+  tests.
+- `cargo test -p roastty renderer::metal::shaders::tests::update_block_cursor -- --nocapture`
+  — passed, 1 test.
+- `cargo test -p roastty renderer::metal::shaders::tests::clear_cursor -- --nocapture`
+  — passed, 1 test.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/820-apply-cursor-uniforms.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 820 connects prepared block cursor uniform state to the existing
+Metal uniforms. The frame rebuild path can now clear cursor uniforms every frame
+and apply block cursor position, width, and color only when preedit is inactive
+and a prepared block cursor is present. The remaining render-loop work still
+needs live terminal-state collection, custom shader cursor animation updates,
+cell/glyph upload, draw-call submission, pacing, and renderer-thread
+integration.
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking issues. The
+review confirmed that validation happens before `MetalUniforms::clear_cursor`,
+out-of-bounds anchors and `Wide::Wide` last-column overflow reject before
+mutation, preedit suppression clears only `cursor_pos` without applying stale
+block cursor color or width, and the tests cover invalid-input no-mutation,
+`Wide::Wide` rejection, and `Wide::SpacerTail` backstep behavior including
+column zero.
+
+Codex also re-ran the focused `frame_rebuild`, `update_block_cursor`, and
+`clear_cursor` test filters successfully and approved the experiment for the
+result commit.

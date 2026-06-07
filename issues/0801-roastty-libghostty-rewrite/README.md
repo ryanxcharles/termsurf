@@ -240,8 +240,10 @@ Experiment 246).
       prepared row-formatting inputs can rebuild planned `Contents` rows;
       prepared cursor/preedit overlay inputs can clear stale cursors, suppress
       cursors during active preedit, and emit planned cursor/preedit glyphs;
-      live terminal-state collection, cursor uniform updates, glyph upload/draw
-      calls, pacing, and live renderer integration remain missing (critical)
+      prepared block cursor uniform inputs can clear/apply Metal cursor
+      uniforms; live terminal-state collection, custom shader cursor animation
+      updates, glyph upload/draw calls, pacing, and live renderer integration
+      remain missing (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
       partial: custom-shader uniforms, target enum, and per-frame/state update
       helpers exist; shader file loading, debug overlay, renderer thread, and
@@ -2248,7 +2250,7 @@ are past the correctness-critical foundation.
 - [Experiment 819: Drive Cursor and Preedit Overlays](819-drive-cursor-preedit-overlays.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 820: Apply Cursor Uniforms](820-apply-cursor-uniforms.md) —
-  **Designed** · Codex/Codex
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
