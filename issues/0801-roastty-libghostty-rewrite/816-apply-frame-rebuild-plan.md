@@ -131,3 +131,60 @@ findings. The follow-up review confirmed that the grid/mutation pre-validation
 resolves the no-partial-mutation blocker, that the batched-order caveat is clear
 for this no-formatting slice, and that the planned tests cover the previously
 missing cases.
+
+## Result
+
+**Result:** Pass
+
+Roastty can now apply frame rebuild plans to CPU-side renderer cell storage:
+
+- `roastty/src/renderer/cell.rs` adds `Contents::size`.
+- `roastty/src/renderer/frame_rebuild.rs` adds `FrameRebuildApplyError` and
+  `FrameRebuildApplication`.
+- `FrameRebuildPlan::apply_to_contents` pre-validates plan/input invariants,
+  resizes `Contents` first when needed, resets full-rebuild contents, clears
+  planned rows, marks planned dirty rows clean, and returns metadata describing
+  the applied actions.
+- Pre-validation covers no-resize grid mismatches, `resize_to`/`effective_grid`
+  disagreement, out-of-bounds `clear_rows`, and short row-dirty slices for
+  `rows_to_mark_clean`, so invalid plans do not partially mutate `Contents`.
+- Tests cover resize-before-reset, post-apply size, full reset including cursor
+  reserved lists, partial row clear preservation, no-op application, application
+  metadata, and invalid-plan no-mutation cases.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/generic.zig` `rebuildCells`.
+- Inspected `roastty/src/renderer/frame_rebuild.rs`.
+- Inspected `roastty/src/renderer/cell.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture` — passed, 21
+  tests.
+- `cargo test -p roastty renderer::cell::tests::contents_resize -- --nocapture`
+  — passed, 4 tests.
+- `cargo test -p roastty renderer::cell::tests::clear -- --nocapture` — passed,
+  2 tests.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/816-apply-frame-rebuild-plan.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 816 completes the mutation boundary for the value-level frame rebuild
+plan: future renderer integration can now plan and apply resize/reset/clear and
+row-dirty cleanup before repopulating rows. The next renderer slice should
+restore the per-row upstream sequencing: clear the row, mark it clean, then
+rebuild that row into `Contents`, while leaving GPU upload, Metal draw
+submission, pacing, and renderer-thread integration for later.
+
+## Completion Review
+
+Codex reviewed the completed implementation and approved it with no blocking
+code findings. The review confirmed that `apply_to_contents` validates before
+mutation, resizes first, resets full-rebuild contents, clears planned rows,
+marks planned rows clean, and resolves the design-review validation blocker by
+checking grid mismatches, resize/effective-grid mismatches, clear-row bounds,
+and dirty-slice max-index requirements. The only findings were documentation
+fixes: record the successful Prettier and `git diff --check` commands, and
+correct the future row-formatting order to `clear -> mark clean -> rebuild row`.
+Both were fixed before the result commit.

@@ -10,6 +10,7 @@
 //! row. Actual terminal row formatting, glyph emission, cursor drawing, and
 //! `Contents` mutation remain later integration work.
 
+use crate::renderer::cell::Contents;
 use crate::renderer::size::{GridSize, Unit};
 use crate::renderer::state::{Preedit, PreeditRange};
 use crate::terminal::point::Coordinate;
@@ -63,6 +64,34 @@ pub(crate) enum FrameRebuildPlanError {
     DirtyRowsTooShort { needed: usize, actual: usize },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameRebuildApplyError {
+    ContentsGridMismatch {
+        expected: GridSize,
+        actual: GridSize,
+    },
+    ResizeGridMismatch {
+        resize_to: GridSize,
+        effective_grid: GridSize,
+    },
+    ClearRowOutOfBounds {
+        row: Unit,
+        rows: Unit,
+    },
+    DirtyRowsTooShort {
+        needed: usize,
+        actual: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FrameRebuildApplication {
+    pub(crate) resized_to: Option<GridSize>,
+    pub(crate) reset_contents: bool,
+    pub(crate) cleared_rows: Vec<Unit>,
+    pub(crate) marked_clean_rows: Vec<Unit>,
+}
+
 impl FrameRebuildPlan {
     pub(crate) fn build(input: FrameRebuildInput<'_>) -> Result<Self, FrameRebuildPlanError> {
         let needed_dirty_rows = input.terminal_grid.rows as usize;
@@ -113,6 +142,78 @@ impl FrameRebuildPlan {
             preedit_range,
         })
     }
+
+    pub(crate) fn apply_to_contents(
+        &self,
+        contents: &mut Contents,
+        row_dirty: &mut [bool],
+    ) -> Result<FrameRebuildApplication, FrameRebuildApplyError> {
+        self.validate_application(contents, row_dirty)?;
+
+        if let Some(size) = self.resize_to {
+            contents.resize(size);
+        }
+        if self.reset_contents {
+            contents.reset();
+        }
+        for row in &self.clear_rows {
+            contents.clear(*row);
+        }
+        for row in &self.rows_to_mark_clean {
+            row_dirty[*row as usize] = false;
+        }
+
+        Ok(FrameRebuildApplication {
+            resized_to: self.resize_to,
+            reset_contents: self.reset_contents,
+            cleared_rows: self.clear_rows.clone(),
+            marked_clean_rows: self.rows_to_mark_clean.clone(),
+        })
+    }
+
+    fn validate_application(
+        &self,
+        contents: &Contents,
+        row_dirty: &[bool],
+    ) -> Result<(), FrameRebuildApplyError> {
+        if let Some(resize_to) = self.resize_to {
+            if resize_to != self.effective_grid {
+                return Err(FrameRebuildApplyError::ResizeGridMismatch {
+                    resize_to,
+                    effective_grid: self.effective_grid,
+                });
+            }
+        } else if contents.size() != self.effective_grid {
+            return Err(FrameRebuildApplyError::ContentsGridMismatch {
+                expected: self.effective_grid,
+                actual: contents.size(),
+            });
+        }
+
+        for row in &self.clear_rows {
+            if *row >= self.effective_grid.rows {
+                return Err(FrameRebuildApplyError::ClearRowOutOfBounds {
+                    row: *row,
+                    rows: self.effective_grid.rows,
+                });
+            }
+        }
+
+        let needed_dirty_rows = self
+            .rows_to_mark_clean
+            .iter()
+            .copied()
+            .max()
+            .map_or(0, |row| row as usize + 1);
+        if row_dirty.len() < needed_dirty_rows {
+            return Err(FrameRebuildApplyError::DirtyRowsTooShort {
+                needed: needed_dirty_rows,
+                actual: row_dirty.len(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 fn plan_preedit_range(
@@ -142,6 +243,9 @@ fn plan_preedit_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::renderer::cell::{Contents, Key};
+    use crate::renderer::cursor::Style as CursorStyle;
+    use crate::renderer::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
     use crate::renderer::state::Codepoint;
 
     fn grid(columns: Unit, rows: Unit) -> GridSize {
@@ -174,6 +278,32 @@ mod tests {
             preedit: None,
             cursor_viewport: None,
         }
+    }
+
+    fn dummy_vertex(row: Unit, marker: u8) -> CellTextVertex {
+        CellTextVertex {
+            glyph_pos: [marker as u32, 0],
+            glyph_size: [1, 1],
+            bearings: [0, 0],
+            grid_pos: [0, row],
+            color: [marker, marker, marker, 255],
+            atlas: CellTextAtlas::Grayscale,
+            flags: CellTextFlags::new(false, false),
+            _padding: [0, 0],
+        }
+    }
+
+    fn contents_with_rows(size: GridSize) -> Contents {
+        let mut contents = Contents::default();
+        contents.resize(size);
+        for row in 0..size.rows {
+            for col in 0..size.columns {
+                *contents.bg_cell_mut(row as usize, col as usize) =
+                    CellBg([row as u8 + 1, col as u8 + 1, 7, 255]);
+            }
+            contents.add(Key::Text, dummy_vertex(row, row as u8 + 10));
+        }
+        contents
     }
 
     #[test]
@@ -403,5 +533,220 @@ mod tests {
         .expect("plan");
 
         assert_eq!(plan.preedit_range, None);
+    }
+
+    #[test]
+    fn apply_resizes_before_reset_and_reports_post_size() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 1),
+            grid(3, 2),
+            RenderDirty::Clean,
+            &[true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 1));
+        let mut row_dirty = vec![true, true];
+
+        let applied = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect("apply plan");
+
+        assert_eq!(contents.size(), grid(3, 2));
+        assert_eq!(applied.resized_to, Some(grid(3, 2)));
+        assert!(applied.reset_contents);
+        assert_eq!(applied.marked_clean_rows, vec![0, 1]);
+        assert_eq!(row_dirty, vec![false, false]);
+        for row in 0..2 {
+            for col in 0..3 {
+                assert_eq!(*contents.bg_cell(row, col), CellBg([0, 0, 0, 0]));
+            }
+        }
+    }
+
+    #[test]
+    fn apply_full_rebuild_resets_cursor_reserved_lists() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Full,
+            &[true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 2));
+        contents.set_cursor(Some(dummy_vertex(0, 99)), Some(CursorStyle::Block));
+        assert!(contents.get_cursor_glyph().is_some());
+        let mut row_dirty = vec![true, true];
+
+        plan.apply_to_contents(&mut contents, &mut row_dirty)
+            .expect("apply plan");
+
+        assert_eq!(contents.get_cursor_glyph(), None);
+        assert!(contents.fg_rows().iter().all(Vec::is_empty));
+        assert_eq!(row_dirty, vec![false, false]);
+    }
+
+    #[test]
+    fn apply_partial_clears_only_planned_rows() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Partial,
+            &[false, true, false],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 3));
+        let preserved_bg = *contents.bg_cell(0, 0);
+        let preserved_fg = contents.fg_rows()[1].clone();
+        let mut row_dirty = vec![false, true, false];
+
+        let applied = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect("apply plan");
+
+        assert_eq!(applied.cleared_rows, vec![1]);
+        assert_eq!(applied.marked_clean_rows, vec![1]);
+        assert_eq!(*contents.bg_cell(0, 0), preserved_bg);
+        assert_eq!(contents.fg_rows()[1], preserved_fg);
+        assert_eq!(*contents.bg_cell(1, 0), CellBg([0, 0, 0, 0]));
+        assert!(contents.fg_rows()[2].is_empty());
+        assert_eq!(row_dirty, vec![false, false, false]);
+    }
+
+    #[test]
+    fn apply_clean_empty_plan_is_noop() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Clean,
+            &[false, false],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![false, false];
+
+        let applied = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect("apply plan");
+
+        assert_eq!(applied.resized_to, None);
+        assert!(!applied.reset_contents);
+        assert!(applied.cleared_rows.is_empty());
+        assert!(applied.marked_clean_rows.is_empty());
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![false, false]);
+    }
+
+    #[test]
+    fn apply_rejects_short_dirty_slice_without_mutation() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Full,
+            &[true, true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 3));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![true, true];
+
+        let err = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect_err("short dirty slice should error before mutation");
+
+        assert_eq!(
+            err,
+            FrameRebuildApplyError::DirtyRowsTooShort {
+                needed: 3,
+                actual: 2,
+            }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![true, true]);
+    }
+
+    #[test]
+    fn apply_rejects_out_of_bounds_clear_row_without_mutation() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Partial,
+            &[false, true],
+        ))
+        .expect("plan");
+        plan.clear_rows = vec![2];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![false, true];
+
+        let err = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect_err("invalid clear row should error before mutation");
+
+        assert_eq!(
+            err,
+            FrameRebuildApplyError::ClearRowOutOfBounds { row: 2, rows: 2 }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![false, true]);
+    }
+
+    #[test]
+    fn apply_rejects_grid_mismatch_without_mutation() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Clean,
+            &[false, false],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(3, 2));
+        let mut row_dirty = vec![false, false];
+
+        let err = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect_err("contents grid mismatch should error");
+
+        assert_eq!(
+            err,
+            FrameRebuildApplyError::ContentsGridMismatch {
+                expected: grid(2, 2),
+                actual: grid(3, 2),
+            }
+        );
+        assert_eq!(contents.size(), grid(3, 2));
+    }
+
+    #[test]
+    fn apply_rejects_resize_effective_grid_mismatch_without_mutation() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(3, 2),
+            RenderDirty::Clean,
+            &[false, false],
+        ))
+        .expect("plan");
+        plan.effective_grid = grid(4, 2);
+        let mut contents = contents_with_rows(grid(2, 2));
+        let mut row_dirty = vec![false, false];
+
+        let err = plan
+            .apply_to_contents(&mut contents, &mut row_dirty)
+            .expect_err("resize/effective mismatch should error");
+
+        assert_eq!(
+            err,
+            FrameRebuildApplyError::ResizeGridMismatch {
+                resize_to: grid(3, 2),
+                effective_grid: grid(4, 2),
+            }
+        );
+        assert_eq!(contents.size(), grid(2, 2));
     }
 }

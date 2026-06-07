@@ -591,6 +591,10 @@ pub(crate) struct Contents {
 }
 
 impl Contents {
+    pub(crate) fn size(&self) -> GridSize {
+        self.size
+    }
+
     /// Resize the cell contents for the given grid size. This always invalidates
     /// the entire cell contents.
     pub(crate) fn resize(&mut self, size: GridSize) {
