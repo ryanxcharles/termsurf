@@ -8,6 +8,22 @@
 
 use std::fmt::{Display, Write as _};
 
+pub(crate) trait FloatEntry: Copy + Display {
+    fn is_nan(self) -> bool;
+}
+
+impl FloatEntry for f32 {
+    fn is_nan(self) -> bool {
+        f32::is_nan(self)
+    }
+}
+
+impl FloatEntry for f64 {
+    fn is_nan(self) -> bool {
+        f64::is_nan(self)
+    }
+}
+
 /// Writes a single `name = value\n` config entry (upstream
 /// `config.formatter.EntryFormatter`).
 pub(crate) struct EntryFormatter<'a> {
@@ -35,11 +51,10 @@ impl<'a> EntryFormatter<'a> {
         let _ = writeln!(self.out, "{} = {}", self.name, value);
     }
 
-    /// `name = <shortest-decimal>\n` (upstream the `float` / `{d}` case). Rust's `f32` `Display` is
-    /// the shortest round-trippable decimal in decimal notation (never scientific, no trailing
-    /// `.0`), matching Zig's `{d}` for every finite value; `NaN` is written `nan` (Zig's spelling)
-    /// rather than Rust's `NaN`.
-    pub(crate) fn entry_float(&mut self, value: f32) {
+    /// `name = <shortest-decimal>\n` (upstream the `float` / `{d}` case).
+    /// Rust's `f32` and `f64` `Display` use shortest round-trippable decimals;
+    /// `NaN` is written `nan` (Zig's spelling) rather than Rust's `NaN`.
+    pub(crate) fn entry_float(&mut self, value: impl FloatEntry) {
         if value.is_nan() {
             let _ = writeln!(self.out, "{} = nan", self.name);
         } else {
@@ -129,6 +144,10 @@ mod tests {
         let mut out = String::new();
         EntryFormatter::new("a", &mut out).entry_float(f32::NAN);
         assert_eq!(out, "a = nan\n");
+
+        let mut out = String::new();
+        EntryFormatter::new("a", &mut out).entry_float(0.12345678901234568_f64);
+        assert_eq!(out, "a = 0.12345678901234568\n");
     }
 
     #[test]

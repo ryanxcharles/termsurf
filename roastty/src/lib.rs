@@ -8924,7 +8924,10 @@ pub extern "C" fn roastty_config_get(
                 true
             }
             b"background-opacity" => {
-                output.cast::<f64>().write(1.0);
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output.cast::<f64>().write(config.parsed.background_opacity);
                 true
             }
             b"bell-audio-volume" => {
@@ -16065,6 +16068,17 @@ mod tests {
         ok.then_some(value)
     }
 
+    fn config_get_f64(config: RoasttyConfig, key: &str) -> Option<f64> {
+        let mut value = 0.0;
+        let ok = roastty_config_get(
+            config,
+            (&mut value as *mut f64).cast::<c_void>(),
+            key.as_ptr().cast(),
+            key.len(),
+        );
+        ok.then_some(value)
+    }
+
     fn unique_config_abi_test_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -17298,6 +17312,96 @@ mod tests {
                 roastty_config_free(config);
             },
         );
+    }
+
+    #[test]
+    fn config_get_background_opacity_returns_default_file_and_clone_values() {
+        let config = roastty_config_new();
+        assert_eq!(config_get_f64(config, "background-opacity"), Some(1.0));
+        roastty_config_free(config);
+
+        let dir = unique_config_abi_test_dir("get-background-opacity-file");
+        let path = dir.join("config.roastty");
+        write_config_file(&path, "background-opacity = 0.12345678901234568\n");
+        let path = c_path(&path);
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, path.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+        let clone = roastty_config_clone(config);
+        roastty_config_free(config);
+        assert_eq!(
+            config_get_f64(clone, "background-opacity"),
+            Some(0.12345678901234568_f64)
+        );
+
+        roastty_config_free(clone);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_get_background_opacity_returns_cli_reset_and_unclamped_values() {
+        with_init_args(
+            &["roastty", "--background-opacity=0.12345678901234568"],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(
+                    config_get_f64(config, "background-opacity"),
+                    Some(0.12345678901234568_f64)
+                );
+                roastty_config_free(config);
+            },
+        );
+
+        with_init_args(
+            &[
+                "roastty",
+                "--background-opacity=0.25",
+                "--background-opacity=",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(config_get_f64(config, "background-opacity"), Some(1.0));
+                roastty_config_free(config);
+            },
+        );
+
+        for value in ["-0.25", "1.5"] {
+            let arg = format!("--background-opacity={value}");
+            with_init_args(&["roastty", &arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(
+                    config_get_f64(config, "background-opacity"),
+                    Some(value.parse::<f64>().unwrap())
+                );
+                roastty_config_free(config);
+            });
+        }
+    }
+
+    #[test]
+    fn config_get_background_opacity_reports_missing_and_invalid_values() {
+        for (arg, error) in [
+            ("--background-opacity", "ValueRequired"),
+            ("--background-opacity=not-a-float", "InvalidValue"),
+        ] {
+            with_init_args(&["roastty", arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 1);
+                let message = config_diagnostic_message(config, 0);
+                assert!(message.contains("background-opacity"), "{message}");
+                assert!(message.contains(error), "{message}");
+                assert_eq!(config_get_f64(config, "background-opacity"), Some(1.0));
+                roastty_config_free(config);
+            });
+        }
     }
 
     #[test]

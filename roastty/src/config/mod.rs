@@ -70,6 +70,8 @@ pub(crate) struct Config {
     pub background_blur: BackgroundBlur,
     /// `window-padding-color`.
     pub window_padding_color: WindowPaddingColor,
+    /// `background-opacity`.
+    pub background_opacity: f64,
     /// `background-image-opacity`.
     pub bg_image_opacity: f32,
     /// `background-image-position`.
@@ -162,6 +164,7 @@ impl Default for Config {
             alpha_blending: AlphaBlending::Native,
             background_blur: BackgroundBlur::False,
             window_padding_color: WindowPaddingColor::Background,
+            background_opacity: 1.0,
             bg_image_opacity: 1.0,
             bg_image_position: BackgroundImagePosition::Center,
             bg_image_fit: BackgroundImageFit::Contain,
@@ -255,6 +258,7 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("mouse-shift-capture", out));
         self.background_blur
             .format_entry(&mut EntryFormatter::new("background-blur", out));
+        EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
         self.notify_on_command_finish
             .format_entry(&mut EntryFormatter::new("notify-on-command-finish", out));
         self.notify_on_command_finish_action
@@ -544,6 +548,9 @@ impl Config {
             }
             "background-image-repeat" => {
                 self.bg_image_repeat = set_bool_field(value, default.bg_image_repeat)?
+            }
+            "background-opacity" => {
+                self.background_opacity = set_f64_field(value, default.background_opacity)?
             }
             "background" => {
                 self.background = set_value_field(value, default.background, Color::parse_cli)?
@@ -1147,6 +1154,18 @@ fn set_bool_field(value: Option<&str>, default_value: bool) -> Result<bool, Conf
     match value {
         Some("") => Ok(default_value),
         _ => parse_bool_field(value).map_err(|_| ConfigSetError::InvalidValue),
+    }
+}
+
+/// Resolve an `f64` field (upstream's type-magic `parseFloat` case): a
+/// set-but-empty value resets to the default; a missing value is
+/// `ValueRequired`; otherwise parse as `f64`, with `InvalidValue` on parse
+/// failure.
+fn set_f64_field(value: Option<&str>, default_value: f64) -> Result<f64, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        None => Err(ConfigSetError::ValueRequired),
+        Some(v) => v.parse::<f64>().map_err(|_| ConfigSetError::InvalidValue),
     }
 }
 
@@ -4150,6 +4169,7 @@ mod tests {
         assert_eq!(d.alpha_blending, AlphaBlending::Native);
         assert_eq!(d.background_blur, BackgroundBlur::False);
         assert_eq!(d.window_padding_color, WindowPaddingColor::Background);
+        assert_eq!(d.background_opacity, 1.0);
         // Background-image group (Experiment 466).
         assert_eq!(d.bg_image_opacity, 1.0);
         assert_eq!(d.bg_image_position, BackgroundImagePosition::Center);
@@ -7478,6 +7498,7 @@ mod tests {
                 "scroll-to-bottom",
                 "mouse-shift-capture",
                 "background-blur",
+                "background-opacity",
                 "notify-on-command-finish",
                 "notify-on-command-finish-action",
                 "link-previews",
@@ -7511,6 +7532,7 @@ mod tests {
 
         // The float field formats as its shortest-decimal default (`1.0` → `1`).
         assert!(out.contains("background-image-opacity = 1\n"));
+        assert!(out.contains("background-opacity = 1\n"));
 
         // The default optionals (all `None`) format as the void line, and `theme`
         // (default `None`) too.
@@ -7790,6 +7812,58 @@ mod tests {
         assert_eq!(
             cfg.set("background-blur", Some("xyz")),
             Err(ConfigSetError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn config_set_routes_background_opacity_float() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        cfg.set("background-opacity", Some("0.12345678901234568"))
+            .unwrap();
+        assert_eq!(cfg.background_opacity, 0.12345678901234568_f64);
+        assert_eq!(
+            line(&cfg, "background-opacity"),
+            "background-opacity = 0.12345678901234568"
+        );
+
+        cfg.set("background-opacity", Some("-0.25")).unwrap();
+        assert_eq!(cfg.background_opacity, -0.25);
+        assert_eq!(
+            line(&cfg, "background-opacity"),
+            "background-opacity = -0.25"
+        );
+
+        cfg.set("background-opacity", Some("1.5")).unwrap();
+        assert_eq!(cfg.background_opacity, 1.5);
+        assert_eq!(line(&cfg, "background-opacity"), "background-opacity = 1.5");
+
+        cfg.set("background-opacity", Some("")).unwrap();
+        assert_eq!(cfg.background_opacity, 1.0);
+        assert_eq!(line(&cfg, "background-opacity"), "background-opacity = 1");
+
+        assert_eq!(
+            cfg.set("background-opacity", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("background-opacity", Some("not-a-float")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("background-opacity", Some("0.25")).map(|_| {
+                let cloned = cfg.clone();
+                cloned == cfg && cloned.background_opacity == 0.25
+            }),
+            Ok(true)
         );
     }
 
