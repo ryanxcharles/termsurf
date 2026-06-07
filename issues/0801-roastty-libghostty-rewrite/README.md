@@ -115,12 +115,10 @@ Zig-origin libraries:
   tables used across the terminal and font layers. Roastty Unicode tables
   generated from the UCD, matching Ghostty's exact property semantics (crates
   like `unicode-width`/`unicode-segmentation` may cross-check, not replace).
-- **z2d** — _fidelity decision (open)._ 2D vector rasterization, used only for
-  the sprite font's anti-aliased path glyphs and the CPU debug overlay. Because
-  the glyph PNGs are compared byte-for-byte, this is the one rasterizer subject
-  to the fidelity rule — resolved in its own experiment (byte-exact port vs. a
-  Rust rasterizer with regenerated fixtures). The exact-fill sprite path needs
-  no rasterizer and is already ported.
+- **z2d** — _satisfied for sprite rasterization by a Rust port._ 2D vector
+  rasterization for the sprite font's anti-aliased path glyphs is implemented in
+  `font/sprite/raster.rs` and used by `Canvas` path methods. CPU debug overlay
+  rendering remains tracked by the renderer debug-overlay row.
 - **libxev** — _crate-eligible._ The async event loop. A Rust event-loop crate
   (e.g. `mio`/`polling` over kqueue, or `tokio`) may drive the PTY read/write
   loops and timers; no byte-exact requirement (macOS only — the
@@ -370,8 +368,9 @@ Out of scope / tooling: `build/`, `benchmark/`, `extra/`, `simd/`, `stb/`,
 
 - [x] `zig-objc` → satisfied by `objc2`
 - [ ] `uucode` (Unicode tables) — not started (no Unicode tables exist yet)
-- [ ] `z2d` (sprite path rasterizer) — in progress (exact-pixel Canvas done;
-      path rendering pending)
+- [x] `z2d` (sprite path rasterizer) — satisfied by the Rust
+      `font/sprite/raster.rs` port used by `Canvas` line/stroke/fill path
+      methods; CPU debug overlay work remains tracked in renderer rows
 - [ ] `libxev` (event loop) — not started
 - [ ] `zf` (fuzzy match) — not started
 - [ ] `wuffs` / `libpng` / `zlib` (image decode + inflate) — not started
@@ -2122,6 +2121,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 792: Sprite Checklist Sync](792-sprite-checklist-sync.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 793: z2d Dependency Checklist Sync](793-z2d-dependency-checklist-sync.md)
+  — **Designed**
 
 ## Non-Goals
 
