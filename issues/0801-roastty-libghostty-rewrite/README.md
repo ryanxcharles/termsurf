@@ -2203,6 +2203,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 805: Sentry Envelope Foundation](805-sentry-envelope-foundation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 806: Crash Envelope Persistence](806-crash-envelope-persistence.md)
+  — **Designed**
 
 ## Non-Goals
 
