@@ -36,6 +36,7 @@ fi
 
 log="$1"
 shift
+mkdir -p "$(dirname "$log")" # so a missing log dir can never silently drop the run
 : >"$log"
 
 # Central US (the maintainer's) timezone, stamped at start/end so elapsed time is
