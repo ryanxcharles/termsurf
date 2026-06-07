@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "default"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "default"
+reasoning = "medium"
 +++
 
 # Experiment 778: Narrow Surface Binding Checklist Sync
@@ -128,3 +133,64 @@ was also updated to require the result to record that PTY-backed paste-path
 coverage comes from Experiment 777's targeted slow tests rather than this
 focused filter set. Codex reviewed the revision, found no blockers, and approved
 the Experiment 778 plan commit.
+
+## Result
+
+**Result:** Pass
+
+The public C ABI and implementation inspections confirmed the checklist update:
+
+- `roastty/include/roastty.h` exposes `roastty_surface_key`,
+  `roastty_surface_key_is_binding`, and `roastty_surface_binding_action`.
+- `Surface::key` dispatches configured keybindings and default keybindings.
+- `dispatch_configured_binding` and `dispatch_default_binding` route through
+  `parse_binding_action` / `perform_parsed_binding_action`.
+- `roastty_surface_binding_action` parses C ABI action bytes and executes the
+  parsed binding action through the same binding-action surface.
+
+All focused key-dispatch filters passed:
+
+- `cargo test -p roastty surface_key_default -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key_configured -- --nocapture --test-threads=1`
+- `cargo test -p roastty surface_key_is_binding -- --nocapture --test-threads=1`
+
+All focused binding-action family filters passed, including close, split, text,
+CSI/ESC, title, reset, clear-screen, selection, copy, write-file copy/open false
+paths, paste-from-clipboard, font size, jump, scroll, tabs/windows, search,
+runtime/app actions, undo/redo, mouse reporting, and readonly toggles.
+
+The planned broad `surface_binding_action_` filter was intentionally not used.
+Experiment 777 already showed that the PTY-backed paste queue tests pass
+individually but remain too slow and variable to use as broad checklist-proof
+coverage. This result carries that evidence forward and treats paste-path
+parsing/execution as covered by those targeted slow tests.
+
+The README checklist update is documentation-only. It removes the stale
+`keybinding/action dispatch` and `full binding-action parsing` missing-work
+phrases while keeping the app/surface C ABI item unchecked for frontend
+selection routing and split tree/frontend mutations.
+
+Documentation checks passed after recording the result:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/778-narrow-surface-binding-checklist-sync.md`
+- `git diff --check`
+
+## Conclusion
+
+Surface key dispatch and binding-action parsing are no longer missing at the C
+ABI checklist level. The remaining app/surface C ABI work is now narrowed to
+frontend selection routing and split tree/frontend mutations, plus any other
+unchecked app/surface areas that future focused experiments identify.
+
+## Completion Review
+
+Codex reviewed the completed Pass result and found one wording issue: the README
+had moved the exact stale phrase `keybinding/action dispatch` into the done
+clause while the result said that phrase was removed. The README was updated to
+say `configured/default surface key dispatch`, which matches the verified scope.
+
+Codex reviewed the revision, found no blockers, and approved the Experiment 778
+result commit. The review confirmed that the stale `full binding-action parsing`
+wording is removed, the remaining references in Experiment 778 are historical
+context, and the app/surface C ABI item remains correctly unchecked for frontend
+selection routing and split tree/frontend mutations.

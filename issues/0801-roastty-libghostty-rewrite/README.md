@@ -288,8 +288,9 @@ Experiment 246).
       scroll-to-top, scroll-to-bottom, scroll-to-row, scroll-to-selection,
       scroll-page-up, scroll-page-down, scroll-page-lines, and
       scroll-page-fractional binding-action string invocation foundations done;
-      keybinding/action dispatch, frontend selection routing, full
-      binding-action parsing, and split tree/frontend mutations missing
+      configured/default surface key dispatch, focused binding-action parsing
+      coverage, and targeted slow PTY paste-path coverage done; frontend
+      selection routing and split tree/frontend mutations missing
 - [ ] Inspector ABI — non-Metal handle lifecycle and input forwarding foundation
       done; Metal renderer integration, inspector UI rendering, and core
       inspector data collection missing
@@ -2070,7 +2071,7 @@ are past the correctness-critical foundation.
 - [Experiment 777: Binding Action Paste Test Reliability](777-binding-action-paste-test-reliability.md)
   — **Partial** (PTY paste tests pass but remain timing-heavy)
 - [Experiment 778: Narrow Surface Binding Checklist Sync](778-narrow-surface-binding-checklist-sync.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
