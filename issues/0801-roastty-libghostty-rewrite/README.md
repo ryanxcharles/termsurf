@@ -2368,7 +2368,7 @@ are past the correctness-critical foundation.
 - [Experiment 838: Compose the prepared frame rebuild sequence](838-compose-prepared-frame-rebuild.md)
   — **Pass** · Claude/Claude/Claude
 - [Experiment 839: Compose rebuild-and-present (add the Metal presentation stage)](839-compose-rebuild-and-present.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 

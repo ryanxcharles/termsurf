@@ -151,6 +151,69 @@ fail-fast holds.
   derives only `Debug`, so the wrapper cannot derive `PartialEq`/`Eq`/`Clone`.
   **Fixed:** noted; tests assert via `matches!`.
 
+## Result
+
+**Result:** Pass
+
+The refactor (`rebuild_frame` → `build_plan` + `run_rebuild_stages`),
+`rebuild_and_present_frame`, and the `FramePreparedPresentationInput` /
+`FramePreparedFrameApplication` / `FramePreparedFrameError` types landed.
+Production `cargo build -p roastty` and `--tests` both clean (no warnings); fmt
+clean, no-ghostty clean, `git diff --check` clean.
+
+- **838 regression — the refactor is behavior-preserving:** all five
+  `rebuild_frame_*` tests still pass unchanged.
+- **`rebuild_and_present_frame_rebuilds_then_presents`** (Metal-device-guarded,
+  ran on this GPU): a full-rebuild snapshot drives rebuild **and** present — the
+  rebuild stages applied (`rows [0,1,2]`, block cursor applied) and the frame
+  **presented** at the requested 8×6 drawable.
+- **`rebuild_and_present_frame_fails_fast_before_presentation`**
+  (Metal-guarded): a truncated snapshot `row_dirty` → `Rebuild(Plan(..))` —
+  never `Present(..)`, proving presentation was not reached.
+
+**Equivalence** is established by construction rather than a GPU side-by-side:
+`rebuild_frame` and `rebuild_and_present_frame` call the **same**
+`run_rebuild_stages` on the **same** plan, and presentation goes through the
+unchanged `present_metal_frame` (Exp 822) — so the rebuild portion is provably
+identical (and the 838 regression suite confirms `run_rebuild_stages` is
+behavior-preserving). A literal two-compositor present comparison was omitted as
+GPU-state-dependent and redundant.
+
+**Full suite (default parallelism, `scripts/bounded-run.sh`):**
+`4367 passed; 0 failed` (4360 + 5 from 838 + 2 from 839), 0 panics, 0
+`PoisonError`, `STATUS=COMPLETED rc=0`, 191 s — green.
+
 ## Conclusion
 
-_(to be written after the run)_
+The standalone composition now spans the full snapshot → rebuilt-frame →
+**presented-frame** path: `rebuild_and_present_frame` builds one plan, runs the
+five rebuild stages, and presents via Metal, with fail-fast error propagation.
+The single-plan reuse keeps presentation validating against the same
+`effective_grid` the rebuild targeted.
+
+What remains for the live renderer path is the **renderer-thread wiring** the
+815–839 pieces were built bottom-up for: calling `rebuild_and_present_frame`
+from the renderer's actual frame loop (constructing the `FrameTerminalSnapshot`
+from the live terminal each frame, threading the real
+`Contents`/`SharedGrid`/uniforms/ atlases/compositor, and driving it on the
+render thread). That integration is the next slice — the first one that touches
+the live renderer rather than the standalone, individually-tested pipeline.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Independently confirmed: build + fmt clean; the slice
+`frame_rebuild::tests::rebuild` → 7 passed / 0 failed (Metal device present,
+both 839 tests and the five 838 `rebuild_frame_*` tests executed, not skipped);
+the refactor is byte-identical (only `build_plan()?` moved into the caller);
+`rebuild_and_present_frame` builds one plan, reborrows for the rebuild, presents
+immutably, and reaches present only after the rebuild `?` succeeds; the suite
+log shows 4367 passed / 0 failed, default parallelism, rc=0. **Verdict: CHANGES
+REQUIRED → fixed.**
+
+- **Required — stale README index status.** The 839 index line still read
+  `Designed`. **Fixed:** flipped to `Pass`.
+- **Optional/Nit (no change required):** the omitted GPU side-by-side
+  equivalence test is honestly justified (equivalence holds by construction);
+  the fail-fast test asserts the `Rebuild(Plan(_))` variant
+  (presentation-not-reached is structurally guaranteed by `?`).

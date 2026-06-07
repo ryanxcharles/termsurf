@@ -187,14 +187,25 @@ impl FrameTerminalSnapshot {
         targets: FramePreparedRebuildTargets<'_>,
         input: FramePreparedRebuildInput<'_>,
     ) -> Result<FramePreparedRebuildApplication, FramePreparedRebuildError> {
+        let plan = self.build_plan()?;
+        self.run_rebuild_stages(&plan, targets, input)
+    }
+
+    /// Run the five rebuild drivers against a pre-built plan. Shared by
+    /// `rebuild_frame` and `rebuild_and_present_frame` so the plan is built once
+    /// and reused for presentation (Issue 801, Exp 839).
+    fn run_rebuild_stages(
+        &self,
+        plan: &FrameRebuildPlan,
+        targets: FramePreparedRebuildTargets<'_>,
+        input: FramePreparedRebuildInput<'_>,
+    ) -> Result<FramePreparedRebuildApplication, FramePreparedRebuildError> {
         let FramePreparedRebuildTargets {
             contents,
             grid,
             row_dirty,
             uniforms,
         } = targets;
-
-        let plan = self.build_plan()?;
 
         let rows = plan.format_rows(
             contents,
@@ -216,6 +227,45 @@ impl FrameTerminalSnapshot {
             padding_extend,
             cursor_uniforms,
         })
+    }
+
+    /// Compose the full prepared frame: rebuild (the five stages) then present via
+    /// `present_metal_frame`, reusing the single plan so presentation validates
+    /// against the same `effective_grid` the rebuild targeted (Issue 801, Exp
+    /// 839). Stops at presentation; no renderer-thread orchestration.
+    pub(crate) fn rebuild_and_present_frame(
+        &self,
+        targets: FramePreparedRebuildTargets<'_>,
+        input: FramePreparedRebuildInput<'_>,
+        presentation: FramePreparedPresentationInput<'_>,
+    ) -> Result<FramePreparedFrameApplication, FramePreparedFrameError> {
+        let plan = self.build_plan().map_err(FramePreparedRebuildError::from)?;
+
+        let rebuild = self.run_rebuild_stages(
+            &plan,
+            FramePreparedRebuildTargets {
+                contents: &mut *targets.contents,
+                grid: &mut *targets.grid,
+                row_dirty: &mut *targets.row_dirty,
+                uniforms: &mut *targets.uniforms,
+            },
+            input,
+        )?;
+
+        let present = plan.present_metal_frame(
+            presentation.compositor,
+            FrameMetalPresentationInput {
+                width: presentation.width,
+                height: presentation.height,
+                contents_scale: presentation.contents_scale,
+                uniforms: targets.uniforms,
+                contents: targets.contents,
+                grayscale_atlas: presentation.grayscale_atlas,
+                color_atlas: presentation.color_atlas,
+            },
+        )?;
+
+        Ok(FramePreparedFrameApplication { rebuild, present })
     }
 }
 
@@ -292,6 +342,46 @@ impl From<FramePaddingExtendValidationError> for FramePreparedRebuildError {
 impl From<FrameCursorUniformValidationError> for FramePreparedRebuildError {
     fn from(error: FrameCursorUniformValidationError) -> Self {
         Self::CursorUniforms(error)
+    }
+}
+
+/// Presentation-only inputs for `rebuild_and_present_frame` (the Metal compositor,
+/// atlases, and drawable dimensions the rebuild stages do not supply).
+pub(crate) struct FramePreparedPresentationInput<'a> {
+    pub(crate) compositor: &'a mut MetalFrameCompositor,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+    pub(crate) contents_scale: f64,
+    pub(crate) grayscale_atlas: &'a Atlas,
+    pub(crate) color_atlas: &'a Atlas,
+}
+
+/// The result of one full prepared frame: the rebuild applications plus the Metal
+/// presentation application.
+#[derive(Debug)]
+pub(crate) struct FramePreparedFrameApplication {
+    pub(crate) rebuild: FramePreparedRebuildApplication,
+    pub(crate) present: FrameMetalPresentationApplication,
+}
+
+/// Error from one full prepared frame: a rebuild-stage failure (including the
+/// plan build) or the Metal presentation. `Debug`-only because
+/// `FrameMetalPresentationError` derives only `Debug`.
+#[derive(Debug)]
+pub(crate) enum FramePreparedFrameError {
+    Rebuild(FramePreparedRebuildError),
+    Present(FrameMetalPresentationError),
+}
+
+impl From<FramePreparedRebuildError> for FramePreparedFrameError {
+    fn from(error: FramePreparedRebuildError) -> Self {
+        Self::Rebuild(error)
+    }
+}
+
+impl From<FrameMetalPresentationError> for FramePreparedFrameError {
+    fn from(error: FrameMetalPresentationError) -> Self {
+        Self::Present(error)
     }
 }
 
@@ -4986,5 +5076,130 @@ mod tests {
         // An earlier stage genuinely ran before refine failed: format_rows cleared
         // the dirty rows — a real mid-sequence failure, not a pre-mutation reject.
         assert_eq!(row_dirty, vec![false, false, false]);
+    }
+
+    #[test]
+    fn rebuild_and_present_frame_rebuilds_then_presents() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let terminal = prepared_rebuild_terminal();
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = metal_compositor(device, 8, 6, &grayscale, &color);
+        let mut contents = contents_with_rows(grid(4, 3));
+        let mut shared = menlo_grid();
+        let mut row_dirty = snapshot.row_dirty.clone();
+        // Uniforms grid must match the 4x3 effective grid for presentation validation.
+        let mut uniforms = metal_uniforms([8, 6], [4, 3]);
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let applied = snapshot
+            .rebuild_and_present_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents,
+                    grid: &mut shared,
+                    row_dirty: &mut row_dirty,
+                    uniforms: &mut uniforms,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    padding_extend: padding_extend_input(
+                        WindowPaddingColor::Extend,
+                        &[false, false, false],
+                    ),
+                },
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect("rebuild and present");
+
+        // The rebuild ran (full rebuild → all rows) and the frame presented at the
+        // requested drawable size.
+        assert_eq!(applied.rebuild.rows.rebuilt_rows, vec![0, 1, 2]);
+        assert!(applied.rebuild.cursor_uniforms.block_cursor_applied);
+        assert_eq!(applied.present.presentation.width, 8);
+        assert_eq!(applied.present.presentation.height, 6);
+    }
+
+    #[test]
+    fn rebuild_and_present_frame_fails_fast_before_presentation() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let terminal = prepared_rebuild_terminal();
+        let mut snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+        // build_plan rejects the truncated row_dirty before any stage — including
+        // presentation — runs.
+        snapshot.row_dirty.clear();
+
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = metal_compositor(device, 8, 6, &grayscale, &color);
+        let mut contents = contents_with_rows(grid(4, 3));
+        let mut shared = menlo_grid();
+        let mut row_dirty = vec![true, true, true];
+        let mut uniforms = metal_uniforms([8, 6], [4, 3]);
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let err = snapshot
+            .rebuild_and_present_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents,
+                    grid: &mut shared,
+                    row_dirty: &mut row_dirty,
+                    uniforms: &mut uniforms,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    padding_extend: padding_extend_input(
+                        WindowPaddingColor::Extend,
+                        &[false, false, false],
+                    ),
+                },
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: 8,
+                    height: 6,
+                    contents_scale: 1.0,
+                    grayscale_atlas: &grayscale,
+                    color_atlas: &color,
+                },
+            )
+            .expect_err("should fail before presentation");
+
+        // A rebuild-side error is reported as `Rebuild(..)`, never `Present(..)` —
+        // proving presentation was not reached.
+        assert!(matches!(
+            err,
+            FramePreparedFrameError::Rebuild(FramePreparedRebuildError::Plan(_))
+        ));
     }
 }
