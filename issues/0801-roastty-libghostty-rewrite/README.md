@@ -2083,6 +2083,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 782: Terminal Clipboard OSC Events](782-terminal-clipboard-osc-events.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 783: Termio Clipboard OSC Worker Events](783-termio-clipboard-osc-worker-events.md)
+  — **Designed**
 
 ## Non-Goals
 
