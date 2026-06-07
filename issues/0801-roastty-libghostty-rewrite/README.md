@@ -2240,6 +2240,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 817: Frame Row Rebuild Driver](817-frame-row-rebuild-driver.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 818: Drive Row Formatting](818-drive-row-formatting.md) —
+  **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
