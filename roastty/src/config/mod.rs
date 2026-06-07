@@ -90,6 +90,8 @@ pub(crate) struct Config {
     pub link_previews: LinkPreviews,
     /// `window-subtitle`.
     pub window_subtitle: WindowSubtitle,
+    /// `window-decoration`.
+    pub window_decoration: WindowDecoration,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `macos-non-native-fullscreen`.
@@ -162,6 +164,7 @@ impl Default for Config {
             confirm_close_surface: ConfirmCloseSurface::True,
             link_previews: LinkPreviews::True,
             window_subtitle: WindowSubtitle::False,
+            window_decoration: WindowDecoration::Auto,
             fullscreen: Fullscreen::False,
             macos_non_native_fullscreen: NonNativeFullscreen::False,
             macos_titlebar_style: MacTitlebarStyle::Transparent,
@@ -252,6 +255,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("window-padding-color", out));
         self.window_subtitle
             .format_entry(&mut EntryFormatter::new("window-subtitle", out));
+        self.window_decoration
+            .format_entry(&mut EntryFormatter::new("window-decoration", out));
         self.window_colorspace
             .format_entry(&mut EntryFormatter::new("window-colorspace", out));
         self.clipboard_read
@@ -414,6 +419,9 @@ impl Config {
             "window-subtitle" => {
                 self.window_subtitle =
                     set_enum_field(value, default.window_subtitle, WindowSubtitle::from_keyword)?
+            }
+            "window-decoration" => {
+                self.window_decoration = WindowDecoration::parse_cli(value)?;
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -1126,6 +1134,14 @@ impl From<BackgroundBlurParseError> for ConfigSetError {
     fn from(e: BackgroundBlurParseError) -> Self {
         match e {
             BackgroundBlurParseError::InvalidValue => ConfigSetError::InvalidValue,
+        }
+    }
+}
+
+impl From<WindowDecorationParseError> for ConfigSetError {
+    fn from(e: WindowDecorationParseError) -> Self {
+        match e {
+            WindowDecorationParseError::InvalidValue => ConfigSetError::InvalidValue,
         }
     }
 }
@@ -4034,6 +4050,7 @@ mod tests {
         assert_eq!(d.confirm_close_surface, ConfirmCloseSurface::True);
         assert_eq!(d.link_previews, LinkPreviews::True);
         assert_eq!(d.window_subtitle, WindowSubtitle::False);
+        assert_eq!(d.window_decoration, WindowDecoration::Auto);
         // macOS-window group (Experiment 469).
         assert_eq!(d.fullscreen, Fullscreen::False);
         assert_eq!(d.macos_non_native_fullscreen, NonNativeFullscreen::False);
@@ -7304,6 +7321,7 @@ mod tests {
                 "fullscreen",
                 "window-padding-color",
                 "window-subtitle",
+                "window-decoration",
                 "window-colorspace",
                 "clipboard-read",
                 "clipboard-write",
@@ -7356,6 +7374,7 @@ mod tests {
             ("confirm-close-surface", "always"),
             ("link-previews", "osc8"),
             ("window-subtitle", "working-directory"),
+            ("window-decoration", "server"),
             ("fullscreen", "non-native"),
             ("macos-non-native-fullscreen", "visible-menu"),
             ("macos-titlebar-style", "tabs"),
@@ -7378,6 +7397,12 @@ mod tests {
             );
         }
 
+        let mut cfg = Config::default();
+        cfg.set("window-decoration", Some("server")).unwrap();
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|line| line == "window-decoration = server"));
+
         // A missing value is `ValueRequired`; an invalid value is `InvalidValue`;
         // an unknown key is `UnknownField`.
         let mut cfg = Config::default();
@@ -7387,6 +7412,10 @@ mod tests {
         );
         assert_eq!(
             cfg.set("fullscreen", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("window-decoration", Some("nope")),
             Err(ConfigSetError::InvalidValue)
         );
         assert_eq!(

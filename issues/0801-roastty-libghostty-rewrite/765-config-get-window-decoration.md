@@ -67,3 +67,46 @@ Non-blocking suggestions from the review: test all returned ABI variants
 (`auto`, `client`, `server`, and `none`), include boolean CLI forms (`true` →
 `auto`, `false` → `none`), add an invalid-value diagnostic test for the new
 aggregate route, and optionally include a recursive/default-file smoke test.
+
+## Result
+
+**Result:** Pass
+
+Implemented aggregate config storage and C ABI lookup for `window-decoration`.
+`config::Config` now stores the field, defaults it to `WindowDecoration::Auto`,
+formats it through `format_config`, and routes
+`Config::set("window-decoration", ...)` through the existing
+`WindowDecoration::parse_cli` parser. Invalid values now surface as
+`ConfigSetError::InvalidValue` through the aggregate config path.
+
+`roastty_config_get("window-decoration")` now reads the parsed config field and
+returns stable nul-terminated C string pointers for `auto`, `client`, `server`,
+and `none`.
+
+Verification passed:
+
+- `cargo test -p roastty window_decoration -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_get_window_decoration -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_ -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings. The
+first review confirmed that the implementation satisfied the approved slice and
+suggested extra non-blocking tests for bare CLI form and explicit non-default
+format output.
+
+Those tests were added, and Codex re-reviewed the final diff with no blocking
+findings. The final review confirmed coverage for default, all file variants,
+CLI bare/boolean/keyword forms, clone/free behavior, invalid CLI diagnostics,
+and explicit formatted output.
+
+## Conclusion
+
+`roastty_config_get("window-decoration")` is no longer a hard-coded default. One
+more app-facing config key now flows through the same parsed config path used by
+file and CLI loading, moving the `config_get` boundary incrementally toward real
+config state.

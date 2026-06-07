@@ -3283,7 +3283,19 @@ static EMPTY_STRING: &[u8] = b"\0";
 static EMPTY_DIAGNOSTIC: &[u8] = b"\0";
 static WINDOW_SAVE_STATE_DEFAULT: &[u8] = b"default\0";
 static WINDOW_DECORATION_AUTO: &[u8] = b"auto\0";
+static WINDOW_DECORATION_CLIENT: &[u8] = b"client\0";
+static WINDOW_DECORATION_SERVER: &[u8] = b"server\0";
+static WINDOW_DECORATION_NONE: &[u8] = b"none\0";
 static WINDOW_THEME_AUTO: &[u8] = b"auto\0";
+
+fn window_decoration_keyword(value: config::WindowDecoration) -> *const c_char {
+    match value {
+        config::WindowDecoration::Auto => WINDOW_DECORATION_AUTO.as_ptr().cast(),
+        config::WindowDecoration::Client => WINDOW_DECORATION_CLIENT.as_ptr().cast(),
+        config::WindowDecoration::Server => WINDOW_DECORATION_SERVER.as_ptr().cast(),
+        config::WindowDecoration::None => WINDOW_DECORATION_NONE.as_ptr().cast(),
+    }
+}
 
 fn config_from_handle<'a>(handle: RoasttyConfig) -> Option<&'a mut Config> {
     if handle.is_null() {
@@ -8859,9 +8871,12 @@ pub extern "C" fn roastty_config_get(
                 true
             }
             b"window-decoration" => {
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
                 output
                     .cast::<*const c_char>()
-                    .write(WINDOW_DECORATION_AUTO.as_ptr().cast());
+                    .write(window_decoration_keyword(config.parsed.window_decoration));
                 true
             }
             b"window-theme" => {
@@ -15980,6 +15995,27 @@ mod tests {
             .into_owned()
     }
 
+    fn config_get_string(config: RoasttyConfig, key: &str) -> Option<String> {
+        let mut value: *const c_char = ptr::null();
+        let ok = roastty_config_get(
+            config,
+            (&mut value as *mut *const c_char).cast::<c_void>(),
+            key.as_ptr().cast(),
+            key.len(),
+        );
+        if !ok {
+            return None;
+        }
+        if value.is_null() {
+            return Some(String::new());
+        }
+        Some(
+            unsafe { CStr::from_ptr(value) }
+                .to_string_lossy()
+                .into_owned(),
+        )
+    }
+
     fn unique_config_abi_test_dir(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -16840,6 +16876,89 @@ mod tests {
                 roastty_config_free(config);
             },
         );
+    }
+
+    #[test]
+    fn config_get_window_decoration_returns_default_and_file_values() {
+        let config = roastty_config_new();
+        assert_eq!(
+            config_get_string(config, "window-decoration").as_deref(),
+            Some("auto")
+        );
+        roastty_config_free(config);
+
+        for value in ["auto", "client", "server", "none"] {
+            let dir = unique_config_abi_test_dir(&format!("get-window-decoration-{value}"));
+            let path = dir.join("config.roastty");
+            write_config_file(&path, &format!("window-decoration = {value}\n"));
+            let path = c_path(&path);
+
+            let config = roastty_config_new();
+            roastty_config_load_file(config, path.as_ptr());
+            assert_eq!(roastty_config_diagnostics_count(config), 0);
+            assert_eq!(
+                config_get_string(config, "window-decoration").as_deref(),
+                Some(value)
+            );
+
+            roastty_config_free(config);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    #[test]
+    fn config_get_window_decoration_returns_cli_boolean_forms() {
+        for (arg, expected) in [
+            ("--window-decoration", "auto"),
+            ("--window-decoration=true", "auto"),
+            ("--window-decoration=false", "none"),
+            ("--window-decoration=client", "client"),
+            ("--window-decoration=server", "server"),
+        ] {
+            with_init_args(&["roastty", arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(
+                    config_get_string(config, "window-decoration").as_deref(),
+                    Some(expected)
+                );
+                roastty_config_free(config);
+            });
+        }
+    }
+
+    #[test]
+    fn config_get_window_decoration_clones_and_reports_invalid_values() {
+        let dir = unique_config_abi_test_dir("get-window-decoration-clone");
+        let path = dir.join("config.roastty");
+        write_config_file(&path, "window-decoration = client\n");
+        let path = c_path(&path);
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, path.as_ptr());
+        let clone = roastty_config_clone(config);
+        roastty_config_free(config);
+        assert_eq!(
+            config_get_string(clone, "window-decoration").as_deref(),
+            Some("client")
+        );
+        roastty_config_free(clone);
+        std::fs::remove_dir_all(&dir).ok();
+
+        with_init_args(&["roastty", "--window-decoration=nope"], || {
+            let config = roastty_config_new();
+            roastty_config_load_cli_args(config);
+            assert_eq!(roastty_config_diagnostics_count(config), 1);
+            let message = config_diagnostic_message(config, 0);
+            assert!(message.contains("window-decoration"), "{message}");
+            assert!(message.contains("InvalidValue"), "{message}");
+            assert_eq!(
+                config_get_string(config, "window-decoration").as_deref(),
+                Some("auto")
+            );
+            roastty_config_free(config);
+        });
     }
 
     #[test]

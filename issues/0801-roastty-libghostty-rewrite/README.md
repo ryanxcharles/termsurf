@@ -2044,7 +2044,7 @@ are past the correctness-critical foundation.
 - [Experiment 764: Config C ABI Default Files Toggle](764-config-c-abi-default-files-toggle.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 765: Config Get Window Decoration](765-config-get-window-decoration.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
