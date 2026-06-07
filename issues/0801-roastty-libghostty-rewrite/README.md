@@ -246,7 +246,12 @@ Experiment 246).
 ### Input — encoding only
 
 - [x] Key codes/events, key encoding (VT/Kitty), key mods, bracketed paste
-- [ ] Keybinding system (`Binding`, `command`/action dispatch) — missing
+- [ ] Keybinding system (`Binding`, `command`/action dispatch) — partial:
+      configured keybind parsing/storage/query, default binding lookup/flags,
+      release consumption, action string parsing, and surface/app runtime
+      dispatch foundations exist; full Ghostty `Binding` type model, config
+      export/remap completeness, keymaps/layouts, and frontend/global menu
+      integration remain tracked elsewhere
 - [ ] Keymaps (`keycodes`, `function_keys`, `KeymapDarwin`, layouts) — missing
 - [ ] Kitty keyboard protocol details (`input/kitty`), `Link`, mouse input
       structs — missing (note: mouse SGR/x11 _encoding_ exists in
@@ -2099,6 +2104,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 788: OS Utilities Checklist Sync](788-os-utilities-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 789: Keybinding Checklist Sync](789-keybinding-checklist-sync.md)
+  — **Designed**
 
 ## Non-Goals
 
