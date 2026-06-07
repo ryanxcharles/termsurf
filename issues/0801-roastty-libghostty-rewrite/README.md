@@ -2089,6 +2089,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 785: OSC 52 Write Clipboard Handling](785-osc52-write-clipboard-handling.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 786: Kitty Clipboard Read Replies](786-kitty-clipboard-read-replies.md)
+  — **Designed**
 
 ## Non-Goals
 
