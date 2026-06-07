@@ -393,9 +393,10 @@ Experiment 246).
       exist with focused tests; future incidental helpers remain as-needed
 - [ ] `cli/` (+list-\* tools), `inspector/` (imgui), `crash/` (sentry),
       `terminfo/`, `synthetic/` — partial: inspector handle lifecycle/input
-      forwarding, terminfo-bearing resource directory discovery, and font
-      synthetic bold/italic foundations exist; CLI/list tools, inspector UI/core
-      data collection, Sentry-style crash reporting, full terminfo tooling, and
+      forwarding, local crash-report directory/listing support, terminfo-bearing
+      resource directory discovery, and font synthetic bold/italic foundations
+      exist; CLI/list tools, inspector UI/core data collection, Sentry SDK
+      capture/envelope persistence/report upload, full terminfo tooling, and
       broader synthetic subsystem work remain open
 - [ ] Swift macOS frontend integration
 
@@ -430,7 +431,9 @@ Out of scope / tooling: `build/`, `benchmark/`, `extra/`, `simd/`, `stb/`,
       surfaces; SIMD acceleration, explicit transcoding replacement, and a full
       Ghostty call-site audit remain open
 - [ ] `highway` (SIMD) — not started
-- [ ] `sentry` (crash reporting) — not started
+- [ ] `sentry` (crash reporting) — partial: local crash-report directory/listing
+      support exists; Sentry SDK initialization, crash callbacks, envelope
+      capture/persistence, report upload, and CLI/frontend flows remain missing
 - [ ] `dcimgui` (inspector UI) — not started
 - [ ] `glslang` / `spirv-cross` (shader translation) — not started
 
@@ -2195,7 +2198,7 @@ are past the correctness-critical foundation.
 - [Experiment 803: Embedded Font Resources](803-embedded-font-resources.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 804: Crash Report Directory Foundation](804-crash-report-directory-foundation.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

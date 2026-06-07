@@ -91,3 +91,54 @@ it with no blocking findings. The approval confirmed that the path scope is
 defensible, the listing verification covers the key mechanics, and the
 README/result wording must stay partial without implying Sentry crate
 initialization or crash capture.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a `crash` module with local crash-report directory/listing
+support:
+
+- `CrashDir::new(path)` for explicit report directories.
+- `CrashDir::default()` and `default_dir_path()` for the default local crash
+  report directory.
+- `$HOME` default path:
+  `~/Library/Application Support/com.termsurf.roastty/crash`.
+- `$HOME`-unavailable fallback: `${TMPDIR}/roastty/crash`.
+- `CrashDir::reports()` returns an empty list for missing directories, filters
+  to regular files, returns basename-only report names, captures modification
+  time, and sorts newest-first with a deterministic name tiebreaker.
+
+This does not implement Sentry SDK initialization, crash callbacks, envelope
+capture/persistence, report upload, CLI commands, or frontend flows.
+
+Verification:
+
+- Inspected:
+  - `vendor/ghostty/src/crash/dir.zig`
+  - `vendor/ghostty/src/cli/crash_report.zig`
+  - `vendor/ghostty/src/crash/sentry.zig`
+  - `vendor/ghostty/src/crash/sentry_envelope.zig`
+- `cargo fmt -p roastty` — passed
+- `cargo test -p roastty crash -- --nocapture --test-threads=1` — 5 passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/804-crash-report-directory-foundation.md`
+  — passed
+- `git diff --check` — passed
+
+## Conclusion
+
+Crash reporting can move from not started to a partial local report foundation.
+The next crash-reporting work should parse and persist Sentry envelopes, then
+wire native SDK capture and CLI/frontend report flows around this directory
+inventory.
+
+## Completion Review
+
+Codex reviewed the staged result and found no blocking findings. The review
+approved `CrashDir` because it uses the bundle-id Application Support path when
+`$HOME` is non-empty, uses a scoped temp fallback otherwise, handles missing
+directories, filters non-files, returns basenames, captures mtimes, and sorts
+newest-first with a deterministic name tiebreaker. The review also approved the
+tests and docs because they cover the key risks for this slice while keeping
+Sentry SDK initialization, crash callbacks/capture, envelope persistence,
+upload, CLI commands, and frontend flows explicitly missing.
