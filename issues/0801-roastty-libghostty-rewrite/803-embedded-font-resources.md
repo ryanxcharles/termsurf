@@ -114,3 +114,66 @@ coverage. Codex re-reviewed the corrected design and approved it with no
 blocking findings because the inventory boundary is now explicit, verification
 covers the relevant risks, and the plan avoids generated default-font, Symbols
 Nerd Font, font-grid, discovery, and frontend-loading claims.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has `font::embedded`, a resource-backed inventory for the exact 15
+upstream `@embedFile("res/...")` entries:
+
+- `emoji`
+- `emoji_text`
+- `arabic`
+- `test_nerd_font`
+- `code_new_roman`
+- `inconsolata`
+- `geist_mono`
+- `jetbrains_mono`
+- `julia_mono`
+- `cozette`
+- `monaspace_neon`
+- `terminus_ttf`
+- `spleen_bdf`
+- `spleen_pcf`
+- `spleen_otb`
+
+Each inventory entry exposes its upstream symbol name, file name, license
+family, role, and raw bytes. The implementation intentionally excludes
+unreferenced vendored resources, generated JetBrains default-font blobs, the
+Symbols Nerd Font blob, and all font-grid/discovery/frontend integration.
+
+Verification:
+
+- Inspected:
+  - `vendor/ghostty/src/font/embedded.zig`
+  - `vendor/ghostty/src/font/res/README.md`
+  - `vendor/ghostty/src/font/res/OFL.txt`
+  - `vendor/ghostty/src/font/res/MIT.txt`
+  - `vendor/ghostty/src/font/res/BSD-2-Clause.txt`
+- `cargo fmt -p roastty` — passed
+- `cargo test -p roastty embedded -- --nocapture --test-threads=1` — 5 passed
+- `cargo test -p roastty opentype -- --nocapture --test-threads=1` — 32 passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/803-embedded-font-resources.md`
+  — passed
+- `git diff --check` — passed
+
+## Conclusion
+
+The font row can now move from "embedded fonts missing" to a partial embedded
+resource foundation. The remaining embedded-font work is generated default-font
+blob replacement, Symbols Nerd Font blob replacement, and wiring these resources
+into font discovery, collection construction, `SharedGridSet`, and frontend/app
+font loading.
+
+## Completion Review
+
+Codex reviewed the staged result and found no blocking findings. The review
+approved the inventory because it matches the exact 15 upstream
+`@embedFile("res/...")` entries, includes `JetBrainsMonoNerdFont-Regular.ttf`
+only for `test_nerd_font`, and excludes `Lilex-VF.ttf`, extra JetBrains Nerd
+Font styles, generated JetBrains blobs, and `nerd_fonts_symbols_only`. The
+review also approved the tests and docs because they cover exact symbol/file
+order and count, uniqueness, non-empty bytes, signatures, license text
+availability, and role comments while keeping the checklist partial and avoiding
+font-grid/discovery/frontend integration claims.

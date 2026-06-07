@@ -253,8 +253,10 @@ Experiment 246).
       exists; upstream config-derived key, font discovery/collection building,
       metrics reload, and full renderer ownership integration remain missing
 - [ ] `opentype/`, `embedded`, `nerd_font_attributes` — `head`/`hhea`/`os2`/
-      `post`/`svg`/`glyf` parsers and Nerd Font attributes complete; embedded
-      fonts and full OpenType helpers missing
+      `post`/`svg`/`glyf` parsers, Nerd Font attributes, and a resource-backed
+      embedded-font inventory for upstream `res/...` entries exist; generated
+      default-font blobs, Symbols Nerd Font blob, full OpenType helpers, and
+      font-grid integration remain missing
 
 ### Input — encoding only
 
@@ -2191,7 +2193,7 @@ are past the correctness-critical foundation.
 - [Experiment 802: zf Fuzzy Foundation](802-zf-fuzzy-foundation.md) — **Pass** ·
   Codex/Codex/Codex
 - [Experiment 803: Embedded Font Resources](803-embedded-font-resources.md) —
-  **Designed**
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
