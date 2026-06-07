@@ -2247,6 +2247,8 @@ are past the correctness-critical foundation.
   · Codex/Codex/Codex
 - [Experiment 819: Drive Cursor and Preedit Overlays](819-drive-cursor-preedit-overlays.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 820: Apply Cursor Uniforms](820-apply-cursor-uniforms.md) —
+  **Designed** · Codex/Codex
 
 ## Non-Goals
 
