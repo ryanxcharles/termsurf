@@ -2054,7 +2054,7 @@ are past the correctness-critical foundation.
 - [Experiment 769: Config Get Background Opacity](769-config-get-background-opacity.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 770: Config Get Bell Audio Volume](770-config-get-bell-audio-volume.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

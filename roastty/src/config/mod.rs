@@ -62,6 +62,8 @@ pub(crate) struct Config {
     pub notify_on_command_finish: NotifyOnCommandFinish,
     /// `notify-on-command-finish-action`.
     pub notify_on_command_finish_action: NotifyOnCommandFinishAction,
+    /// `bell-audio-volume`.
+    pub bell_audio_volume: f64,
     /// `window-colorspace`.
     pub window_colorspace: WindowColorspace,
     /// `alpha-blending`.
@@ -160,6 +162,7 @@ impl Default for Config {
             shell_integration_features: ShellIntegrationFeatures::default(),
             notify_on_command_finish: NotifyOnCommandFinish::Never,
             notify_on_command_finish_action: NotifyOnCommandFinishAction::default(),
+            bell_audio_volume: 0.5,
             window_colorspace: WindowColorspace::Srgb,
             alpha_blending: AlphaBlending::Native,
             background_blur: BackgroundBlur::False,
@@ -259,6 +262,7 @@ impl Config {
         self.background_blur
             .format_entry(&mut EntryFormatter::new("background-blur", out));
         EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
+        EntryFormatter::new("bell-audio-volume", out).entry_float(self.bell_audio_volume);
         self.notify_on_command_finish
             .format_entry(&mut EntryFormatter::new("notify-on-command-finish", out));
         self.notify_on_command_finish_action
@@ -402,6 +406,9 @@ impl Config {
                     default.notify_on_command_finish,
                     NotifyOnCommandFinish::from_keyword,
                 )?
+            }
+            "bell-audio-volume" => {
+                self.bell_audio_volume = set_f64_field(value, default.bell_audio_volume)?
             }
             "window-colorspace" => {
                 self.window_colorspace = set_enum_field(
@@ -4164,6 +4171,7 @@ mod tests {
             d.notify_on_command_finish_action,
             NotifyOnCommandFinishAction::default()
         );
+        assert_eq!(d.bell_audio_volume, 0.5);
         // Renderer-appearance group (Experiment 465).
         assert_eq!(d.window_colorspace, WindowColorspace::Srgb);
         assert_eq!(d.alpha_blending, AlphaBlending::Native);
@@ -7499,6 +7507,7 @@ mod tests {
                 "mouse-shift-capture",
                 "background-blur",
                 "background-opacity",
+                "bell-audio-volume",
                 "notify-on-command-finish",
                 "notify-on-command-finish-action",
                 "link-previews",
@@ -7533,6 +7542,7 @@ mod tests {
         // The float field formats as its shortest-decimal default (`1.0` → `1`).
         assert!(out.contains("background-image-opacity = 1\n"));
         assert!(out.contains("background-opacity = 1\n"));
+        assert!(out.contains("bell-audio-volume = 0.5\n"));
 
         // The default optionals (all `None`) format as the void line, and `theme`
         // (default `None`) too.
@@ -7862,6 +7872,55 @@ mod tests {
             cfg.set("background-opacity", Some("0.25")).map(|_| {
                 let cloned = cfg.clone();
                 cloned == cfg && cloned.background_opacity == 0.25
+            }),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn config_set_routes_bell_audio_volume_float() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        cfg.set("bell-audio-volume", Some("0.12345678901234568"))
+            .unwrap();
+        assert_eq!(cfg.bell_audio_volume, 0.12345678901234568_f64);
+        assert_eq!(
+            line(&cfg, "bell-audio-volume"),
+            "bell-audio-volume = 0.12345678901234568"
+        );
+
+        cfg.set("bell-audio-volume", Some("-0.25")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, -0.25);
+        assert_eq!(line(&cfg, "bell-audio-volume"), "bell-audio-volume = -0.25");
+
+        cfg.set("bell-audio-volume", Some("1.5")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 1.5);
+        assert_eq!(line(&cfg, "bell-audio-volume"), "bell-audio-volume = 1.5");
+
+        cfg.set("bell-audio-volume", Some("")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 0.5);
+        assert_eq!(line(&cfg, "bell-audio-volume"), "bell-audio-volume = 0.5");
+
+        assert_eq!(
+            cfg.set("bell-audio-volume", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("bell-audio-volume", Some("not-a-float")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("bell-audio-volume", Some("0.25")).map(|_| {
+                let cloned = cfg.clone();
+                cloned == cfg && cloned.bell_audio_volume == 0.25
             }),
             Ok(true)
         );

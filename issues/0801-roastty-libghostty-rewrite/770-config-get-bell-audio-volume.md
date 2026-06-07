@@ -73,3 +73,45 @@ The plan was amended to make two non-blocking test expectations explicit: public
 C ABI diagnostics for bare and invalid CLI values, and full formatter key-order
 coverage that inserts `bell-audio-volume` between `background-opacity` and
 `notify-on-command-finish`.
+
+## Result
+
+**Result:** Pass
+
+Implemented aggregate config storage for `bell-audio-volume`. `config::Config`
+now stores `bell_audio_volume: f64`, defaults it to `0.5`, formats it between
+`background-opacity` and `notify-on-command-finish`, and routes
+`Config::set("bell-audio-volume", ...)` through the shared scalar `f64` parser
+from Experiment 769.
+
+`roastty_config_get("bell-audio-volume")` now reads parsed config state instead
+of writing the hard-coded `0.5` default.
+
+Verification passed:
+
+- `cargo test -p roastty bell_audio_volume -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_get_bell_audio_volume -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_ -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Conclusion
+
+`bell-audio-volume` now reports parsed config state through the C ABI while
+remaining a pure config slice. Runtime bell playback, `bell-features`, and
+`bell-audio-path` remain follow-up work.
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no blocking findings. The
+review confirmed that `bell_audio_volume` is stored as `f64`, defaults to `0.5`,
+formats between `background-opacity` and `notify-on-command-finish`, routes
+through `set_f64_field`, and is returned by
+`roastty_config_get("bell-audio-volume")` from parsed state.
+
+The review also confirmed the tests cover the scoped risks: formatter
+order/defaults, scalar parser behavior, empty reset, missing and invalid errors,
+unclamped finite values, f64 precision, file load, CLI load, clone/free
+behavior, and public C ABI diagnostics. No additional tests were required before
+the result commit.

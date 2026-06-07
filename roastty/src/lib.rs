@@ -8931,7 +8931,10 @@ pub extern "C" fn roastty_config_get(
                 true
             }
             b"bell-audio-volume" => {
-                output.cast::<f64>().write(0.5);
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output.cast::<f64>().write(config.parsed.bell_audio_volume);
                 true
             }
             b"notify-on-command-finish-after" => {
@@ -17399,6 +17402,96 @@ mod tests {
                 assert!(message.contains("background-opacity"), "{message}");
                 assert!(message.contains(error), "{message}");
                 assert_eq!(config_get_f64(config, "background-opacity"), Some(1.0));
+                roastty_config_free(config);
+            });
+        }
+    }
+
+    #[test]
+    fn config_get_bell_audio_volume_returns_default_file_and_clone_values() {
+        let config = roastty_config_new();
+        assert_eq!(config_get_f64(config, "bell-audio-volume"), Some(0.5));
+        roastty_config_free(config);
+
+        let dir = unique_config_abi_test_dir("get-bell-audio-volume-file");
+        let path = dir.join("config.roastty");
+        write_config_file(&path, "bell-audio-volume = 0.12345678901234568\n");
+        let path = c_path(&path);
+
+        let config = roastty_config_new();
+        roastty_config_load_file(config, path.as_ptr());
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+        let clone = roastty_config_clone(config);
+        roastty_config_free(config);
+        assert_eq!(
+            config_get_f64(clone, "bell-audio-volume"),
+            Some(0.12345678901234568_f64)
+        );
+
+        roastty_config_free(clone);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_get_bell_audio_volume_returns_cli_reset_and_unclamped_values() {
+        with_init_args(
+            &["roastty", "--bell-audio-volume=0.12345678901234568"],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(
+                    config_get_f64(config, "bell-audio-volume"),
+                    Some(0.12345678901234568_f64)
+                );
+                roastty_config_free(config);
+            },
+        );
+
+        with_init_args(
+            &[
+                "roastty",
+                "--bell-audio-volume=0.25",
+                "--bell-audio-volume=",
+            ],
+            || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(config_get_f64(config, "bell-audio-volume"), Some(0.5));
+                roastty_config_free(config);
+            },
+        );
+
+        for value in ["-0.25", "1.5"] {
+            let arg = format!("--bell-audio-volume={value}");
+            with_init_args(&["roastty", &arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 0);
+                assert_eq!(
+                    config_get_f64(config, "bell-audio-volume"),
+                    Some(value.parse::<f64>().unwrap())
+                );
+                roastty_config_free(config);
+            });
+        }
+    }
+
+    #[test]
+    fn config_get_bell_audio_volume_reports_missing_and_invalid_values() {
+        for (arg, error) in [
+            ("--bell-audio-volume", "ValueRequired"),
+            ("--bell-audio-volume=not-a-float", "InvalidValue"),
+        ] {
+            with_init_args(&["roastty", arg], || {
+                let config = roastty_config_new();
+                roastty_config_load_cli_args(config);
+                assert_eq!(roastty_config_diagnostics_count(config), 1);
+                let message = config_diagnostic_message(config, 0);
+                assert!(message.contains("bell-audio-volume"), "{message}");
+                assert!(message.contains(error), "{message}");
+                assert_eq!(config_get_f64(config, "bell-audio-volume"), Some(0.5));
                 roastty_config_free(config);
             });
         }
