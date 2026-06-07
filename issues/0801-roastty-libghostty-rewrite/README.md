@@ -410,7 +410,11 @@ Out of scope / tooling: `build/`, `benchmark/`, `extra/`, `simd/`, `stb/`,
 - [ ] `oniguruma` (regex) — not ported; terminal-core `search`/`StringMap` uses
       Rust `regex`, but Surface link/search UI regex integration still needs a
       broader decision
-- [ ] `simdutf` (UTF-8 validation/transcoding) — not started
+- [ ] `simdutf` (UTF-8 validation/transcoding) — partial: terminal `UTF8Decoder`
+      is ported and stream-integrated, and standard-library UTF-8
+      validation/exposure paths exist in C ABI/config/input/preedit/render-state
+      surfaces; SIMD acceleration, explicit transcoding replacement, and a full
+      Ghostty call-site audit remain open
 - [ ] `highway` (SIMD) — not started
 - [ ] `sentry` (crash reporting) — not started
 - [ ] `dcimgui` (inspector UI) — not started
@@ -2164,6 +2168,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 797: Image Decode Dependency Checklist Sync](797-image-decode-dependency-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 798: UTF-8 Dependency Checklist Sync](798-utf8-dependency-checklist-sync.md)
+  — **Designed**
 
 ## Non-Goals
 
