@@ -2037,6 +2037,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 761: Config Recursive File Loading](761-config-recursive-file-loading.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 762: Config C ABI Recursive Files](762-config-c-abi-recursive-files.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
