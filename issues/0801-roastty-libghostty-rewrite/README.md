@@ -235,9 +235,10 @@ Experiment 246).
 - [ ] Main render loop (`generic.zig`: frame build, dirty tracking, glyph
       upload, draw calls, pacing) — partial: the value-level frame rebuild
       planner for resize/full/row-dirty/preedit decisions exists and can apply
-      resize/reset/clear/mark-clean actions to `Contents`; terminal row
-      formatting, glyph upload/draw calls, pacing, and live renderer integration
-      remain missing (critical)
+      resize/reset/clear/mark-clean actions to `Contents`; a per-row driver
+      restores upstream clear/mark-clean/rebuild sequencing for callbacks;
+      terminal row formatting, glyph upload/draw calls, pacing, and live
+      renderer integration remain missing (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
       partial: custom-shader uniforms, target enum, and per-frame/state update
       helpers exist; shader file loading, debug overlay, renderer thread, and
@@ -2238,7 +2239,7 @@ are past the correctness-critical foundation.
 - [Experiment 816: Apply Frame Rebuild Plan](816-apply-frame-rebuild-plan.md) —
   **Pass** · Codex/Codex/Codex
 - [Experiment 817: Frame Row Rebuild Driver](817-frame-row-rebuild-driver.md) —
-  **Designed** · Codex/Codex/Codex
+  **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

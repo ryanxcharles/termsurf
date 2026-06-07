@@ -14,6 +14,7 @@ use crate::renderer::cell::Contents;
 use crate::renderer::size::{GridSize, Unit};
 use crate::renderer::state::{Preedit, PreeditRange};
 use crate::terminal::point::Coordinate;
+use std::collections::HashSet;
 
 /// Terminal render-state dirty mode. Mirrors upstream
 /// `terminal.RenderState.Dirty`.
@@ -90,6 +91,39 @@ pub(crate) struct FrameRebuildApplication {
     pub(crate) reset_contents: bool,
     pub(crate) cleared_rows: Vec<Unit>,
     pub(crate) marked_clean_rows: Vec<Unit>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameRowRebuildValidationError {
+    Apply(FrameRebuildApplyError),
+    RebuildRowOutOfBounds { row: Unit, rows: Unit },
+    DuplicateRebuildRow { row: Unit },
+    DuplicateClearRow { row: Unit },
+    DuplicateMarkCleanRow { row: Unit },
+    ClearRowNotRebuilt { row: Unit },
+    MarkCleanRowNotRebuilt { row: Unit },
+}
+
+impl From<FrameRebuildApplyError> for FrameRowRebuildValidationError {
+    fn from(error: FrameRebuildApplyError) -> Self {
+        Self::Apply(error)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FrameRowRebuildFailure<E> {
+    pub(crate) row: Unit,
+    pub(crate) error: E,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FrameRowRebuildApplication<E> {
+    pub(crate) resized_to: Option<GridSize>,
+    pub(crate) reset_contents: bool,
+    pub(crate) cleared_rows: Vec<Unit>,
+    pub(crate) marked_clean_rows: Vec<Unit>,
+    pub(crate) rebuilt_rows: Vec<Unit>,
+    pub(crate) failed_rows: Vec<FrameRowRebuildFailure<E>>,
 }
 
 impl FrameRebuildPlan {
@@ -171,6 +205,53 @@ impl FrameRebuildPlan {
         })
     }
 
+    pub(crate) fn drive_row_rebuilds<E>(
+        &self,
+        contents: &mut Contents,
+        row_dirty: &mut [bool],
+        mut rebuild_row: impl FnMut(&mut Contents, Unit) -> Result<(), E>,
+    ) -> Result<FrameRowRebuildApplication<E>, FrameRowRebuildValidationError> {
+        self.validate_row_rebuild_application(contents, row_dirty)?;
+
+        if let Some(size) = self.resize_to {
+            contents.resize(size);
+        }
+        if self.reset_contents {
+            contents.reset();
+        }
+
+        let clear_rows: HashSet<Unit> = self.clear_rows.iter().copied().collect();
+        let mark_clean_rows: HashSet<Unit> = self.rows_to_mark_clean.iter().copied().collect();
+        let mut rebuilt_rows = Vec::new();
+        let mut failed_rows = Vec::new();
+
+        for row in &self.rows_to_rebuild {
+            if clear_rows.contains(row) {
+                contents.clear(*row);
+            }
+            if mark_clean_rows.contains(row) {
+                row_dirty[*row as usize] = false;
+            }
+
+            match rebuild_row(contents, *row) {
+                Ok(()) => rebuilt_rows.push(*row),
+                Err(error) => {
+                    contents.clear(*row);
+                    failed_rows.push(FrameRowRebuildFailure { row: *row, error });
+                }
+            }
+        }
+
+        Ok(FrameRowRebuildApplication {
+            resized_to: self.resize_to,
+            reset_contents: self.reset_contents,
+            cleared_rows: self.clear_rows.clone(),
+            marked_clean_rows: self.rows_to_mark_clean.clone(),
+            rebuilt_rows,
+            failed_rows,
+        })
+    }
+
     fn validate_application(
         &self,
         contents: &Contents,
@@ -214,6 +295,59 @@ impl FrameRebuildPlan {
 
         Ok(())
     }
+
+    fn validate_row_rebuild_application(
+        &self,
+        contents: &Contents,
+        row_dirty: &[bool],
+    ) -> Result<(), FrameRowRebuildValidationError> {
+        self.validate_application(contents, row_dirty)?;
+        validate_unique_rows(&self.rows_to_rebuild, |row| {
+            FrameRowRebuildValidationError::DuplicateRebuildRow { row }
+        })?;
+        validate_unique_rows(&self.clear_rows, |row| {
+            FrameRowRebuildValidationError::DuplicateClearRow { row }
+        })?;
+        validate_unique_rows(&self.rows_to_mark_clean, |row| {
+            FrameRowRebuildValidationError::DuplicateMarkCleanRow { row }
+        })?;
+
+        for row in &self.rows_to_rebuild {
+            if *row >= self.effective_grid.rows {
+                return Err(FrameRowRebuildValidationError::RebuildRowOutOfBounds {
+                    row: *row,
+                    rows: self.effective_grid.rows,
+                });
+            }
+        }
+
+        let rebuild_rows: HashSet<Unit> = self.rows_to_rebuild.iter().copied().collect();
+        for row in &self.clear_rows {
+            if !rebuild_rows.contains(row) {
+                return Err(FrameRowRebuildValidationError::ClearRowNotRebuilt { row: *row });
+            }
+        }
+        for row in &self.rows_to_mark_clean {
+            if !rebuild_rows.contains(row) {
+                return Err(FrameRowRebuildValidationError::MarkCleanRowNotRebuilt { row: *row });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn validate_unique_rows(
+    rows: &[Unit],
+    duplicate: impl Fn(Unit) -> FrameRowRebuildValidationError,
+) -> Result<(), FrameRowRebuildValidationError> {
+    let mut seen = HashSet::new();
+    for row in rows {
+        if !seen.insert(*row) {
+            return Err(duplicate(*row));
+        }
+    }
+    Ok(())
 }
 
 fn plan_preedit_range(
@@ -748,5 +882,362 @@ mod tests {
             }
         );
         assert_eq!(contents.size(), grid(2, 2));
+    }
+
+    #[test]
+    fn drive_partial_rows_clears_marks_and_rebuilds_each_row() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Partial,
+            &[false, true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 3));
+        let mut row_dirty = vec![false, true, true];
+        let mut observed = Vec::new();
+
+        let applied = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |contents, row| {
+                observed.push(row);
+                assert_eq!(*contents.bg_cell(row as usize, 0), CellBg([0, 0, 0, 0]));
+                *contents.bg_cell_mut(row as usize, 0) = CellBg([row as u8 + 20, 1, 1, 255]);
+                Ok::<(), &'static str>(())
+            })
+            .expect("drive row rebuilds");
+
+        assert_eq!(observed, vec![1, 2]);
+        assert_eq!(applied.cleared_rows, vec![1, 2]);
+        assert_eq!(applied.marked_clean_rows, vec![1, 2]);
+        assert_eq!(applied.rebuilt_rows, vec![1, 2]);
+        assert!(applied.failed_rows.is_empty());
+        assert_eq!(row_dirty, vec![false, false, false]);
+        assert_eq!(*contents.bg_cell(1, 0), CellBg([21, 1, 1, 255]));
+        assert_eq!(*contents.bg_cell(2, 0), CellBg([22, 1, 1, 255]));
+    }
+
+    #[test]
+    fn drive_full_rebuild_resets_once_and_rebuilds_all_rows() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Full,
+            &[true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 2));
+        let mut row_dirty = vec![true, true];
+        let mut observed = Vec::new();
+
+        let applied = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |contents, row| {
+                observed.push(row);
+                assert_eq!(*contents.bg_cell(row as usize, 0), CellBg([0, 0, 0, 0]));
+                *contents.bg_cell_mut(row as usize, 0) = CellBg([row as u8 + 30, 2, 2, 255]);
+                Ok::<(), &'static str>(())
+            })
+            .expect("drive row rebuilds");
+
+        assert_eq!(observed, vec![0, 1]);
+        assert!(applied.reset_contents);
+        assert!(applied.cleared_rows.is_empty());
+        assert_eq!(applied.marked_clean_rows, vec![0, 1]);
+        assert_eq!(applied.rebuilt_rows, vec![0, 1]);
+        assert_eq!(row_dirty, vec![false, false]);
+        assert_eq!(*contents.bg_cell(0, 0), CellBg([30, 2, 2, 255]));
+        assert_eq!(*contents.bg_cell(1, 0), CellBg([31, 2, 2, 255]));
+    }
+
+    #[test]
+    fn drive_callback_errors_clear_failed_row_and_continue() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Partial,
+            &[true, true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 3));
+        let mut row_dirty = vec![true, true, true];
+        let mut observed = Vec::new();
+
+        let applied = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |contents, row| {
+                observed.push(row);
+                *contents.bg_cell_mut(row as usize, 0) = CellBg([row as u8 + 40, 3, 3, 255]);
+                if row == 1 {
+                    Err("row failed")
+                } else {
+                    Ok(())
+                }
+            })
+            .expect("drive row rebuilds");
+
+        assert_eq!(observed, vec![0, 1, 2]);
+        assert_eq!(applied.rebuilt_rows, vec![0, 2]);
+        assert_eq!(
+            applied.failed_rows,
+            vec![FrameRowRebuildFailure {
+                row: 1,
+                error: "row failed",
+            }]
+        );
+        assert_eq!(*contents.bg_cell(0, 0), CellBg([40, 3, 3, 255]));
+        assert_eq!(*contents.bg_cell(1, 0), CellBg([0, 0, 0, 0]));
+        assert_eq!(*contents.bg_cell(2, 0), CellBg([42, 3, 3, 255]));
+        assert_eq!(row_dirty, vec![false, false, false]);
+    }
+
+    #[test]
+    fn drive_resize_happens_before_callback() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(1, 1),
+            grid(2, 2),
+            RenderDirty::Clean,
+            &[false, false],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(1, 1));
+        let mut row_dirty = vec![false, false];
+        let mut sizes = Vec::new();
+
+        let applied = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |contents, row| {
+                sizes.push((row, contents.size()));
+                Ok::<(), &'static str>(())
+            })
+            .expect("drive row rebuilds");
+
+        assert_eq!(applied.resized_to, Some(grid(2, 2)));
+        assert_eq!(contents.size(), grid(2, 2));
+        assert_eq!(sizes, vec![(0, grid(2, 2)), (1, grid(2, 2))]);
+    }
+
+    #[test]
+    fn drive_clean_empty_plan_is_noop() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Clean,
+            &[false, false],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![false, false];
+
+        let applied = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                panic!("empty plan should not invoke callback");
+                #[allow(unreachable_code)]
+                Ok::<(), &'static str>(())
+            })
+            .expect("drive row rebuilds");
+
+        assert_eq!(applied.resized_to, None);
+        assert!(!applied.reset_contents);
+        assert!(applied.cleared_rows.is_empty());
+        assert!(applied.marked_clean_rows.is_empty());
+        assert!(applied.rebuilt_rows.is_empty());
+        assert!(applied.failed_rows.is_empty());
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![false, false]);
+    }
+
+    #[test]
+    fn drive_rejects_out_of_bounds_rebuild_row_without_mutation() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Partial,
+            &[false, true],
+        ))
+        .expect("plan");
+        plan.rows_to_rebuild = vec![2];
+        plan.clear_rows.clear();
+        plan.rows_to_mark_clean.clear();
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![false, true];
+
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("invalid rebuild row should error before mutation");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::RebuildRowOutOfBounds { row: 2, rows: 2 }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![false, true]);
+    }
+
+    #[test]
+    fn drive_rejects_duplicate_rows_without_mutation() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Partial,
+            &[false, true],
+        ))
+        .expect("plan");
+        plan.rows_to_rebuild = vec![1, 1];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let mut row_dirty = vec![false, true];
+
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("duplicate rebuild rows should error");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::DuplicateRebuildRow { row: 1 }
+        );
+        assert_eq!(row_dirty, vec![false, true]);
+    }
+
+    #[test]
+    fn drive_rejects_duplicate_clear_rows_without_mutation() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Partial,
+            &[false, true],
+        ))
+        .expect("plan");
+        plan.clear_rows = vec![1, 1];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![false, true];
+
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("duplicate clear rows should error");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::DuplicateClearRow { row: 1 }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![false, true]);
+    }
+
+    #[test]
+    fn drive_rejects_duplicate_mark_clean_rows_without_mutation() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 2),
+            grid(2, 2),
+            RenderDirty::Partial,
+            &[false, true],
+        ))
+        .expect("plan");
+        plan.rows_to_mark_clean = vec![1, 1];
+        let mut contents = contents_with_rows(grid(2, 2));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![false, true];
+
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("duplicate mark-clean rows should error");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::DuplicateMarkCleanRow { row: 1 }
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![false, true]);
+    }
+
+    #[test]
+    fn drive_rejects_clear_or_mark_rows_outside_rebuild_set() {
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Partial,
+            &[true, true, false],
+        ))
+        .expect("plan");
+        plan.clear_rows = vec![0, 2];
+        let mut contents = contents_with_rows(grid(2, 3));
+        let mut row_dirty = vec![true, true, false];
+
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("clear row outside rebuild set should error");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::ClearRowNotRebuilt { row: 2 }
+        );
+
+        let mut plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Partial,
+            &[true, true, false],
+        ))
+        .expect("plan");
+        plan.rows_to_mark_clean = vec![0, 2];
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("mark-clean row outside rebuild set should error");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::MarkCleanRowNotRebuilt { row: 2 }
+        );
+        assert_eq!(row_dirty, vec![true, true, false]);
+    }
+
+    #[test]
+    fn drive_wraps_apply_validation_errors_without_mutation() {
+        let plan = FrameRebuildPlan::build(input(
+            grid(2, 3),
+            grid(2, 3),
+            RenderDirty::Full,
+            &[true, true, true],
+        ))
+        .expect("plan");
+        let mut contents = contents_with_rows(grid(2, 3));
+        let bg = contents.bg_cells().to_vec();
+        let fg = contents.fg_rows().to_vec();
+        let mut row_dirty = vec![true, true];
+
+        let err = plan
+            .drive_row_rebuilds(&mut contents, &mut row_dirty, |_contents, _row| {
+                Ok::<(), &'static str>(())
+            })
+            .expect_err("short dirty slice should error before mutation");
+
+        assert_eq!(
+            err,
+            FrameRowRebuildValidationError::Apply(FrameRebuildApplyError::DirtyRowsTooShort {
+                needed: 3,
+                actual: 2,
+            })
+        );
+        assert_eq!(contents.bg_cells(), bg);
+        assert_eq!(contents.fg_rows(), fg);
+        assert_eq!(row_dirty, vec![true, true]);
     }
 }

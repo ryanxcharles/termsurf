@@ -138,3 +138,64 @@ validation now match the scoped upstream behavior. The only clarification was
 that `rebuilt_rows` should mean rows whose callback succeeded, with failed
 attempts recorded only in `failed_rows`; the plan was updated accordingly before
 the plan commit.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a per-row frame rebuild driver:
+
+- `roastty/src/renderer/frame_rebuild.rs` adds `FrameRowRebuildValidationError`,
+  `FrameRowRebuildFailure`, and `FrameRowRebuildApplication`.
+- `FrameRebuildPlan::drive_row_rebuilds` validates plan/input invariants,
+  resizes first, resets full-rebuild contents, then visits each
+  `rows_to_rebuild` row in order.
+- For each row, the driver clears rows listed in `clear_rows`, marks rows listed
+  in `rows_to_mark_clean` clean, then invokes the rebuild callback.
+- Callback failures match upstream recovery for this boundary: the failed row is
+  cleared again, recorded in `failed_rows`, and later rows continue.
+- Validation rejects stale/manual row-set inconsistencies before mutation:
+  out-of-bounds rebuild rows, duplicate row entries, `clear_rows` outside
+  `rows_to_rebuild`, `rows_to_mark_clean` outside `rows_to_rebuild`, and the
+  existing grid/dirty-slice validation errors.
+- `rebuilt_rows` contains only rows whose callback succeeded.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/generic.zig` `rebuildCells`.
+- Inspected `roastty/src/renderer/frame_rebuild.rs`.
+- Inspected `roastty/src/renderer/cell.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture` — passed, 32
+  tests.
+- `cargo test -p roastty renderer::cell::tests::contents_resize -- --nocapture`
+  — passed, 4 tests.
+- `cargo test -p roastty renderer::cell::tests::clear -- --nocapture` — passed,
+  2 tests.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/817-frame-row-rebuild-driver.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 817 restores the per-row sequencing boundary that future row
+formatting should use: resize/reset setup first, then per planned row
+`clear -> mark clean -> rebuild callback`, with upstream-style
+clear-and-continue recovery when a row rebuild fails. The next renderer slice
+can connect this driver to the existing `cell.rs` row-formatting helpers and
+real per-row `RunOptions` inputs, while leaving GPU upload, Metal draw
+submission, pacing, and renderer-thread integration for later.
+
+## Completion Review
+
+Codex reviewed the completed implementation and found no driver correctness
+bugs. The review confirmed that the driver validates before mutation, resizes,
+resets, executes per-row clear/mark-clean/callback sequencing, and clears failed
+callback rows while continuing to later rows. It found two issues before the
+result commit: duplicate `clear_rows` and duplicate `rows_to_mark_clean` needed
+explicit tests because they were part of the amended blocker resolution, and the
+result record omitted the successful Prettier and `git diff --check` commands.
+
+Both findings were fixed before the result commit. The duplicate row-set tests
+were added, `renderer::frame_rebuild` increased from 30 to 32 passing tests, and
+the verification record now includes Prettier and `git diff --check`.
