@@ -112,9 +112,10 @@ CoreGraphics, etc., reached via `objc2` bindings) are bound, not reimplemented.
 Zig-origin libraries:
 
 - **uucode** — _from-scratch._ Unicode property, grapheme-break, and width
-  tables used across the terminal and font layers. Roastty Unicode tables
-  generated from the UCD, matching Ghostty's exact property semantics (crates
-  like `unicode-width`/`unicode-segmentation` may cross-check, not replace).
+  tables used across the terminal and font layers. Roastty Unicode tables should
+  be generated from the UCD as each table is ported, matching Ghostty's exact
+  property semantics (crates like `unicode-width`/`unicode-segmentation` may
+  cross-check, not replace).
 - **z2d** — _satisfied for sprite rasterization by a Rust port._ 2D vector
   rasterization for the sprite font's anti-aliased path glyphs is implemented in
   `font/sprite/raster.rs` and used by `Canvas` path methods. CPU debug overlay
@@ -362,8 +363,11 @@ Experiment 246).
 
 ### Supporting subsystems
 
-- [ ] `unicode/` (grapheme break, width/wcwidth, properties) — missing (no
-      tables; widths currently implicit)
+- [ ] `unicode/` (grapheme break, width/wcwidth, properties) — partial: the
+      generated `Emoji_Presentation` table exists under `font/` and feeds the
+      codepoint resolver's default emoji/text presentation; no standalone
+      `unicode/` namespace yet, and grapheme-break, width/wcwidth, and broader
+      property tables remain incomplete
 - [x] Datastruct: `OffsetHashMap`, `PageList`, `BitmapAllocator`,
       `RefCountedSet` (in `terminal/`)
 - [x] Datastruct: `CircBuf`, `IntrusiveLinkedList`, other utilities —
@@ -380,7 +384,10 @@ Out of scope / tooling: `build/`, `benchmark/`, `extra/`, `simd/`, `stb/`,
 ### Dependencies (provided in Rust — crate or from-scratch per the hybrid policy)
 
 - [x] `zig-objc` → satisfied by `objc2`
-- [ ] `uucode` (Unicode tables) — not started (no Unicode tables exist yet)
+- [ ] `uucode` (Unicode tables) — partial: the generated `Emoji_Presentation`
+      table from `vendor/uucode/ucd/emoji/emoji-data.txt` exists with focused
+      tests and resolver use; broader Unicode property, grapheme-break, and
+      width tables remain open
 - [x] `z2d` (sprite path rasterizer) — satisfied by the Rust
       `font/sprite/raster.rs` port used by `Canvas` line/stroke/fill path
       methods; CPU debug overlay work remains tracked in renderer rows
@@ -2138,6 +2145,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 794: Config Checklist Sync](794-config-checklist-sync.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 795: Unicode Table Checklist Sync](795-unicode-table-checklist-sync.md)
+  — **Designed**
 
 ## Non-Goals
 
