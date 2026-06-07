@@ -237,10 +237,11 @@ Experiment 246).
       planner for resize/full/row-dirty/preedit decisions exists and can apply
       resize/reset/clear/mark-clean actions to `Contents`; a per-row driver
       restores upstream clear/mark-clean/rebuild sequencing for callbacks;
-      prepared row-formatting inputs can rebuild planned `Contents` rows; live
-      terminal-state collection, cursor/preedit glyph emission, glyph
-      upload/draw calls, pacing, and live renderer integration remain missing
-      (critical)
+      prepared row-formatting inputs can rebuild planned `Contents` rows;
+      prepared cursor/preedit overlay inputs can clear stale cursors, suppress
+      cursors during active preedit, and emit planned cursor/preedit glyphs;
+      live terminal-state collection, cursor uniform updates, glyph upload/draw
+      calls, pacing, and live renderer integration remain missing (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
       partial: custom-shader uniforms, target enum, and per-frame/state update
       helpers exist; shader file loading, debug overlay, renderer thread, and
@@ -2245,7 +2246,7 @@ are past the correctness-critical foundation.
 - [Experiment 818: Drive Row Formatting](818-drive-row-formatting.md) — **Pass**
   · Codex/Codex/Codex
 - [Experiment 819: Drive Cursor and Preedit Overlays](819-drive-cursor-preedit-overlays.md)
-  — **Designed** · Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

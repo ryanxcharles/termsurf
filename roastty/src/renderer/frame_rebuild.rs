@@ -13,7 +13,10 @@
 use crate::font::codepoint_resolver::ResolverRenderError;
 use crate::font::run::{shape_row_cached, RunOptions};
 use crate::font::shared_grid::SharedGrid;
-use crate::renderer::cell::{rebuild_bg_row, rebuild_row, Contents, Highlight, SelectionConfig};
+use crate::renderer::cell::{
+    add_cursor, add_preedit, rebuild_bg_row, rebuild_row, Contents, Highlight, SelectionConfig,
+};
+use crate::renderer::cursor::Style as CursorStyle;
 use crate::renderer::size::{GridSize, Unit};
 use crate::renderer::state::{Preedit, PreeditRange};
 use crate::terminal::color::{Palette, Rgb};
@@ -178,6 +181,94 @@ impl From<ResolverRenderError> for FrameRowRenderError {
     fn from(error: ResolverRenderError) -> Self {
         Self::Render(error)
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameCursorOverlay {
+    pub(crate) grid_pos: [u16; 2],
+    pub(crate) style: CursorStyle,
+    pub(crate) wide: bool,
+    pub(crate) color: Rgb,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameTextOverlayInput<'a> {
+    pub(crate) preedit: Option<&'a Preedit>,
+    pub(crate) cursor: Option<FrameCursorOverlay>,
+    pub(crate) screen_fg: Rgb,
+    pub(crate) alpha: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameTextOverlayValidationError {
+    ContentsGridMismatch {
+        expected: GridSize,
+        actual: GridSize,
+    },
+    CursorOutOfBounds {
+        grid_pos: [u16; 2],
+        size: GridSize,
+    },
+    WideCursorOutOfBounds {
+        grid_pos: [u16; 2],
+        columns: Unit,
+    },
+    PreeditRowOutOfBounds {
+        row: Unit,
+        rows: Unit,
+    },
+    PreeditRangeInvalid {
+        range: PreeditRange,
+    },
+    PreeditRangeOutOfBounds {
+        range: PreeditRange,
+        columns: Unit,
+    },
+    MissingPreedit,
+    PreeditOffsetOutOfBounds {
+        cp_offset: usize,
+        codepoints: usize,
+    },
+    PreeditWidthMismatch {
+        expected: Unit,
+        actual: Unit,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameTextOverlayRenderError {
+    Render(ResolverRenderError),
+}
+
+impl From<ResolverRenderError> for FrameTextOverlayRenderError {
+    fn from(error: ResolverRenderError) -> Self {
+        Self::Render(error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrameTextOverlayError {
+    Validation(FrameTextOverlayValidationError),
+    Render(FrameTextOverlayRenderError),
+}
+
+impl From<FrameTextOverlayValidationError> for FrameTextOverlayError {
+    fn from(error: FrameTextOverlayValidationError) -> Self {
+        Self::Validation(error)
+    }
+}
+
+impl From<FrameTextOverlayRenderError> for FrameTextOverlayError {
+    fn from(error: FrameTextOverlayRenderError) -> Self {
+        Self::Render(error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FrameTextOverlayApplication {
+    pub(crate) cursor_cleared: bool,
+    pub(crate) cursor_drawn: Option<CursorStyle>,
+    pub(crate) preedit_drawn: bool,
 }
 
 impl FrameRebuildPlan {
@@ -376,6 +467,64 @@ impl FrameRebuildPlan {
         .map_err(FrameRowFormatValidationError::from)
     }
 
+    pub(crate) fn draw_text_overlays(
+        &self,
+        contents: &mut Contents,
+        grid: &mut SharedGrid,
+        input: FrameTextOverlayInput<'_>,
+    ) -> Result<FrameTextOverlayApplication, FrameTextOverlayError> {
+        self.validate_text_overlay_input(contents, &input)?;
+
+        contents.set_cursor(None, None);
+
+        let mut cursor_drawn = None;
+        let mut preedit_drawn = false;
+
+        if let Some(preedit) = input.preedit {
+            if let Some(range) = self.preedit_range {
+                add_preedit(
+                    contents,
+                    grid,
+                    preedit,
+                    range.range,
+                    range.row,
+                    self.effective_grid.columns,
+                    rgb_array(input.screen_fg),
+                )
+                .map_err(FrameTextOverlayRenderError::from)?;
+                preedit_drawn = true;
+            }
+
+            return Ok(FrameTextOverlayApplication {
+                cursor_cleared: true,
+                cursor_drawn,
+                preedit_drawn,
+            });
+        }
+
+        if let Some(cursor) = input.cursor {
+            add_cursor(
+                contents,
+                grid,
+                cursor.grid_pos,
+                cursor.style,
+                cursor.wide,
+                rgb_array(cursor.color),
+                input.alpha,
+            )
+            .map_err(FrameTextOverlayRenderError::from)?;
+            if contents.get_cursor_glyph().is_some() {
+                cursor_drawn = Some(cursor.style);
+            }
+        }
+
+        Ok(FrameTextOverlayApplication {
+            cursor_cleared: true,
+            cursor_drawn,
+            preedit_drawn,
+        })
+    }
+
     fn validate_application(
         &self,
         contents: &Contents,
@@ -443,6 +592,92 @@ impl FrameRebuildPlan {
         Ok(())
     }
 
+    fn validate_text_overlay_input(
+        &self,
+        contents: &Contents,
+        input: &FrameTextOverlayInput<'_>,
+    ) -> Result<(), FrameTextOverlayValidationError> {
+        if contents.size() != self.effective_grid {
+            return Err(FrameTextOverlayValidationError::ContentsGridMismatch {
+                expected: self.effective_grid,
+                actual: contents.size(),
+            });
+        }
+
+        if let Some(cursor) = input.cursor {
+            let [x, y] = cursor.grid_pos;
+            if x >= self.effective_grid.columns || y >= self.effective_grid.rows {
+                return Err(FrameTextOverlayValidationError::CursorOutOfBounds {
+                    grid_pos: cursor.grid_pos,
+                    size: self.effective_grid,
+                });
+            }
+            if cursor.wide && x + 1 >= self.effective_grid.columns {
+                return Err(FrameTextOverlayValidationError::WideCursorOutOfBounds {
+                    grid_pos: cursor.grid_pos,
+                    columns: self.effective_grid.columns,
+                });
+            }
+        }
+
+        if let Some(preedit_range) = self.preedit_range {
+            if preedit_range.row >= self.effective_grid.rows {
+                return Err(FrameTextOverlayValidationError::PreeditRowOutOfBounds {
+                    row: preedit_range.row,
+                    rows: self.effective_grid.rows,
+                });
+            }
+
+            let range = preedit_range.range;
+            if range.start > range.end {
+                return Err(FrameTextOverlayValidationError::PreeditRangeInvalid { range });
+            }
+            if range.end >= self.effective_grid.columns {
+                return Err(FrameTextOverlayValidationError::PreeditRangeOutOfBounds {
+                    range,
+                    columns: self.effective_grid.columns,
+                });
+            }
+
+            let Some(preedit) = input.preedit else {
+                return Err(FrameTextOverlayValidationError::MissingPreedit);
+            };
+            if range.cp_offset > preedit.codepoints.len() {
+                return Err(FrameTextOverlayValidationError::PreeditOffsetOutOfBounds {
+                    cp_offset: range.cp_offset,
+                    codepoints: preedit.codepoints.len(),
+                });
+            }
+
+            let codepoints = &preedit.codepoints[range.cp_offset..];
+            let actual = preedit_width(codepoints);
+            let expected = range.end - range.start + 1;
+            if actual < expected {
+                return Err(FrameTextOverlayValidationError::PreeditWidthMismatch {
+                    expected,
+                    actual,
+                });
+            }
+
+            let mut x = range.start;
+            for cp in codepoints {
+                let width = if cp.wide { 2 } else { 1 };
+                let end = x + width - 1;
+                let allowed_final_wide =
+                    cp.wide && x == range.end && range.end + 1 == self.effective_grid.columns;
+                if x > range.end || (end > range.end && !allowed_final_wide) {
+                    return Err(FrameTextOverlayValidationError::PreeditWidthMismatch {
+                        expected,
+                        actual,
+                    });
+                }
+                x = x.saturating_add(width);
+            }
+        }
+
+        Ok(())
+    }
+
     fn validate_row_rebuild_application(
         &self,
         contents: &Contents,
@@ -484,6 +719,17 @@ impl FrameRebuildPlan {
     }
 }
 
+fn rgb_array(rgb: Rgb) -> [u8; 3] {
+    [rgb.r, rgb.g, rgb.b]
+}
+
+fn preedit_width(codepoints: &[crate::renderer::state::Codepoint]) -> Unit {
+    codepoints
+        .iter()
+        .map(|cp| if cp.wide { 2 } else { 1 })
+        .sum()
+}
+
 fn validate_unique_rows(
     rows: &[Unit],
     duplicate: impl Fn(Unit) -> FrameRowRebuildValidationError,
@@ -503,6 +749,9 @@ fn plan_preedit_range(
     rows_to_rebuild: &[Unit],
 ) -> Option<FramePreeditRange> {
     let preedit = input.preedit?;
+    if preedit.codepoints.is_empty() {
+        return None;
+    }
     let cursor = input.cursor_viewport?;
     let row = Unit::try_from(cursor.y).ok()?;
     if row >= row_count || cursor.x >= input.terminal_grid.columns {
@@ -1661,5 +1910,413 @@ mod tests {
         assert_eq!(contents.bg_cells(), bg);
         assert_eq!(contents.fg_rows(), fg);
         assert_eq!(row_dirty, vec![true]);
+    }
+
+    fn text_overlay_input(
+        preedit: Option<&Preedit>,
+        cursor: Option<FrameCursorOverlay>,
+    ) -> FrameTextOverlayInput<'_> {
+        FrameTextOverlayInput {
+            preedit,
+            cursor,
+            screen_fg: Rgb::new(220, 221, 222),
+            alpha: 255,
+        }
+    }
+
+    fn cursor_overlay(style: CursorStyle, grid_pos: [u16; 2]) -> FrameCursorOverlay {
+        FrameCursorOverlay {
+            grid_pos,
+            style,
+            wide: false,
+            color: Rgb::new(7, 8, 9),
+        }
+    }
+
+    fn plan_for_grid(size: GridSize) -> FrameRebuildPlan {
+        FrameRebuildPlan::build(input(
+            size,
+            size,
+            RenderDirty::Full,
+            &vec![true; size.rows as usize],
+        ))
+        .expect("plan")
+    }
+
+    #[test]
+    fn draw_text_overlays_clears_stale_cursor_without_overlay() {
+        let plan = plan_for_grid(grid(3, 2));
+        let mut contents = contents_with_rows(grid(3, 2));
+        contents.set_cursor(Some(dummy_vertex(0, 99)), Some(CursorStyle::Block));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(&mut contents, &mut shared, text_overlay_input(None, None))
+            .expect("draw overlays");
+
+        assert_eq!(
+            applied,
+            FrameTextOverlayApplication {
+                cursor_cleared: true,
+                cursor_drawn: None,
+                preedit_drawn: false,
+            }
+        );
+        assert_eq!(contents.get_cursor_glyph(), None);
+    }
+
+    #[test]
+    fn draw_text_overlays_draws_cursor_overlay() {
+        let plan = plan_for_grid(grid(4, 2));
+        let mut contents = Contents::default();
+        contents.resize(grid(4, 2));
+        let mut shared = menlo_grid();
+        let cursor = cursor_overlay(CursorStyle::Bar, [1, 0]);
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(None, Some(cursor)),
+            )
+            .expect("draw overlays");
+
+        assert_eq!(applied.cursor_drawn, Some(CursorStyle::Bar));
+        let glyph = contents.get_cursor_glyph().expect("cursor glyph");
+        assert_eq!(glyph.grid_pos, [1, 0]);
+        assert!(contents.fg_rows()[0].is_empty());
+        assert_eq!(contents.fg_rows()[3].len(), 1);
+    }
+
+    #[test]
+    fn draw_text_overlays_places_block_cursor_in_first_reserved_row() {
+        let plan = plan_for_grid(grid(4, 2));
+        let mut contents = Contents::default();
+        contents.resize(grid(4, 2));
+        let mut shared = menlo_grid();
+        let cursor = cursor_overlay(CursorStyle::Block, [2, 1]);
+
+        plan.draw_text_overlays(
+            &mut contents,
+            &mut shared,
+            text_overlay_input(None, Some(cursor)),
+        )
+        .expect("draw overlays");
+
+        assert_eq!(contents.fg_rows()[0].len(), 1);
+        assert!(contents.fg_rows()[3].is_empty());
+        assert_eq!(contents.fg_rows()[0][0].grid_pos, [2, 1]);
+    }
+
+    #[test]
+    fn draw_text_overlays_draws_preedit_and_suppresses_cursor() {
+        let p = Preedit {
+            codepoints: vec![
+                Codepoint {
+                    codepoint: 'A' as u32,
+                    wide: false,
+                },
+                Codepoint {
+                    codepoint: 'B' as u32,
+                    wide: false,
+                },
+            ],
+        };
+        let mut plan = plan_for_grid(grid(4, 1));
+        plan.preedit_range = Some(FramePreeditRange {
+            row: 0,
+            range: PreeditRange {
+                start: 1,
+                end: 2,
+                cp_offset: 0,
+            },
+        });
+        let mut contents = Contents::default();
+        contents.resize(grid(4, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 88)), Some(CursorStyle::Block));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(Some(&p), Some(cursor_overlay(CursorStyle::Bar, [0, 0]))),
+            )
+            .expect("draw overlays");
+
+        assert_eq!(
+            applied,
+            FrameTextOverlayApplication {
+                cursor_cleared: true,
+                cursor_drawn: None,
+                preedit_drawn: true,
+            }
+        );
+        assert_eq!(contents.get_cursor_glyph(), None);
+        let cols: Vec<u16> = contents.fg_rows()[1]
+            .iter()
+            .map(|vertex| vertex.grid_pos[0])
+            .collect();
+        assert_eq!(cols, [1, 1, 2, 2]);
+    }
+
+    #[test]
+    fn draw_text_overlays_active_preedit_without_range_still_suppresses_cursor() {
+        let p = preedit(&[false]);
+        let plan = plan_for_grid(grid(3, 1));
+        let mut contents = Contents::default();
+        contents.resize(grid(3, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 77)), Some(CursorStyle::Block));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(Some(&p), Some(cursor_overlay(CursorStyle::Bar, [0, 0]))),
+            )
+            .expect("draw overlays");
+
+        assert_eq!(applied.cursor_drawn, None);
+        assert!(!applied.preedit_drawn);
+        assert_eq!(contents.get_cursor_glyph(), None);
+        assert!(contents.fg_rows()[1].is_empty());
+    }
+
+    #[test]
+    fn draw_text_overlays_accepts_plan_generated_wide_preedit_at_edge() {
+        let p = preedit(&[true]);
+        let plan = FrameRebuildPlan::build(FrameRebuildInput {
+            current_grid: grid(1, 1),
+            terminal_grid: grid(1, 1),
+            dirty: RenderDirty::Full,
+            row_dirty: &[true],
+            preedit: Some(&p),
+            cursor_viewport: Some(Coordinate::new(0, 0)),
+        })
+        .expect("plan");
+        assert_eq!(
+            plan.preedit_range,
+            Some(FramePreeditRange {
+                row: 0,
+                range: PreeditRange {
+                    start: 0,
+                    end: 0,
+                    cp_offset: 0,
+                },
+            })
+        );
+        let mut contents = Contents::default();
+        contents.resize(grid(1, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 76)), Some(CursorStyle::Block));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(Some(&p), Some(cursor_overlay(CursorStyle::Bar, [0, 0]))),
+            )
+            .expect("wide edge preedit should draw best-effort");
+
+        assert!(applied.preedit_drawn);
+        assert_eq!(applied.cursor_drawn, None);
+        assert_eq!(contents.get_cursor_glyph(), None);
+        assert_eq!(contents.fg_rows()[1].len(), 2);
+    }
+
+    #[test]
+    fn empty_plan_generated_preedit_suppresses_cursor_without_range() {
+        let p = Preedit::default();
+        let plan = FrameRebuildPlan::build(FrameRebuildInput {
+            current_grid: grid(2, 1),
+            terminal_grid: grid(2, 1),
+            dirty: RenderDirty::Full,
+            row_dirty: &[true],
+            preedit: Some(&p),
+            cursor_viewport: Some(Coordinate::new(0, 0)),
+        })
+        .expect("plan");
+        assert_eq!(plan.preedit_range, None);
+        let mut contents = Contents::default();
+        contents.resize(grid(2, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 75)), Some(CursorStyle::Block));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(Some(&p), Some(cursor_overlay(CursorStyle::Bar, [0, 0]))),
+            )
+            .expect("empty preedit should suppress cursor");
+
+        assert_eq!(applied.cursor_drawn, None);
+        assert!(!applied.preedit_drawn);
+        assert_eq!(contents.get_cursor_glyph(), None);
+        assert!(contents.fg_rows()[1].is_empty());
+    }
+
+    #[test]
+    fn draw_text_overlays_rejects_contents_grid_mismatch_without_mutation() {
+        let plan = plan_for_grid(grid(2, 1));
+        let mut contents = Contents::default();
+        contents.resize(grid(3, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 66)), Some(CursorStyle::Block));
+        let fg = contents.fg_rows().to_vec();
+        let mut shared = menlo_grid();
+
+        let err = plan
+            .draw_text_overlays(&mut contents, &mut shared, text_overlay_input(None, None))
+            .expect_err("contents mismatch should reject before mutation");
+
+        assert_eq!(
+            err,
+            FrameTextOverlayError::Validation(
+                FrameTextOverlayValidationError::ContentsGridMismatch {
+                    expected: grid(2, 1),
+                    actual: grid(3, 1),
+                }
+            )
+        );
+        assert_eq!(contents.fg_rows(), fg);
+        assert!(contents.get_cursor_glyph().is_some());
+    }
+
+    #[test]
+    fn draw_text_overlays_rejects_wide_cursor_extent_without_mutation() {
+        let plan = plan_for_grid(grid(2, 1));
+        let mut contents = Contents::default();
+        contents.resize(grid(2, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 55)), Some(CursorStyle::Block));
+        let fg = contents.fg_rows().to_vec();
+        let mut shared = menlo_grid();
+        let mut cursor = cursor_overlay(CursorStyle::Block, [1, 0]);
+        cursor.wide = true;
+
+        let err = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(None, Some(cursor)),
+            )
+            .expect_err("wide cursor should reject before mutation");
+
+        assert_eq!(
+            err,
+            FrameTextOverlayError::Validation(
+                FrameTextOverlayValidationError::WideCursorOutOfBounds {
+                    grid_pos: [1, 0],
+                    columns: 2,
+                }
+            )
+        );
+        assert_eq!(contents.fg_rows(), fg);
+    }
+
+    #[test]
+    fn draw_text_overlays_rejects_invalid_preedit_payload_without_mutation() {
+        let p = preedit(&[false]);
+        let mut plan = plan_for_grid(grid(3, 1));
+        plan.preedit_range = Some(FramePreeditRange {
+            row: 0,
+            range: PreeditRange {
+                start: 0,
+                end: 1,
+                cp_offset: 0,
+            },
+        });
+        let mut contents = Contents::default();
+        contents.resize(grid(3, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 44)), Some(CursorStyle::Block));
+        let fg = contents.fg_rows().to_vec();
+        let mut shared = menlo_grid();
+
+        let err = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(Some(&p), None),
+            )
+            .expect_err("payload width should reject before mutation");
+
+        assert_eq!(
+            err,
+            FrameTextOverlayError::Validation(
+                FrameTextOverlayValidationError::PreeditWidthMismatch {
+                    expected: 2,
+                    actual: 1,
+                }
+            )
+        );
+        assert_eq!(contents.fg_rows(), fg);
+        assert!(contents.get_cursor_glyph().is_some());
+    }
+
+    #[test]
+    fn draw_text_overlays_rejects_too_long_preedit_payload_without_mutation() {
+        let p = preedit(&[false, false]);
+        let mut plan = plan_for_grid(grid(2, 1));
+        plan.preedit_range = Some(FramePreeditRange {
+            row: 0,
+            range: PreeditRange {
+                start: 0,
+                end: 0,
+                cp_offset: 0,
+            },
+        });
+        let mut contents = Contents::default();
+        contents.resize(grid(2, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 43)), Some(CursorStyle::Block));
+        let fg = contents.fg_rows().to_vec();
+        let mut shared = menlo_grid();
+
+        let err = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                text_overlay_input(Some(&p), None),
+            )
+            .expect_err("too-long payload should reject before mutation");
+
+        assert_eq!(
+            err,
+            FrameTextOverlayError::Validation(
+                FrameTextOverlayValidationError::PreeditWidthMismatch {
+                    expected: 1,
+                    actual: 2,
+                }
+            )
+        );
+        assert_eq!(contents.fg_rows(), fg);
+        assert!(contents.get_cursor_glyph().is_some());
+    }
+
+    #[test]
+    fn draw_text_overlays_rejects_missing_preedit_payload_without_mutation() {
+        let mut plan = plan_for_grid(grid(3, 1));
+        plan.preedit_range = Some(FramePreeditRange {
+            row: 0,
+            range: PreeditRange {
+                start: 0,
+                end: 0,
+                cp_offset: 0,
+            },
+        });
+        let mut contents = Contents::default();
+        contents.resize(grid(3, 1));
+        contents.set_cursor(Some(dummy_vertex(0, 33)), Some(CursorStyle::Block));
+        let fg = contents.fg_rows().to_vec();
+        let mut shared = menlo_grid();
+
+        let err = plan
+            .draw_text_overlays(&mut contents, &mut shared, text_overlay_input(None, None))
+            .expect_err("missing preedit should reject before mutation");
+
+        assert_eq!(
+            err,
+            FrameTextOverlayError::Validation(FrameTextOverlayValidationError::MissingPreedit)
+        );
+        assert_eq!(contents.fg_rows(), fg);
     }
 }

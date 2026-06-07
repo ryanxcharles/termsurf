@@ -149,3 +149,82 @@ contents-grid validation, extent-validation, and wrapper-test findings were
 resolved. The only note was wording-level: `cell::CursorStyle` is effectively
 the renderer cursor style used by the cell helper, so the implementation should
 use the existing local type path rather than introduce a duplicate style.
+
+## Result
+
+**Result:** Pass
+
+Roastty can now emit prepared text overlays after planned row formatting:
+
+- `roastty/src/renderer/frame_rebuild.rs` adds `FrameCursorOverlay`,
+  `FrameTextOverlayInput`, overlay validation/render/application result types,
+  and `FrameRebuildPlan::draw_text_overlays`.
+- The wrapper validates the actual `Contents` grid, cursor anchors and wide
+  extents, planned preedit row/range bounds, preedit payload presence,
+  `cp_offset`, and preedit payload width before mutation.
+- The wrapper clears the stale cursor once validation passes.
+- Active preedit suppresses cursor drawing even when the plan has no preedit
+  range, matching upstream `rebuildCells`.
+- Planned preedit ranges draw through `cell::add_preedit`; non-preedit cursor
+  overlays draw through `cell::add_cursor`.
+- Tests cover stale cursor clearing, cursor overlay placement, block/non-block
+  cursor row routing, preedit glyph emission with cursor suppression,
+  active-preedit/no-range cursor suppression, contents-grid mismatch before
+  mutation, wide-cursor extent rejection, invalid preedit payload rejection, and
+  missing-preedit payload rejection.
+- Completion review found that exact-width preedit validation rejected
+  plan-generated edge ranges before clearing stale cursors. The implementation
+  now avoids planning a preedit range for empty preedit payloads and allows
+  best-effort drawing when a plan-generated wide preedit codepoint occupies the
+  final available cell, while still rejecting too-short prepared payloads before
+  mutation. Follow-up completion review caught that the first relaxation allowed
+  arbitrary too-long prepared payloads; validation now walks each planned
+  codepoint placement and only permits the final-cell wide-codepoint exception,
+  with a no-mutation test for too-long prepared payloads.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/generic.zig` `rebuildCells`
+  cursor/preedit section.
+- Inspected `roastty/src/renderer/frame_rebuild.rs`.
+- Inspected `roastty/src/renderer/cell.rs`.
+- Inspected `roastty/src/renderer/cursor.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture` — passed, 50
+  tests.
+- `cargo test -p roastty renderer::cell::tests::add_cursor -- --nocapture` —
+  passed, 3 tests.
+- `cargo test -p roastty renderer::cell::tests::add_preedit -- --nocapture` —
+  passed, 2 tests.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/819-drive-cursor-preedit-overlays.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 819 finishes the prepared-input cursor/preedit overlay slice of the
+frame rebuild path. The renderer can now plan rows, rebuild planned row
+contents, and then apply validated post-row text overlays with upstream cursor
+suppression semantics for active preedit. The remaining render-loop work still
+needs live terminal-state collection, cursor shader uniform updates, GPU
+cell/glyph upload, draw-call submission, pacing, and renderer-thread
+integration.
+
+## Completion Review
+
+Codex reviewed the completed implementation and initially found that exact
+preedit width validation rejected some plan-generated active-preedit edge cases
+before clearing stale cursors. The implementation was updated so empty preedit
+payloads plan no range, active preedit still clears and suppresses the cursor
+without a range, and a wide preedit codepoint can draw best-effort in the final
+available cell.
+
+Codex then found that the first relaxation also allowed arbitrary too-long
+prepared payloads. The validation was tightened to walk the prepared codepoint
+placements and permit only the final-cell wide-codepoint exception; too-short
+and too-long prepared payloads both reject before mutation.
+
+Codex re-reviewed the final implementation and approved it for the result commit
+with no remaining blockers. The final review confirmed the empty-preedit,
+final-cell wide-preedit, too-short payload, too-long payload, and current test
+count coverage.
