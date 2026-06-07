@@ -139,6 +139,71 @@ preedit source; `CursorStyle` is `Copy` so the tuple field
 - **Nit — name the helper to update.** **Fixed:** the Changes section names the
   842 `render_knobs()` helper as dropping the three initializers.
 
+## Result
+
+**Result:** Pass
+
+The cursor/`screen_fg` derivation landed: `cursor`/`block_cursor`/`screen_fg`
+removed from `FrameRenderKnobs`; `FrameRenderState` gained
+`cursor: Option<(CursorStyle, Rgb)>` + `screen_fg`; `from_terminal` derives them
+(visibility-gated, `Style::from_terminal`, `color_effective(Cursor)` →
+`default_fg` fallback); `rebuild_input` builds the cursor sub-inputs from
+`self.cursor`. The 842 `render_knobs()` helper dropped the three initializers.
+Production `cargo build -p roastty` and `--tests` both clean (no warnings); fmt
+clean, no-ghostty clean, `git diff --check` clean.
+
+Four new tests, all passing (plus the existing `frame_renderer` tests still pass
+after the knobs change):
+
+- **`render_state_derives_visible_block_cursor_overlay`** — a default terminal's
+  visible Block cursor → `cursor == Some((Block, default_fg))`; the overlay
+  cursor and `screen_fg` carry through.
+- **`render_state_cursor_color_comes_from_osc12`** — feeding
+  `\x1b]12;rgb:ab/cd/ef` makes the derived cursor color `Rgb(0xab,0xcd,0xef)` (≠
+  `default_fg`), proving the color flows from `color_effective(Cursor)`, not the
+  fallback.
+- **`render_state_block_sets_uniform_underline_does_not`** — Block sets
+  `cursor_uniform.block_cursor`; DECSCUSR `\x1b[4 q` (Underline) leaves it
+  `None` while the overlay cursor stays `Some`.
+- **`render_state_hidden_cursor_has_no_overlay_or_uniform`** — `\x1b[?25l` hides
+  the cursor → both `None`.
+
+**Full suite (default parallelism, `scripts/bounded-run.sh`):**
+`4381 passed; 0 failed` (4377 + 4 new), 0 panics, 0 `PoisonError`,
+`STATUS=COMPLETED rc=0`, 241 s — green.
+
 ## Conclusion
 
-_(to be written after the run)_
+The cursor sub-inputs and `screen_fg` now come from the live terminal
+(visibility, style, color), leaving `FrameRenderKnobs` to the genuinely
+config-derived knobs.
+
+Continuing the input-derivation arc, in order:
+
+- **Exp 844:** derive `row_never_extend` via `cell::row_never_extend_bg_flags`
+  (the last stubbed input field).
+- **Exp 845:** selection / highlights / link ranges from the terminal (the
+  dynamic buffers currently empty).
+- **Exp 846+:** the **configuration sub-arc** — port `font-thicken`,
+  `font-thicken-strength`, `minimum-contrast` (→ `alpha`/`faint_opacity`);
+  source the remaining knobs (`bold_color`, `background_opacity`,
+  `window_padding_color`) from `Config`; then have `FrameRenderer::update_frame`
+  take `&FrameRenderState` + `&FrameRenderKnobs` directly, and finally build
+  them from live surface state in `surface.draw()`. After that, the live draw
+  path renders through the new pipeline — also pulling in the deferred cursor
+  `wide`/inverse-color and blink/focus gating.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Confirmed: the diff matches the design exactly (knobs lose 3 fields,
+`FrameRenderState` gains `cursor`/`screen_fg`, `from_terminal` derives them with
+the visibility gate + `color_effective(Cursor)`→`default_fg` fallback,
+`rebuild_input` builds the overlay + block-only uniform via `matches!(Block)`,
+`render_knobs()` dropped the initializers); only `frame_renderer.rs` changed; 14
+frame_renderer tests pass (4 new + prior); the cursor tests are non-vacuous
+(OSC-12 asserts the color ≠ default_fg; block-vs-underline toggles real
+DECSCUSR; hidden toggles visibility); v1.log shows 4381 passed / 0 failed, rc=0,
+default parallelism, no timeout; build/fmt/no-ghostty clean. **Verdict: CHANGES
+REQUIRED → fixed.** Required: the stale README index status — flipped
+`Designed → Pass`.

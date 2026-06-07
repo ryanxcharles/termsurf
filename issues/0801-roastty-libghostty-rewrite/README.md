@@ -2411,7 +2411,7 @@ are past the correctness-critical foundation.
 - [Experiment 842: Derive the render input's colors/palette from the live terminal](842-derive-render-input-colors.md)
   — **Pass** · Claude/Claude/Claude
 - [Experiment 843: Derive the cursor sub-inputs and screen_fg from the terminal](843-derive-cursor-and-screen-fg.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 

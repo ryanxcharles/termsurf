@@ -8,8 +8,10 @@
 //! are all later slices.
 
 use crate::config::WindowPaddingColor;
+use crate::font::run::Wide;
 use crate::font::shared_grid::SharedGrid;
 use crate::renderer::cell::{Contents, Highlight, SelectionConfig};
+use crate::renderer::cursor::Style as CursorStyle;
 use crate::renderer::frame_rebuild::{
     FramePaddingExtendInput, FramePreparedFrameApplication, FramePreparedFrameError,
     FramePreparedPresentationInput, FramePreparedRebuildApplication, FramePreparedRebuildError,
@@ -145,9 +147,6 @@ pub(crate) struct FrameRenderKnobs {
     pub(crate) background_opacity_cells: bool,
     pub(crate) background_opacity: f64,
     pub(crate) padding_color: WindowPaddingColor,
-    pub(crate) cursor: Option<FrameSnapshotCursorOverlayInput>,
-    pub(crate) block_cursor: Option<FrameSnapshotBlockCursorUniformInput>,
-    pub(crate) screen_fg: Rgb,
     pub(crate) overlay_alpha: u8,
 }
 
@@ -160,6 +159,9 @@ pub(crate) struct FrameRenderState {
     default_fg: Rgb,
     default_bg: Rgb,
     palette: Palette,
+    // `Some((style, color))` when the terminal cursor is visible; `None` otherwise.
+    cursor: Option<(CursorStyle, Rgb)>,
+    screen_fg: Rgb,
     highlights: Vec<Vec<Highlight>>,
     link_ranges: Vec<Vec<[u16; 2]>>,
     selection_config: SelectionConfig,
@@ -184,10 +186,24 @@ impl FrameRenderState {
             .palette_current()
             .map(|(r, g, b)| Rgb::new(r, g, b));
 
+        // The cursor is derived only when visible: style mapped from the terminal
+        // visual style, color from the effective cursor color with a foreground
+        // fallback (mirrors the GUI render path / upstream `cursor_color`).
+        let cursor = terminal.cursor_visible().then(|| {
+            let style = CursorStyle::from_terminal(terminal.cursor_visual_style());
+            let color = terminal
+                .color_effective(TerminalColorKind::Cursor)
+                .map(|(r, g, b)| Rgb::new(r, g, b))
+                .unwrap_or(default_fg);
+            (style, color)
+        });
+
         Self {
             default_fg,
             default_bg,
             palette,
+            cursor,
+            screen_fg: default_fg,
             highlights: Vec::new(),
             link_ranges: Vec::new(),
             selection_config: SelectionConfig::default(),
@@ -218,12 +234,26 @@ impl FrameRenderState {
                 background_opacity: knobs.background_opacity,
             },
             text_overlay: FrameSnapshotTextOverlayInput {
-                cursor: knobs.cursor,
-                screen_fg: knobs.screen_fg,
+                cursor: self
+                    .cursor
+                    .map(|(style, color)| FrameSnapshotCursorOverlayInput {
+                        style,
+                        wide: false,
+                        color,
+                    }),
+                screen_fg: self.screen_fg,
                 alpha: knobs.overlay_alpha,
             },
             cursor_uniform: FrameSnapshotCursorUniformInput {
-                block_cursor: knobs.block_cursor,
+                // The block-cursor uniform is the under-cursor recolor; it applies
+                // only to the Block style (other styles render as the overlay only).
+                block_cursor: self
+                    .cursor
+                    .filter(|(style, _)| matches!(style, CursorStyle::Block))
+                    .map(|(_, color)| FrameSnapshotBlockCursorUniformInput {
+                        wide: Wide::Narrow,
+                        color,
+                    }),
             },
             rebuild_uniform: FrameRebuildUniformInput {
                 padding_color: knobs.padding_color,
@@ -705,16 +735,6 @@ mod tests {
             background_opacity_cells: true,
             background_opacity: 0.42,
             padding_color: WindowPaddingColor::Extend,
-            cursor: Some(FrameSnapshotCursorOverlayInput {
-                style: CursorStyle::Underline,
-                wide: true,
-                color: Rgb::new(3, 4, 5),
-            }),
-            block_cursor: Some(FrameSnapshotBlockCursorUniformInput {
-                wide: Wide::Wide,
-                color: Rgb::new(11, 12, 13),
-            }),
-            screen_fg: Rgb::new(40, 41, 42),
             overlay_alpha: 219,
         }
     }
@@ -764,5 +784,70 @@ mod tests {
         assert!(app.rows.reset_contents);
         assert_eq!(app.rows.rebuilt_rows, vec![0, 1, 2]);
         assert_eq!(renderer.current_grid(), grid(4, 3));
+    }
+
+    #[test]
+    fn render_state_derives_visible_block_cursor_overlay() {
+        let term = terminal(4, 3); // default: cursor visible, Block style
+        let state = FrameRenderState::from_terminal(&term);
+
+        let (style, color) = state.cursor.expect("visible cursor");
+        assert!(matches!(style, CursorStyle::Block));
+        // No OSC-12 set, so the cursor color is the default-foreground fallback.
+        assert_eq!(color, state.default_fg);
+
+        let knobs = render_knobs();
+        let input = state.rebuild_input(&knobs);
+        let overlay = input.text_overlay.cursor.expect("overlay cursor");
+        assert!(matches!(overlay.style, CursorStyle::Block));
+        assert_eq!(overlay.color, state.default_fg);
+        assert_eq!(input.text_overlay.screen_fg, state.default_fg);
+    }
+
+    #[test]
+    fn render_state_cursor_color_comes_from_osc12() {
+        let mut term = terminal(4, 3);
+        // OSC 12: set the cursor color to ab/cd/ef.
+        term.next_slice(b"\x1b]12;rgb:ab/cd/ef\x07")
+            .expect("osc12 cursor color");
+        let state = FrameRenderState::from_terminal(&term);
+
+        let (_, color) = state.cursor.expect("visible cursor");
+        assert_eq!(color, Rgb::new(0xab, 0xcd, 0xef));
+        assert_ne!(color, state.default_fg);
+    }
+
+    #[test]
+    fn render_state_block_sets_uniform_underline_does_not() {
+        let knobs = render_knobs();
+
+        // Block (default) → the block-cursor uniform is set.
+        let block = terminal(4, 3);
+        let block_state = FrameRenderState::from_terminal(&block);
+        let block_input = block_state.rebuild_input(&knobs);
+        assert!(block_input.cursor_uniform.block_cursor.is_some());
+
+        // Underline (DECSCUSR 4) → no block uniform, but the overlay cursor stays.
+        let mut underline = terminal(4, 3);
+        underline
+            .next_slice(b"\x1b[4 q")
+            .expect("decscusr underline");
+        let underline_state = FrameRenderState::from_terminal(&underline);
+        let underline_input = underline_state.rebuild_input(&knobs);
+        assert!(underline_input.cursor_uniform.block_cursor.is_none());
+        assert!(underline_input.text_overlay.cursor.is_some());
+    }
+
+    #[test]
+    fn render_state_hidden_cursor_has_no_overlay_or_uniform() {
+        let mut term = terminal(4, 3);
+        term.next_slice(b"\x1b[?25l").expect("hide cursor");
+        let state = FrameRenderState::from_terminal(&term);
+
+        assert!(state.cursor.is_none());
+        let knobs = render_knobs();
+        let input = state.rebuild_input(&knobs);
+        assert!(input.text_overlay.cursor.is_none());
+        assert!(input.cursor_uniform.block_cursor.is_none());
     }
 }
