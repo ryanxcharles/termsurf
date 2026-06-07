@@ -175,6 +175,83 @@ reviewer confirmed both orders are functionally identical because
 `apply_cursor_uniforms` mutates uniform fields disjoint from padding-extend and
 grid size — so the reorder is safe and better expresses the real dependency.
 
+## Result
+
+**Result:** Pass
+
+`FrameTerminalSnapshot::rebuild_frame` landed with its target/input bundles,
+`FramePreparedRebuildApplication`, and `FramePreparedRebuildError` (six `From`
+impls). Production `cargo build -p roastty` and `cargo build -p roastty --tests`
+both clean (no warnings); fmt clean, no-ghostty clean, `git diff --check` clean.
+
+Four new tests in `frame_rebuild.rs`, all passing:
+
+- `rebuild_frame_runs_the_full_prepared_sequence` — a full-rebuild snapshot
+  drives all five stages: rows `[0,1,2]` rebuilt + contents reset, overlay
+  cursor drawn, rebuild-uniform padding-extend reset, padding rows `[0,2]`
+  refined, block cursor applied, `row_dirty` cleared.
+- `rebuild_frame_matches_hand_sequenced_drivers` — **equivalence**: the composed
+  sequence yields identical per-stage applications **and** identical `Contents`
+  (`bg_cells`/`fg_rows`), `MetalUniforms.padding_extend`, and `row_dirty` to
+  calling the five drivers by hand in the same order. Proves no behavior change.
+- `rebuild_frame_fails_fast_on_plan_error_without_mutating_targets` — a
+  truncated snapshot `row_dirty` makes `build_plan` fail → `Plan` variant,
+  **no** target mutated.
+- `rebuild_frame_fails_fast_on_format_rows_error_and_skips_later_stages` — a
+  too-short target `row_dirty` makes `format_rows` reject → `FormatRows`
+  variant, the later uniform stages did **not** run.
+- `rebuild_frame_fails_fast_on_padding_extend_after_earlier_stages_ran` — a
+  too-short `row_never_extend` makes `refine_padding_extend_rows` (stage 4)
+  reject → `PaddingExtend` variant — and `format_rows` (stage 1) had already
+  cleared `row_dirty`, so this proves a genuine **mid-sequence** failure
+  (earlier stage mutated, the failing stage and later stages handled by `?`).
+
+(Three of the six stages — `Plan`, `FormatRows`, `PaddingExtend` — have explicit
+fail-fast tests, including a mid-sequence one. The remaining three propagate
+identically: `TextOverlays` and `CursorUniforms` by the same `?`+`From`
+mechanism the three tests exercise and the compiler enforces, and
+`RebuildUniforms` cannot be made to fail from a valid snapshot's plan (its
+validation only rejects an internally-inconsistent plan, which `build_plan`
+never produces). The happy path proves each stage's `?` is on the success path.
+"Stops before presentation" holds by construction: `rebuild_frame` never
+references `present_metal_frame` or `apply_custom_shader_frame`.)
+
+**Full suite (default parallelism, `scripts/bounded-run.sh`):**
+`4365 passed; 0 failed` (the prior 4360 + 5 new), 0 panics, 0 `PoisonError`,
+`STATUS=COMPLETED rc=0` — the suite stays green with the composition added.
+
 ## Conclusion
 
-_(to be written after the run)_
+The renderer's frame rebuild now has one composition entry point: a caller hands
+`rebuild_frame` a snapshot, the mutable targets, and the per-stage inputs, and
+it builds the plan and runs the five drivers in dependency order — with
+fail-fast error propagation and proven equivalence to hand-sequencing. The
+adapter/driver pieces built across 815–828 are now a single callable sequence.
+
+The next experiment continues from where this one deliberately stops:
+**renderer- thread orchestration / Metal presentation** — feeding the rebuilt
+`Contents` / `SharedGrid` / `MetalUniforms` into `present_metal_frame` (Exp 822)
+within the renderer loop, and wiring `rebuild_frame` to where the renderer
+currently rebuilds frames. That is the next slice toward the live Metal renderer
+path.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Verified the diff matches the approved design (the bundles,
+`rebuild_frame` calling the five drivers in the stated order with
+`apply_rebuild_uniforms` before `refine_padding_extend_rows`, the application
+struct, the error enum + six `From` impls; production-only, no `#[cfg(test)]` on
+the composition); confirmed the equivalence test is substantive (identical
+per-stage applications + `Contents`/`uniforms`/`row_dirty`); "stops before
+presentation" holds by construction; and the suite evidence (4364 → now 4365
+passed, rc=0, default parallelism). **Verdict: CHANGES REQUIRED → fixed.**
+
+- **Required — stale README index status.** The 838 index line still read
+  `Designed`. **Fixed:** flipped to `Pass`.
+- **Optional — fail-fast under-delivered vs the design's "each stage in turn."**
+  **Addressed:** added a third, mid-sequence fail-fast test (`PaddingExtend`,
+  after `format_rows` mutated), and documented that the remaining variants
+  (`TextOverlays`/`CursorUniforms`) propagate by the same compiler-enforced
+  `?`+`From` mechanism while `RebuildUniforms` cannot fail from a valid plan.
+  The narrowed-but-justified criterion is recorded.

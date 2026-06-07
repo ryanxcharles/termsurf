@@ -2366,7 +2366,7 @@ are past the correctness-critical foundation.
 - [Experiment 837: Serialize the config tests' process-global env/cwd mutation](837-config-env-cwd-race.md)
   — **Pass** · Claude/Claude/Claude
 - [Experiment 838: Compose the prepared frame rebuild sequence](838-compose-prepared-frame-rebuild.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 

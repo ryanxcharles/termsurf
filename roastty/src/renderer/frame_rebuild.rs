@@ -171,6 +171,128 @@ impl FrameTerminalSnapshot {
             block_cursor,
         }
     }
+
+    /// Compose the prepared frame rebuild: build the plan from this snapshot and
+    /// run the five rebuild drivers in dependency order, stopping before Metal
+    /// presentation / renderer-thread orchestration (Issue 801, Exp 838).
+    ///
+    /// Ordering: `format_rows` → `draw_text_overlays` → `apply_rebuild_uniforms`
+    /// → `refine_padding_extend_rows` (refines the padding-extend the rebuild
+    /// uniforms reset, so it must run after) → `apply_cursor_uniforms` (disjoint
+    /// uniform fields, order-independent). Fail-fast: the first failing stage
+    /// returns its error and later stages do not run; earlier stages' mutations
+    /// have already landed in `targets`, exactly as if hand-sequenced.
+    pub(crate) fn rebuild_frame(
+        &self,
+        targets: FramePreparedRebuildTargets<'_>,
+        input: FramePreparedRebuildInput<'_>,
+    ) -> Result<FramePreparedRebuildApplication, FramePreparedRebuildError> {
+        let FramePreparedRebuildTargets {
+            contents,
+            grid,
+            row_dirty,
+            uniforms,
+        } = targets;
+
+        let plan = self.build_plan()?;
+
+        let rows = plan.format_rows(
+            contents,
+            grid,
+            row_dirty,
+            self.row_format_input(input.row_format),
+        )?;
+        let text_overlays =
+            plan.draw_text_overlays(contents, grid, self.text_overlay_input(input.text_overlay))?;
+        let rebuild_uniforms = plan.apply_rebuild_uniforms(uniforms, input.rebuild_uniform)?;
+        let padding_extend = plan.refine_padding_extend_rows(uniforms, input.padding_extend)?;
+        let cursor_uniforms =
+            plan.apply_cursor_uniforms(uniforms, self.cursor_uniform_input(input.cursor_uniform))?;
+
+        Ok(FramePreparedRebuildApplication {
+            rows,
+            text_overlays,
+            rebuild_uniforms,
+            padding_extend,
+            cursor_uniforms,
+        })
+    }
+}
+
+/// Mutable render targets the prepared frame rebuild sequence writes into.
+pub(crate) struct FramePreparedRebuildTargets<'a> {
+    pub(crate) contents: &'a mut Contents,
+    pub(crate) grid: &'a mut SharedGrid,
+    pub(crate) row_dirty: &'a mut [bool],
+    pub(crate) uniforms: &'a mut MetalUniforms,
+}
+
+/// Caller-supplied inputs for the prepared frame rebuild sequence: the
+/// snapshot-adapter inputs (827/828) plus the two drivers whose inputs are not
+/// snapshot-derived (rebuild uniforms, padding extend).
+pub(crate) struct FramePreparedRebuildInput<'a> {
+    pub(crate) row_format: FrameSnapshotRowFormatInput<'a>,
+    pub(crate) text_overlay: FrameSnapshotTextOverlayInput,
+    pub(crate) cursor_uniform: FrameSnapshotCursorUniformInput,
+    pub(crate) rebuild_uniform: FrameRebuildUniformInput,
+    pub(crate) padding_extend: FramePaddingExtendInput<'a>,
+}
+
+/// Per-stage application results of one prepared frame rebuild.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FramePreparedRebuildApplication {
+    pub(crate) rows: FrameRowRebuildApplication<FrameRowRenderError>,
+    pub(crate) text_overlays: FrameTextOverlayApplication,
+    pub(crate) rebuild_uniforms: FrameRebuildUniformApplication,
+    pub(crate) padding_extend: FramePaddingExtendApplication,
+    pub(crate) cursor_uniforms: FrameCursorUniformApplication,
+}
+
+/// Error from one prepared frame rebuild stage, wrapping that stage's own error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FramePreparedRebuildError {
+    Plan(FrameRebuildPlanError),
+    FormatRows(FrameRowFormatValidationError),
+    TextOverlays(FrameTextOverlayError),
+    RebuildUniforms(FrameRebuildUniformValidationError),
+    PaddingExtend(FramePaddingExtendValidationError),
+    CursorUniforms(FrameCursorUniformValidationError),
+}
+
+impl From<FrameRebuildPlanError> for FramePreparedRebuildError {
+    fn from(error: FrameRebuildPlanError) -> Self {
+        Self::Plan(error)
+    }
+}
+
+impl From<FrameRowFormatValidationError> for FramePreparedRebuildError {
+    fn from(error: FrameRowFormatValidationError) -> Self {
+        Self::FormatRows(error)
+    }
+}
+
+impl From<FrameTextOverlayError> for FramePreparedRebuildError {
+    fn from(error: FrameTextOverlayError) -> Self {
+        Self::TextOverlays(error)
+    }
+}
+
+impl From<FrameRebuildUniformValidationError> for FramePreparedRebuildError {
+    fn from(error: FrameRebuildUniformValidationError) -> Self {
+        Self::RebuildUniforms(error)
+    }
+}
+
+impl From<FramePaddingExtendValidationError> for FramePreparedRebuildError {
+    fn from(error: FramePaddingExtendValidationError) -> Self {
+        Self::PaddingExtend(error)
+    }
+}
+
+impl From<FrameCursorUniformValidationError> for FramePreparedRebuildError {
+    fn from(error: FrameCursorUniformValidationError) -> Self {
+        Self::CursorUniforms(error)
+    }
 }
 
 /// The preedit placement planned for this frame.
@@ -4550,5 +4672,319 @@ mod tests {
             FramePaddingExtendValidationError::RebuildRowOutOfBounds { row: 0, rows: 0 }
         );
         assert_eq!(uniforms.padding_extend, before.padding_extend);
+    }
+
+    // A full prepared-rebuild fixture: a live 4x3 terminal with one written row
+    // and a cursor, plus the caller-supplied inputs for every stage.
+    fn prepared_rebuild_terminal() -> Terminal {
+        let mut terminal = terminal(4, 3);
+        terminal.clear_dirty_for_tests();
+        terminal.set_cursor_position_for_tests(0, 1);
+        write_terminal(&mut terminal, b"A");
+        terminal
+    }
+
+    #[test]
+    fn rebuild_frame_runs_the_full_prepared_sequence() {
+        let terminal = prepared_rebuild_terminal();
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+
+        let mut contents = contents_with_rows(grid(4, 3));
+        let mut shared = menlo_grid();
+        let mut row_dirty = snapshot.row_dirty.clone();
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let applied = snapshot
+            .rebuild_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents,
+                    grid: &mut shared,
+                    row_dirty: &mut row_dirty,
+                    uniforms: &mut uniforms,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    padding_extend: padding_extend_input(
+                        WindowPaddingColor::Extend,
+                        &[false, false, false],
+                    ),
+                },
+            )
+            .expect("rebuild frame");
+
+        // Every stage ran: rows rebuilt (full rebuild → all rows), overlay cursor
+        // drawn (no preedit), rebuild uniforms reset padding-extend, padding rows
+        // refined (first+last of the rebuild set), block cursor applied.
+        assert_eq!(applied.rows.rebuilt_rows, vec![0, 1, 2]);
+        assert!(applied.rows.reset_contents);
+        assert!(applied.text_overlays.cursor_drawn.is_some());
+        assert!(applied.rebuild_uniforms.padding_extend_mutated);
+        assert_eq!(applied.padding_extend.refined_rows, vec![0, 2]);
+        assert!(applied.cursor_uniforms.block_cursor_applied);
+        // row_dirty cleared for the rebuilt rows.
+        assert_eq!(row_dirty, vec![false, false, false]);
+    }
+
+    #[test]
+    fn rebuild_frame_matches_hand_sequenced_drivers() {
+        let terminal = prepared_rebuild_terminal();
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        // Composed path.
+        let snapshot_a =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+        let mut contents_a = contents_with_rows(grid(4, 3));
+        let mut shared_a = menlo_grid();
+        let mut row_dirty_a = snapshot_a.row_dirty.clone();
+        let mut uniforms_a = rebuild_uniforms();
+        uniforms_a.padding_extend = 15;
+        let applied = snapshot_a
+            .rebuild_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents_a,
+                    grid: &mut shared_a,
+                    row_dirty: &mut row_dirty_a,
+                    uniforms: &mut uniforms_a,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    padding_extend: padding_extend_input(
+                        WindowPaddingColor::Extend,
+                        &[false, false, false],
+                    ),
+                },
+            )
+            .expect("rebuild frame");
+
+        // Hand-sequenced path: identical fixture, the five drivers called by hand
+        // in the same order.
+        let snapshot_b =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+        let plan = snapshot_b.build_plan().expect("plan");
+        let mut contents_b = contents_with_rows(grid(4, 3));
+        let mut shared_b = menlo_grid();
+        let mut row_dirty_b = snapshot_b.row_dirty.clone();
+        let mut uniforms_b = rebuild_uniforms();
+        uniforms_b.padding_extend = 15;
+
+        let rows = plan
+            .format_rows(
+                &mut contents_b,
+                &mut shared_b,
+                &mut row_dirty_b,
+                snapshot_b.row_format_input(snapshot_format_input(
+                    &highlights,
+                    &links,
+                    &selection_config,
+                )),
+            )
+            .expect("format rows");
+        let text_overlays = plan
+            .draw_text_overlays(
+                &mut contents_b,
+                &mut shared_b,
+                snapshot_b.text_overlay_input(snapshot_text_overlay_input(Some(
+                    snapshot_cursor_overlay_input(),
+                ))),
+            )
+            .expect("draw overlays");
+        let rebuild_uniforms_app = plan
+            .apply_rebuild_uniforms(
+                &mut uniforms_b,
+                rebuild_uniform_input(WindowPaddingColor::Extend),
+            )
+            .expect("rebuild uniforms");
+        let padding_extend = plan
+            .refine_padding_extend_rows(
+                &mut uniforms_b,
+                padding_extend_input(WindowPaddingColor::Extend, &[false, false, false]),
+            )
+            .expect("refine padding");
+        let cursor_uniforms = plan
+            .apply_cursor_uniforms(
+                &mut uniforms_b,
+                snapshot_b.cursor_uniform_input(snapshot_cursor_uniform_input(Some(
+                    snapshot_block_cursor_uniform_input(),
+                ))),
+            )
+            .expect("cursor uniforms");
+
+        // Same per-stage applications and same observable target mutations.
+        assert_eq!(applied.rows, rows);
+        assert_eq!(applied.text_overlays, text_overlays);
+        assert_eq!(applied.rebuild_uniforms, rebuild_uniforms_app);
+        assert_eq!(applied.padding_extend, padding_extend);
+        assert_eq!(applied.cursor_uniforms, cursor_uniforms);
+        assert_eq!(contents_a.bg_cells(), contents_b.bg_cells());
+        assert_eq!(contents_a.fg_rows(), contents_b.fg_rows());
+        assert_eq!(uniforms_a.padding_extend, uniforms_b.padding_extend);
+        assert_eq!(row_dirty_a, row_dirty_b);
+    }
+
+    #[test]
+    fn rebuild_frame_fails_fast_on_plan_error_without_mutating_targets() {
+        let terminal = prepared_rebuild_terminal();
+        let mut snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+        // Truncate row_dirty so build_plan rejects it (DirtyRowsTooShort) before any
+        // driver runs.
+        snapshot.row_dirty.clear();
+
+        let mut contents = contents_with_rows(grid(4, 3));
+        let mut shared = menlo_grid();
+        let mut row_dirty = vec![true, true, true];
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+        let before_bg = contents.bg_cells().to_vec();
+        let before_padding = uniforms.padding_extend;
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let err = snapshot
+            .rebuild_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents,
+                    grid: &mut shared,
+                    row_dirty: &mut row_dirty,
+                    uniforms: &mut uniforms,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    padding_extend: padding_extend_input(
+                        WindowPaddingColor::Extend,
+                        &[false, false, false],
+                    ),
+                },
+            )
+            .expect_err("plan should fail");
+
+        assert!(matches!(err, FramePreparedRebuildError::Plan(_)));
+        // No stage ran: targets untouched.
+        assert_eq!(contents.bg_cells(), before_bg.as_slice());
+        assert_eq!(uniforms.padding_extend, before_padding);
+        assert_eq!(row_dirty, vec![true, true, true]);
+    }
+
+    #[test]
+    fn rebuild_frame_fails_fast_on_format_rows_error_and_skips_later_stages() {
+        let terminal = prepared_rebuild_terminal();
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+
+        let mut contents = contents_with_rows(grid(4, 3));
+        let mut shared = menlo_grid();
+        // A too-short target row_dirty makes the first driver (format_rows) reject
+        // before mutation; the plan still builds (it validates the snapshot's own
+        // row_dirty, which is intact).
+        let mut row_dirty = Vec::new();
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+        let before_padding = uniforms.padding_extend;
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let err = snapshot
+            .rebuild_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents,
+                    grid: &mut shared,
+                    row_dirty: &mut row_dirty,
+                    uniforms: &mut uniforms,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    padding_extend: padding_extend_input(
+                        WindowPaddingColor::Extend,
+                        &[false, false, false],
+                    ),
+                },
+            )
+            .expect_err("format_rows should fail");
+
+        assert!(matches!(err, FramePreparedRebuildError::FormatRows(_)));
+        // The later uniform stages did not run.
+        assert_eq!(uniforms.padding_extend, before_padding);
+    }
+
+    #[test]
+    fn rebuild_frame_fails_fast_on_padding_extend_after_earlier_stages_ran() {
+        let terminal = prepared_rebuild_terminal();
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Full, None);
+
+        let mut contents = contents_with_rows(grid(4, 3));
+        let mut shared = menlo_grid();
+        let mut row_dirty = snapshot.row_dirty.clone();
+        let mut uniforms = rebuild_uniforms();
+        uniforms.padding_extend = 15;
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let err = snapshot
+            .rebuild_frame(
+                FramePreparedRebuildTargets {
+                    contents: &mut contents,
+                    grid: &mut shared,
+                    row_dirty: &mut row_dirty,
+                    uniforms: &mut uniforms,
+                },
+                FramePreparedRebuildInput {
+                    row_format: snapshot_format_input(&highlights, &links, &selection_config),
+                    text_overlay: snapshot_text_overlay_input(
+                        Some(snapshot_cursor_overlay_input()),
+                    ),
+                    cursor_uniform: snapshot_cursor_uniform_input(Some(
+                        snapshot_block_cursor_uniform_input(),
+                    )),
+                    rebuild_uniform: rebuild_uniform_input(WindowPaddingColor::Extend),
+                    // Too short: the full rebuild touches row 2, so refine validates
+                    // a `row_never_extend` index the 1-element slice does not cover.
+                    padding_extend: padding_extend_input(WindowPaddingColor::Extend, &[false]),
+                },
+            )
+            .expect_err("padding extend should fail");
+
+        assert!(matches!(err, FramePreparedRebuildError::PaddingExtend(_)));
+        // An earlier stage genuinely ran before refine failed: format_rows cleared
+        // the dirty rows — a real mid-sequence failure, not a pre-mutation reject.
+        assert_eq!(row_dirty, vec![false, false, false]);
     }
 }
