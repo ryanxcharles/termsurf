@@ -2229,6 +2229,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 814: Metal Frame Compositor](814-metal-frame-compositor.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 815: Renderer Frame Rebuild Plan](815-renderer-frame-rebuild-plan.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
