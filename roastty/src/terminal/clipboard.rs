@@ -12,12 +12,12 @@ pub(crate) struct KittyClipboard<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Location {
+pub(crate) enum Location {
     Primary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Operation {
+pub(crate) enum Operation {
     Read,
     WriteAlias,
     WriteData,
@@ -25,7 +25,7 @@ pub(super) enum Operation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Status {
+pub(crate) enum Status {
     Data,
     Done,
     Busy,
@@ -37,35 +37,45 @@ pub(super) enum Status {
 }
 
 impl KittyClipboard<'_> {
-    pub(super) fn id(&self) -> Option<&[u8]> {
+    pub(crate) fn id(&self) -> Option<&[u8]> {
         let value = read_option(self.metadata, b"id")?;
         is_valid_identifier(value).then_some(value)
     }
 
-    pub(super) fn loc(&self) -> Option<Location> {
+    pub(crate) fn sanitized_id(&self) -> Option<Vec<u8>> {
+        let value = read_option(self.metadata, b"id")?;
+        let sanitized: Vec<u8> = value
+            .iter()
+            .copied()
+            .filter(|byte| is_valid_identifier_byte(*byte))
+            .collect();
+        (!sanitized.is_empty()).then_some(sanitized)
+    }
+
+    pub(crate) fn loc(&self) -> Option<Location> {
         match read_option(self.metadata, b"loc")? {
             b"primary" => Some(Location::Primary),
             _ => None,
         }
     }
 
-    pub(super) fn mime(&self) -> Option<&[u8]> {
+    pub(crate) fn mime(&self) -> Option<&[u8]> {
         read_option(self.metadata, b"mime")
     }
 
-    pub(super) fn name(&self) -> Option<&[u8]> {
+    pub(crate) fn name(&self) -> Option<&[u8]> {
         read_option(self.metadata, b"name")
     }
 
-    pub(super) fn password(&self) -> Option<&[u8]> {
+    pub(crate) fn password(&self) -> Option<&[u8]> {
         read_option(self.metadata, b"password")
     }
 
-    pub(super) fn pw(&self) -> Option<&[u8]> {
+    pub(crate) fn pw(&self) -> Option<&[u8]> {
         read_option(self.metadata, b"pw")
     }
 
-    pub(super) fn status(&self) -> Option<Status> {
+    pub(crate) fn status(&self) -> Option<Status> {
         match read_option(self.metadata, b"status")? {
             b"DATA" => Some(Status::Data),
             b"DONE" => Some(Status::Done),
@@ -79,7 +89,7 @@ impl KittyClipboard<'_> {
         }
     }
 
-    pub(super) fn operation(&self) -> Option<Operation> {
+    pub(crate) fn operation(&self) -> Option<Operation> {
         match read_option(self.metadata, b"type")? {
             b"read" => Some(Operation::Read),
             b"walias" => Some(Operation::WriteAlias),
@@ -136,10 +146,14 @@ fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
 }
 
 fn is_valid_identifier(bytes: &[u8]) -> bool {
-    !bytes.is_empty()
-        && bytes
-            .iter()
-            .all(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'+' | b'.'))
+    !bytes.is_empty() && bytes.iter().all(|byte| is_valid_identifier_byte(*byte))
+}
+
+fn is_valid_identifier_byte(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'+' | b'.'
+    )
 }
 
 #[cfg(test)]
@@ -175,6 +189,11 @@ mod tests {
         );
         assert_eq!(clip(b"id=").id(), None);
         assert_eq!(clip(b"id=bad/slash").id(), None);
+        assert_eq!(
+            clip(b"id=bad/slash").sanitized_id(),
+            Some(b"badslash".to_vec())
+        );
+        assert_eq!(clip(b"id=///").sanitized_id(), None);
         assert_eq!(clip(b"loc=primary").loc(), Some(Location::Primary));
         assert_eq!(clip(b"loc=Primary").loc(), None);
         assert_eq!(clip(b"status=DATA").status(), Some(Status::Data));

@@ -153,3 +153,66 @@ The design now decodes read payloads, accepts MIME lists containing
 MIME surface, and requires sanitized `id` propagation on every reply.
 
 Re-review approved the revised design with no blocking findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented Kitty clipboard read replies:
+
+- Kitty OSC 5522 events now reach `Surface::handle_terminal_clipboard_event`
+  instead of being dropped.
+- The surface layer reuses the retained Kitty clipboard parser and widens only
+  the needed parser symbols to crate visibility.
+- Kitty read payloads decode as base64 MIME lists. Requests containing
+  `text/plain` start the existing runtime clipboard read flow.
+- The `.` availability query returns the known `text/plain` MIME type without
+  reading clipboard contents or prompting for permission.
+- `loc=primary` maps to the selection clipboard only when the runtime reports
+  selection clipboard support; otherwise it replies with `ENOSYS`.
+- Replies preserve the request terminator and sanitized request `id` metadata.
+- Successful reads write `OK`, `DATA:mime=text/plain`, and `DONE` OSC 5522
+  packets to the PTY.
+- Plain-text read data is split into `DATA` chunks no larger than 4096 bytes
+  before base64 encoding.
+- Unsupported operations, invalid operations, invalid payloads, unsupported MIME
+  requests, unsupported primary selection, and denied reads produce explicit
+  status replies.
+- Existing OSC 52 read/write behavior remains unchanged.
+
+Verification passed:
+
+- `cargo test -p roastty kitty_clipboard -- --nocapture --test-threads=1`
+  - 11 tests passed.
+- `cargo test -p roastty osc52_clipboard -- --nocapture --test-threads=1`
+  - 13 tests passed.
+- `cargo test -p roastty clipboard_read -- --nocapture --test-threads=1`
+  - 14 tests passed.
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/786-kitty-clipboard-read-replies.md`
+- `git diff --check`
+
+## Conclusion
+
+Kitty clipboard read requests now have a protocol-correct plain-text path over
+the existing runtime clipboard ABI. The remaining Kitty clipboard work is write
+transactions, aliases, arbitrary MIME data, passwords, and multipart/chunked
+state.
+
+## Completion Review
+
+The first completion review found three blocking issues:
+
+- the README experiment index was missing the `Codex/Codex/Codex` provenance
+  tag;
+- Kitty read `DATA` replies were not chunked to the protocol's 4096-byte
+  pre-base64 maximum;
+- tests did not prove the actual reply bytes for availability, deny, and
+  unsupported-operation false paths.
+
+The README tag was added, read reply encoding now chunks data at 4096 bytes
+before base64 encoding, direct tests cover multi-chunk replies, and PTY tests
+now assert the explicit availability, `EPERM`, and `ENOSYS` reply bytes.
+
+Re-review approved the completed experiment with no blocking findings.

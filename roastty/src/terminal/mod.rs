@@ -26,7 +26,7 @@ mod circ_buf;
 mod charsets;
 
 #[allow(dead_code)]
-mod clipboard;
+pub(crate) mod clipboard;
 
 #[allow(dead_code)]
 mod context_signal;

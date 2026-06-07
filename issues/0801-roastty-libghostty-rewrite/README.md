@@ -321,9 +321,10 @@ Experiment 246).
       parsing coverage, targeted slow PTY paste-path coverage, and paste
       clipboard request state done, and render-state display ID scalar done;
       terminal clipboard OSC event retention done, and OSC 52 read/write surface
-      handling done; splits, frontend selection routing, renderer display-ID
-      consumption/delivery, Quicklook UI/font integration, Kitty clipboard
-      handling, and full frontend presentation missing
+      handling done; Kitty clipboard read replies done; splits, frontend
+      selection routing, renderer display-ID consumption/delivery, Quicklook
+      UI/font integration, Kitty clipboard write/multipart handling, and full
+      frontend presentation missing
 - [ ] `pty` + `termio` (shell spawn, read/write loops, resize, fg pid, tty name,
       exit) — PTY open/resize, subprocess spawn, child IO, synchronous pump,
       background worker, worker shutdown/drop, and surface process-exit state
@@ -2090,7 +2091,7 @@ are past the correctness-critical foundation.
 - [Experiment 785: OSC 52 Write Clipboard Handling](785-osc52-write-clipboard-handling.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 786: Kitty Clipboard Read Replies](786-kitty-clipboard-read-replies.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

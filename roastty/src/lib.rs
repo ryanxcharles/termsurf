@@ -14,6 +14,8 @@ use std::slice;
 use std::sync::Mutex;
 
 use input::{key, key_encode, key_mods, paste};
+use terminal::clipboard::{KittyClipboard, Location as KittyClipboardLocation};
+use terminal::clipboard::{Operation as KittyClipboardOperation, Status as KittyClipboardStatus};
 use terminal::color;
 use terminal::cursor;
 use terminal::focus;
@@ -116,6 +118,8 @@ const ROASTTY_CLIPBOARD_REQUEST_PASTE: c_int = 0;
 const ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ: c_int = 1;
 #[allow(dead_code)]
 const ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE: c_int = 2;
+#[allow(dead_code)]
+const ROASTTY_CLIPBOARD_REQUEST_KITTY_READ: c_int = 3;
 
 const ROASTTY_ACTION_QUIT: c_int = 0;
 const ROASTTY_ACTION_NEW_WINDOW: c_int = 1;
@@ -1657,6 +1661,8 @@ struct ClipboardRequestState {
     request: c_int,
     clipboard: c_int,
     osc52_kind: u8,
+    kitty_id: Vec<u8>,
+    kitty_terminator: osc::Terminator,
 }
 
 impl Drop for Surface {
@@ -2661,8 +2667,147 @@ impl Surface {
                     self.osc52_clipboard_write(kind, &data);
                 }
             }
-            TerminalClipboardEvent::Kitty { .. } => {}
+            TerminalClipboardEvent::Kitty {
+                metadata,
+                payload,
+                terminator,
+            } => {
+                let event = KittyClipboard {
+                    metadata: &metadata,
+                    payload: payload.as_deref(),
+                    terminator,
+                };
+                self.kitty_clipboard_event(event);
+            }
         }
+    }
+
+    fn kitty_clipboard_event(&mut self, event: KittyClipboard<'_>) -> bool {
+        let id = event.sanitized_id().unwrap_or_default();
+        match event.operation() {
+            Some(KittyClipboardOperation::Read) => self.kitty_clipboard_read(event, id),
+            Some(KittyClipboardOperation::Write) => self.kitty_clipboard_error(
+                KittyClipboardOperation::Write,
+                KittyClipboardStatus::NotImplemented,
+                &id,
+                event.terminator,
+            ),
+            Some(KittyClipboardOperation::WriteData) => self.kitty_clipboard_error(
+                KittyClipboardOperation::WriteData,
+                KittyClipboardStatus::NotImplemented,
+                &id,
+                event.terminator,
+            ),
+            Some(KittyClipboardOperation::WriteAlias) => self.kitty_clipboard_error(
+                KittyClipboardOperation::WriteAlias,
+                KittyClipboardStatus::NotImplemented,
+                &id,
+                event.terminator,
+            ),
+            None => self.kitty_clipboard_error(
+                KittyClipboardOperation::Read,
+                KittyClipboardStatus::NotImplemented,
+                &id,
+                event.terminator,
+            ),
+        }
+    }
+
+    fn kitty_clipboard_read(&mut self, event: KittyClipboard<'_>, id: Vec<u8>) -> bool {
+        if event.loc() == Some(KittyClipboardLocation::Primary) {
+            let Some(app) = app_from_handle(self.app) else {
+                return false;
+            };
+            if !app.runtime.supports_selection_clipboard {
+                return self.kitty_clipboard_error(
+                    KittyClipboardOperation::Read,
+                    KittyClipboardStatus::NotImplemented,
+                    &id,
+                    event.terminator,
+                );
+            }
+        }
+
+        match kitty_clipboard_read_payload(event.payload) {
+            Some(KittyReadPayload::TextPlain) => {
+                let clipboard = if event.loc() == Some(KittyClipboardLocation::Primary) {
+                    ROASTTY_CLIPBOARD_SELECTION
+                } else {
+                    ROASTTY_CLIPBOARD_STANDARD
+                };
+                self.kitty_clipboard_start_read(clipboard, id, event.terminator)
+            }
+            Some(KittyReadPayload::AvailableTypes) => {
+                let reply = kitty_clipboard_read_reply(&id, event.terminator, b"text/plain");
+                self.queue_clipboard_reply(&reply)
+            }
+            None => self.kitty_clipboard_error(
+                KittyClipboardOperation::Read,
+                KittyClipboardStatus::NotImplemented,
+                &id,
+                event.terminator,
+            ),
+        }
+    }
+
+    fn kitty_clipboard_start_read(
+        &mut self,
+        clipboard: c_int,
+        id: Vec<u8>,
+        terminator: osc::Terminator,
+    ) -> bool {
+        if self.app.is_null() || self.termio_worker.is_none() {
+            return false;
+        }
+        if self.clipboard_read.denied() {
+            return self.kitty_clipboard_error(
+                KittyClipboardOperation::Read,
+                KittyClipboardStatus::Permission,
+                &id,
+                terminator,
+            );
+        }
+        let Some(app) = app_from_handle(self.app) else {
+            return false;
+        };
+        let Some(read_clipboard) = app.runtime.read_clipboard_cb else {
+            return false;
+        };
+
+        let state = self.push_clipboard_request_with_kitty_metadata(
+            ROASTTY_CLIPBOARD_REQUEST_KITTY_READ,
+            clipboard,
+            b'c',
+            id,
+            terminator,
+        );
+        let started = unsafe { read_clipboard(app.runtime.userdata, clipboard, state) };
+        if !started {
+            self.take_clipboard_request(state);
+        }
+        started
+    }
+
+    fn kitty_clipboard_error(
+        &mut self,
+        operation: KittyClipboardOperation,
+        status: KittyClipboardStatus,
+        id: &[u8],
+        terminator: osc::Terminator,
+    ) -> bool {
+        let reply = kitty_clipboard_status_reply(operation, status, id, terminator);
+        self.queue_clipboard_reply(&reply)
+    }
+
+    fn queue_clipboard_reply(&mut self, reply: &[u8]) -> bool {
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        if let Err(err) = worker.queue_write(reply) {
+            self.apply_termio_event(termio::TermioWorkerEvent::Error(format!("{err:?}")));
+            return false;
+        }
+        true
     }
 
     fn osc52_clipboard_read(&mut self, kind: u8, data: &[u8]) -> bool {
@@ -2735,10 +2880,29 @@ impl Surface {
         clipboard: c_int,
         osc52_kind: u8,
     ) -> *mut c_void {
+        self.push_clipboard_request_with_kitty_metadata(
+            request,
+            clipboard,
+            osc52_kind,
+            Vec::new(),
+            osc::Terminator::St,
+        )
+    }
+
+    fn push_clipboard_request_with_kitty_metadata(
+        &mut self,
+        request: c_int,
+        clipboard: c_int,
+        osc52_kind: u8,
+        kitty_id: Vec<u8>,
+        kitty_terminator: osc::Terminator,
+    ) -> *mut c_void {
         let state = Box::new(ClipboardRequestState {
             request,
             clipboard,
             osc52_kind,
+            kitty_id,
+            kitty_terminator,
         });
         let state = NonNull::from(Box::leak(state));
         self.active_clipboard_requests.push(state);
@@ -4541,6 +4705,124 @@ fn osc52_read_reply(kind: u8, data: &[u8]) -> Vec<u8> {
     reply.extend_from_slice(&encoded);
     reply.extend_from_slice(b"\x1b\\");
     reply
+}
+
+enum KittyReadPayload {
+    TextPlain,
+    AvailableTypes,
+}
+
+fn kitty_clipboard_read_payload(payload: Option<&[u8]>) -> Option<KittyReadPayload> {
+    let decoded = decode_clipboard_base64(payload?)?;
+    if decoded == b"." {
+        return Some(KittyReadPayload::AvailableTypes);
+    }
+    decoded
+        .split(|byte| byte.is_ascii_whitespace())
+        .any(|part| part == b"text/plain")
+        .then_some(KittyReadPayload::TextPlain)
+}
+
+fn decode_clipboard_base64(data: &[u8]) -> Option<Vec<u8>> {
+    let size = base64_decoded_len(data)?;
+    let mut decoded = vec![0u8; size];
+    let decoded = terminal::base64::decode(data, &mut decoded).ok()?;
+    Some(decoded.to_vec())
+}
+
+fn kitty_clipboard_read_reply(id: &[u8], terminator: osc::Terminator, data: &[u8]) -> Vec<u8> {
+    let mut reply = Vec::new();
+    reply.extend_from_slice(&kitty_clipboard_status_reply(
+        KittyClipboardOperation::Read,
+        KittyClipboardStatus::Ok,
+        id,
+        terminator,
+    ));
+    if data.is_empty() {
+        kitty_clipboard_append_read_data(&mut reply, id, terminator, data);
+    } else {
+        for chunk in data.chunks(4096) {
+            kitty_clipboard_append_read_data(&mut reply, id, terminator, chunk);
+        }
+    }
+    reply.extend_from_slice(&kitty_clipboard_status_reply(
+        KittyClipboardOperation::Read,
+        KittyClipboardStatus::Done,
+        id,
+        terminator,
+    ));
+    reply
+}
+
+fn kitty_clipboard_append_read_data(
+    reply: &mut Vec<u8>,
+    id: &[u8],
+    terminator: osc::Terminator,
+    data: &[u8],
+) {
+    kitty_clipboard_reply_prefix(
+        reply,
+        KittyClipboardOperation::Read,
+        Some(KittyClipboardStatus::Data),
+        id,
+    );
+    reply.extend_from_slice(b":mime=");
+    reply.extend_from_slice(&base64_standard_encode(b"text/plain"));
+    reply.push(b';');
+    reply.extend_from_slice(&base64_standard_encode(data));
+    reply.extend_from_slice(terminator.bytes());
+}
+
+fn kitty_clipboard_status_reply(
+    operation: KittyClipboardOperation,
+    status: KittyClipboardStatus,
+    id: &[u8],
+    terminator: osc::Terminator,
+) -> Vec<u8> {
+    let mut reply = Vec::new();
+    kitty_clipboard_reply_prefix(&mut reply, operation, Some(status), id);
+    reply.extend_from_slice(terminator.bytes());
+    reply
+}
+
+fn kitty_clipboard_reply_prefix(
+    reply: &mut Vec<u8>,
+    operation: KittyClipboardOperation,
+    status: Option<KittyClipboardStatus>,
+    id: &[u8],
+) {
+    reply.extend_from_slice(b"\x1b]5522;type=");
+    reply.extend_from_slice(kitty_clipboard_operation_name(operation));
+    if !id.is_empty() {
+        reply.extend_from_slice(b":id=");
+        reply.extend_from_slice(id);
+    }
+    if let Some(status) = status {
+        reply.extend_from_slice(b":status=");
+        reply.extend_from_slice(kitty_clipboard_status_name(status));
+    }
+}
+
+fn kitty_clipboard_operation_name(operation: KittyClipboardOperation) -> &'static [u8] {
+    match operation {
+        KittyClipboardOperation::Read => b"read",
+        KittyClipboardOperation::WriteAlias => b"walias",
+        KittyClipboardOperation::WriteData => b"wdata",
+        KittyClipboardOperation::Write => b"write",
+    }
+}
+
+fn kitty_clipboard_status_name(status: KittyClipboardStatus) -> &'static [u8] {
+    match status {
+        KittyClipboardStatus::Data => b"DATA",
+        KittyClipboardStatus::Done => b"DONE",
+        KittyClipboardStatus::Busy => b"EBUSY",
+        KittyClipboardStatus::Invalid => b"EINVAL",
+        KittyClipboardStatus::Io => b"EIO",
+        KittyClipboardStatus::NotImplemented => b"ENOSYS",
+        KittyClipboardStatus::Permission => b"EPERM",
+        KittyClipboardStatus::Ok => b"OK",
+    }
 }
 
 fn terminal_from_handle<'a>(handle: RoasttyTerminal) -> Option<&'a mut Terminal> {
@@ -13260,6 +13542,8 @@ pub extern "C" fn roastty_surface_complete_clipboard_request(
     let request = request_state.request;
     let clipboard = request_state.clipboard;
     let osc52_kind = request_state.osc52_kind;
+    let kitty_id = request_state.kitty_id.clone();
+    let kitty_terminator = request_state.kitty_terminator;
     let bytes = unsafe { CStr::from_ptr(text) }.to_bytes();
 
     match request {
@@ -13334,6 +13618,52 @@ pub extern "C" fn roastty_surface_complete_clipboard_request(
         }
         ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE => {
             surface.take_clipboard_request(state);
+        }
+        ROASTTY_CLIPBOARD_REQUEST_KITTY_READ => {
+            if surface.app.is_null() || surface.termio_worker.is_none() {
+                surface.take_clipboard_request(state);
+                return;
+            }
+            if surface.clipboard_read.denied() {
+                surface.take_clipboard_request(state);
+                let reply = kitty_clipboard_status_reply(
+                    KittyClipboardOperation::Read,
+                    KittyClipboardStatus::Permission,
+                    &kitty_id,
+                    kitty_terminator,
+                );
+                surface.queue_clipboard_reply(&reply);
+                return;
+            }
+            if !confirmed && surface.clipboard_read.needs_confirm() {
+                let Some(app) = app_from_handle(surface.app) else {
+                    surface.take_clipboard_request(state);
+                    return;
+                };
+                let Some(confirm) = app.runtime.confirm_read_clipboard_cb else {
+                    surface.take_clipboard_request(state);
+                    let reply = kitty_clipboard_status_reply(
+                        KittyClipboardOperation::Read,
+                        KittyClipboardStatus::Permission,
+                        &kitty_id,
+                        kitty_terminator,
+                    );
+                    surface.queue_clipboard_reply(&reply);
+                    return;
+                };
+                unsafe {
+                    confirm(
+                        app.runtime.userdata,
+                        text,
+                        state,
+                        ROASTTY_CLIPBOARD_REQUEST_KITTY_READ,
+                    );
+                }
+                return;
+            }
+            surface.take_clipboard_request(state);
+            let reply = kitty_clipboard_read_reply(&kitty_id, kitty_terminator, bytes);
+            surface.queue_clipboard_reply(&reply);
         }
         _ => {}
     }
@@ -25167,6 +25497,7 @@ mod tests {
         assert_eq!(ROASTTY_CLIPBOARD_REQUEST_PASTE, 0);
         assert_eq!(ROASTTY_CLIPBOARD_REQUEST_OSC_52_READ, 1);
         assert_eq!(ROASTTY_CLIPBOARD_REQUEST_OSC_52_WRITE, 2);
+        assert_eq!(ROASTTY_CLIPBOARD_REQUEST_KITTY_READ, 3);
     }
 
     #[test]
@@ -25178,6 +25509,99 @@ mod tests {
         assert_eq!(base64_standard_encode(b"clip"), b"Y2xpcA==");
         assert_eq!(osc52_read_reply(b'p', b""), b"\x1b]52;p;\x1b\\");
         assert_eq!(osc52_read_reply(b'x', b"f"), b"\x1b]52;c;Zg==\x1b\\");
+    }
+
+    #[test]
+    fn kitty_clipboard_read_payload_and_reply_encoding() {
+        assert!(matches!(
+            kitty_clipboard_read_payload(Some(b"dGV4dC9wbGFpbg==")),
+            Some(KittyReadPayload::TextPlain)
+        ));
+        assert!(matches!(
+            kitty_clipboard_read_payload(Some(b"dGV4dC9wbGFpbiBpbWFnZS9wbmc=")),
+            Some(KittyReadPayload::TextPlain)
+        ));
+        assert!(matches!(
+            kitty_clipboard_read_payload(Some(b"Lg==")),
+            Some(KittyReadPayload::AvailableTypes)
+        ));
+        assert!(kitty_clipboard_read_payload(Some(b"aW1hZ2UvcG5n")).is_none());
+        assert!(kitty_clipboard_read_payload(Some(b"bad")).is_none());
+        assert!(kitty_clipboard_read_payload(None).is_none());
+
+        assert_eq!(
+            kitty_clipboard_status_reply(
+                KittyClipboardOperation::Read,
+                KittyClipboardStatus::Ok,
+                b"abc",
+                osc::Terminator::St,
+            ),
+            b"\x1b]5522;type=read:id=abc:status=OK\x1b\\"
+        );
+        assert_eq!(
+            kitty_clipboard_status_reply(
+                KittyClipboardOperation::Write,
+                KittyClipboardStatus::NotImplemented,
+                b"",
+                osc::Terminator::Bel,
+            ),
+            b"\x1b]5522;type=write:status=ENOSYS\x07"
+        );
+        assert_eq!(
+            kitty_clipboard_read_reply(b"", osc::Terminator::Bel, b"f"),
+            b"\x1b]5522;type=read:status=OK\x07\x1b]5522;type=read:status=DATA:mime=dGV4dC9wbGFpbg==;Zg==\x07\x1b]5522;type=read:status=DONE\x07"
+        );
+
+        let long = vec![b'a'; 4097];
+        let reply = kitty_clipboard_read_reply(b"", osc::Terminator::St, &long);
+        assert_eq!(count_bytes(&reply, b":status=DATA"), 2);
+        assert!(reply.ends_with(b"\x1b]5522;type=read:status=DONE\x1b\\"));
+    }
+
+    fn push_kitty_clipboard(
+        surface: RoasttySurface,
+        metadata: &[u8],
+        payload: Option<&[u8]>,
+        terminator: osc::Terminator,
+    ) {
+        surface_from_handle(surface)
+            .unwrap()
+            .test_termio_events
+            .push_back(termio::TermioWorkerEvent::Clipboard(
+                TerminalClipboardEvent::Kitty {
+                    metadata: metadata.to_vec(),
+                    payload: payload.map(|payload| payload.to_vec()),
+                    terminator,
+                },
+            ));
+    }
+
+    fn count_bytes(haystack: &[u8], needle: &[u8]) -> usize {
+        haystack
+            .windows(needle.len())
+            .filter(|window| *window == needle)
+            .count()
+    }
+
+    fn hex_bytes(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn read_reply_command(reply_len: usize) -> CString {
+        CString::new(format!(
+            "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read({reply_len}); sys.stdout.write(\"\\nhex:\" + data.hex()); sys.stdout.flush()'"
+        ))
+        .unwrap()
+    }
+
+    fn assert_surface_writes_reply(
+        app: RoasttyApp,
+        surface: RoasttySurface,
+        expected_reply: &[u8],
+    ) {
+        let expected = format!("hex:{}", hex_bytes(expected_reply));
+        let snapshot = surface_snapshot_text_until(app, surface, &expected);
+        assert!(snapshot.contains(&expected), "{snapshot:?}");
     }
 
     #[test]
@@ -25560,6 +25984,251 @@ mod tests {
             .active_clipboard_requests
             .is_empty());
         roastty_surface_free(detached);
+    }
+
+    #[test]
+    fn kitty_clipboard_read_event_allocates_standard_runtime_request_with_id() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app_with_clipboard_read(0xCA57, true, false);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        push_kitty_clipboard(
+            surface,
+            b"type=read:id=bad/slash",
+            Some(b"dGV4dC9wbGFpbg=="),
+            osc::Terminator::Bel,
+        );
+
+        roastty_app_tick(app);
+
+        let records = clipboard_read_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].userdata, 0xCA57);
+        assert_eq!(records[0].clipboard, ROASTTY_CLIPBOARD_STANDARD);
+        let request = unsafe {
+            surface_from_handle(surface)
+                .unwrap()
+                .active_clipboard_requests[0]
+                .as_ref()
+        };
+        assert_eq!(request.request, ROASTTY_CLIPBOARD_REQUEST_KITTY_READ);
+        assert_eq!(request.clipboard, ROASTTY_CLIPBOARD_STANDARD);
+        assert_eq!(request.kitty_id, b"badslash");
+        assert_eq!(request.kitty_terminator, osc::Terminator::Bel);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn kitty_clipboard_read_event_routes_primary_when_supported() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app_with_clipboard_read(0xCA57, true, true);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        push_kitty_clipboard(
+            surface,
+            b"type=read:loc=primary",
+            Some(b"dGV4dC9wbGFpbg=="),
+            osc::Terminator::St,
+        );
+
+        roastty_app_tick(app);
+
+        let records = clipboard_read_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].clipboard, ROASTTY_CLIPBOARD_SELECTION);
+        let request = unsafe {
+            surface_from_handle(surface)
+                .unwrap()
+                .active_clipboard_requests[0]
+                .as_ref()
+        };
+        assert_eq!(request.clipboard, ROASTTY_CLIPBOARD_SELECTION);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn kitty_clipboard_read_event_rejects_unsupported_forms_without_request() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app_with_clipboard_read(0xCA57, true, false);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        for (metadata, payload) in [
+            (
+                b"type=read:loc=primary".as_slice(),
+                Some(b"dGV4dC9wbGFpbg==".as_slice()),
+            ),
+            (b"type=read", Some(b"aW1hZ2UvcG5n".as_slice())),
+            (b"type=read", Some(b"bad".as_slice())),
+            (b"type=read", None),
+            (b"type=write", None),
+            (b"type=wdata", None),
+            (b"type=walias", None),
+            (b"type=bogus", None),
+            (b"", None),
+        ] {
+            push_kitty_clipboard(surface, metadata, payload, osc::Terminator::St);
+        }
+
+        roastty_app_tick(app);
+
+        assert!(clipboard_read_records().is_empty());
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn kitty_clipboard_read_event_availability_query_skips_runtime_read() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app_with_clipboard_read(0xCA57, true, false);
+        let expected_reply = kitty_clipboard_read_reply(b"ok", osc::Terminator::Bel, b"text/plain");
+        let command = read_reply_command(expected_reply.len());
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 320, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        push_kitty_clipboard(
+            surface,
+            b"type=read:id=ok",
+            Some(b"Lg=="),
+            osc::Terminator::Bel,
+        );
+
+        roastty_app_tick(app);
+
+        assert!(clipboard_read_records().is_empty());
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+        assert_surface_writes_reply(app, surface, &expected_reply);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn kitty_clipboard_read_event_deny_policy_replies_without_request() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let config = new_test_config_with_clipboard_read(config::ClipboardAccess::Deny);
+        let app = new_test_app_with_clipboard_read(0xCA57, true, false);
+        let runtime = app_from_handle(app).unwrap().runtime;
+        roastty_app_free(app);
+        let app = roastty_app_new(&runtime, config);
+        let expected_reply = kitty_clipboard_status_reply(
+            KittyClipboardOperation::Read,
+            KittyClipboardStatus::Permission,
+            b"",
+            osc::Terminator::St,
+        );
+        let command = read_reply_command(expected_reply.len());
+        let mut surface_config = roastty_surface_config_new();
+        surface_config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &surface_config);
+        set_surface_test_geometry(surface, 320, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        push_kitty_clipboard(
+            surface,
+            b"type=read",
+            Some(b"dGV4dC9wbGFpbg=="),
+            osc::Terminator::St,
+        );
+
+        roastty_app_tick(app);
+
+        assert!(clipboard_read_records().is_empty());
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+        assert_surface_writes_reply(app, surface, &expected_reply);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn kitty_clipboard_unsupported_operation_writes_explicit_reply() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let app = new_test_app();
+        let expected_reply = kitty_clipboard_status_reply(
+            KittyClipboardOperation::Write,
+            KittyClipboardStatus::NotImplemented,
+            b"",
+            osc::Terminator::St,
+        );
+        let command = read_reply_command(expected_reply.len());
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 320, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        push_kitty_clipboard(surface, b"type=write", None, osc::Terminator::St);
+
+        roastty_app_tick(app);
+
+        assert_surface_writes_reply(app, surface, &expected_reply);
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn kitty_clipboard_read_completion_writes_reply_with_original_terminator() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let config = new_test_config_with_clipboard_read(config::ClipboardAccess::Allow);
+        let app = new_test_app_with_clipboard_read(0xCA57, true, false);
+        let runtime = app_from_handle(app).unwrap().runtime;
+        roastty_app_free(app);
+        let app = roastty_app_new(&runtime, config);
+        let command = CString::new(
+            "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read(137); sys.stdout.write(\"\\nhex:\" + data.hex()); sys.stdout.flush()'",
+        )
+        .unwrap();
+        let mut surface_config = roastty_surface_config_new();
+        surface_config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &surface_config);
+        set_surface_test_geometry(surface, 320, 3, 10, 20);
+        assert!(surface_snapshot_text_after_start(app, surface).contains("ready"));
+        let state = surface_from_handle(surface)
+            .unwrap()
+            .push_clipboard_request_with_kitty_metadata(
+                ROASTTY_CLIPBOARD_REQUEST_KITTY_READ,
+                ROASTTY_CLIPBOARD_STANDARD,
+                b'c',
+                b"abc".to_vec(),
+                osc::Terminator::Bel,
+            );
+        let text = CString::new("clip").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), state, false);
+
+        let expected =
+            "hex:1b5d353532323b747970653d726561643a69643d6162633a7374617475733d4f4b071b5d353532323b747970653d726561643a69643d6162633a7374617475733d444154413a6d696d653d64475634644339776247467062673d3d3b5932787063413d3d071b5d353532323b747970653d726561643a69643d6162633a7374617475733d444f4e4507";
+        let snapshot = surface_snapshot_text_until(app, surface, expected);
+        assert!(snapshot.contains(expected), "{snapshot:?}");
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     fn push_osc52_write(surface: RoasttySurface, kind: u8, data: &[u8]) {
