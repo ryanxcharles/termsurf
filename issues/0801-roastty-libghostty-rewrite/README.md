@@ -2254,6 +2254,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 821: Apply Custom Shader Frame Updates](821-apply-custom-shader-frame.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 822: Present Metal Frame](822-present-metal-frame.md) —
+  **Designed** · Codex/Codex
 
 ## Non-Goals
 
