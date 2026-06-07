@@ -402,7 +402,11 @@ Out of scope / tooling: `build/`, `benchmark/`, `extra/`, `simd/`, `stb/`,
       methods; CPU debug overlay work remains tracked in renderer rows
 - [ ] `libxev` (event loop) — not started
 - [ ] `zf` (fuzzy match) — not started
-- [ ] `wuffs` / `libpng` / `zlib` (image decode + inflate) — not started
+- [ ] `wuffs` / `libpng` / `zlib` (image decode + inflate) — partial: Kitty
+      graphics zlib-deflate payloads decompress through `flate2`, and PNG decode
+      is wired through the `sys_decode_png` host callback path with
+      direct/file/temporary-file/shared-memory coverage; bundled PNG decoder
+      selection or replacement remains open
 - [ ] `oniguruma` (regex) — not ported; terminal-core `search`/`StringMap` uses
       Rust `regex`, but Surface link/search UI regex integration still needs a
       broader decision
@@ -2158,6 +2162,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 796: Renderer Metal Checklist Sync](796-renderer-metal-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 797: Image Decode Dependency Checklist Sync](797-image-decode-dependency-checklist-sync.md)
+  — **Designed**
 
 ## Non-Goals
 
