@@ -25,7 +25,7 @@ use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAU
 use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
 use crate::terminal::style::BoldColor as TerminalBoldColor;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 /// The aggregating config struct (upstream `config.Config`) — the home of the
 /// config keys. Built up one coherent field group per slice; this lands the
@@ -594,9 +594,14 @@ impl Config {
         &mut self,
         path: &std::path::Path,
     ) -> std::io::Result<Vec<ConfigDiagnostic>> {
-        let text = std::fs::read_to_string(path)?;
+        let path = std::fs::canonicalize(path)?;
+        let text = std::fs::read_to_string(&path)?;
         let text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
-        Ok(self.load_str(text))
+        let diagnostics = self.load_str(text);
+        if let Some(base) = path.parent() {
+            self.expand_config_file_paths_from_base(base);
+        }
+        Ok(diagnostics)
     }
 
     /// Load a config file if it exists (upstream `Config.loadOptionalFile`): `Loaded`
@@ -696,6 +701,18 @@ impl Config {
     where
         I: IntoIterator<Item = &'a str>,
     {
+        let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        self.set_cli_args_from_base(args, &base)
+    }
+
+    pub(crate) fn set_cli_args_from_base<'a, I>(
+        &mut self,
+        args: I,
+        base: &std::path::Path,
+    ) -> Vec<ConfigDiagnostic>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
         let mut diagnostics = Vec::new();
         for (i, arg) in args.into_iter().enumerate() {
             match loader::parse_cli_arg(arg) {
@@ -716,7 +733,13 @@ impl Config {
                 }),
             }
         }
+        let base = std::fs::canonicalize(base).unwrap_or_else(|_| base.to_path_buf());
+        self.expand_config_file_paths_from_base(&base);
         diagnostics
+    }
+
+    fn expand_config_file_paths_from_base(&mut self, base: &std::path::Path) {
+        self.config_file.expand_from_base(base);
     }
 }
 
@@ -841,6 +864,55 @@ impl ConfigFilePath {
             Self::Required(path) => formatter.entry_str(path),
         }
     }
+
+    fn set_required_empty(&mut self) {
+        *self = Self::Required(String::new());
+    }
+
+    fn replace_path(&mut self, path: PathBuf) {
+        let path = path.to_string_lossy().into_owned();
+        match self {
+            Self::Optional(current) | Self::Required(current) => *current = path,
+        }
+    }
+
+    fn expand_from_base(&mut self, base: &Path) {
+        let path = self.path();
+        if path.is_empty() {
+            return;
+        }
+
+        let path = Path::new(path);
+        if path.is_absolute() {
+            return;
+        }
+
+        let expanded_home = if path.starts_with("~/") {
+            let Some(home) = std::env::var_os("HOME") else {
+                self.set_required_empty();
+                return;
+            };
+            Some(PathBuf::from(
+                expand_home(path.as_os_str(), &home).into_owned(),
+            ))
+        } else {
+            None
+        };
+        let path = expanded_home.as_deref().unwrap_or(path);
+        if path.is_absolute() {
+            self.replace_path(path.to_path_buf());
+            return;
+        }
+
+        let candidate = base.join(path);
+        match std::fs::canonicalize(&candidate) {
+            Ok(path) => self.replace_path(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.replace_path(lexical_normalize_path(candidate));
+            }
+            Err(_) => self.set_required_empty(),
+        }
+    }
 }
 
 /// An accumulating `config-file` list (upstream `RepeatablePath`).
@@ -895,6 +967,28 @@ impl RepeatableConfigPath {
             path.format_entry(formatter);
         }
     }
+
+    fn expand_from_base(&mut self, base: &Path) {
+        for path in &mut self.list {
+            path.expand_from_base(base);
+        }
+    }
+}
+
+fn lexical_normalize_path(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 /// Resolve an enum field value (upstream's empty-reset + `stringToEnum` magic): a
@@ -3662,7 +3756,7 @@ mod tests {
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
-    use std::ffi::OsStr;
+    use std::ffi::{OsStr, OsString};
     use std::os::unix::ffi::OsStrExt;
     use std::path::PathBuf;
 
@@ -4923,6 +5017,162 @@ mod tests {
                 ConfigFilePath::Optional("b".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn config_file_load_expands_paths_relative_to_config_file() {
+        let dir = unique_config_test_dir("path-file-base");
+        let child = dir.join("child.conf");
+        let main = dir.join("main.conf");
+        write_config_file(&child, "fullscreen = true\n");
+        write_config_file(&main, "config-file = ./child.conf\n");
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_file(&main).unwrap();
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.config_file.list,
+            vec![ConfigFilePath::Required(
+                std::fs::canonicalize(&child)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_file_load_relative_config_path_uses_canonical_parent_base() {
+        let dir = unique_config_test_dir("path-relative-load");
+        let child = dir.join("child.conf");
+        let main = dir.join("main.conf");
+        write_config_file(&child, "fullscreen = true\n");
+        write_config_file(&main, "config-file = child.conf\n");
+
+        let _cwd = CurrentDirGuard::set(&dir);
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_file(std::path::Path::new("main.conf")).unwrap();
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[0]),
+            std::fs::canonicalize(&child)
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        );
+
+        drop(_cwd);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_path_cli_expands_relative_optional_absolute_home_and_missing() {
+        let dir = unique_config_test_dir("path-cli-base");
+        let base = dir.join("base");
+        let home = dir.join("home");
+        let child = base.join("child.conf");
+        let home_child = home.join("home-child.conf");
+        write_config_file(&child, "fullscreen = true\n");
+        write_config_file(&home_child, "fullscreen = true\n");
+        let _home = EnvGuard::set("HOME", &home);
+        let canonical_base = std::fs::canonicalize(&base).unwrap();
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.set_cli_args_from_base(
+            [
+                "--config-file=./child.conf",
+                "--config-file=?missing.conf",
+                "--config-file=?./missing-dot.conf",
+                "--config-file=?sub/../missing-parent.conf",
+                &format!("--config-file={}", child.display()),
+                "--config-file=~/home-child.conf",
+            ],
+            &base,
+        );
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.config_file.list.len(), 6);
+        assert!(matches!(
+            cfg.config_file.list[0],
+            ConfigFilePath::Required(_)
+        ));
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[0]),
+            std::fs::canonicalize(&child)
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert!(matches!(
+            cfg.config_file.list[1],
+            ConfigFilePath::Optional(_)
+        ));
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[1]),
+            canonical_base
+                .join("missing.conf")
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[2]),
+            canonical_base
+                .join("missing-dot.conf")
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert!(matches!(
+            cfg.config_file.list[3],
+            ConfigFilePath::Optional(_)
+        ));
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[3]),
+            canonical_base
+                .join("missing-parent.conf")
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[4]),
+            child.to_string_lossy().as_ref()
+        );
+        assert_eq!(
+            config_file_path_string(&cfg.config_file.list[5]),
+            home_child.to_string_lossy().as_ref()
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out
+            .lines()
+            .any(|line| line == format!("config-file = {}", child.display())));
+        assert!(out.lines().any(|line| line
+            == format!(
+                "config-file = ?{}",
+                canonical_base.join("missing.conf").display()
+            )));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_path_expansion_error_blanks_to_required_empty() {
+        let dir = unique_config_test_dir("path-error");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cfg = Config::default();
+        let diagnostics = cfg.set_cli_args_from_base(["--config-file=bad\0path"], &dir);
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.config_file.list,
+            vec![ConfigFilePath::Required(String::new())]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -6426,6 +6676,53 @@ mod tests {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(path, text).unwrap();
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<OsStr>) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    struct CurrentDirGuard {
+        previous: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn set(path: &std::path::Path) -> Self {
+            let previous = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self { previous }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.previous).unwrap();
+        }
+    }
+
+    fn config_file_path_string(path: &ConfigFilePath) -> &str {
+        match path {
+            ConfigFilePath::Optional(path) | ConfigFilePath::Required(path) => path,
+        }
     }
 
     #[test]

@@ -102,3 +102,53 @@ remaining blocking findings. The follow-up review confirmed that canonicalizing
 existing relative targets, preserving missing-file fallback behavior, blanking
 non-missing expansion errors to required empty, and canonicalizing loaded config
 paths before deriving the expansion base are sufficient for this slice.
+
+## Result
+
+**Result:** Pass
+
+Implemented `config-file` path expansion in `roastty/src/config/mod.rs`.
+`Config::load_file` now canonicalizes the loaded config path before reading it
+and expands stored `config-file` entries relative to that canonical parent.
+`Config::set_cli_args` now expands stored `config-file` entries relative to the
+current working directory, with a test helper for stable base-directory
+coverage.
+
+The expansion helper now:
+
+- leaves absolute paths unchanged;
+- expands `~/` through Roastty's home expansion helper;
+- canonicalizes existing relative targets;
+- lexically normalizes missing relative targets after joining them to the base;
+- preserves required/optional status for successful expansion and missing-file
+  fallback;
+- blanks non-missing expansion errors to required empty, matching upstream's
+  skip-ready state.
+
+Verification passed:
+
+- `cargo test -p roastty config_file -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_path -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_ -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `git diff --check`
+
+## Completion Review
+
+Codex reviewed the completed implementation and first found one blocking
+upstream mismatch: missing-file fallback stored `base.join(path)` without
+lexical normalization. The implementation was fixed to use
+`lexical_normalize_path` for the `NotFound` fallback, and tests were added for
+`?./missing-dot.conf` and `?sub/../missing-parent.conf`.
+
+Codex reviewed the updated implementation and found no remaining blocking
+findings. The follow-up review confirmed that the prior blocker was addressed
+and approved the result commit.
+
+## Conclusion
+
+Roastty now expands stored `config-file` paths into absolute paths after file
+and CLI loading. This preserves the upstream prerequisite that recursive loading
+iterates absolute paths, while leaving recursive file opening, cycle detection,
+and file type handling for the next slice.
