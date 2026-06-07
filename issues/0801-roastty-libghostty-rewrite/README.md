@@ -2319,6 +2319,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Claude/Claude
 - [Experiment 830: Fix the flaky surface_text PTY-snapshot tests](830-flaky-surface-snapshot-tests.md)
   — **Partial** · Claude/Claude/Claude
+- [Experiment 831: Poison-resilient PTY_COMMAND_LOCK (kill the cascade amplifier)](831-poison-resilient-pty-lock.md)
+  — **Designed** · Claude/Claude/Claude
 
 ## Non-Goals
 
