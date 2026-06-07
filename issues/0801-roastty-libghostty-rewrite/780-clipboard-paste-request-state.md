@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "default"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "default"
+reasoning = "medium"
 +++
 
 # Experiment 780: Clipboard Paste Request State
@@ -116,3 +121,63 @@ tests for stale/cross-surface state, double completion, confirmation
 preservation, confirmed unsafe paste, callback refusal, synchronous completion,
 and abandoned request cleanup. Codex reviewed the revision, found no blockers,
 and approved the Experiment 780 plan commit.
+
+## Result
+
+**Result:** Pass
+
+`Surface` now owns active paste clipboard request state:
+
+- `paste_from_clipboard` allocates a stable request pointer before calling
+  `read_clipboard_cb`.
+- Refused callbacks clean up the request only if it is still active, so
+  synchronous completion during the callback is stable.
+- `roastty_surface_complete_clipboard_request` validates that the request state
+  belongs to the target surface before consuming it.
+- Empty paste text consumes the request without writing.
+- Safe unconfirmed paste and confirmed paste write to the child PTY and consume
+  the request.
+- Unsafe unconfirmed paste calls `confirm_read_clipboard_cb` with
+  `ROASTTY_CLIPBOARD_REQUEST_PASTE` and preserves the request for a later
+  confirmed completion.
+- Unsafe unconfirmed paste without a confirmation callback drops the request
+  without writing.
+- Surface destruction frees abandoned request states.
+
+The README checklist update is scoped: paste clipboard request state is done,
+while OSC 52 request allocation/handling remains missing.
+
+Verification passed:
+
+- `cargo test -p roastty surface_binding_action_paste_from_clipboard -- --nocapture --test-threads=1`
+  - 4 tests passed, finished in 7.28s.
+- `cargo test -p roastty surface_complete_clipboard_request -- --nocapture --test-threads=1`
+  - 10 tests passed, finished in 33.85s.
+- `cargo test -p roastty clipboard_request -- --nocapture --test-threads=1`
+  - 12 tests passed, finished in 42.31s.
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/780-clipboard-paste-request-state.md`
+- `git diff --check`
+
+## Conclusion
+
+Paste clipboard requests now have real Roastty-owned request state and
+confirmation-preserving completion behavior. The remaining clipboard request gap
+is OSC 52 request allocation/handling, which should be handled separately when
+the terminal OSC request path is ready.
+
+## Completion Review
+
+Codex reviewed the completed result and initially found three issues: the README
+checklist wording could read as if frontend/lifecycle work was done, active
+requests were not consumed if the app or worker disappeared before completion,
+and the preserved confirmation path did not prove that later confirmed
+completion wrote to the child PTY on the same request.
+
+The implementation and docs were updated so the checklist keeps only paste
+request state in the done clause, active requests are consumed after validating
+state even if the app or worker is unavailable, and the unsafe confirmation test
+verifies later confirmed completion writes the expected PTY bytes for the same
+preserved request. Codex reviewed the revised diff, found no blockers, and
+approved the Experiment 780 result commit.
