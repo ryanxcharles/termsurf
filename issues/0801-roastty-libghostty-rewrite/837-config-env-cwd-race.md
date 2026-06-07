@@ -124,6 +124,72 @@ asserts). Three findings, adopted:
 - **Nit — `Mutex` not in scope.** **Fixed:** the static and field are
   fully-qualified `std::sync::Mutex` / `std::sync::MutexGuard`.
 
+## Result
+
+**Result:** Pass
+
+The lock landed (`PROCESS_ENV_LOCK` + `process_env_lock()`, and a `_lock` field
+on `EnvGuard` and `CurrentDirGuard`). Build clean (no warnings), fmt clean,
+no-ghostty clean, `git diff --check` clean; both config tests pass in isolation.
+
+| run (default) | STATUS              | result               |
+| ------------- | ------------------- | -------------------- |
+| #1            | COMPLETED rc=0 301s | 4360 passed / 0 fail |
+| #2            | COMPLETED rc=0 295s | 4360 passed / 0 fail |
+| #3            | COMPLETED rc=0 191s | 4360 passed / 0 fail |
+| #4            | COMPLETED rc=0 156s | 4360 passed / 0 fail |
+| #5            | COMPLETED rc=0 156s | 4360 passed / 0 fail |
+
+**5/5 fully green at default parallelism** — 0 failures, 0 panics, 0
+`PoisonError`, no `HARD_TIMEOUT`/`IDLE_KILL`. The structural mutual-exclusion
+(one guard holds the process env/cwd at a time) eliminates the race; the 5 runs
+corroborate it. (Serializing the _writers_ is sufficient: the only unguarded
+process-env/cwd readers — a few `set_cli_args` callers reading `current_dir()` —
+use no cwd-dependent relative path, so the env/cwd value never influences their
+assertions.)
+
+**The suite is now default-green, so the thread cap is dropped.** The README
+"Test execution gate" routine gate reverts from
+`cargo test -p roastty -- --test-threads=4` to plain **`cargo test -p roastty`**
+(default parallelism) through `scripts/bounded-run.sh`; the machine-relative
+`--test-threads=4` note is removed.
+
 ## Conclusion
 
-_(to be written after the run)_
+This was the last flake. The full arc of the test-suite stabilization (Issue
+801, Exps 829–837):
+
+- **829** — deadlock-proof gate + the PTY-drop deadlock fix.
+- **831** — poison-resilient `PTY_COMMAND_LOCK` (killed the 13–77-failure
+  cascade).
+- **832** — the surface-snapshot first-render race (~106 sites →
+  wait-for-token).
+- **833** — bounded parallelism (Partial: it shifted, not removed, the flake —
+  the lesson that per-test fixes, not a global cap, were needed).
+- **834** — `surface_start` echo-defeated KEY.
+- **835** — `natural_text` racy-echo assertion → the deterministic byte.
+- **836** — `performable_action` blocked child → `cat -v` deterministic output.
+- **837** — the config `$HOME`/cwd env race → a serialization lock.
+
+`cargo test -p roastty` now runs **green at default parallelism** (5/5), under
+the 15-min bounded-run gate. The contention-driven flakes were _fixed_, not
+masked, so the thread cap is no longer needed.
+
+**Feature work resumes next** (Issue 801's actual remaining surface area:
+URI/regex needing an oniguruma-class engine, the remaining `os/` slices, etc.),
+now that the suite is a trustworthy signal again.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED — no Required findings.** Independently
+verified: `_lock` is acquired first in both `set` constructors (before the
+mutation), the restore lives in the manual `Drop::drop` body (runs before field
+drops, so the lock outlives the restore), types fully-qualified, three guard
+sites in three distinct tests (no self-deadlock), test-only; v1–v5 each
+`4360 passed; 0 failed`, rc=0, 0 panics/poison, `CMD=cargo test -p roastty` (no
+`--test-threads`), no timeout; the README gate is now plain
+`cargo test -p roastty` with no prescriptive cap; run times fell (301→156 s, no
+slowdown) and `PROCESS_ENV_LOCK` is independent of `PTY_COMMAND_LOCK`. One
+Optional, adopted: noted that the unguarded `set_cli_args` cwd readers are
+path-independent, so serializing the writers suffices.

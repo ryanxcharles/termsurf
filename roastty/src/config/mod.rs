@@ -7533,16 +7533,36 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
+    // Serializes all process-global env/cwd mutation across test threads so the
+    // HOME/cwd guards below cannot race (Issue 801, Exp 837). Poison-resilient:
+    // the lock guards no data (a pure serialization mutex over `()`), so a test
+    // panicking while holding it must not cascade PoisonError into every other
+    // env/cwd test (mirrors pty_command_lock, Exp 831).
+    static PROCESS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn process_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        PROCESS_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     struct EnvGuard {
         key: &'static str,
         previous: Option<OsString>,
+        // Held for the guard's whole lifetime. The restore runs in `drop()` below,
+        // which executes before any field is dropped, so the lock is released only
+        // after the restore — keeping set→use→restore mutually exclusive.
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: impl AsRef<OsStr>) -> Self {
+            let _lock = process_env_lock();
             let previous = std::env::var_os(key);
             std::env::set_var(key, value);
-            Self { key, previous }
+            Self {
+                key,
+                previous,
+                _lock,
+            }
         }
     }
 
@@ -7558,13 +7578,15 @@ mod tests {
 
     struct CurrentDirGuard {
         previous: PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl CurrentDirGuard {
         fn set(path: &std::path::Path) -> Self {
+            let _lock = process_env_lock();
             let previous = std::env::current_dir().unwrap();
             std::env::set_current_dir(path).unwrap();
-            Self { previous }
+            Self { previous, _lock }
         }
     }
 

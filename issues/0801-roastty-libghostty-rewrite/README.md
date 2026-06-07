@@ -536,16 +536,15 @@ make hangs loud and fatal rather than silent:
   failure this gate exists to kill. Treat an instant `STATUS=COMPLETED`, an
   empty log, or a missing `STATUS` line as a **failure to investigate**, never a
   pass.
-- **The routine gate is bare `cargo test -p roastty -- --test-threads=4`, run
-  through `scripts/bounded-run.sh`.** The `--test-threads=4` cap (≈ half this
-  machine's cores — _machine-relative_, recalibrate per host) keeps the
-  real-child PTY tests from being CPU-starved, which otherwise loses key-echo
-  renders and produces contention flakes (Experiment 833). A full run is ~190 s,
-  so it sits comfortably inside the 15-min cap. Deadlock detection comes from
-  `bounded-run.sh`: a silent hang stops log progress, trips the 90 s no-progress
-  kill, and is `sample`d before the kill — caught within the 15-min ceiling
-  (catch latency ~drain + 90 s ≈ 5 min, via stack-sample rather than a by-name
-  line).
+- **The routine gate is bare `cargo test -p roastty`, run through
+  `scripts/bounded-run.sh`** (default parallelism). A full run is ~150–300 s,
+  well inside the 15-min cap. Deadlock detection comes from `bounded-run.sh`: a
+  silent hang stops log progress, trips the 90 s no-progress kill, and is
+  `sample`d before the kill — caught within the 15-min ceiling (catch latency
+  ~drain + 90 s ≈ 5 min, via stack-sample rather than a by-name line). (Exp 833
+  briefly used a `--test-threads=4` cap to mask the contention flakes, but that
+  only _shifted_ the flake; Exps 834–837 _fixed_ each underlying test, so the
+  suite is now green at default parallelism and the cap was dropped.)
 - **`cargo nextest run -p roastty` is the on-demand deadlock-pinpointing tool,
   not the routine gate.** Its `.config/nextest.toml`
   (`slow-timeout = { period = "30s", terminate-after = 1 }`, plus the `coretext`
@@ -556,7 +555,7 @@ make hangs loud and fatal rather than silent:
   makes a full run ~12–15 min, dangerously close to the 15-min hard cap.
 - **Run the full suite at the result gate** — never silently filter out the slow
   or PTY tests. A recorded representative subset may be used while iterating,
-  but the result gate runs everything (at `--test-threads=4`).
+  but the result gate runs everything (at default parallelism).
 - **Never hand-roll a poll-watcher.** The only sanctioned way to run a
   possibly-hanging command is `scripts/bounded-run.sh` as a single tracked
   background task (above). Do not background a raw command with `&` and watch it
@@ -2365,7 +2364,7 @@ are past the correctness-critical foundation.
 - [Experiment 836: Fix surface_key performable_action — a child that actually outputs](836-surface-key-performable-action.md)
   — **Pass** · Claude/Claude/Claude
 - [Experiment 837: Serialize the config tests' process-global env/cwd mutation](837-config-env-cwd-race.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 
