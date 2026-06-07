@@ -2,7 +2,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
     MTLBuffer, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
-    MTLRenderCommandEncoder, MTLRenderPassDescriptor,
+    MTLRenderCommandEncoder, MTLRenderPassDescriptor, MTLTexture,
 };
 
 use crate::renderer::metal::api::{
@@ -83,7 +83,7 @@ impl MetalRenderPass {
                 MetalLoadAction::Load.to_objc()
             });
             color_attachment.setStoreAction(MetalStoreAction::Store.to_objc());
-            color_attachment.setTexture(Some(attachment.texture.texture()));
+            color_attachment.setTexture(Some(attachment.texture));
             if let Some(clear_color) = attachment.clear_color {
                 color_attachment.setClearColor(clear_color.to_objc());
             }
@@ -269,7 +269,7 @@ pub(crate) enum MetalRenderPassError {
 }
 
 pub(crate) struct MetalRenderPassAttachment<'a> {
-    pub(crate) texture: &'a MetalTexture,
+    pub(crate) texture: &'a ProtocolObject<dyn MTLTexture>,
     pub(crate) clear_color: Option<MetalClearColor>,
 }
 
@@ -617,7 +617,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 32.0 / 255.0,
                     green: 64.0 / 255.0,
@@ -656,7 +656,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -703,7 +703,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -768,7 +768,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -843,7 +843,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 1.0,
@@ -923,7 +923,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -994,7 +994,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1061,7 +1061,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1132,7 +1132,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1207,7 +1207,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1251,7 +1251,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1310,7 +1310,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1393,7 +1393,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1462,7 +1462,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1515,7 +1515,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1567,7 +1567,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1620,7 +1620,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1673,7 +1673,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1726,7 +1726,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 1.0,
@@ -1791,7 +1791,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1848,7 +1848,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -1919,7 +1919,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 1.0,
@@ -1974,7 +1974,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -2038,7 +2038,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 0.0,
@@ -2095,7 +2095,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 1.0,
@@ -2146,7 +2146,7 @@ mod tests {
         let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
         let pass = frame
             .render_pass(&[MetalRenderPassAttachment {
-                texture: &target,
+                texture: target.texture(),
                 clear_color: Some(MetalClearColor {
                     red: 0.0,
                     green: 1.0,

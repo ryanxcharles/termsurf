@@ -45,7 +45,9 @@ starting the full live render loop.
     `Retained<ProtocolObject<dyn MTLTexture>>`, plus width/height accessors.
   - Build the IOSurface property dictionary from CoreFoundation values:
     `kIOSurfaceWidth`, `kIOSurfaceHeight`, `kIOSurfacePixelFormat` (`32BGRA`),
-    `kIOSurfaceBytesPerElement = 4`, and `kIOSurfaceColorSpace` populated from
+    and `kIOSurfaceBytesPerElement = 4`.
+  - Populate `kIOSurfaceColorSpace` after surface creation with
+    `IOSurfaceSetValue`, using
     `CGColorSpaceCreateWithName(kCGColorSpaceDisplayP3)` plus
     `CGColorSpaceCopyPropertyList`, matching upstream's Display P3 surface
     setup.
@@ -125,3 +127,61 @@ restrict target pixel formats to `Bgra8Unorm`/`Bgra8UnormSrgb`, and add zero
 dimension plus unsupported-format negative tests. With those fixes, the review
 said the design is implementable with the local `objc2` bindings and remains
 properly scoped to `Target`, not `IOSurfaceLayer` or the live render loop.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has an IOSurface-backed Metal target wrapper:
+
+- `roastty/Cargo.toml` declares `objc2-io-surface` directly and enables the
+  `objc2-io-surface` feature on `objc2-metal`.
+- `roastty/src/renderer/metal/target.rs` creates a Display P3 `32BGRA`
+  IOSurface, sets the serialized Display P3 property list with
+  `IOSurfaceSetValue`, creates an `MTLTexture` from the surface with
+  `newTextureWithDescriptor_iosurface_plane`, owns the surface as
+  `CFRetained<IOSurfaceRef>`, marks it purgeable-empty on drop, and exposes both
+  the surface and texture for later presentation work.
+- `MetalTarget` rejects zero dimensions and non-BGRA Metal pixel formats before
+  creating resources.
+- `MetalRenderPassAttachment` now borrows a common `MTLTexture` protocol view so
+  offscreen `MetalTexture` and IOSurface-backed `MetalTarget` can both be render
+  targets.
+- Existing render-pass tests were updated to pass `target.texture()` for
+  attachments, while shader-read step textures remain unchanged.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/metal/Target.zig`.
+- Inspected `vendor/ghostty/src/renderer/metal/IOSurfaceLayer.zig`.
+- Inspected `roastty/src/renderer/metal/texture.rs`.
+- Inspected `roastty/src/renderer/metal/render_pass.rs`.
+- Inspected local `objc2-io-surface` and `objc2-metal` generated bindings.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty metal::target -- --nocapture --test-threads=1` —
+  passed, 5 tests, including color-space presence on the IOSurface.
+- `cargo test -p roastty metal::render_pass -- --nocapture --test-threads=1` —
+  passed, 28 tests.
+
+## Conclusion
+
+Experiment 810 completes the IOSurface-backed `Target` resource layer. The Metal
+renderer row remains partial because `IOSurfaceLayer`, presentation, and full
+live frame orchestration are still missing.
+
+## Completion Review
+
+Codex reviewed the staged result and initially found two blocking issues: the
+Display P3 color space was being supplied in the IOSurface creation dictionary
+instead of assigned after creation with `IOSurfaceSetValue`, and `MetalTarget`
+relied only on `CFRetained<IOSurfaceRef>` drop instead of mirroring upstream's
+purgeable-empty cleanup before release. The review also noted that a test should
+prove the color-space value is present.
+
+The result was updated to create the IOSurface with width, height, pixel format,
+and bytes-per-element properties only; call `surface.set_value` with
+`kIOSurfaceColorSpace` after creation; assert that the color-space value exists
+on the test surface; and implement `Drop` to call
+`set_purgeable(PurgeableEmpty)` before the retained surface releases. Codex then
+re-reviewed the staged result, confirmed the prior blockers were fixed, found no
+remaining blocking issues, and approved the result commit.

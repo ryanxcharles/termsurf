@@ -8,6 +8,7 @@ pub(crate) mod pipeline;
 pub(crate) mod render_pass;
 pub(crate) mod sampler;
 pub(crate) mod shaders;
+pub(crate) mod target;
 pub(crate) mod texture;
 
 use crate::renderer::shadertoy::Target;
