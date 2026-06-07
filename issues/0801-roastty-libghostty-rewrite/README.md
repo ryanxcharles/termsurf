@@ -2199,6 +2199,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 804: Crash Report Directory Foundation](804-crash-report-directory-foundation.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 805: Sentry Envelope Foundation](805-sentry-envelope-foundation.md)
+  — **Designed**
 
 ## Non-Goals
 
