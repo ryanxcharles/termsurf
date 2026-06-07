@@ -2041,6 +2041,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 763: Config C ABI CLI Config Args](763-config-c-abi-cli-config-args.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 764: Config C ABI Default Files Toggle](764-config-c-abi-default-files-toggle.md)
+  — **Designed**
 
 ## Non-Goals
 
