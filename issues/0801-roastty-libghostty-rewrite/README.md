@@ -2217,6 +2217,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 810: Metal IOSurface Target](810-metal-iosurface-target.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 811: IOSurfaceLayer Sync Presentation](811-iosurface-layer-sync.md)
+  — **Designed**
 
 ## Non-Goals
 
