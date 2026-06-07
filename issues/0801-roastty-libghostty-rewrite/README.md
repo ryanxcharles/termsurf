@@ -2220,6 +2220,8 @@ are past the correctness-critical foundation.
   **Pass** · Codex/Codex/Codex
 - [Experiment 811: IOSurfaceLayer Sync Presentation](811-iosurface-layer-sync.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 812: IOSurfaceLayer Subclass Callback](812-iosurface-layer-subclass.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
