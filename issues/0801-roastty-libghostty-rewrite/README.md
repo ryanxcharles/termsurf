@@ -2237,6 +2237,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 816: Apply Frame Rebuild Plan](816-apply-frame-rebuild-plan.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 817: Frame Row Rebuild Driver](817-frame-row-rebuild-driver.md) —
+  **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
