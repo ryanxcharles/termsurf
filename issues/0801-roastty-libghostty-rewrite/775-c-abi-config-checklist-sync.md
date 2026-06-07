@@ -8,6 +8,11 @@ reasoning = "high"
 agent = "codex"
 model = "default"
 reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "default"
+reasoning = "medium"
 +++
 
 # Experiment 775: C ABI Config Checklist Sync
@@ -76,3 +81,57 @@ not inspect the public header and did not run the default
 
 The follow-up review found no blockers and approved the design for the plan
 commit.
+
+## Result
+
+**Result:** Pass
+
+The C ABI checklist item for `config_get` and keybind triggers was stale. The
+public header exposes `roastty_config_get`, `roastty_config_trigger`, and
+`roastty_config_key_is_binding`. `roastty/src/lib.rs` handles the 12
+currently-scoped `roastty_config_get` keys:
+
+- `initial-window`
+- `quit-after-last-window-closed`
+- `window-save-state`
+- `window-decoration`
+- `window-theme`
+- `background-opacity`
+- `bell-audio-volume`
+- `notify-on-command-finish-after`
+- `title`
+- `window-position-x`
+- `window-position-y`
+- `bell-audio-path`
+
+The existing tests cover default triggers, default key binding lookup, CLI
+keybind parsing/storage/diagnostics, configured trigger lookup, and
+`config_key_is_binding`. The README checklist item is now marked complete with
+that scope.
+
+Verification passed:
+
+- inspected `roastty/include/roastty.h`
+- inspected `roastty/src/lib.rs`
+- `cargo test -p roastty config_get_ -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_trigger -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_key_is_binding -- --nocapture --test-threads=1`
+- `cargo test -p roastty config_cli_keybind -- --nocapture --test-threads=1`
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/775-c-abi-config-checklist-sync.md`
+- `git diff --check`
+
+## Conclusion
+
+The Issue 801 C ABI checklist now reflects the implemented and tested config
+getter/keybinding ABI surface. This was documentation-only; no Roastty code
+changed.
+
+## Completion Review
+
+Codex reviewed the completed documentation-only diff and found one result-doc
+gap: the verification list omitted the `prettier` and `git diff --check`
+commands that had run. Those bullets were added.
+
+The follow-up review found no blockers, confirmed the checklist update was
+scoped to the `config_get` plus keybind-trigger C ABI item, and approved the
+Experiment 775 result commit.

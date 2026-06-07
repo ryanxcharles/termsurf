@@ -268,9 +268,9 @@ Experiment 246).
       selection-gesture ABI, Kitty-graphics ABI
 - [x] Config / app / surface lifecycle handles (new/free/clone/userdata/basic
       setters/inherited surface config)
-- [ ] `config_get` (12 defaults only) + keybind triggers — config trigger ABI
-      foundation and no-keybind fallback done; keybind parsing/storage and real
-      trigger lookup missing
+- [x] `config_get` (12 defaults only) + keybind triggers — default triggers, CLI
+      keybind parsing/storage/diagnostics, real trigger lookup, and
+      `config_key_is_binding` are complete
 - [ ] App/surface key dispatch, surface draw/refresh, IME/text/preedit, surface
       mouse dispatch, selection read, splits — surface draw and refresh wakeups
       and surface text paste input done; preedit state and explicit surface text
@@ -2064,7 +2064,7 @@ are past the correctness-critical foundation.
 - [Experiment 774: Config Get Bell Audio Path](774-config-get-bell-audio-path.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 775: C ABI Config Checklist Sync](775-c-abi-config-checklist-sync.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
