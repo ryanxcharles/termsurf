@@ -2033,6 +2033,8 @@ are past the correctness-critical foundation.
   — **Partial** · Codex/Codex/Codex
 - [Experiment 759: Config File Key Storage](759-config-file-key-storage.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 760: Config File Path Expansion](760-config-file-path-expansion.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Non-Goals
 
