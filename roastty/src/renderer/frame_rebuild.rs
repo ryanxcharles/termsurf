@@ -110,6 +110,28 @@ impl FrameTerminalSnapshot {
     pub(crate) fn build_plan(&self) -> Result<FrameRebuildPlan, FrameRebuildPlanError> {
         FrameRebuildPlan::build(self.rebuild_input())
     }
+
+    pub(crate) fn row_format_input<'a>(
+        &'a self,
+        input: FrameSnapshotRowFormatInput<'a>,
+    ) -> FrameRowFormatInput<'a> {
+        FrameRowFormatInput {
+            rows: &self.rows,
+            highlights: input.highlights,
+            link_ranges: input.link_ranges,
+            selection_config: input.selection_config,
+            default_fg: input.default_fg,
+            default_bg: input.default_bg,
+            palette: input.palette,
+            bold: input.bold,
+            alpha: input.alpha,
+            faint_opacity: input.faint_opacity,
+            thicken: input.thicken,
+            thicken_strength: input.thicken_strength,
+            background_opacity_cells: input.background_opacity_cells,
+            background_opacity: input.background_opacity,
+        }
+    }
 }
 
 /// The preedit placement planned for this frame.
@@ -204,6 +226,23 @@ pub(crate) struct FrameRowRebuildApplication<E> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FrameRowFormatInput<'a> {
     pub(crate) rows: &'a [RunOptions],
+    pub(crate) highlights: &'a [Vec<Highlight>],
+    pub(crate) link_ranges: &'a [Vec<[u16; 2]>],
+    pub(crate) selection_config: &'a SelectionConfig,
+    pub(crate) default_fg: Rgb,
+    pub(crate) default_bg: Rgb,
+    pub(crate) palette: &'a Palette,
+    pub(crate) bold: Option<BoldColor>,
+    pub(crate) alpha: u8,
+    pub(crate) faint_opacity: u8,
+    pub(crate) thicken: bool,
+    pub(crate) thicken_strength: u8,
+    pub(crate) background_opacity_cells: bool,
+    pub(crate) background_opacity: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSnapshotRowFormatInput<'a> {
     pub(crate) highlights: &'a [Vec<Highlight>],
     pub(crate) link_ranges: &'a [Vec<[u16; 2]>],
     pub(crate) selection_config: &'a SelectionConfig,
@@ -1513,6 +1552,124 @@ mod tests {
             background_opacity_cells: false,
             background_opacity: 1.0,
         }
+    }
+
+    fn snapshot_format_input<'a>(
+        highlights: &'a [Vec<Highlight>],
+        link_ranges: &'a [Vec<[u16; 2]>],
+        selection_config: &'a SelectionConfig,
+    ) -> FrameSnapshotRowFormatInput<'a> {
+        FrameSnapshotRowFormatInput {
+            highlights,
+            link_ranges,
+            selection_config,
+            default_fg: Rgb::new(210, 211, 212),
+            default_bg: Rgb::new(10, 11, 12),
+            palette: &DEFAULT_PALETTE,
+            bold: Some(BoldColor::Color(Rgb::new(1, 2, 3))),
+            alpha: 230,
+            faint_opacity: 99,
+            thicken: true,
+            thicken_strength: 77,
+            background_opacity_cells: true,
+            background_opacity: 0.42,
+        }
+    }
+
+    #[test]
+    fn snapshot_row_format_input_borrows_snapshot_rows_by_identity() {
+        let mut terminal = terminal(4, 2);
+        write_terminal(&mut terminal, b"AB");
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 2), RenderDirty::Partial, None);
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+
+        let input = snapshot.row_format_input(snapshot_format_input(
+            &highlights,
+            &links,
+            &selection_config,
+        ));
+
+        assert!(std::ptr::eq(input.rows, snapshot.rows.as_slice()));
+    }
+
+    #[test]
+    fn snapshot_row_format_input_threads_renderer_options() {
+        let terminal = terminal(3, 1);
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(3, 1), RenderDirty::Partial, None);
+        let highlights = vec![vec![Highlight {
+            range: [0, 1],
+            tag: crate::renderer::cell::HighlightTag::SearchMatch,
+        }]];
+        let links = vec![vec![[1, 2]]];
+        let selection_config = SelectionConfig {
+            search_background: SelectionColor::Color(Rgb::new(4, 5, 6)),
+            search_foreground: SelectionColor::Color(Rgb::new(7, 8, 9)),
+            ..SelectionConfig::default()
+        };
+
+        let input = snapshot.row_format_input(snapshot_format_input(
+            &highlights,
+            &links,
+            &selection_config,
+        ));
+
+        assert!(std::ptr::eq(input.rows, snapshot.rows.as_slice()));
+        assert!(std::ptr::eq(input.highlights, highlights.as_slice()));
+        assert!(std::ptr::eq(input.link_ranges, links.as_slice()));
+        assert!(std::ptr::eq(input.selection_config, &selection_config));
+        assert!(std::ptr::eq(input.palette, &DEFAULT_PALETTE));
+        assert_eq!(input.default_fg, Rgb::new(210, 211, 212));
+        assert_eq!(input.default_bg, Rgb::new(10, 11, 12));
+        assert_eq!(input.bold, Some(BoldColor::Color(Rgb::new(1, 2, 3))));
+        assert_eq!(input.alpha, 230);
+        assert_eq!(input.faint_opacity, 99);
+        assert_eq!(input.thicken, true);
+        assert_eq!(input.thicken_strength, 77);
+        assert_eq!(input.background_opacity_cells, true);
+        assert_eq!(input.background_opacity, 0.42);
+    }
+
+    #[test]
+    fn snapshot_row_format_input_feeds_live_terminal_row_formatting() {
+        let mut terminal = terminal(4, 3);
+        terminal.clear_dirty_for_tests();
+        terminal.set_cursor_position_for_tests(0, 1);
+        write_terminal(&mut terminal, b"A");
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Partial, None);
+        let plan = snapshot.build_plan().expect("plan");
+        let highlights = Vec::new();
+        let links = Vec::new();
+        let selection_config = SelectionConfig::default();
+        let mut contents = contents_with_rows(grid(4, 3));
+        let preserved_bg = *contents.bg_cell(0, 0);
+        let mut row_dirty = snapshot.row_dirty.clone();
+        let mut grid = menlo_grid();
+
+        let applied = plan
+            .format_rows(
+                &mut contents,
+                &mut grid,
+                &mut row_dirty,
+                snapshot.row_format_input(snapshot_format_input(
+                    &highlights,
+                    &links,
+                    &selection_config,
+                )),
+            )
+            .expect("format rows");
+
+        assert_eq!(applied.rebuilt_rows, vec![1]);
+        assert!(applied.failed_rows.is_empty());
+        assert_eq!(row_dirty, vec![false, false, false]);
+        assert_eq!(*contents.bg_cell(0, 0), preserved_bg);
+        assert!(contents.fg_rows()[2]
+            .iter()
+            .any(|vertex| vertex.grid_pos == [0, 1]));
     }
 
     #[test]

@@ -109,3 +109,68 @@ truth for actual agents used, and tag Experiment 827 as
 
 Codex then re-reviewed the revised design and approved it for the plan commit
 with no remaining blockers.
+
+## Result
+
+**Result:** Pass
+
+Added `FrameSnapshotRowFormatInput` and
+`FrameTerminalSnapshot::row_format_input`. The adapter borrows
+`FrameTerminalSnapshot::rows` for the existing `FrameRowFormatInput::rows` field
+and copies through all caller-supplied renderer formatting fields: highlights,
+hovered-link ranges, selection config, default foreground/background colors,
+palette, bold color behavior, alpha, faint opacity, font thickening, and
+background opacity controls.
+
+Implementation changes:
+
+- `roastty/src/renderer/frame_rebuild.rs`
+  - Added `FrameSnapshotRowFormatInput<'a>`.
+  - Added
+    `FrameTerminalSnapshot::row_format_input<'a>(&'a self, input: FrameSnapshotRowFormatInput<'a>) -> FrameRowFormatInput<'a>`.
+  - Added tests proving row slice identity, renderer option threading, and live
+    terminal snapshot rows feeding `FrameRebuildPlan::format_rows`.
+- `issues/0801-roastty-libghostty-rewrite/README.md`
+  - Marked Experiment 827 as `Pass`.
+  - Updated the renderer tracker to say terminal frame snapshots can now feed
+    both rebuild planning and row-formatting input while live renderer-loop
+    orchestration remains open.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty renderer::frame_rebuild::tests::snapshot_row_format -- --nocapture`
+  - 3 passed
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture`
+  - 99 passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/827-build-snapshot-row-format-input.md`
+- `git diff --check`
+
+## Conclusion
+
+The prepared renderer path now has a complete terminal snapshot handoff for the
+front of row rebuilding: a snapshot can build the rebuild plan and package the
+same live terminal rows into the row-formatting driver. The existing
+`FrameRebuildPlan::format_rows` validation remains the single place that checks
+missing rows and row-width mismatches.
+
+This still does not orchestrate a full live frame. The next useful experiment
+can begin composing these prepared pieces into a single frame rebuild sequence,
+or add a companion adapter for text overlay/cursor uniform inputs from snapshot
+and renderer state.
+
+## Completion Review
+
+Codex reviewed the completed implementation and recorded result. The review
+found no implementation correctness, regression, or lifetime-soundness blockers.
+It confirmed that the adapter ties the snapshot row borrow and renderer-state
+borrows through the intended shared lifetime, borrows `self.rows`, copies the
+remaining fields directly, and leaves validation in
+`FrameRebuildPlan::format_rows`.
+
+The review found one workflow traceability issue: the result verification list
+omitted the markdown `prettier` command and `git diff --check` even though both
+had been run. The verification list was updated to include those commands.
+
+After that doc-only fix, Codex approved the implementation and recorded result
+for the result commit.
