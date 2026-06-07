@@ -2194,6 +2194,8 @@ are past the correctness-critical foundation.
   Codex/Codex/Codex
 - [Experiment 803: Embedded Font Resources](803-embedded-font-resources.md) —
   **Pass** · Codex/Codex/Codex
+- [Experiment 804: Crash Report Directory Foundation](804-crash-report-directory-foundation.md)
+  — **Designed**
 
 ## Non-Goals
 
