@@ -16364,8 +16364,10 @@ mod tests {
         );
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
         assert!(roastty_surface_key(surface, event));
-        let text = surface_snapshot_text_until(app, surface, "^E");
-        assert!(text.contains("^E"), "{text:?}");
+        // Assert the deterministic od hex of the legacy byte (0x05), not the racy
+        // pre-`stty -echo` echo "^E", which is lost under load (Issue 801, Exp 835).
+        let text = surface_snapshot_text_until(app, surface, "05");
+        assert!(text.contains("05"), "{text:?}");
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);

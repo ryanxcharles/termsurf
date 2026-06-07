@@ -107,6 +107,63 @@ the atomic ` 05\n` flush + echo-timing-independent data path, not just the
 single captured run. (Nit: `contains("05")` is a bare substring but safe on the
 otherwise-blank screen — left as-is.)
 
+## Result
+
+**Result:** Pass
+
+The two-line change landed (`_until`/assert needle `"^E"` → `"05"`). Build clean
+(no warnings), fmt clean, no-ghostty clean, `git diff --check` clean; isolation
+pass.
+
+| run (default) | STATUS                | `natural_text` | other failures (out of scope)                        |
+| ------------- | --------------------- | -------------- | ---------------------------------------------------- |
+| #1            | COMPLETED rc=101 185s | **ok**         | performable_action                                   |
+| #2            | COMPLETED rc=101 180s | **ok**         | performable_action                                   |
+| #3            | COMPLETED rc=101 110s | **ok**         | performable_action, config_path_cli, bell_audio_path |
+
+- **`natural_text_editing` is `... ok` 3/3 at default parallelism** — the
+  setting where it failed in Exp 834. Keying on the deterministic od byte `05`
+  instead of the racy pre-`stty` echo `"^E"` makes it robust. All runs
+  `START`/`END`/`CMD` stamped, none hit `HARD_TIMEOUT`/`IDLE_KILL`.
+- The other default failures are the expected, separately-scoped ones: the
+  `performable_action` sibling (Exp 836), and the config `$HOME`/cwd flakes —
+  which I now see are **two** tests of the same class:
+  `config_path_cli_expands_…` and
+  `bell_audio_path_expands_from_file_cli_home_…`.
+
 ## Conclusion
 
-_(to be written after the run)_
+Another racy-echo assertion replaced with the deterministic byte it was really
+verifying. natural_text is green at default and threads=4 (and isolation).
+
+Remaining before the gate can drop `--test-threads=4` (default-green):
+
+- **Exp 836 (next):** `surface_key_default_performable_action…` — the harder
+  sibling: its `dd`/`od` output never renders (its `stty min 8`/`count 8` waits
+  for 8 bytes while Shift+ArrowLeft writes only 6), so it relies entirely on the
+  racy echo. Needs the command redesigned so a deterministic output renders, or
+  the assertion re-grounded. Diagnose first (the od path did not flush even at
+  `min 6`/`count 6` in isolation — understand why before fixing).
+- **Exp 837 (later):** the config `$HOME`/cwd flake **class** —
+  `config_path_cli` **and** `bell_audio_path` (non-PTY, env/cwd dependent), fix
+  together.
+
+Once 836 + 837 land, the suite is green at default parallelism and the gate
+drops the thread cap; then feature work resumes.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Confirmed the diff is exactly the two-line `"^E"`→`"05"` change
+(test-only, no production), `natural_text ... ok` 3/3 at default
+(`CMD=cargo test -p roastty`, no timeouts), and that run-3's extra
+`config::tests` failures (`config_path_cli`, `bell_audio_path`) are env/cwd
+tests untouched by this diff (cannot be caused by it). **Verdict: CHANGES
+REQUIRED → fixed.**
+
+- **Required — stale README index status.** The 835 index line still read
+  `Designed`. **Fixed:** flipped to `Pass`.
+- **Nit — table elapsed inconsistency.** **Fixed:** all rows now cite the
+  `STATUS=` wall-clock (185/180/110 s).
+- **Nit — "any parallelism" overgeneralized.** **Fixed:** softened to "default
+  and threads=4 (and isolation)".
