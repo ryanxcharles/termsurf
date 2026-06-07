@@ -228,8 +228,8 @@ Experiment 246).
       wrapper plus render-pass sampler binding and IOSurface-backed target
       wrapper plus synchronous IOSurfaceLayer presentation wrapper,
       IOSurfaceLayer subclass/display callback, and implicit animation
-      suppression exist; async presentation and full live frame orchestration
-      remain missing
+      suppression, and async/main-thread IOSurfaceLayer presentation scheduling
+      exist; full live frame orchestration remains missing
 - [ ] Main render loop (`generic.zig`: frame build, dirty tracking, glyph
       upload, draw calls, pacing) — missing (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
@@ -2224,7 +2224,7 @@ are past the correctness-critical foundation.
 - [Experiment 812: IOSurfaceLayer Subclass Callback](812-iosurface-layer-subclass.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 813: IOSurfaceLayer Async Presentation](813-iosurface-layer-async-presentation.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

@@ -8,6 +8,7 @@ name = "roastty"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+dispatch2 = "0.3"
 flate2 = "1.1.9"
 half = "2"
 libc = "0.2"
@@ -26,6 +27,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSNull",
     "NSRange",
     "NSString",
+    "NSThread",
 ] }
 objc2-metal = { version = "0.3", default-features = false, features = [
     "MTLAllocation",

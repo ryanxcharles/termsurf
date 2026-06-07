@@ -129,3 +129,63 @@ a main-thread assertion inside queued presentation and documents that drops
 before enqueue completion release retained references without mutating them,
 while a never-run queued closure holds the retained objects rather than touching
 them off-main.
+
+Codex re-reviewed the amended design and approved it with no remaining blocking
+findings. The follow-up review confirmed the deterministic enqueue seam, the
+forced-main and forced-off-main expectations, the move-only `Send` wrapper
+invariant, and the `NSThread`/`dispatch2` binding assumptions.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has an async/main-thread IOSurfaceLayer presentation boundary:
+
+- `roastty/Cargo.toml` adds `dispatch2` and enables `NSThread` on
+  `objc2-foundation`.
+- `Cargo.lock` records the `dispatch2` dependency closure update.
+- `MetalIOSurfaceLayer::set_surface` creates a retained presentation payload,
+  presents immediately when `NSThread::isMainThread_class()` is true, and
+  schedules the retained payload on `DispatchQueue::main()` when called
+  off-main.
+- `MetalSurfacePresentationMode` reports whether presentation was immediate or
+  queued.
+- `SurfacePresentation` owns retained `CALayer` and `IOSurfaceRef` references
+  and performs the existing `bounds * contentsScale` size check before assigning
+  layer contents.
+- `MainQueueSurfacePresentation` is a narrow move-only `Send` wrapper consumed
+  by the queued closure. Its `run_on_main_thread` method asserts main-thread
+  execution before touching CoreAnimation state.
+- A private enqueue seam lets tests force the main and off-main branches without
+  depending on the Rust test harness to drain the macOS main queue.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/metal/IOSurfaceLayer.zig`.
+- Inspected `roastty/src/renderer/metal/iosurface_layer.rs`.
+- Inspected local `dispatch2::DispatchQueue` bindings.
+- Inspected local `objc2-foundation` generated `NSThread` bindings.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty metal::iosurface_layer -- --nocapture --test-threads=1`
+  — passed, 13 tests.
+- `cargo test -p roastty metal::target -- --nocapture --test-threads=1` —
+  passed, 5 tests.
+
+## Conclusion
+
+Experiment 813 completes the retained async/main-thread IOSurfaceLayer
+presentation scheduling foundation. Unit tests prove retained payload
+presentation and queued payload construction separately; full live frame
+orchestration and app-run-loop presentation remain for the renderer integration
+experiments.
+
+## Completion Review
+
+Codex reviewed the completed result and approved it with no blocking findings.
+The review confirmed that `SurfacePresentation` retains the CALayer and
+IOSurface, `set_surface` uses `NSThread::isMainThread_class()` and
+`DispatchQueue::main().exec_async`, the unsafe `Send` wrapper is narrow and
+consumed by the dispatch closure, `run_on_main_thread` asserts main-thread
+execution before mutating CoreAnimation state, and the deterministic seam tests
+cover retained payload presentation, forced immediate behavior, forced queued
+construction, no premature contents mutation, and identity preservation.

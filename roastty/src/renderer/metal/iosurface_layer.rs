@@ -1,8 +1,9 @@
+use dispatch2::DispatchQueue;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, ProtocolObject, Sel};
 use objc2::{msg_send, sel, ClassType};
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::NSNull;
+use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize, Type};
+use objc2_foundation::{NSNull, NSThread};
 use objc2_io_surface::IOSurfaceRef;
 use objc2_quartz_core::{kCAGravityTopLeft, CAAction, CALayer};
 use std::cell::{Cell, RefCell};
@@ -17,6 +18,12 @@ pub(crate) struct MetalIOSurfaceLayer {
 struct DisplayCallbackSlot {
     in_display: Cell<bool>,
     callback: RefCell<Box<dyn FnMut()>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MetalSurfacePresentationMode {
+    Immediate,
+    Queued,
 }
 
 impl MetalIOSurfaceLayer {
@@ -64,6 +71,30 @@ impl MetalIOSurfaceLayer {
         true
     }
 
+    pub(crate) fn set_surface(&self, surface: &IOSurfaceRef) -> MetalSurfacePresentationMode {
+        self.set_surface_with_enqueue(surface, NSThread::isMainThread_class(), |presentation| {
+            DispatchQueue::main().exec_async(move || {
+                presentation.run_on_main_thread();
+            });
+        })
+    }
+
+    fn set_surface_with_enqueue(
+        &self,
+        surface: &IOSurfaceRef,
+        is_main_thread: bool,
+        enqueue: impl FnOnce(MainQueueSurfacePresentation),
+    ) -> MetalSurfacePresentationMode {
+        let presentation = SurfacePresentation::new(&self.layer, surface);
+        if is_main_thread {
+            presentation.present();
+            MetalSurfacePresentationMode::Immediate
+        } else {
+            enqueue(MainQueueSurfacePresentation::new(presentation));
+            MetalSurfacePresentationMode::Queued
+        }
+    }
+
     pub(crate) fn on_display(&mut self, callback: impl FnMut() + 'static) {
         set_display_callback(self.layer.as_ref(), std::ptr::null_mut());
         self.display_callback = Some(Box::new(DisplayCallbackSlot {
@@ -77,6 +108,56 @@ impl MetalIOSurfaceLayer {
                 slot as *mut DisplayCallbackSlot as *mut c_void
             });
         set_display_callback(self.layer.as_ref(), slot);
+    }
+}
+
+struct SurfacePresentation {
+    layer: Retained<CALayer>,
+    surface: CFRetained<IOSurfaceRef>,
+}
+
+impl SurfacePresentation {
+    fn new(layer: &Retained<CALayer>, surface: &IOSurfaceRef) -> Self {
+        Self {
+            layer: layer.clone(),
+            surface: surface.retain(),
+        }
+    }
+
+    fn present(&self) -> bool {
+        let bounds = self.layer.bounds();
+        let scale = self.layer.contentsScale();
+        let width = (bounds.size.width * scale) as usize;
+        let height = (bounds.size.height * scale) as usize;
+        if width != self.surface.width() || height != self.surface.height() {
+            return false;
+        }
+
+        unsafe {
+            self.layer
+                .setContents(Some(iosurface_as_any_object(&self.surface)));
+        }
+        true
+    }
+}
+
+struct MainQueueSurfacePresentation {
+    presentation: SurfacePresentation,
+}
+
+// SAFETY: This wrapper is move-only and consumed by the dispatch closure. The
+// retained CALayer/IOSurface are not dereferenced while crossing threads;
+// `run_on_main_thread` asserts main-thread execution before touching them.
+unsafe impl Send for MainQueueSurfacePresentation {}
+
+impl MainQueueSurfacePresentation {
+    fn new(presentation: SurfacePresentation) -> Self {
+        Self { presentation }
+    }
+
+    fn run_on_main_thread(self) -> bool {
+        assert!(NSThread::isMainThread_class());
+        self.presentation.present()
     }
 }
 
@@ -193,7 +274,7 @@ mod tests {
     use objc2_foundation::{ns_string, NSString};
     use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
     use objc2_quartz_core::CAAction;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use super::*;
@@ -218,6 +299,10 @@ mod tests {
 
     fn contents_identity(layer: &MetalIOSurfaceLayer) -> Option<*const AnyObject> {
         unsafe { layer.layer().contents() }.map(|contents| Retained::as_ptr(&contents))
+    }
+
+    fn layer_identity(layer: &CALayer) -> *const AnyObject {
+        layer_as_object(layer) as *const AnyObject
     }
 
     fn action_identity(action: Retained<ProtocolObject<dyn CAAction>>) -> *const AnyObject {
@@ -395,6 +480,79 @@ mod tests {
         );
 
         assert!(!layer.set_surface_if_size_matches(mismatched.surface()));
+        assert_eq!(
+            contents_identity(&layer),
+            Some(iosurface_identity(matching.surface()))
+        );
+    }
+
+    #[test]
+    fn retained_presentation_sets_matching_surface_and_rejects_mismatch() {
+        let layer = MetalIOSurfaceLayer::new();
+        let matching = target(3, 4);
+        let mismatched = target(2, 4);
+        layer.set_bounds_pixels(1.5, 2.0, 2.0);
+
+        let presentation = SurfacePresentation::new(&layer.layer, matching.surface());
+        assert!(presentation.present());
+        assert_eq!(
+            contents_identity(&layer),
+            Some(iosurface_identity(matching.surface()))
+        );
+
+        let presentation = SurfacePresentation::new(&layer.layer, mismatched.surface());
+        assert!(!presentation.present());
+        assert_eq!(
+            contents_identity(&layer),
+            Some(iosurface_identity(matching.surface()))
+        );
+    }
+
+    #[test]
+    fn forced_main_surface_presentation_runs_without_enqueue() {
+        let layer = MetalIOSurfaceLayer::new();
+        let matching = target(3, 4);
+        layer.set_bounds_pixels(1.5, 2.0, 2.0);
+
+        let mode = layer.set_surface_with_enqueue(matching.surface(), true, |_| {
+            panic!("main-thread presentation should not enqueue");
+        });
+
+        assert_eq!(mode, MetalSurfacePresentationMode::Immediate);
+        assert_eq!(
+            contents_identity(&layer),
+            Some(iosurface_identity(matching.surface()))
+        );
+    }
+
+    #[test]
+    fn forced_off_main_surface_presentation_enqueues_retained_payload() {
+        let layer = MetalIOSurfaceLayer::new();
+        let matching = target(3, 4);
+        layer.set_bounds_pixels(1.5, 2.0, 2.0);
+        let scheduled = RefCell::new(None);
+
+        let mode = layer.set_surface_with_enqueue(matching.surface(), false, |presentation| {
+            assert!(scheduled.borrow().is_none());
+            *scheduled.borrow_mut() = Some(presentation);
+        });
+
+        assert_eq!(mode, MetalSurfacePresentationMode::Queued);
+        assert_eq!(contents_identity(&layer), None);
+
+        let presentation = scheduled
+            .into_inner()
+            .expect("off-main presentation should be queued");
+        assert_eq!(
+            layer_identity(&presentation.presentation.layer),
+            layer_identity(layer.layer())
+        );
+        assert_eq!(
+            iosurface_identity(&presentation.presentation.surface),
+            iosurface_identity(matching.surface())
+        );
+
+        assert!(presentation.presentation.present());
         assert_eq!(
             contents_identity(&layer),
             Some(iosurface_identity(matching.surface()))
