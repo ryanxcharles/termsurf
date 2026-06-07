@@ -214,7 +214,9 @@ Experiment 246).
       size/padding types (`size.rs`), shader vertex/uniform types (`shader.rs`)
 - [x] Metal primitives — `api`, `buffer`, `shaders` (MSL), `render_pass`,
       `texture`
-- [ ] Render `state` — partial (only `Preedit`; full `State` + `Mouse` missing)
+- [ ] Render `state` — partial: `Preedit` and value-level `State`/`Mouse`
+      foundations exist; live renderer-thread terminal/inspector ownership and
+      update-loop integration remain missing
 - [ ] Image state (`image.rs`) — partial: pending/ready/replace/unload tracking,
       Kitty placement buckets, RGBA preparation, Metal texture upload, and image
       draw-call foundations exist; live renderer upload/presentation integration
@@ -2207,7 +2209,7 @@ are past the correctness-critical foundation.
 - [Experiment 806: Crash Envelope Persistence](806-crash-envelope-persistence.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 807: Renderer State Mouse Foundation](807-renderer-state-mouse-foundation.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

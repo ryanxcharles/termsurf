@@ -1,12 +1,16 @@
 #![allow(dead_code)]
-// Renderer preedit state is consumed by later renderer slices.
+// Renderer state values are consumed by later renderer slices.
 
-//! Renderer preedit state.
+//! Renderer state values.
 //!
-//! Faithful port of the `Preedit` type from upstream `renderer/State.zig`: the
-//! IME preedit text rendered over the cursor and its cell-placement `range`. The
-//! live render `State` struct and `Mouse` depend on the renderer threading model
-//! and are ported separately.
+//! Faithful value-level port of upstream `renderer/State.zig`: the IME preedit
+//! text rendered over the cursor, renderer-relevant mouse state, and the outer
+//! state values renderers consume. The upstream mutex, terminal pointer, and
+//! inspector pointer are renderer-thread/frontend ownership details and remain
+//! tracked by later integration slices.
+
+use crate::input::key_mods::Mods;
+use crate::terminal::point::Coordinate;
 
 /// Cell-count unit. Mirrors `terminal::size::CellCountInt` (`u16`).
 pub(crate) type Unit = u16;
@@ -32,6 +36,49 @@ pub(crate) struct PreeditRange {
     pub start: Unit,
     pub end: Unit,
     pub cp_offset: usize,
+}
+
+/// Mouse state relevant to renderers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Mouse {
+    /// The current viewport point of the mouse.
+    pub point: Option<Coordinate>,
+
+    /// The input modifiers active for the last mouse event.
+    pub mods: Mods,
+}
+
+/// Value-level renderer state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct State {
+    pub preedit: Option<Preedit>,
+    pub mouse: Mouse,
+}
+
+impl State {
+    pub(crate) fn new() -> State {
+        State::default()
+    }
+
+    pub(crate) fn set_preedit(&mut self, preedit: Preedit) {
+        self.preedit = Some(preedit);
+    }
+
+    pub(crate) fn clear_preedit(&mut self) {
+        self.preedit = None;
+    }
+
+    pub(crate) fn set_mouse_point(&mut self, point: Coordinate) {
+        self.mouse.point = Some(point);
+    }
+
+    pub(crate) fn clear_mouse_point(&mut self) {
+        self.mouse.point = None;
+    }
+
+    pub(crate) fn set_mouse_mods(&mut self, mods: Mods) {
+        self.mouse.mods = mods;
+    }
 }
 
 impl Preedit {
@@ -83,6 +130,7 @@ impl Preedit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::key_mods::{Mod, Side};
 
     const HANGUL_GA: u32 = 0xAC00; // U+AC00 HANGUL SYLLABLE GA
 
@@ -160,5 +208,70 @@ mod tests {
             ],
         };
         assert_eq!(p.width(), 4);
+    }
+
+    #[test]
+    fn state_defaults_to_no_preedit_and_empty_mouse() {
+        let state = State::new();
+
+        assert_eq!(state.preedit, None);
+        assert_eq!(state.mouse.point, None);
+        assert_eq!(state.mouse.mods, Mods::new());
+    }
+
+    #[test]
+    fn state_sets_and_clears_preedit() {
+        let mut state = State::new();
+        let preedit = Preedit {
+            codepoints: vec![cp('x' as u32, false)],
+        };
+
+        state.set_preedit(preedit.clone());
+        assert_eq!(state.preedit.as_ref(), Some(&preedit));
+
+        state.clear_preedit();
+        assert_eq!(state.preedit, None);
+    }
+
+    #[test]
+    fn state_clone_owns_preedit_codepoints() {
+        let mut state = State::new();
+        state.set_preedit(Preedit {
+            codepoints: vec![cp('a' as u32, false)],
+        });
+
+        let mut cloned = state.clone();
+        cloned
+            .preedit
+            .as_mut()
+            .unwrap()
+            .codepoints
+            .push(cp('b' as u32, false));
+
+        assert_eq!(state.preedit.as_ref().unwrap().codepoints.len(), 1);
+        assert_eq!(cloned.preedit.as_ref().unwrap().codepoints.len(), 2);
+    }
+
+    #[test]
+    fn state_updates_mouse_point_and_mods() {
+        let mut state = State::new();
+        let point = Coordinate::new(4, 9);
+        let mut mods = Mods::for_mod(Mod::Super, Side::Right);
+        mods.caps_lock = true;
+        mods.num_lock = true;
+
+        state.set_mouse_point(point);
+        state.set_mouse_mods(mods);
+
+        assert_eq!(state.mouse.point, Some(point));
+        assert_eq!(state.mouse.mods, mods);
+        assert!(state.mouse.mods.super_);
+        assert!(state.mouse.mods.caps_lock);
+        assert!(state.mouse.mods.num_lock);
+        assert_eq!(state.mouse.mods.sides.super_, Side::Right);
+
+        state.clear_mouse_point();
+        assert_eq!(state.mouse.point, None);
+        assert_eq!(state.mouse.mods, mods);
     }
 }

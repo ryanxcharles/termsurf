@@ -92,6 +92,64 @@ bit terminal `MouseMods` cannot represent.
 
 Codex re-reviewed the corrected design and approved it with no findings. The
 approval confirmed that `Mouse.point` maps to viewport coordinates, `Mouse.mods`
-maps to `crate::input::key_mods::Mods`, omitting mutex/terminal/ inspector
-fields is properly scoped to later renderer-thread/frontend integration, and the
+maps to `crate::input::key_mods::Mods`, omitting mutex/terminal/inspector fields
+is properly scoped to later renderer-thread/frontend integration, and the
 planned checklist update does not claim live renderer integration.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has the value-level renderer state foundation in
+`roastty/src/renderer/state.rs`. The module keeps the existing upstream-derived
+`Preedit` behavior and adds:
+
+- `Mouse`, with optional viewport `Coordinate` and
+  `crate::input::key_mods::Mods` for renderer-relevant input modifiers;
+- `State`, with optional `Preedit`, `Mouse`, and explicit helpers for
+  setting/clearing preedit and mouse point/modifier state.
+
+The implementation intentionally does not add upstream's mutex, terminal
+pointer, or inspector pointer fields. Those are tied to renderer-thread and
+frontend ownership, which remain separate incomplete slices.
+
+The Issue 801 renderer checklist now records render state as partial with
+`Preedit` and value-level `State`/`Mouse` foundations present. Live
+renderer-thread terminal/inspector ownership and update-loop integration remain
+missing.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/State.zig`.
+- Inspected `roastty/src/renderer/state.rs`.
+- Inspected `roastty/src/terminal/point.rs`.
+- Inspected `roastty/src/input/key_mods.rs`.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty renderer::state -- --nocapture --test-threads=1` —
+  passed, 8 tests.
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/807-renderer-state-mouse-foundation.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Experiment 807 moves renderer state beyond preedit-only support by adding the
+renderer mouse and outer state value model. The next renderer-state work can
+connect these values to the live renderer thread, terminal snapshots, inspector
+state, and update-loop ownership model.
+
+## Completion Review
+
+Codex reviewed the staged result and found one blocking documentation
+consistency issue: the experiment file recorded `Pass`, but the Issue 801
+experiment index still listed Experiment 807 as `Designed`. The README index now
+marks Experiment 807 as `Pass · Codex/Codex/Codex`. Codex found no code-level
+blocking issues: the implementation uses input key modifiers, preserves
+`super_`/lock/side state in tests, covers preedit clone ownership, and keeps
+live renderer integration scoped out.
+
+Codex re-reviewed the corrected staged result and approved it with no findings.
+The approval confirmed that the README status was fixed, the value-level state
+matches upstream `preedit`/`mouse` fields for this slice, tests cover modifier
+fidelity and preedit ownership, and the docs do not claim live renderer-thread,
+terminal, inspector, or update-loop integration.
