@@ -2088,6 +2088,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 784: OSC 52 Read Clipboard Requests](784-osc52-read-clipboard-requests.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 785: OSC 52 Write Clipboard Handling](785-osc52-write-clipboard-handling.md)
+  — **Designed**
 
 ## Non-Goals
 
