@@ -72,3 +72,45 @@ Codex reviewed the design and found no blocking findings. The review approved
 the docs-only scope, checked row limited to the current terminal utility
 collection set, explicit future-helper caveat, and non-empty focused test
 filters.
+
+## Result
+
+**Result:** Pass
+
+The named terminal utility datastructure modules exist and the focused tests
+passed:
+
+- `cargo test -p roastty circ_buf -- --nocapture --test-threads=1`: 19 passed
+- `cargo test -p roastty intrusive_linked_list -- --nocapture --test-threads=1`:
+  5 passed
+- `cargo test -p roastty array_list_collection -- --nocapture --test-threads=1`:
+  3 passed
+- `cargo test -p roastty cache_table -- --nocapture --test-threads=1`: 4 passed
+- `cargo test -p roastty lru -- --nocapture --test-threads=1`: 10 passed
+- `cargo test -p roastty segmented_pool -- --nocapture --test-threads=1`: 5
+  passed
+
+Formatting and diff hygiene checks passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/791-datastruct-utilities-checklist-sync.md`
+- `git diff --check`
+
+The README row now marks the current `CircBuf`, `IntrusiveLinkedList`, and
+adjacent terminal utility collection set complete while explicitly leaving
+future incidental helpers as-needed.
+
+## Conclusion
+
+The unchecked datastruct-utilities row was stale. Roastty already carries the
+current supporting utility collection set needed by the terminal core:
+`circ_buf`, `intrusive_linked_list`, `array_list_collection`, `cache_table`,
+`lru`, and `segmented_pool`, all with focused passing tests. Future incidental
+helpers are still allowed, but the checklist no longer needs to track this
+implemented set as open work.
+
+## Completion Review
+
+Codex reviewed the completed experiment and found no blocking findings. The
+review approved the checked row scoped to the current terminal utility
+collection set, the future-helper caveat, the recorded verification counts plus
+Prettier and `git diff --check`, and the README status/provenance.

@@ -2116,7 +2116,7 @@ are past the correctness-critical foundation.
   — **Partial** (surface mouse reporting filters hung during verification) ·
   Codex/Codex/Codex
 - [Experiment 791: Datastruct Utilities Checklist Sync](791-datastruct-utilities-checklist-sync.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
