@@ -2163,7 +2163,7 @@ are past the correctness-critical foundation.
 - [Experiment 796: Renderer Metal Checklist Sync](796-renderer-metal-checklist-sync.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 797: Image Decode Dependency Checklist Sync](797-image-decode-dependency-checklist-sync.md)
-  — **Designed**
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 
