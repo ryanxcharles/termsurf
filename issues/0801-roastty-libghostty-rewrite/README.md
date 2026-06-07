@@ -2077,6 +2077,8 @@ are past the correctness-critical foundation.
   — **Pass** · Codex/Codex/Codex
 - [Experiment 780: Clipboard Paste Request State](780-clipboard-paste-request-state.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 781: Render State Display ID](781-render-state-display-id.md) —
+  **Designed**
 
 ## Non-Goals
 
