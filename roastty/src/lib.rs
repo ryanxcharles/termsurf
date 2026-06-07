@@ -14500,7 +14500,7 @@ pub extern "C" fn roastty_surface_binding_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::os::pty::{PtyReadiness, PtySize, PTY_COMMAND_LOCK};
+    use crate::os::pty::{pty_command_lock, PtyReadiness, PtySize};
     use crate::terminal::terminal::{
         TerminalDeviceAttributes, TerminalDeviceAttributesPrimary,
         TerminalDeviceAttributesSecondary, TerminalDeviceAttributesTertiary,
@@ -15565,7 +15565,7 @@ mod tests {
 
     #[test]
     fn surface_inherited_config_uses_current_worker_pwd_when_available() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -15593,7 +15593,7 @@ mod tests {
 
     #[test]
     fn surface_inherited_config_without_worker_pwd_returns_null_working_directory() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let no_worker = new_test_surface(app);
         let worker_without_pwd = new_test_surface(app);
@@ -15615,7 +15615,7 @@ mod tests {
 
     #[test]
     fn surface_inherited_config_after_app_detach_ignores_worker_pwd() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let mut config = roastty_surface_config_new();
         config.context = ROASTTY_SURFACE_CONTEXT_TAB;
@@ -15633,7 +15633,7 @@ mod tests {
 
     #[test]
     fn app_free_detaches_live_surfaces_before_surface_free() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -15650,7 +15650,7 @@ mod tests {
 
     #[test]
     fn app_tick_drains_worker_output_into_surface_dirty_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("printf hello"));
@@ -15667,7 +15667,7 @@ mod tests {
 
     #[test]
     fn app_tick_marks_surface_process_exited_from_worker_final_event() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("printf done"));
@@ -15888,7 +15888,7 @@ mod tests {
 
     #[test]
     fn surface_key_printable_utf8_reaches_child_pty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("stty -echo -icanon min 1 time 0; dd bs=1 count=1 2>/dev/null").unwrap();
@@ -15917,7 +15917,7 @@ mod tests {
 
     #[test]
     fn surface_key_uses_terminal_cursor_key_application_mode() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "stty -echo -icanon min 3 time 0; dd bs=1 count=3 2>/dev/null | od -An -tx1 -v",
@@ -15954,7 +15954,7 @@ mod tests {
 
     #[test]
     fn surface_key_options_reflect_attached_terminal_modes() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -15982,7 +15982,7 @@ mod tests {
 
     #[test]
     fn surface_key_options_change_representative_encodings() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -16096,7 +16096,7 @@ mod tests {
 
     #[test]
     fn surface_key_worker_write_failure_records_error() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -16279,7 +16279,7 @@ mod tests {
 
     #[test]
     fn surface_key_default_performable_action_falls_through_when_unperformed() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(true);
         let command = CString::new(
             "stty -echo -icanon min 8 time 0; dd bs=1 count=8 2>/dev/null | od -An -tx1 -v",
@@ -16333,7 +16333,7 @@ mod tests {
 
     #[test]
     fn surface_key_default_natural_text_editing_writes_legacy_bytes() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "stty -echo -icanon min 1 time 0; dd bs=1 count=1 2>/dev/null | od -An -tx1 -v",
@@ -16399,7 +16399,7 @@ mod tests {
 
     #[test]
     fn surface_key_configured_text_dispatch_writes_to_child_pty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         with_init_args(&["roastty", "--keybind=ctrl+x=text:hello"], || {
             let config = roastty_config_new();
             roastty_config_load_cli_args(config);
@@ -16482,7 +16482,7 @@ mod tests {
 
     #[test]
     fn surface_key_configured_overrides_static_default_dispatch() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         with_init_args(&["roastty", "--keybind=cmd+c=text:custom"], || {
             let config = roastty_config_new();
             roastty_config_load_cli_args(config);
@@ -16601,7 +16601,7 @@ mod tests {
 
     #[test]
     fn surface_key_invalid_configured_action_does_not_store_and_clears_stale_release() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         with_init_args(
             &[
                 "roastty",
@@ -20293,7 +20293,7 @@ mod tests {
 
     #[test]
     fn surface_needs_confirm_quit_uses_semantic_prompt_for_true_policy() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
 
         let mut running_config = roastty_surface_config_new();
@@ -21132,7 +21132,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_text_decoded_escapes_reach_child_pty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("stty -echo; IFS= read line; printf 'line:%s' \"$line\"").unwrap();
@@ -21151,7 +21151,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_text_raw_control_bytes_reach_child_pty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); b = sys.stdin.buffer.read(1); sys.stdout.write(\"\\n\" + b.hex())'",
@@ -21172,7 +21172,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_text_invalid_escape_consumes_without_writing() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "python3 -c 'import select, sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); r, _, _ = select.select([sys.stdin], [], [], 0.5); b = sys.stdin.buffer.read(1) if r else b\"\"; sys.stdout.write(\"\\nbyte:\" + b.hex())'",
@@ -21211,7 +21211,7 @@ mod tests {
     }
 
     fn assert_binding_action_raw_bytes(action: &[u8], byte_count: usize, expected_hex: &str) {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = raw_reader_command(byte_count);
         let mut config = roastty_surface_config_new();
@@ -21407,7 +21407,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_reset_clears_visible_terminal_text() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'ready\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21425,7 +21425,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_reset_clears_title_and_pwd_metadata() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21474,7 +21474,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_clear_screen_non_prompt_clears_above_cursor_and_history() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\ncurrent'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21502,7 +21502,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_clear_screen_clears_active_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\ncurrent'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21561,7 +21561,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_clear_screen_at_prompt_queues_form_feed_to_child() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "python3 -c 'import sys, tty, time; sys.stdout.write(\"\\x1b]133;A\\x07$ \"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); b = sys.stdin.buffer.read(1); sys.stdout.write(\"\\nbyte:\" + b.hex()); sys.stdout.flush(); time.sleep(5)'",
@@ -21582,7 +21582,7 @@ mod tests {
 
     #[test]
     fn surface_readonly_suppresses_clear_screen_form_feed_write() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "python3 -c 'import sys, tty, time; sys.stdout.write(\"\\x1b]133;A\\x07$ \"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); b = sys.stdin.buffer.read(1); sys.stdout.write(\"\\nbyte:\" + b.hex()); sys.stdout.flush(); time.sleep(5)'",
@@ -21638,7 +21638,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_select_all_empty_worker_consumes_without_selection_or_render() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21665,7 +21665,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_select_all_installs_selection_and_requests_render() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21724,7 +21724,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_adjust_selection_false_without_active_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21765,7 +21765,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_adjust_selection_updates_active_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21814,7 +21814,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_adjust_selection_boundary_noop_still_consumes_and_renders() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21844,7 +21844,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_adjust_selection_scrolls_endpoint_into_view() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\n'; sleep 5").unwrap();
@@ -21914,7 +21914,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_adjust_selection_visible_endpoint_keeps_viewport() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -21976,7 +21976,7 @@ mod tests {
         assert!(clipboard_write_records().is_empty());
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xC017);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22009,7 +22009,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_copy_to_clipboard_writes_formats() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xC017);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22117,7 +22117,7 @@ mod tests {
         assert!(clipboard_write_records().is_empty());
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xC017);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22159,7 +22159,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_copy_url_to_clipboard_writes_osc8_uri() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xC017);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22245,7 +22245,7 @@ mod tests {
         assert!(clipboard_write_records().is_empty());
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xF11E);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22296,7 +22296,7 @@ mod tests {
         assert!(clipboard_write_records().is_empty());
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22336,7 +22336,7 @@ mod tests {
         assert!(clipboard_write_records().is_empty());
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xF11E);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22389,7 +22389,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_scrollback_file_paste_false_paths() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22452,7 +22452,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_selection_file_paste_false_paths() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22497,7 +22497,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_screen_file_paste_false_paths() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22541,7 +22541,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_selection_file_copy_writes_selected_text_file() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xF11E);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22610,7 +22610,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_screen_file_copy_writes_screen_text_file() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xF11E);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22677,7 +22677,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_scrollback_file_copy_writes_history_text_file() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xF11E);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22750,7 +22750,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_selection_file_retains_earlier_paths() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_write(0xF11E);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -22813,7 +22813,7 @@ mod tests {
                 "html",
             ),
         ] {
-            let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+            let _guard = pty_command_lock();
             let app = new_test_app();
             let command = CString::new(
                 "python3 -c 'import os, select, sys, time, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); fd = sys.stdin.fileno(); tty.setraw(fd); first = os.read(fd, 1); time.sleep(0.2); r, _, _ = select.select([fd], [], [], 0); rest = os.read(fd, 4096) if r else b\"\"; data = first + rest; sys.stdout.write(\"\\npath:\" + data.decode()); sys.stdout.flush(); time.sleep(5)'",
@@ -22886,7 +22886,7 @@ mod tests {
                 "html",
             ),
         ] {
-            let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+            let _guard = pty_command_lock();
             let app = new_test_app();
             let command = CString::new(
                 "python3 -c 'import os, select, sys, time, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); fd = sys.stdin.fileno(); tty.setraw(fd); first = os.read(fd, 1); time.sleep(0.2); r, _, _ = select.select([fd], [], [], 0); rest = os.read(fd, 4096) if r else b\"\"; data = first + rest; sys.stdout.write(\"\\npath:\" + data.decode()); sys.stdout.flush(); time.sleep(5)'",
@@ -22957,7 +22957,7 @@ mod tests {
                 "html",
             ),
         ] {
-            let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+            let _guard = pty_command_lock();
             let app = new_test_app();
             let command = CString::new(
                 "python3 -c 'import os, select, sys, time, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); fd = sys.stdin.fileno(); tty.setraw(fd); first = os.read(fd, 1); time.sleep(0.2); r, _, _ = select.select([fd], [], [], 0); rest = os.read(fd, 4096) if r else b\"\"; data = first + rest; sys.stdout.write(\"\\npath:\" + data.decode()); sys.stdout.flush(); time.sleep(5)'",
@@ -23034,7 +23034,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_selection_file_open_forwards_path() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(true);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23111,7 +23111,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_screen_file_open_forwards_path() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(true);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23185,7 +23185,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_scrollback_file_open_forwards_path() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(true);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23266,7 +23266,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_write_file_open_false_paths() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(false);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23390,7 +23390,7 @@ mod tests {
         assert!(clipboard_read_records().is_empty());
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23421,7 +23421,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_paste_from_clipboard_starts_read_requests() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, true, true);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23503,7 +23503,7 @@ mod tests {
 
     #[test]
     fn surface_readonly_allows_paste_read_requests() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, true, true);
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -23565,7 +23565,7 @@ mod tests {
 
     #[test]
     fn surface_complete_clipboard_request_unconfirmed_unsafe_confirms_and_preserves_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read_confirm(0xCA57, true, true);
         let command = CString::new(
             "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read(12); sys.stdout.write(\"\\nbytes:\" + data.hex()); sys.stdout.flush()'",
@@ -23935,7 +23935,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_jump_to_prompt_no_prompt_worker_consumes_without_moving() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -23955,7 +23955,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_jump_to_prompt_moves_worker_viewport() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24017,7 +24017,7 @@ mod tests {
     #[test]
     fn surface_binding_action_scroll_to_top_and_scroll_to_bottom_moves_to_exact_viewport_endpoints()
     {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24077,7 +24077,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_to_row_moves_to_absolute_rows() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
@@ -24133,7 +24133,7 @@ mod tests {
         assert!(!binding_action(surface, "scroll_to_selection"));
         roastty_surface_free(surface);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24151,7 +24151,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_to_selection_moves_to_normalized_selection_top_left() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
@@ -24194,7 +24194,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_to_selection_in_active_area_clamps_to_active() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
@@ -24253,7 +24253,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_up_and_scroll_page_down_moves_by_surface_rows() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
@@ -24284,7 +24284,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_zero_rows_consumes_without_moving() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24333,7 +24333,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_lines_moves_by_signed_line_count() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
@@ -24370,7 +24370,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_lines_zero_consumes_without_moving() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24421,7 +24421,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_fractional_moves_by_truncated_row_count() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\nl6\\nl7\\nl8\\n'; sleep 5")
@@ -24458,7 +24458,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_fractional_zero_delta_consumes_without_moving() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24478,7 +24478,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_scroll_page_fractional_zero_rows_consumes_without_moving() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'l0\\nl1\\nl2\\nl3\\nl4\\nl5\\n'; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24913,7 +24913,7 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(true);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24944,7 +24944,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_search_selection_forwards_trimmed_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(true);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -24983,7 +24983,7 @@ mod tests {
 
     #[test]
     fn surface_binding_action_search_selection_returns_callback_result() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_action(false);
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
@@ -25538,7 +25538,7 @@ mod tests {
 
     #[test]
     fn surface_ime_point_uses_cursor_geometry_scale_and_preedit_width() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -25619,7 +25619,7 @@ mod tests {
 
     #[test]
     fn surface_ime_point_width_saturates_at_or_beyond_right_edge() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -25653,7 +25653,7 @@ mod tests {
 
     #[test]
     fn surface_ime_point_after_app_detach_uses_stored_geometry_and_preedit() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -25953,7 +25953,7 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, false, false);
         let command = CString::new(
             "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read(13); sys.stdout.write(\"\\nhex:\" + data.hex()); sys.stdout.flush()'",
@@ -25993,7 +25993,7 @@ mod tests {
 
     #[test]
     fn osc52_clipboard_read_completion_uses_allow_ask_and_empty_reply_policy() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let config = new_test_config_with_clipboard_read(config::ClipboardAccess::Allow);
         let app = new_test_app_with_clipboard_read(0xCA57, true, false);
         let runtime = app_from_handle(app).unwrap().runtime;
@@ -26099,7 +26099,7 @@ mod tests {
 
     #[test]
     fn osc52_clipboard_read_confirm_sync_completion_consumes_once() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read_confirm(0xCA57, true, false);
         let command = CString::new(
             "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read(13); sys.stdout.write(\"\\nhex:\" + data.hex()); sys.stdout.flush()'",
@@ -26196,7 +26196,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_read_event_allocates_standard_runtime_request_with_id() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, true, false);
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -26230,7 +26230,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_read_event_routes_primary_when_supported() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, true, true);
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -26260,7 +26260,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_read_event_rejects_unsupported_forms_without_request() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, true, false);
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -26295,7 +26295,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_read_event_availability_query_skips_runtime_read() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app_with_clipboard_read(0xCA57, true, false);
         let expected_reply = kitty_clipboard_read_reply(b"ok", osc::Terminator::Bel, b"text/plain");
         let command = read_reply_command(expected_reply.len());
@@ -26326,7 +26326,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_read_event_deny_policy_replies_without_request() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let config = new_test_config_with_clipboard_read(config::ClipboardAccess::Deny);
         let app = new_test_app_with_clipboard_read(0xCA57, true, false);
         let runtime = app_from_handle(app).unwrap().runtime;
@@ -26367,7 +26367,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_unsupported_alias_writes_explicit_reply() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let expected_reply = kitty_clipboard_status_reply(
             KittyClipboardOperation::Write,
@@ -26397,7 +26397,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_read_completion_writes_reply_with_original_terminator() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let config = new_test_config_with_clipboard_read(config::ClipboardAccess::Allow);
         let app = new_test_app_with_clipboard_read(0xCA57, true, false);
         let runtime = app_from_handle(app).unwrap().runtime;
@@ -26441,7 +26441,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_text_write_transaction_chunks_and_replies_done() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let (app, config) =
             new_test_app_with_clipboard_write_config(0xC017, true, config::ClipboardAccess::Allow);
         let expected_reply = kitty_clipboard_status_reply(
@@ -26536,7 +26536,7 @@ mod tests {
         roastty_app_free(app);
         roastty_config_free(config);
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let (app, config) =
             new_test_app_with_clipboard_write_config(0xC017, false, config::ClipboardAccess::Allow);
         let expected_reply = kitty_clipboard_status_reply(
@@ -26569,7 +26569,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_text_write_deny_invalid_and_recovery_replies() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let (app, config) =
             new_test_app_with_clipboard_write_config(0xC017, true, config::ClipboardAccess::Deny);
         let expected_reply = kitty_clipboard_status_reply(
@@ -26658,7 +26658,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_text_write_rejects_unsupported_mime_nul_and_orphan_wdata() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let (app, config) =
             new_test_app_with_clipboard_write_config(0xC017, true, config::ClipboardAccess::Allow);
         let invalid_reply = kitty_clipboard_status_reply(
@@ -26714,7 +26714,7 @@ mod tests {
 
     #[test]
     fn kitty_clipboard_text_write_completion_without_app_replies_io() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let expected_reply = kitty_clipboard_status_reply(
             KittyClipboardOperation::Write,
@@ -27018,7 +27018,7 @@ mod tests {
         roastty_surface_complete_clipboard_request(surface, text.as_ptr(), surface, true);
         assert!(!roastty_surface_needs_render(surface));
 
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let command = CString::new("printf ready; sleep 5").unwrap();
         let mut config = roastty_surface_config_new();
         config.command = command.as_ptr();
@@ -27074,7 +27074,7 @@ mod tests {
             ("safe", false, "bytes:73616665"),
             ("unsafe\n", true, "bytes:756e736166650d"),
         ] {
-            let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+            let _guard = pty_command_lock();
             let app = new_test_app_with_clipboard_read(0xCA57, true, true);
             let command = CString::new(format!(
                 "python3 -c 'import sys, tty; sys.stdout.write(\"ready\\n\"); sys.stdout.flush(); tty.setraw(sys.stdin.fileno()); data = sys.stdin.buffer.read({}); sys.stdout.write(\"\\nbytes:\" + data.hex()); sys.stdout.flush()'",
@@ -27134,7 +27134,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_captured_validates_null_detached_no_worker_and_default() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         assert!(!roastty_surface_mouse_captured(ptr::null_mut()));
 
         let app = new_test_app();
@@ -27156,7 +27156,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_captured_tracks_worker_terminal_mouse_modes() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf ready").unwrap();
         let mut config = roastty_surface_config_new();
@@ -27257,7 +27257,7 @@ mod tests {
 
     #[test]
     fn surface_readonly_suppresses_key_writes_but_stores_key_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27304,7 +27304,7 @@ mod tests {
 
     #[test]
     fn surface_readonly_suppresses_text_and_raw_writes() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27339,7 +27339,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_captured_honors_surface_mouse_reporting_gate() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -27485,7 +27485,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_button_reports_when_tracking_accepts_event() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27531,7 +27531,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_button_reporting_honors_surface_mouse_reporting_gate() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27576,7 +27576,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_button_reporting_honors_readonly_gate() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27621,7 +27621,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_motion_dispatch_respects_terminal_mode() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27652,7 +27652,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_geometry_prefers_attached_terminal_grid_over_fallback() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker_with_size(
@@ -27693,7 +27693,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_button_mode_drag_motion_uses_pressed_button() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27734,7 +27734,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_motion_dedupes_last_reported_cell() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27764,7 +27764,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_dispatch_records_worker_write_errors() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27819,7 +27819,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_scroll_disabled_reporting_stores_without_report() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27839,7 +27839,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_scroll_reporting_honors_surface_mouse_reporting_gate() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27876,7 +27876,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_scroll_reports_vertical_and_horizontal_wheel_steps() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27896,7 +27896,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_scroll_accumulates_non_precision_fractional_steps() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27927,7 +27927,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_scroll_accumulates_precision_pixels_by_cell_size() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -27953,7 +27953,7 @@ mod tests {
 
     #[test]
     fn surface_mouse_scroll_no_position_does_not_accumulate_or_report() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
@@ -28003,7 +28003,7 @@ mod tests {
 
     #[test]
     fn surface_has_selection_validates_null_detached_no_worker_and_empty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         assert!(!roastty_surface_has_selection(ptr::null_mut()));
 
         let app = new_test_app();
@@ -28029,7 +28029,7 @@ mod tests {
 
     #[test]
     fn surface_read_selection_validates_null_inputs_and_no_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         let mut text = empty_text();
@@ -28051,7 +28051,7 @@ mod tests {
 
     #[test]
     fn surface_read_selection_reads_active_worker_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28076,7 +28076,7 @@ mod tests {
 
     #[test]
     fn surface_read_selection_result_is_owned_across_ticks() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28097,7 +28097,7 @@ mod tests {
 
     #[test]
     fn surface_read_selection_returns_false_after_clearing_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28132,7 +28132,7 @@ mod tests {
 
     #[test]
     fn surface_quicklook_word_validates_inputs_no_worker_and_no_position() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         let mut text = RoasttyText {
@@ -28172,7 +28172,7 @@ mod tests {
 
     #[test]
     fn surface_quicklook_word_reads_word_at_mouse_position_with_metadata() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28196,7 +28196,7 @@ mod tests {
 
     #[test]
     fn surface_quicklook_word_preserves_active_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28221,7 +28221,7 @@ mod tests {
 
     #[test]
     fn surface_quicklook_word_free_resets_pointer_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28250,7 +28250,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_after_app_detach_returns_false() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("printf hello"));
@@ -28265,7 +28265,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_reads_explicit_worker_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28289,7 +28289,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_metadata_uses_content_scale() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Line0\\nHello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28318,7 +28318,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_metadata_defaults_for_off_viewport_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'aaa\\nbbb\\nccc\\nddd\\neee\\nfff\\nggg'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28342,7 +28342,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_metadata_clamps_partially_visible_selection() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'aaa\\nbbb\\nccc\\nddd\\neee\\nfff\\nggg'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28366,7 +28366,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_invalid_selection_returns_false() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28385,7 +28385,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_result_is_owned_across_ticks() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28405,7 +28405,7 @@ mod tests {
 
     #[test]
     fn surface_read_text_repeated_read_free_resets_pointer_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf 'Hello World'").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28458,7 +28458,7 @@ mod tests {
 
     #[test]
     fn surface_text_unbracketed_reaches_child_pty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("stty -echo; IFS= read line; printf 'out:%s' \"$line\"").unwrap();
@@ -28477,7 +28477,7 @@ mod tests {
 
     #[test]
     fn surface_text_unbracketed_maps_newline_to_carriage_return() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("stty -echo; IFS= read line; printf 'line:%s' \"$line\"").unwrap();
@@ -28496,7 +28496,7 @@ mod tests {
 
     #[test]
     fn surface_text_replaces_unsafe_control_bytes_with_spaces() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("stty -echo; IFS= read line; printf 'line:%s' \"$line\"").unwrap();
@@ -28515,7 +28515,7 @@ mod tests {
 
     #[test]
     fn surface_text_bracketed_mode_wraps_paste_markers() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new(
             "printf '\\033[?2004h'; stty -echo -icanon min 1 time 0; dd bs=1 count=18 2>/dev/null | cat -v",
@@ -28546,7 +28546,7 @@ mod tests {
 
     #[test]
     fn surface_text_after_app_detach_is_noop() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("cat"));
@@ -28678,7 +28678,7 @@ mod tests {
 
     #[test]
     fn surface_render_state_update_clears_draw_requested_dirty_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -28703,7 +28703,7 @@ mod tests {
 
     #[test]
     fn surface_render_state_update_clears_refresh_requested_dirty_state() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -28724,7 +28724,7 @@ mod tests {
 
     #[test]
     fn surface_render_state_update_snapshots_worker_terminal_and_clears_dirty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("printf hello"));
@@ -28755,7 +28755,7 @@ mod tests {
 
     #[test]
     fn surface_render_state_update_display_id_resets_on_terminal_update() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
@@ -28829,7 +28829,7 @@ mod tests {
 
     #[test]
     fn surface_start_launches_configured_command_for_snapshot() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf hello").unwrap();
         let mut config = roastty_surface_config_new();
@@ -28907,7 +28907,7 @@ mod tests {
     #[test]
     fn surface_start_without_command_uses_non_desktop_env_shell() {
         let _env_guard = ENV_LOCK.lock().unwrap();
-        let _pty_guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _pty_guard = pty_command_lock();
         let _desktop = DefaultShellDesktopOverrideGuard::new(false);
         let script = TempScript::new(b"#!/bin/sh\nprintf roastty-env-shell\n");
         let _shell = EnvGuard::set("SHELL", &script.path);
@@ -28923,7 +28923,7 @@ mod tests {
 
     #[test]
     fn surface_start_without_command_attaches_worker_and_is_idempotent() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
 
@@ -28966,7 +28966,7 @@ mod tests {
 
     #[test]
     fn surface_set_size_resizes_attached_worker_pty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
@@ -28999,7 +28999,7 @@ mod tests {
 
     #[test]
     fn surface_set_size_records_error_for_disconnected_worker() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf done").unwrap();
         let mut config = roastty_surface_config_new();
@@ -29041,7 +29041,7 @@ mod tests {
 
     #[test]
     fn surface_set_size_after_app_detach_updates_stored_size_only() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
 
@@ -29074,7 +29074,7 @@ mod tests {
 
     #[test]
     fn surface_foreground_pid_reports_worker_foreground_pid_after_start() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
 
@@ -29094,7 +29094,7 @@ mod tests {
 
     #[test]
     fn surface_foreground_pid_returns_zero_after_app_detach() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
 
@@ -29108,7 +29108,7 @@ mod tests {
 
     #[test]
     fn surface_tty_name_reports_worker_tty_after_start() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
 
@@ -29125,7 +29125,7 @@ mod tests {
 
     #[test]
     fn surface_tty_name_falls_back_after_app_detach() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = new_test_surface(app);
 
@@ -29140,7 +29140,7 @@ mod tests {
 
     #[test]
     fn surface_start_uses_copied_config_after_source_strings_drop() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let current_dir = std::env::current_dir().expect("current dir");
         let surface = {
@@ -29165,7 +29165,7 @@ mod tests {
 
     #[test]
     fn surface_start_uses_initial_input() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("stty -echo; IFS= read line; printf 'out:%s' \"$line\"").unwrap();
@@ -29184,7 +29184,7 @@ mod tests {
 
     #[test]
     fn surface_start_uses_working_directory() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let current_dir = std::env::current_dir().expect("current dir");
         let command = CString::new("pwd").unwrap();
@@ -29203,7 +29203,7 @@ mod tests {
 
     #[test]
     fn surface_start_passes_environment_variables() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf '%s' \"$ROASTTY_SURFACE_ENV_TEST\"").unwrap();
         let key = CString::new("ROASTTY_SURFACE_ENV_TEST").unwrap();
@@ -29227,7 +29227,7 @@ mod tests {
 
     #[test]
     fn surface_start_uses_copied_env_after_source_strings_drop() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let surface = {
             let command = CString::new("printf '%s' \"$ROASTTY_SCOPED_ENV_TEST\"").unwrap();
@@ -29253,7 +29253,7 @@ mod tests {
 
     #[test]
     fn surface_start_treats_null_env_array_as_empty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf '%s' \"${ROASTTY_NULL_ENV_TEST-unset}\"").unwrap();
         let mut config = roastty_surface_config_new();
@@ -29271,7 +29271,7 @@ mod tests {
 
     #[test]
     fn surface_start_skips_invalid_env_entries_and_keeps_valid_entry() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command =
             CString::new("printf '%s:%s' \"$ROASTTY_VALID_ENV\" \"$ROASTTY_EMPTY_ENV\"").unwrap();
@@ -29320,7 +29320,7 @@ mod tests {
 
     #[test]
     fn surface_start_duplicate_env_keys_last_value_wins() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf '%s' \"$ROASTTY_DUP_ENV\"").unwrap();
         let key = CString::new("ROASTTY_DUP_ENV").unwrap();
@@ -29352,7 +29352,7 @@ mod tests {
 
     #[test]
     fn surface_start_after_process_exit_keeps_attached_worker() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let app = new_test_app();
         let command = CString::new("printf done").unwrap();
         let mut config = roastty_surface_config_new();

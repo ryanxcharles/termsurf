@@ -210,6 +210,20 @@ pub(crate) struct PtyRead {
 #[cfg(test)]
 pub(crate) static PTY_COMMAND_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Acquire the PTY test serialization lock, recovering from poison.
+///
+/// `PTY_COMMAND_LOCK` is a pure serialization mutex over `()`; a poisoned lock
+/// means a prior test panicked while holding it, not that any guarded state is
+/// corrupt (each PTY test spawns its own pty + child). Recovering so one test's
+/// panic cannot cascade into `PoisonError` across every other PTY test (Issue
+/// 801, Experiment 831). The originating panic still fails its own test.
+#[cfg(test)]
+pub(crate) fn pty_command_lock() -> std::sync::MutexGuard<'static, ()> {
+    PTY_COMMAND_LOCK
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
 impl PtyChild {
     pub(crate) fn master_fd(&self) -> RawFd {
         self.pty.master_fd()
@@ -571,7 +585,7 @@ mod tests {
 
     #[test]
     fn pty_command_reads_child_output_from_master() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command.arg("-c").arg("printf hello");
 
@@ -585,7 +599,7 @@ mod tests {
 
     #[test]
     fn pty_command_attaches_stdio_to_tty() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command
             .arg("-c")
@@ -600,7 +614,7 @@ mod tests {
 
     #[test]
     fn pty_child_keeps_tty_name_after_slave_close() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sleep", test_size());
         command.arg("1");
 
@@ -613,7 +627,7 @@ mod tests {
 
     #[test]
     fn pty_child_reports_simple_foreground_pid() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sleep", test_size());
         command.arg("1");
 
@@ -624,7 +638,7 @@ mod tests {
 
     #[test]
     fn pty_command_passes_environment_variables() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command
             .arg("-c")
@@ -640,7 +654,7 @@ mod tests {
 
     #[test]
     fn pty_child_drop_kills_and_reaps_running_child() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let pid = {
             let mut command = PtyCommand::new("/bin/sleep", test_size());
             command.arg("5");
@@ -665,7 +679,7 @@ mod tests {
         // the grandchild survived and teardown could park forever in `wait4`. The
         // 5s watchdog also guards the bounded-reap property: drop must return
         // promptly, not block.
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command
             .arg("-c")
@@ -705,7 +719,7 @@ mod tests {
 
     #[test]
     fn pty_child_write_and_read_available_round_trip() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command
             .arg("-c")
@@ -741,7 +755,7 @@ mod tests {
 
     #[test]
     fn pty_child_read_available_empty_nonblocking_returns_promptly() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sleep", test_size());
         command.arg("1");
         let child = command.spawn().expect("spawn child");
@@ -758,7 +772,7 @@ mod tests {
 
     #[test]
     fn pty_child_resize_updates_reported_size_after_spawn() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sleep", test_size());
         command.arg("1");
         let child = command.spawn().expect("spawn child");
@@ -776,7 +790,7 @@ mod tests {
 
     #[test]
     fn pty_child_try_wait_reports_running_then_exited() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sleep", test_size());
         command.arg("1");
         let mut child = command.spawn().expect("spawn child");
@@ -788,7 +802,7 @@ mod tests {
 
     #[test]
     fn pty_child_poll_and_read_available_report_eof_for_short_lived_child() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut command = PtyCommand::new("/bin/sh", test_size());
         command.arg("-c").arg("printf done");
         let mut child = command.spawn().expect("spawn child");

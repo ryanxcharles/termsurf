@@ -103,8 +103,11 @@ resumes only after all three land and the suite runs clean.
 The cascade is the thing being eliminated, so the verification measures the
 **failure structure**, not (yet) a green suite:
 
-- **Build/lint:** `cargo build -p roastty` — no warnings (incl. no unused-import
-  warnings from the import change). `cargo fmt -p roastty -- --check` — clean.
+- **Build/lint:** the change is entirely `#[cfg(test)]`, so warning-cleanliness
+  is established by the **test compile** (`cargo build -p roastty --tests`; the
+  5 verify runs each compiled with 0 warnings, incl. no unused/missing-import
+  warning from the import change), not the plain `cargo build`.
+  `cargo fmt -p roastty -- --check` — clean.
 - **Cascade gone:** `cargo test -p roastty` (bare, in-process) run **5×**; in
   every run **zero `PoisonError` panics**, and
   `total failures == genuine originator count` (expected 0–2 per run — the
@@ -148,6 +151,81 @@ lock scope, the 831/832/833 decomposition, and the non-green "Pass" criterion.
 - **Nit — define "originator."** **Adopted:** the verification now defines an
   originator as a non-`PoisonError` panic and gives the exact grep check.
 
+## Result
+
+**Result:** Pass
+
+The accessor + a mechanical sub-expression conversion of **all 192**
+`PTY_COMMAND_LOCK.lock().unwrap()` sites (160 `lib.rs` / 20 `termio.rs` / 12
+`os/pty.rs`, including the lone `_pty_guard` at `lib.rs:28910`) landed, with the
+two `use` imports switched to `pty_command_lock`. Build clean (no warnings), fmt
+clean, no-ghostty clean, `git diff --check` clean.
+
+**Verification — `cargo test -p roastty` (bare, in-process) ×5:**
+
+| run | total failures | `PoisonError` | real originators | duration |
+| --: | -------------: | ------------: | ---------------: | -------: |
+|   1 |              2 |         **0** |                2 |    376 s |
+|   2 |              2 |         **0** |                2 |    222 s |
+|   3 |              2 |         **0** |                2 |    137 s |
+|   4 |              3 |         **0** |                3 |    130 s |
+|   5 |              2 |         **0** |                2 |     86 s |
+
+**The cascade is dead:** zero `PoisonError` in every run (was 12–76 in Exp 830),
+and `total failures == real originators` exactly. 13–77 red tests collapsed to
+the **2–3 genuine flakes**. The lock still serializes correctly (4357–4358 PTY
+tests pass each run; no concurrency regression).
+
+The genuine originators, now visible:
+
+- `surface_key_default_performable_action_falls_through_when_unperformed`
+  (`lib.rs:16314`) and
+  `surface_key_default_natural_text_editing_writes_legacy_bytes`
+  (`lib.rs:16358`) — failed **5/5**; both are `surface_snapshot_text`
+  first-render round-trip tests → **Exp 832**.
+- `config::tests::config_path_cli_expands_relative_optional_absolute_home_and_missing`
+  (`config/mod.rs:5642`) — failed **1/5**, a non-PTY env/path flake → **Exp
+  833**.
+
+(Measurement note: runs took 86–376 s with no hang, so the unbounded run
+completed. Going forward, bare-`cargo test` verification runs use a
+**no-progress watchdog** — kill + sample if the test log is silent > 90 s, hard
+ceiling 600 s — so a future deadlock self-reports in ≤ 90 s instead of waiting
+indefinitely.)
+
 ## Conclusion
 
-_(to be written after the run)_
+Poison-resilience was the high-leverage fix the Exp 830 design wrongly rejected:
+one mechanical change turned an unreadable 13–77-failure suite into a precise
+2–3-failure one, with the real culprits named. The cascade amplifier is gone for
+good.
+
+The suite is **not yet clean** — that is the explicit, bounded remaining work:
+
+- **Exp 832 (next):** the surface round-trip snapshot race — convert the ~110
+  `surface_snapshot_text_after_start(...).contains(NEEDLE)` and ~10
+  `surface_snapshot_text` first-render sites to wait for their output token (the
+  Exp 830 five-test fix is the template). The two `surface_key` originators
+  above are the immediate targets.
+- **Exp 833:** the `config_path_cli` env/path flake (separate root cause).
+
+Feature work (URI/regex, remaining `os/`) resumes only once 832 + 833 land and
+`cargo test -p roastty` runs clean.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Independently verified the conversion and the evidence.
+
+**Verdict:** APPROVED — no Required, Optional, or Nit findings. Confirmed: zero
+remaining `PTY_COMMAND_LOCK.lock().unwrap()` sites; `PTY_COMMAND_LOCK`
+referenced only in `os/pty.rs`; `pty_command_lock()` = 192 calls + 1 definition
+(incl. the `_pty_guard` site); accessor correct and `#[cfg(test)]`; both imports
+switched cleanly; `grep -c PoisonError` = 0 in all 5 logs with
+`total == real originators`; the named originators match; the Pass verdict is
+honest (cascade-kill goal met, residual flakes correctly deferred to 832/833);
+and poison-recovery introduces no risk (mutex guards `()`; a real panic still
+fails its own test). Two non-findings were noted and addressed: the build target
+wording (corrected to the `--tests` compile) and pre-existing
+`WindowTheme::Ghostty` literals in `lib.rs` that this diff does not introduce
+(out of scope; flagged for a future cleanup).

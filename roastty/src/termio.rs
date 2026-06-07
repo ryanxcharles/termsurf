@@ -424,7 +424,7 @@ impl From<TerminalStreamError> for TermioError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::os::pty::PTY_COMMAND_LOCK;
+    use crate::os::pty::pty_command_lock;
     use crate::terminal::osc;
     use std::ffi::c_void;
     use std::thread;
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn pump_once_delivers_child_output_to_terminal() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio = spawn_shell("printf hello");
 
         let pump = pump_until(&mut termio, |termio, pump| {
@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn queue_write_reaches_child_and_output_returns_to_terminal() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio =
             spawn_shell("stty -echo; printf ready; IFS= read line; printf 'out:%s' \"$line\"");
 
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn terminal_response_flushes_to_child_without_dropping_bytes() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio = spawn_shell(
             "stty raw -echo min 0 time 10; \
              printf '\\033[c'; \
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn resize_pty_updates_reported_winsize() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let termio = Termio::spawn("/bin/sleep", ["1"], test_size()).expect("spawn termio");
         let resized = PtySize {
             rows: 33,
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn pump_once_reports_child_exit() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio = spawn_shell("printf done");
 
         let pump = pump_until(&mut termio, |_, pump| pump.child_exited || pump.eof);
@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn accessors_expose_terminal_child_id_and_pending_count() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio = Termio::spawn("/bin/sleep", ["1"], test_size()).expect("spawn termio");
 
         assert!(termio.child_id() > 0);
@@ -608,7 +608,7 @@ mod tests {
 
     #[test]
     fn spawn_with_cwd_runs_child_in_requested_directory() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let cwd = std::env::current_dir().expect("current dir");
         let mut termio = Termio::spawn_with_cwd(
             "/bin/pwd",
@@ -634,7 +634,7 @@ mod tests {
 
     #[test]
     fn spawn_with_cwd_reports_missing_directory() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let missing = std::env::temp_dir().join(format!(
             "roastty-missing-cwd-for-test-{}",
             std::process::id()
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn spawn_with_options_passes_environment_variables() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio = Termio::spawn_with_options(
             "/bin/sh",
             ["-c", "printf '%s' \"$ROASTTY_TERMIO_ENV_TEST\""],
@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn termio_clipboard_osc52_worker_event_preserves_payload() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = spawn_worker("printf '\\033]52;s;?\\007'");
 
         let event = worker_event_until(&worker, |_, event| {
@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn termio_clipboard_kitty_worker_event_preserves_payload_and_terminator() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = spawn_worker("printf '\\033]5522;type=read;payload\\033\\\\'");
 
         let event = worker_event_until(&worker, |_, event| {
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn termio_clipboard_worker_events_precede_same_read_pump_in_parse_order() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker =
             spawn_worker("printf 'text\\033]52;c;raw\\007\\033]5522;type=read\\007tail'");
 
@@ -767,7 +767,7 @@ mod tests {
 
     #[test]
     fn worker_delivers_child_output_to_terminal() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = spawn_worker("printf hello");
 
         let event = worker_event_until(&worker, |worker, event| {
@@ -785,7 +785,7 @@ mod tests {
 
     #[test]
     fn worker_rejects_terminal_with_callbacks() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut termio = spawn_shell("printf ignored");
         termio
             .terminal_mut()
@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     fn worker_queue_write_reaches_child() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker =
             spawn_worker("stty -echo; printf ready; IFS= read line; printf 'out:%s' \"$line\"");
 
@@ -818,7 +818,7 @@ mod tests {
 
     #[test]
     fn worker_resize_command_updates_pty_size() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = TermioWorker::spawn(
             Termio::spawn("/bin/sleep", ["1"], test_size()).expect("spawn termio"),
             10,
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn worker_emits_final_event_before_exiting() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = spawn_worker("printf done");
 
         let event = worker_event_until(
@@ -860,7 +860,7 @@ mod tests {
 
     #[test]
     fn worker_shutdown_joins_long_lived_child_thread() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = TermioWorker::spawn(
             Termio::spawn("/bin/sleep", ["5"], test_size()).expect("spawn termio"),
             10,
@@ -874,7 +874,7 @@ mod tests {
 
     #[test]
     fn worker_drop_cleans_up_long_lived_child() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let pid = {
             let worker = TermioWorker::spawn(
                 Termio::spawn("/bin/sleep", ["5"], test_size()).expect("spawn termio"),
@@ -893,7 +893,7 @@ mod tests {
 
     #[test]
     fn worker_commands_fail_after_worker_stops() {
-        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let _guard = pty_command_lock();
         let mut worker = spawn_worker("printf done");
 
         worker_event_until(
