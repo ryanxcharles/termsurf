@@ -2408,6 +2408,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Claude/Claude
 - [Experiment 841: FrameRenderer drives update-and-present](841-frame-renderer-present.md)
   — **Pass** · Claude/Claude/Claude
+- [Experiment 842: Derive the render input's colors/palette from the live terminal](842-derive-render-input-colors.md)
+  — **Designed** · Claude/Claude/Claude
 
 ## Non-Goals
 
