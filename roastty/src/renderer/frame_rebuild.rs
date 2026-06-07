@@ -132,6 +132,45 @@ impl FrameTerminalSnapshot {
             background_opacity: input.background_opacity,
         }
     }
+
+    pub(crate) fn text_overlay_input(
+        &self,
+        input: FrameSnapshotTextOverlayInput,
+    ) -> FrameTextOverlayInput<'_> {
+        let cursor = cursor_grid_pos(self.cursor_viewport).and_then(|grid_pos| {
+            input.cursor.map(|cursor| FrameCursorOverlay {
+                grid_pos,
+                style: cursor.style,
+                wide: cursor.wide,
+                color: cursor.color,
+            })
+        });
+
+        FrameTextOverlayInput {
+            preedit: self.preedit.as_ref(),
+            cursor,
+            screen_fg: input.screen_fg,
+            alpha: input.alpha,
+        }
+    }
+
+    pub(crate) fn cursor_uniform_input(
+        &self,
+        input: FrameSnapshotCursorUniformInput,
+    ) -> FrameCursorUniformInput {
+        let block_cursor = cursor_grid_pos(self.cursor_viewport).and_then(|grid_pos| {
+            input.block_cursor.map(|cursor| FrameBlockCursorUniform {
+                grid_pos,
+                wide: cursor.wide,
+                color: cursor.color,
+            })
+        });
+
+        FrameCursorUniformInput {
+            preedit_active: self.preedit.is_some(),
+            block_cursor,
+        }
+    }
 }
 
 /// The preedit placement planned for this frame.
@@ -298,6 +337,20 @@ pub(crate) struct FrameCursorOverlay {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSnapshotCursorOverlayInput {
+    pub(crate) style: CursorStyle,
+    pub(crate) wide: bool,
+    pub(crate) color: Rgb,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSnapshotTextOverlayInput {
+    pub(crate) cursor: Option<FrameSnapshotCursorOverlayInput>,
+    pub(crate) screen_fg: Rgb,
+    pub(crate) alpha: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct FrameTextOverlayInput<'a> {
     pub(crate) preedit: Option<&'a Preedit>,
     pub(crate) cursor: Option<FrameCursorOverlay>,
@@ -382,6 +435,17 @@ pub(crate) struct FrameBlockCursorUniform {
     pub(crate) grid_pos: [u16; 2],
     pub(crate) wide: Wide,
     pub(crate) color: Rgb,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSnapshotBlockCursorUniformInput {
+    pub(crate) wide: Wide,
+    pub(crate) color: Rgb,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSnapshotCursorUniformInput {
+    pub(crate) block_cursor: Option<FrameSnapshotBlockCursorUniformInput>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1252,6 +1316,11 @@ fn preedit_width(codepoints: &[crate::renderer::state::Codepoint]) -> Unit {
 fn cursor_viewport(cursor_x: Unit, cursor_y: Unit, terminal_grid: GridSize) -> Option<Coordinate> {
     (cursor_x < terminal_grid.columns && cursor_y < terminal_grid.rows)
         .then_some(Coordinate::new(cursor_x, u32::from(cursor_y)))
+}
+
+fn cursor_grid_pos(cursor: Option<Coordinate>) -> Option<[u16; 2]> {
+    let cursor = cursor?;
+    Some([cursor.x, u16::try_from(cursor.y).ok()?])
 }
 
 fn validate_unique_rows(
@@ -2711,6 +2780,127 @@ mod tests {
         }
     }
 
+    fn snapshot_cursor_overlay_input() -> FrameSnapshotCursorOverlayInput {
+        FrameSnapshotCursorOverlayInput {
+            style: CursorStyle::Underline,
+            wide: true,
+            color: Rgb::new(3, 4, 5),
+        }
+    }
+
+    fn snapshot_text_overlay_input(
+        cursor: Option<FrameSnapshotCursorOverlayInput>,
+    ) -> FrameSnapshotTextOverlayInput {
+        FrameSnapshotTextOverlayInput {
+            cursor,
+            screen_fg: Rgb::new(40, 41, 42),
+            alpha: 219,
+        }
+    }
+
+    #[test]
+    fn snapshot_overlay_text_input_borrows_preedit_and_threads_fields() {
+        let mut terminal = terminal(4, 2);
+        terminal.set_cursor_position_for_tests(2, 1);
+        let snapshot = FrameTerminalSnapshot::collect(
+            &terminal,
+            grid(4, 2),
+            RenderDirty::Full,
+            Some(preedit(&[false])),
+        );
+
+        let input = snapshot.text_overlay_input(snapshot_text_overlay_input(Some(
+            snapshot_cursor_overlay_input(),
+        )));
+
+        assert!(std::ptr::eq(
+            input.preedit.expect("preedit"),
+            snapshot.preedit.as_ref().expect("snapshot preedit")
+        ));
+        assert_eq!(input.screen_fg, Rgb::new(40, 41, 42));
+        assert_eq!(input.alpha, 219);
+        let cursor = input.cursor.expect("cursor");
+        assert_eq!(cursor.grid_pos, [2, 1]);
+        assert_eq!(cursor.style, CursorStyle::Underline);
+        assert_eq!(cursor.wide, true);
+        assert_eq!(cursor.color, Rgb::new(3, 4, 5));
+    }
+
+    #[test]
+    fn snapshot_overlay_text_input_omits_cursor_without_snapshot_cursor() {
+        let terminal = terminal(4, 2);
+        let mut snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 2), RenderDirty::Full, None);
+        snapshot.cursor_viewport = None;
+
+        let input = snapshot.text_overlay_input(snapshot_text_overlay_input(Some(
+            snapshot_cursor_overlay_input(),
+        )));
+
+        assert_eq!(input.preedit, None);
+        assert!(input.cursor.is_none());
+    }
+
+    #[test]
+    fn snapshot_overlay_text_input_feeds_cursor_driver() {
+        let mut terminal = terminal(4, 2);
+        terminal.set_cursor_position_for_tests(1, 0);
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 2), RenderDirty::Full, None);
+        let plan = snapshot.build_plan().expect("plan");
+        let mut contents = Contents::default();
+        contents.resize(grid(4, 2));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                snapshot.text_overlay_input(snapshot_text_overlay_input(Some(
+                    FrameSnapshotCursorOverlayInput {
+                        style: CursorStyle::Block,
+                        wide: false,
+                        color: Rgb::new(7, 8, 9),
+                    },
+                ))),
+            )
+            .expect("draw overlays");
+
+        assert!(applied.cursor_cleared);
+        assert_eq!(applied.cursor_drawn, Some(CursorStyle::Block));
+        assert_eq!(applied.preedit_drawn, false);
+    }
+
+    #[test]
+    fn snapshot_overlay_text_input_feeds_preedit_suppression_driver() {
+        let mut terminal = terminal(4, 2);
+        terminal.set_cursor_position_for_tests(1, 0);
+        let snapshot = FrameTerminalSnapshot::collect(
+            &terminal,
+            grid(4, 2),
+            RenderDirty::Full,
+            Some(preedit(&[false])),
+        );
+        let plan = snapshot.build_plan().expect("plan");
+        let mut contents = Contents::default();
+        contents.resize(grid(4, 2));
+        let mut shared = menlo_grid();
+
+        let applied = plan
+            .draw_text_overlays(
+                &mut contents,
+                &mut shared,
+                snapshot.text_overlay_input(snapshot_text_overlay_input(Some(
+                    snapshot_cursor_overlay_input(),
+                ))),
+            )
+            .expect("draw overlays");
+
+        assert!(applied.cursor_cleared);
+        assert_eq!(applied.cursor_drawn, None);
+        assert!(applied.preedit_drawn);
+    }
+
     fn plan_for_grid(size: GridSize) -> FrameRebuildPlan {
         FrameRebuildPlan::build(input(
             size,
@@ -3114,6 +3304,108 @@ mod tests {
             wide,
             color,
         }
+    }
+
+    fn snapshot_block_cursor_uniform_input() -> FrameSnapshotBlockCursorUniformInput {
+        FrameSnapshotBlockCursorUniformInput {
+            wide: Wide::Wide,
+            color: Rgb::new(11, 12, 13),
+        }
+    }
+
+    fn snapshot_cursor_uniform_input(
+        block_cursor: Option<FrameSnapshotBlockCursorUniformInput>,
+    ) -> FrameSnapshotCursorUniformInput {
+        FrameSnapshotCursorUniformInput { block_cursor }
+    }
+
+    #[test]
+    fn snapshot_overlay_cursor_uniform_input_derives_preedit_and_threads_cursor() {
+        let mut terminal = terminal(4, 2);
+        terminal.set_cursor_position_for_tests(2, 1);
+        let snapshot = FrameTerminalSnapshot::collect(
+            &terminal,
+            grid(4, 2),
+            RenderDirty::Full,
+            Some(preedit(&[false])),
+        );
+
+        let input = snapshot.cursor_uniform_input(snapshot_cursor_uniform_input(Some(
+            snapshot_block_cursor_uniform_input(),
+        )));
+
+        assert!(input.preedit_active);
+        let cursor = input.block_cursor.expect("block cursor");
+        assert_eq!(cursor.grid_pos, [2, 1]);
+        assert_eq!(cursor.wide, Wide::Wide);
+        assert_eq!(cursor.color, Rgb::new(11, 12, 13));
+    }
+
+    #[test]
+    fn snapshot_overlay_cursor_uniform_omits_cursor_without_snapshot_cursor() {
+        let terminal = terminal(4, 2);
+        let mut snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 2), RenderDirty::Full, None);
+        snapshot.cursor_viewport = None;
+
+        let input = snapshot.cursor_uniform_input(snapshot_cursor_uniform_input(Some(
+            snapshot_block_cursor_uniform_input(),
+        )));
+
+        assert_eq!(input.preedit_active, false);
+        assert!(input.block_cursor.is_none());
+    }
+
+    #[test]
+    fn snapshot_overlay_cursor_uniform_feeds_block_driver() {
+        let mut terminal = terminal(4, 2);
+        terminal.set_cursor_position_for_tests(1, 0);
+        let snapshot =
+            FrameTerminalSnapshot::collect(&terminal, grid(4, 2), RenderDirty::Full, None);
+        let plan = snapshot.build_plan().expect("plan");
+        let mut uniforms = uniforms_with_stale_cursor();
+
+        let applied = plan
+            .apply_cursor_uniforms(
+                &mut uniforms,
+                snapshot.cursor_uniform_input(snapshot_cursor_uniform_input(Some(
+                    snapshot_block_cursor_uniform_input(),
+                ))),
+            )
+            .expect("cursor uniforms");
+
+        assert!(applied.cursor_cleared);
+        assert!(applied.block_cursor_applied);
+        assert_eq!(uniforms.cursor_pos, [1, 0]);
+        assert_eq!(uniforms.cursor_color, [11, 12, 13, 255]);
+        assert!(uniforms.bools.cursor_wide);
+    }
+
+    #[test]
+    fn snapshot_overlay_cursor_uniform_feeds_preedit_suppression_driver() {
+        let mut terminal = terminal(4, 2);
+        terminal.set_cursor_position_for_tests(1, 0);
+        let snapshot = FrameTerminalSnapshot::collect(
+            &terminal,
+            grid(4, 2),
+            RenderDirty::Full,
+            Some(preedit(&[false])),
+        );
+        let plan = snapshot.build_plan().expect("plan");
+        let mut uniforms = uniforms_with_stale_cursor();
+
+        let applied = plan
+            .apply_cursor_uniforms(
+                &mut uniforms,
+                snapshot.cursor_uniform_input(snapshot_cursor_uniform_input(Some(
+                    snapshot_block_cursor_uniform_input(),
+                ))),
+            )
+            .expect("cursor uniforms");
+
+        assert!(applied.cursor_cleared);
+        assert_eq!(applied.block_cursor_applied, false);
+        assert_eq!(uniforms.cursor_pos, [u16::MAX, u16::MAX]);
     }
 
     fn uniforms_with_stale_cursor() -> MetalUniforms {

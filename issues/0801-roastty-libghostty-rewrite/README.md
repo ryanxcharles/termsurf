@@ -245,14 +245,14 @@ Experiment 246).
       resolution, cursor animation, and focus fields; an owned terminal frame
       snapshot can collect live terminal grid size, row dirty flags,
       `RunOptions` rows, cursor viewport, and caller-supplied preedit for the
-      prepared rebuild planner and row-formatting input; custom shader
-      enablement/upload, pacing, and live renderer integration remain missing;
-      prepared Metal frame presentation can sync contents/atlases and submit
-      draw calls through the compositor; prepared rebuild uniform inputs can
-      sync resize grid-size and full-rebuild padding extension uniforms, and
-      prepared row-level padding-extension inputs can refine rebuilt boundary
-      rows from derived `rowNeverExtendBg` decisions while live renderer-loop
-      wiring remains missing (critical)
+      prepared rebuild planner, row-formatting input, text overlay input, and
+      cursor uniform input; custom shader enablement/upload, pacing, and live
+      renderer integration remain missing; prepared Metal frame presentation can
+      sync contents/atlases and submit draw calls through the compositor;
+      prepared rebuild uniform inputs can sync resize grid-size and full-rebuild
+      padding extension uniforms, and prepared row-level padding-extension
+      inputs can refine rebuilt boundary rows from derived `rowNeverExtendBg`
+      decisions while live renderer-loop wiring remains missing (critical)
 - [ ] z2d debug `Overlay`, link highlighting, render `Thread`, custom shaders —
       partial: custom-shader uniforms, target enum, and per-frame/state update
       helpers exist; shader file loading, debug overlay, renderer thread, and
@@ -2277,7 +2277,7 @@ are past the correctness-critical foundation.
 - [Experiment 827: Build Snapshot Row Format Input](827-build-snapshot-row-format-input.md)
   — **Pass** · Codex/Codex/Codex
 - [Experiment 828: Build Snapshot Overlay Inputs](828-build-snapshot-overlay-inputs.md)
-  — **Designed** · Codex/Codex/Codex
+  — **Pass** · Codex/Codex/Codex
 
 ## Non-Goals
 

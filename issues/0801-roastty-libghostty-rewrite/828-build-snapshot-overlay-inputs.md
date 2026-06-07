@@ -119,3 +119,75 @@ snapshot cursor viewport into `[x, y]` when both the snapshot cursor and caller
 payload are present. The planned tests cover borrowed preedit identity, caller
 field passthrough, cursor absence, preedit-derived suppression state, block
 cursor mapping, and feeding the produced inputs into the existing drivers.
+
+## Result
+
+**Result:** Pass
+
+Added snapshot adapter inputs for text overlays and cursor uniforms.
+`FrameTerminalSnapshot::text_overlay_input` now borrows snapshot preedit, maps
+snapshot cursor viewport into cursor grid position when a caller cursor payload
+is present, and copies caller-supplied cursor style, cursor width, cursor color,
+screen foreground, and alpha. `FrameTerminalSnapshot::cursor_uniform_input` now
+derives `preedit_active` from snapshot preedit and maps snapshot cursor viewport
+into an optional block cursor uniform when a caller block-cursor payload is
+present.
+
+Implementation changes:
+
+- `roastty/src/renderer/frame_rebuild.rs`
+  - Added `FrameSnapshotCursorOverlayInput`.
+  - Added `FrameSnapshotTextOverlayInput`.
+  - Added `FrameSnapshotBlockCursorUniformInput`.
+  - Added `FrameSnapshotCursorUniformInput`.
+  - Added `FrameTerminalSnapshot::text_overlay_input`.
+  - Added `FrameTerminalSnapshot::cursor_uniform_input`.
+  - Added shared cursor grid-position conversion from snapshot cursor viewport.
+  - Added tests proving preedit borrowing, cursor mapping, caller-field
+    passthrough, cursor omission, preedit-active derivation, block-cursor
+    mapping, and live-driver use for cursor drawing and preedit suppression.
+- `issues/0801-roastty-libghostty-rewrite/README.md`
+  - Marked Experiment 828 as `Pass`.
+  - Updated the renderer tracker to say terminal frame snapshots can now feed
+    rebuild planning, row formatting, text overlay, and cursor uniform inputs
+    while live renderer-loop orchestration remains open.
+
+Verification:
+
+- `cargo fmt -p roastty`
+- `cargo test -p roastty renderer::frame_rebuild::tests::snapshot_overlay -- --nocapture`
+  - 8 passed
+- `cargo test -p roastty renderer::frame_rebuild -- --nocapture`
+  - 107 passed
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/828-build-snapshot-overlay-inputs.md`
+- `git diff --check`
+
+## Conclusion
+
+Terminal snapshots now bridge all prepared front-half frame rebuild inputs that
+depend on live terminal state: rebuild planning, row formatting, text overlays,
+and cursor uniforms. The adapters still only package data. The existing
+`draw_text_overlays` and `apply_cursor_uniforms` drivers remain responsible for
+bounds validation, wide cursor validation, mutation, and rendering behavior.
+
+The next useful experiment can start composing a single prepared frame rebuild
+sequence that collects a snapshot, builds a plan, formats rows, draws overlays,
+updates rebuild/cursor uniforms, refines padding extension rows, and then stops
+before Metal presentation or renderer-thread orchestration.
+
+## Completion Review
+
+Codex reviewed the completed implementation and recorded result, and approved
+the experiment with no findings. The review confirmed that the implementation is
+scoped to the intended adapter layer and does not add renderer-loop wiring,
+Metal presentation orchestration, or C ABI changes.
+
+The review also confirmed the cursor/preedit behavior: text overlay input
+borrows snapshot preedit, maps cursor position from `cursor_viewport`, and
+copies caller-owned style, width, color, and screen fields. Cursor uniforms
+derive `preedit_active` from snapshot preedit and only build a block cursor when
+both snapshot cursor position and caller payload are present. Validation remains
+in the existing drivers.
+
+The review found the `snapshot_overlay` tests adequate for this slice and
+confirmed that the recorded verification matches the requested commands.
