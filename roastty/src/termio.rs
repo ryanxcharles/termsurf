@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use crate::os::pty::{PtyChild, PtyCommand, PtyReadiness, PtySize};
-use crate::terminal::terminal::{Terminal, TerminalInitError, TerminalStreamError};
+use crate::terminal::terminal::{
+    Terminal, TerminalClipboardEvent, TerminalInitError, TerminalStreamError,
+};
 
 #[derive(Debug)]
 pub(crate) struct Termio {
@@ -66,6 +68,7 @@ enum TermioWorkerCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TermioWorkerEvent {
     Pump(TermioPump),
+    Clipboard(TerminalClipboardEvent),
     Error(String),
 }
 
@@ -156,6 +159,10 @@ impl Termio {
 
     pub(crate) fn queue_write(&mut self, bytes: &[u8]) {
         self.pending_write.extend_from_slice(bytes);
+    }
+
+    pub(crate) fn drain_clipboard_events(&mut self) -> Vec<TerminalClipboardEvent> {
+        self.terminal.drain_clipboard_events()
     }
 
     pub(crate) fn pump_once(
@@ -331,6 +338,18 @@ fn run_termio_worker(
 
         match pump {
             Ok(pump) => {
+                let clipboard_events = {
+                    let mut termio = termio.lock().expect("termio worker mutex poisoned");
+                    termio.drain_clipboard_events()
+                };
+                for clipboard_event in clipboard_events {
+                    if events
+                        .send(TermioWorkerEvent::Clipboard(clipboard_event))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
                 let should_emit = pump.bytes_read > 0
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
@@ -406,6 +425,7 @@ impl From<TerminalStreamError> for TermioError {
 mod tests {
     use super::*;
     use crate::os::pty::PTY_COMMAND_LOCK;
+    use crate::terminal::osc;
     use std::ffi::c_void;
     use std::thread;
     use std::time::Duration;
@@ -459,6 +479,23 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("worker event condition not met: {last:?}");
+    }
+
+    fn worker_events_until<F>(worker: &TermioWorker, mut done: F) -> Vec<TermioWorkerEvent>
+    where
+        F: FnMut(&[TermioWorkerEvent]) -> bool,
+    {
+        let mut events = Vec::new();
+        for _ in 0..100 {
+            while let Some(event) = worker.try_recv_event() {
+                events.push(event);
+                if done(&events) {
+                    return events;
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("worker events condition not met: {events:?}");
     }
 
     fn wait_until<F>(mut done: F)
@@ -635,6 +672,97 @@ mod tests {
         });
 
         assert!(termio.terminal().plain_screen(false).contains("termio-env"));
+    }
+
+    #[test]
+    fn termio_clipboard_osc52_worker_event_preserves_payload() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut worker = spawn_worker("printf '\\033]52;s;?\\007'");
+
+        let event = worker_event_until(&worker, |_, event| {
+            matches!(
+                event,
+                TermioWorkerEvent::Clipboard(TerminalClipboardEvent::Osc52 { .. })
+            )
+        });
+
+        assert_eq!(
+            event,
+            TermioWorkerEvent::Clipboard(TerminalClipboardEvent::Osc52 {
+                kind: b's',
+                data: b"?".to_vec(),
+            })
+        );
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
+    fn termio_clipboard_kitty_worker_event_preserves_payload_and_terminator() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut worker = spawn_worker("printf '\\033]5522;type=read;payload\\033\\\\'");
+
+        let event = worker_event_until(&worker, |_, event| {
+            matches!(
+                event,
+                TermioWorkerEvent::Clipboard(TerminalClipboardEvent::Kitty { .. })
+            )
+        });
+
+        assert_eq!(
+            event,
+            TermioWorkerEvent::Clipboard(TerminalClipboardEvent::Kitty {
+                metadata: b"type=read".to_vec(),
+                payload: Some(b"payload".to_vec()),
+                terminator: osc::Terminator::St,
+            })
+        );
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
+    fn termio_clipboard_worker_events_precede_same_read_pump_in_parse_order() {
+        let _guard = PTY_COMMAND_LOCK.lock().unwrap();
+        let mut worker =
+            spawn_worker("printf 'text\\033]52;c;raw\\007\\033]5522;type=read\\007tail'");
+
+        let events = worker_events_until(&worker, |events| {
+            matches!(
+                events.last(),
+                Some(TermioWorkerEvent::Pump(pump)) if pump.bytes_read > 0
+            ) && events
+                .iter()
+                .filter(|event| matches!(event, TermioWorkerEvent::Clipboard(_)))
+                .count()
+                >= 2
+        });
+
+        let pump_index = events
+            .iter()
+            .position(|event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.bytes_read > 0))
+            .expect("pump event");
+        let clipboard_events: Vec<_> = events[..pump_index]
+            .iter()
+            .filter_map(|event| match event {
+                TermioWorkerEvent::Clipboard(event) => Some(event.clone()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            clipboard_events,
+            vec![
+                TerminalClipboardEvent::Osc52 {
+                    kind: b'c',
+                    data: b"raw".to_vec(),
+                },
+                TerminalClipboardEvent::Kitty {
+                    metadata: b"type=read".to_vec(),
+                    payload: None,
+                    terminator: osc::Terminator::Bel,
+                },
+            ]
+        );
+        worker.shutdown().expect("shutdown worker");
     }
 
     #[test]

@@ -1,3 +1,20 @@
++++
+[implementer]
+agent = "codex"
+model = "gpt-5"
+reasoning = "high"
+
+[review.design]
+agent = "codex"
+model = "default"
+reasoning = "medium"
+
+[review.result]
+agent = "codex"
+model = "default"
+reasoning = "medium"
++++
+
 # Experiment 783: Termio Clipboard OSC Worker Events
 
 ## Description
@@ -66,3 +83,42 @@ the same successful read, preserves retained clipboard-event order, adds Kitty
 coverage, and makes the surface no-op assertions concrete.
 
 Re-review approved the revised design with no findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented the termio clipboard bridge without changing the existing
+`TermioPump` status shape. `TermioWorkerEvent` now has a `Clipboard` variant
+carrying the retained `TerminalClipboardEvent`; the worker drains events from
+the terminal after each successful pump and emits those clipboard events before
+the pump summary from the same read.
+
+Surface ticking now drains clipboard worker events and intentionally leaves
+surface state unchanged until a later experiment allocates frontend clipboard
+requests.
+
+Verification passed:
+
+- `cargo test -p roastty termio_clipboard -- --nocapture --test-threads=1`
+- `cargo test -p roastty app_tick_drains_clipboard_termio_event -- --nocapture --test-threads=1`
+- `cargo fmt -p roastty`
+- `cargo fmt -p roastty -- --check`
+- `prettier --write --prose-wrap always --print-width 80 issues/0801-roastty-libghostty-rewrite/README.md issues/0801-roastty-libghostty-rewrite/783-termio-clipboard-osc-worker-events.md`
+- `git diff --check`
+
+## Conclusion
+
+PTY-backed termio workers can now preserve OSC 52 and Kitty clipboard requests
+across the worker event boundary, including ordering relative to the pump event.
+The next clipboard slice can allocate surface/frontend requests from these
+events instead of needing to re-parse terminal output.
+
+## Completion Review
+
+The first completion review found no implementation correctness issues, but
+blocked result commit on missing experiment provenance frontmatter, missing
+README provenance tags, and incomplete verification command recording.
+
+Re-review approved the completed experiment with no findings after those records
+were corrected.

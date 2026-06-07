@@ -31,6 +31,8 @@ use terminal::selection_gesture::{
     SelectionGestureBehavior, SelectionGestureDeepPress, SelectionGestureDrag,
     SelectionGestureGeometry, SelectionGesturePress, SelectionGestureRelease, DEFAULT_BEHAVIORS,
 };
+#[cfg(test)]
+use terminal::terminal::TerminalClipboardEvent;
 use terminal::terminal::{
     ClearScreenResult, KittyImageMedium, Terminal as InnerTerminal, TerminalBellCallback,
     TerminalColorKind, TerminalColorSchemeCallback, TerminalDeviceAttributesCallback,
@@ -3295,6 +3297,7 @@ impl Surface {
                 self.process_exited = true;
                 self.dirty = true;
             }
+            termio::TermioWorkerEvent::Clipboard(_) => {}
         }
     }
 }
@@ -14892,6 +14895,33 @@ mod tests {
         assert!(surface_ref.dirty);
         assert!(surface_ref.process_exited);
         assert!(roastty_surface_process_exited(surface));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn app_tick_drains_clipboard_termio_event_without_surface_state_change() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        let surface_ref = surface_from_handle(surface).unwrap();
+        surface_ref.dirty = false;
+        surface_ref
+            .test_termio_events
+            .push_back(termio::TermioWorkerEvent::Clipboard(
+                TerminalClipboardEvent::Osc52 {
+                    kind: b'c',
+                    data: b"?".to_vec(),
+                },
+            ));
+
+        roastty_app_tick(app);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.test_termio_events.is_empty());
+        assert!(!surface_ref.dirty);
+        assert!(!surface_ref.process_exited);
+        assert_eq!(surface_ref.last_termio_error, None);
 
         roastty_surface_free(surface);
         roastty_app_free(app);
