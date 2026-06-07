@@ -1,18 +1,32 @@
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, ProtocolObject, Sel};
+use objc2::{msg_send, sel, ClassType};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_foundation::NSNull;
 use objc2_io_surface::IOSurfaceRef;
-use objc2_quartz_core::{kCAGravityTopLeft, CALayer};
+use objc2_quartz_core::{kCAGravityTopLeft, CAAction, CALayer};
+use std::cell::{Cell, RefCell};
+use std::ffi::{c_void, CStr};
+use std::sync::OnceLock;
 
 pub(crate) struct MetalIOSurfaceLayer {
     layer: Retained<CALayer>,
+    display_callback: Option<Box<DisplayCallbackSlot>>,
+}
+
+struct DisplayCallbackSlot {
+    in_display: Cell<bool>,
+    callback: RefCell<Box<dyn FnMut()>>,
 }
 
 impl MetalIOSurfaceLayer {
     pub(crate) fn new() -> Self {
-        let layer = CALayer::layer();
+        let layer = new_iosurface_layer();
         layer.setContentsGravity(unsafe { kCAGravityTopLeft });
-        Self { layer }
+        Self {
+            layer,
+            display_callback: None,
+        }
     }
 
     pub(crate) fn layer(&self) -> &CALayer {
@@ -49,6 +63,27 @@ impl MetalIOSurfaceLayer {
         self.set_surface_sync(surface);
         true
     }
+
+    pub(crate) fn on_display(&mut self, callback: impl FnMut() + 'static) {
+        set_display_callback(self.layer.as_ref(), std::ptr::null_mut());
+        self.display_callback = Some(Box::new(DisplayCallbackSlot {
+            in_display: Cell::new(false),
+            callback: RefCell::new(Box::new(callback)),
+        }));
+        let slot = self
+            .display_callback
+            .as_deref_mut()
+            .map_or(std::ptr::null_mut(), |slot| {
+                slot as *mut DisplayCallbackSlot as *mut c_void
+            });
+        set_display_callback(self.layer.as_ref(), slot);
+    }
+}
+
+impl Drop for MetalIOSurfaceLayer {
+    fn drop(&mut self) {
+        set_display_callback(self.layer.as_ref(), std::ptr::null_mut());
+    }
 }
 
 fn iosurface_identity(surface: &IOSurfaceRef) -> *const AnyObject {
@@ -59,12 +94,107 @@ unsafe fn iosurface_as_any_object(surface: &IOSurfaceRef) -> &AnyObject {
     &*iosurface_identity(surface)
 }
 
+fn new_iosurface_layer() -> Retained<CALayer> {
+    let layer_class = iosurface_layer_class();
+    let layer: Retained<AnyObject> = unsafe { msg_send![layer_class, new] };
+    unsafe { Retained::cast_unchecked(layer) }
+}
+
+fn iosurface_layer_class() -> &'static AnyClass {
+    static CLASS: OnceLock<&'static AnyClass> = OnceLock::new();
+    CLASS.get_or_init(|| {
+        let name = CStr::from_bytes_with_nul(b"RoasttyIOSurfaceLayer\0").unwrap();
+        let mut class =
+            ClassBuilder::new(name, CALayer::class()).expect("RoasttyIOSurfaceLayer unavailable");
+
+        class.add_ivar::<*mut c_void>(display_callback_ivar_name());
+        unsafe {
+            class.add_method(
+                sel!(display),
+                display as extern "C-unwind" fn(*mut AnyObject, Sel),
+            );
+            class.add_method(
+                sel!(actionForKey:),
+                action_for_key
+                    as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> *mut AnyObject,
+            );
+        }
+        class.register()
+    })
+}
+
+fn display_callback_ivar_name() -> &'static CStr {
+    CStr::from_bytes_with_nul(b"_displayCallback\0").unwrap()
+}
+
+fn display_callback_ivar() -> &'static objc2::runtime::Ivar {
+    iosurface_layer_class()
+        .instance_variable(display_callback_ivar_name())
+        .expect("RoasttyIOSurfaceLayer callback ivar missing")
+}
+
+fn layer_as_object(layer: &CALayer) -> &AnyObject {
+    unsafe { &*(layer as *const CALayer as *const AnyObject) }
+}
+
+fn set_display_callback(layer: &CALayer, callback: *mut c_void) {
+    unsafe {
+        display_callback_ivar()
+            .load_ptr::<*mut c_void>(layer_as_object(layer))
+            .write(callback);
+    }
+}
+
+extern "C-unwind" fn display(this: *mut AnyObject, _sel: Sel) {
+    if this.is_null() {
+        return;
+    }
+
+    unsafe {
+        let object = &*this;
+        let slot =
+            *display_callback_ivar().load::<*mut c_void>(object) as *const DisplayCallbackSlot;
+        if let Some(slot) = slot.as_ref() {
+            if slot.in_display.replace(true) {
+                return;
+            }
+            let _guard = DisplayCallbackGuard { slot };
+            let mut callback = slot.callback.borrow_mut();
+            callback();
+        }
+    }
+}
+
+struct DisplayCallbackGuard<'a> {
+    slot: &'a DisplayCallbackSlot,
+}
+
+impl Drop for DisplayCallbackGuard<'_> {
+    fn drop(&mut self) {
+        self.slot.in_display.set(false);
+    }
+}
+
+extern "C-unwind" fn action_for_key(
+    _this: *mut AnyObject,
+    _sel: Sel,
+    _event: *mut AnyObject,
+) -> *mut AnyObject {
+    let action: Retained<NSNull> = NSNull::null();
+    let action: Retained<ProtocolObject<dyn CAAction>> = ProtocolObject::from_retained(action);
+    let action: Retained<AnyObject> = unsafe { Retained::cast_unchecked(action) };
+    Retained::autorelease_return(action)
+}
+
 #[cfg(test)]
 mod tests {
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
-    use objc2_foundation::NSString;
+    use objc2_foundation::{ns_string, NSString};
     use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
+    use objc2_quartz_core::CAAction;
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     use super::*;
     use crate::renderer::metal::api::{MetalPixelFormat, MetalStorageMode};
@@ -90,12 +220,151 @@ mod tests {
         unsafe { layer.layer().contents() }.map(|contents| Retained::as_ptr(&contents))
     }
 
+    fn action_identity(action: Retained<ProtocolObject<dyn CAAction>>) -> *const AnyObject {
+        Retained::as_ptr(&action) as *const AnyObject
+    }
+
     #[test]
     fn layer_initializes_with_top_left_gravity() {
         let layer = MetalIOSurfaceLayer::new();
         let gravity = layer.layer().contentsGravity();
         let gravity: &NSString = gravity.as_ref();
         assert_eq!(gravity, unsafe { kCAGravityTopLeft });
+    }
+
+    #[test]
+    fn layer_uses_custom_subclass() {
+        let layer = MetalIOSurfaceLayer::new();
+
+        assert_eq!(
+            layer_as_object(layer.layer()).class(),
+            iosurface_layer_class()
+        );
+    }
+
+    #[test]
+    fn display_invokes_registered_callback() {
+        let mut layer = MetalIOSurfaceLayer::new();
+        let count = Rc::new(Cell::new(0));
+        let callback_count = count.clone();
+        layer.on_display(move || callback_count.set(callback_count.get() + 1));
+
+        layer.layer().display();
+        layer.layer().display();
+
+        assert_eq!(count.get(), 2);
+    }
+
+    #[test]
+    fn replacing_display_callback_stops_calling_previous_callback() {
+        let mut layer = MetalIOSurfaceLayer::new();
+        let first = Rc::new(Cell::new(0));
+        let second = Rc::new(Cell::new(0));
+
+        let first_callback = first.clone();
+        layer.on_display(move || first_callback.set(first_callback.get() + 1));
+
+        let second_callback = second.clone();
+        layer.on_display(move || second_callback.set(second_callback.get() + 1));
+        layer.layer().display();
+
+        assert_eq!(first.get(), 0);
+        assert_eq!(second.get(), 1);
+    }
+
+    #[test]
+    fn replacing_display_callback_clears_ivar_before_dropping_old_callback() {
+        struct DisplayOnDrop {
+            layer: Retained<CALayer>,
+        }
+
+        impl Drop for DisplayOnDrop {
+            fn drop(&mut self) {
+                self.layer.display();
+            }
+        }
+
+        let mut layer = MetalIOSurfaceLayer::new();
+        let first_count = Rc::new(Cell::new(0));
+        let second_count = Rc::new(Cell::new(0));
+        let guard = DisplayOnDrop {
+            layer: layer.layer.clone(),
+        };
+
+        let first_callback_count = first_count.clone();
+        layer.on_display(move || {
+            let _keep_guard_alive = &guard;
+            first_callback_count.set(first_callback_count.get() + 1);
+        });
+
+        let second_callback_count = second_count.clone();
+        layer.on_display(move || {
+            second_callback_count.set(second_callback_count.get() + 1);
+        });
+
+        assert_eq!(first_count.get(), 0);
+        assert_eq!(second_count.get(), 0);
+
+        layer.layer().display();
+
+        assert_eq!(first_count.get(), 0);
+        assert_eq!(second_count.get(), 1);
+    }
+
+    #[test]
+    fn display_callback_reentrant_display_is_ignored() {
+        let mut layer = MetalIOSurfaceLayer::new();
+        let retained_layer = layer.layer.clone();
+        let count = Rc::new(Cell::new(0));
+        let callback_count = count.clone();
+
+        layer.on_display(move || {
+            callback_count.set(callback_count.get() + 1);
+            retained_layer.display();
+        });
+
+        layer.layer().display();
+        assert_eq!(count.get(), 1);
+
+        layer.layer().display();
+        assert_eq!(count.get(), 2);
+    }
+
+    #[test]
+    fn drop_clears_display_callback_before_releasing_storage() {
+        let retained_layer = {
+            let mut layer = MetalIOSurfaceLayer::new();
+            let count = Rc::new(Cell::new(0));
+            let callback_count = count.clone();
+            layer.on_display(move || callback_count.set(callback_count.get() + 1));
+            let retained_layer = layer.layer.clone();
+
+            layer.layer().display();
+            assert_eq!(count.get(), 1);
+
+            retained_layer
+        };
+
+        retained_layer.display();
+    }
+
+    #[test]
+    fn action_for_key_returns_nsnull_to_disable_implicit_animations() {
+        let layer = MetalIOSurfaceLayer::new();
+        let null = NSNull::null();
+        let null_identity = Retained::as_ptr(&null) as *const AnyObject;
+
+        let contents_action = layer
+            .layer()
+            .actionForKey(ns_string!("contents"))
+            .expect("contents action should be disabled by NSNull");
+        let bounds_action = layer
+            .layer()
+            .actionForKey(ns_string!("bounds"))
+            .expect("bounds action should be disabled by NSNull");
+
+        assert_eq!(action_identity(contents_action), null_identity);
+        assert_eq!(action_identity(bounds_action), null_identity);
     }
 
     #[test]

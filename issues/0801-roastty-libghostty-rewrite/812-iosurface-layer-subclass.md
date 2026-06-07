@@ -117,3 +117,86 @@ storage is released, add a retained-layer-after-wrapper-drop test, return the
 `NSNull` action object with `Retained::autorelease_return` to satisfy +0 method
 ownership, and require `OnceLock<&'static AnyClass>` for race-free subclass
 registration.
+
+Codex re-reviewed the amended design and approved it with no remaining blocking
+findings. The follow-up review confirmed that the callback lifetime, `NSNull`
+return ownership, and thread-safe class registration blockers were resolved and
+that the revised verification covers the important subclass/callback paths.
+
+## Result
+
+**Result:** Pass
+
+Roastty now backs `MetalIOSurfaceLayer` with a registered
+`RoasttyIOSurfaceLayer` Objective-C subclass:
+
+- `roastty/Cargo.toml` enables the `NSNull` Foundation feature needed for the
+  no-op `CAAction`.
+- `roastty/src/renderer/metal/iosurface_layer.rs` registers the subclass through
+  `OnceLock<&'static AnyClass>` and allocates layer instances from that class.
+- The subclass stores a heap-stable callback slot pointer in a `*mut c_void`
+  ivar. `MetalIOSurfaceLayer::on_display` installs a Rust callback and `Drop`
+  clears the ivar before callback storage is released.
+- Callback replacement clears the layer ivar before dropping the old callback
+  storage, so reentrant `display()` during an old callback capture's destructor
+  cannot call through stale storage.
+- Callback invocation uses a `Cell<bool>` reentrancy guard and stores the
+  `FnMut` in a `RefCell`, so nested `display()` calls from inside the callback
+  return before borrowing the callback again.
+- The subclass `display` override invokes the installed Rust callback when one
+  is present.
+- The subclass `actionForKey:` override returns `NSNull` through
+  `Retained::autorelease_return`, matching Cocoa's +0 return convention and
+  disabling implicit CoreAnimation actions.
+- The existing synchronous IOSurface contents assignment and size guard behavior
+  remain intact.
+
+Verification:
+
+- Inspected `vendor/ghostty/src/renderer/metal/IOSurfaceLayer.zig`.
+- Inspected `roastty/src/renderer/metal/iosurface_layer.rs`.
+- Inspected local `objc2-quartz-core` generated `CALayer` and `CAAction`
+  bindings.
+- Inspected local `objc2-foundation` generated `NSNull` bindings.
+- `cargo fmt -p roastty` — passed.
+- `cargo test -p roastty metal::iosurface_layer -- --nocapture --test-threads=1`
+  — passed, 10 tests.
+- `cargo test -p roastty metal::target -- --nocapture --test-threads=1` —
+  passed, 5 tests.
+
+## Conclusion
+
+Experiment 812 completes the custom IOSurfaceLayer subclass foundation:
+display-callback dispatch and implicit-animation suppression now exist beside
+the synchronous IOSurface presentation path from Experiment 811. The remaining
+IOSurfaceLayer work is async/main-thread presentation, followed by integration
+with full live frame orchestration.
+
+## Completion Review
+
+Codex reviewed the completed result and found one blocking callback-lifetime
+issue: `on_display` replaced `display_callback` before clearing the Objective-C
+ivar, so the old callback storage could be dropped while the layer still pointed
+at it. If an old callback capture's destructor re-entered `display()` on a
+retained layer, the subclass could read a stale ivar.
+
+The implementation was fixed to clear the ivar before replacing the callback
+storage, then install the new slot after it is allocated. A regression test now
+captures an object whose `Drop` calls `display()` while callback replacement is
+in progress; the test proves the old callback is not invoked during that
+reentrant display and the new callback still works afterward.
+
+Codex re-reviewed the replacement fix and found a second callback safety issue:
+`display` could be called reentrantly from inside the installed callback,
+creating a second mutable borrow of the same `FnMut`. The implementation now
+stores the callback in a `RefCell` behind a `DisplayCallbackSlot` with a
+`Cell<bool>` reentrancy guard. Nested `display()` calls return before borrowing
+the callback, and a regression test proves a callback-triggered reentrant
+`display()` is ignored while later non-reentrant displays still invoke the
+callback.
+
+Codex performed a final completion review after both callback safety fixes and
+approved the result with no remaining blocking findings. The final review
+confirmed the replacement ivar clearing, reentrant display guard, class
+registration, retained-layer drop behavior, `NSNull` action ownership, and
+IOSurface identity/size behavior.
