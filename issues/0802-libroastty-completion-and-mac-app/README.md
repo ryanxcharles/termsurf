@@ -265,6 +265,16 @@ before re-reading experiments.
   export to `*_handle`, sed the test call sites). Add a `size_of`/`offset_of`
   layout test per struct. `cargo build` only checks the lib — run
   `cargo test --lib` to compile+check the migrated tests.
+- **Typed-union ABI without test churn (Exp 9):** when a struct switches from an
+  opaque carrier (`int tag; uintptr_t storage[8]`) to a typed tagged union, do
+  the `storage→union` conversion at the ONE C-callback boundary (the binding
+  path is type-erased, so per-site rewrites are impossible anyway), and add a
+  **test-only reverse `union→storage`** so existing `storage[N]` assertions
+  round-trip the real conversion untouched. Reuse existing roastty enum type
+  names in union members (a blind `ghostty_→roastty_` import re-emits
+  enumerators → C redefinition). Pin layout with BOTH Rust `offset_of!` and C
+  `_Static_assert` so a Rust↔header drift fails at compile time. `ssize_t` needs
+  `#include <sys/types.h>`.
 
 ### Where things live
 
@@ -440,6 +450,9 @@ stays unaltered except for the rename).
   — **Pass** (36 action types + typed `action_u` union byte-faithful, central
   storage→union conversion, readonly swap fixed; 4396 tests green; gap 48→11) ·
   Claude/Claude
+- [Experiment 10: Embedded ABI — the config + function tail (tranche 3)](10-embedded-abi-config-tail.md)
+  — **Designed** (6 config/misc value types + 4 function stubs; should take the
+  app to compiles + links — Phase B exit) · Claude
 
 ## Process
 
