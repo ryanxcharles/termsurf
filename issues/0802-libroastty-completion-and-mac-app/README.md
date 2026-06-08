@@ -471,6 +471,9 @@ stays unaltered except for the rename).
   — **Pass** (`config_key_is_binding` by-value; **the app COMPILES + LINKS** —
   `** BUILD SUCCEEDED **`, Roastty.app produced, Phase B exit; 4401 tests green)
   · Claude/Claude
+- [Experiment 14: Phase C — launch Roastty.app and capture what it renders](14-launch-roastty-app.md)
+  — **Designed** (first Phase-C step: run the built app, capture the live state,
+  pin the first render work item; kill what we spawn) · Claude
 
 ## Process
 
