@@ -115,3 +115,4 @@ webtui/target/
 # Release packaging
 dist/
 
+vendor/toolchains/
