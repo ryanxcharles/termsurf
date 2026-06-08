@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #ifdef _WIN32
 #ifdef ROASTTY_STATIC
@@ -1454,6 +1455,269 @@ typedef enum {
   ROASTTY_RESIZE_SPLIT_LEFT = 2,
   ROASTTY_RESIZE_SPLIT_RIGHT = 3,
 } roastty_resize_split_e;
+
+// === Embedded action ABI (Issue 802 / Exp 9) ===
+
+typedef roastty_float_window_e roastty_action_float_window_e;
+
+typedef roastty_fullscreen_e roastty_action_fullscreen_e;
+
+typedef roastty_goto_split_e roastty_action_goto_split_e;
+
+typedef roastty_goto_tab_e roastty_action_goto_tab_e;
+
+typedef roastty_goto_window_e roastty_action_goto_window_e;
+
+typedef roastty_inspector_mode_e roastty_action_inspector_e;
+
+typedef roastty_prompt_title_e roastty_action_prompt_title_e;
+
+typedef roastty_readonly_e roastty_action_readonly_e;
+
+typedef roastty_resize_split_e roastty_action_resize_split_direction_e;
+
+typedef roastty_secure_input_e roastty_action_secure_input_e;
+
+typedef roastty_split_direction_e roastty_action_split_direction_e;
+
+typedef struct {
+  uint32_t width;
+  uint32_t height;
+} roastty_action_cell_size_s;
+
+typedef struct {
+  uint32_t exit_code;
+  uint64_t timetime_ms;
+} roastty_surface_message_childexited_s;
+
+typedef enum {
+  ROASTTY_QUIT_TIMER_START,
+  ROASTTY_QUIT_TIMER_STOP,
+} roastty_action_quit_timer_e;
+
+typedef struct {
+  bool soft;
+} roastty_action_reload_config_s;
+
+typedef enum {
+  ROASTTY_MOUSE_SHAPE_DEFAULT,
+  ROASTTY_MOUSE_SHAPE_CONTEXT_MENU,
+  ROASTTY_MOUSE_SHAPE_HELP,
+  ROASTTY_MOUSE_SHAPE_POINTER,
+  ROASTTY_MOUSE_SHAPE_PROGRESS,
+  ROASTTY_MOUSE_SHAPE_WAIT,
+  ROASTTY_MOUSE_SHAPE_CELL,
+  ROASTTY_MOUSE_SHAPE_CROSSHAIR,
+  ROASTTY_MOUSE_SHAPE_TEXT,
+  ROASTTY_MOUSE_SHAPE_VERTICAL_TEXT,
+  ROASTTY_MOUSE_SHAPE_ALIAS,
+  ROASTTY_MOUSE_SHAPE_COPY,
+  ROASTTY_MOUSE_SHAPE_MOVE,
+  ROASTTY_MOUSE_SHAPE_NO_DROP,
+  ROASTTY_MOUSE_SHAPE_NOT_ALLOWED,
+  ROASTTY_MOUSE_SHAPE_GRAB,
+  ROASTTY_MOUSE_SHAPE_GRABBING,
+  ROASTTY_MOUSE_SHAPE_ALL_SCROLL,
+  ROASTTY_MOUSE_SHAPE_COL_RESIZE,
+  ROASTTY_MOUSE_SHAPE_ROW_RESIZE,
+  ROASTTY_MOUSE_SHAPE_N_RESIZE,
+  ROASTTY_MOUSE_SHAPE_E_RESIZE,
+  ROASTTY_MOUSE_SHAPE_S_RESIZE,
+  ROASTTY_MOUSE_SHAPE_W_RESIZE,
+  ROASTTY_MOUSE_SHAPE_NE_RESIZE,
+  ROASTTY_MOUSE_SHAPE_NW_RESIZE,
+  ROASTTY_MOUSE_SHAPE_SE_RESIZE,
+  ROASTTY_MOUSE_SHAPE_SW_RESIZE,
+  ROASTTY_MOUSE_SHAPE_EW_RESIZE,
+  ROASTTY_MOUSE_SHAPE_NS_RESIZE,
+  ROASTTY_MOUSE_SHAPE_NESW_RESIZE,
+  ROASTTY_MOUSE_SHAPE_NWSE_RESIZE,
+  ROASTTY_MOUSE_SHAPE_ZOOM_IN,
+  ROASTTY_MOUSE_SHAPE_ZOOM_OUT,
+} roastty_action_mouse_shape_e;
+
+typedef union {
+  struct {
+    const char *name;
+    size_t len;
+  } activate;
+} roastty_action_key_table_u;
+
+typedef enum {
+  ROASTTY_KEY_TABLE_ACTIVATE,
+  ROASTTY_KEY_TABLE_DEACTIVATE,
+  ROASTTY_KEY_TABLE_DEACTIVATE_ALL,
+} roastty_action_key_table_tag_e;
+
+typedef struct {
+  roastty_action_key_table_tag_e tag;
+  roastty_action_key_table_u value;
+} roastty_action_key_table_s;
+
+typedef struct {
+  uint32_t width;
+  uint32_t height;
+} roastty_action_initial_size_s;
+
+typedef enum {
+  ROASTTY_PROGRESS_STATE_REMOVE,
+  ROASTTY_PROGRESS_STATE_SET,
+  ROASTTY_PROGRESS_STATE_ERROR,
+  ROASTTY_PROGRESS_STATE_INDETERMINATE,
+  ROASTTY_PROGRESS_STATE_PAUSE,
+} roastty_action_progress_report_state_e;
+
+typedef enum {
+  ROASTTY_ACTION_CLOSE_TAB_MODE_THIS,
+  ROASTTY_ACTION_CLOSE_TAB_MODE_OTHER,
+  ROASTTY_ACTION_CLOSE_TAB_MODE_RIGHT,
+} roastty_action_close_tab_mode_e;
+
+typedef struct {
+  ssize_t amount;
+} roastty_action_move_tab_s;
+
+typedef enum {
+  ROASTTY_RENDERER_HEALTH_HEALTHY,
+  ROASTTY_RENDERER_HEALTH_UNHEALTHY,
+} roastty_action_renderer_health_e;
+
+typedef struct {
+  // -1 if no exit code was reported, otherwise 0-255
+  int16_t exit_code;
+  // number of nanoseconds that command was running for
+  uint64_t duration;
+} roastty_action_command_finished_s;
+
+typedef struct {
+  ssize_t selected;
+} roastty_action_search_selected_s;
+
+typedef struct {
+  uint64_t total;
+  uint64_t offset;
+  uint64_t len;
+} roastty_action_scrollbar_s;
+
+typedef enum {
+  ROASTTY_MOUSE_VISIBLE,
+  ROASTTY_MOUSE_HIDDEN,
+} roastty_action_mouse_visibility_e;
+
+typedef struct {
+  const char* title;
+  const char* body;
+} roastty_action_desktop_notification_s;
+
+typedef struct {
+  const char* pwd;
+} roastty_action_pwd_s;
+
+typedef struct {
+  const char* title;
+} roastty_action_set_title_s;
+
+typedef struct {
+  uint32_t min_width;
+  uint32_t min_height;
+  uint32_t max_width;
+  uint32_t max_height;
+} roastty_action_size_limit_s;
+
+typedef struct {
+  bool active;
+  roastty_input_trigger_s trigger;
+} roastty_action_key_sequence_s;
+
+typedef struct {
+  roastty_action_open_url_kind_e kind;
+  const char* url;
+  uintptr_t len;
+} roastty_action_open_url_s;
+
+typedef enum {
+  ROASTTY_ACTION_COLOR_KIND_FOREGROUND = -1,
+  ROASTTY_ACTION_COLOR_KIND_BACKGROUND = -2,
+  ROASTTY_ACTION_COLOR_KIND_CURSOR = -3,
+} roastty_action_color_kind_e;
+
+typedef struct {
+  roastty_action_color_kind_e kind;
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+} roastty_action_color_change_s;
+
+typedef struct {
+  const char* needle;
+} roastty_action_start_search_s;
+
+typedef struct {
+  ssize_t total;
+} roastty_action_search_total_s;
+
+typedef struct {
+  roastty_config_t config;
+} roastty_action_config_change_s;
+
+typedef struct {
+  roastty_action_progress_report_state_e state;
+  // -1 if no progress was reported, otherwise 0-100 indicating percent
+  // completeness.
+  int8_t progress;
+} roastty_action_progress_report_s;
+
+typedef struct {
+  const char* url;
+  size_t len;
+} roastty_action_mouse_over_link_s;
+
+typedef struct {
+  uint16_t amount;
+  roastty_action_resize_split_direction_e direction;
+} roastty_action_resize_split_s;
+
+typedef union {
+  roastty_action_split_direction_e new_split;
+  roastty_action_fullscreen_e toggle_fullscreen;
+  roastty_action_move_tab_s move_tab;
+  roastty_action_goto_tab_e goto_tab;
+  roastty_action_goto_split_e goto_split;
+  roastty_action_goto_window_e goto_window;
+  roastty_action_resize_split_s resize_split;
+  roastty_action_size_limit_s size_limit;
+  roastty_action_initial_size_s initial_size;
+  roastty_action_cell_size_s cell_size;
+  roastty_action_scrollbar_s scrollbar;
+  roastty_action_inspector_e inspector;
+  roastty_action_desktop_notification_s desktop_notification;
+  roastty_action_set_title_s set_title;
+  roastty_action_set_title_s set_tab_title;
+  roastty_action_prompt_title_e prompt_title;
+  roastty_action_pwd_s pwd;
+  roastty_action_mouse_shape_e mouse_shape;
+  roastty_action_mouse_visibility_e mouse_visibility;
+  roastty_action_mouse_over_link_s mouse_over_link;
+  roastty_action_renderer_health_e renderer_health;
+  roastty_action_quit_timer_e quit_timer;
+  roastty_action_float_window_e float_window;
+  roastty_action_secure_input_e secure_input;
+  roastty_action_key_sequence_s key_sequence;
+  roastty_action_key_table_s key_table;
+  roastty_action_color_change_s color_change;
+  roastty_action_reload_config_s reload_config;
+  roastty_action_config_change_s config_change;
+  roastty_action_open_url_s open_url;
+  roastty_action_close_tab_mode_e close_tab_mode;
+  roastty_surface_message_childexited_s child_exited;
+  roastty_action_progress_report_s progress_report;
+  roastty_action_command_finished_s command_finished;
+  roastty_action_start_search_s start_search;
+  roastty_action_search_total_s search_total;
+  roastty_action_search_selected_s search_selected;
+  roastty_action_readonly_e readonly;
+} roastty_action_u;
+
 
 typedef enum {
   ROASTTY_MOUSE_ACTION_PRESS = 0,
