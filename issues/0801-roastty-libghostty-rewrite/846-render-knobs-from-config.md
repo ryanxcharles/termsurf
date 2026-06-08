@@ -133,6 +133,63 @@ adopted:
 - **Nit — round vs ceil.** **Fixed:** the `faint_opacity` derivation cites
   `ceil(0.5 × 255)` (upstream `@ceil`), so the eventual f64→u8 port matches.
 
+## Result
+
+**Result:** Pass
+
+`FrameRenderKnobs::from_config(&Config)` landed (5 config-sourced knobs + 4
+upstream-default constants), the `FrameRenderKnobs` doc comment was updated, and
+the production `use crate::config::Config` added. Production
+`cargo build -p roastty` and `--tests` both clean (no warnings); fmt clean,
+no-ghostty clean (the comments use "upstream", the ghostty/`generic.zig`
+citations live in the experiment doc), `git diff --check` clean.
+
+Three new tests, all passing:
+
+- **`from_config_defaults_flow_through`** — `from_config(&Config::default())`
+  gives `bold None` / `thicken false` / `thicken_strength 255` /
+  `background_opacity 1.0` / `padding Background`, and the constants `alpha 255`
+  / `overlay_alpha 255` / `faint_opacity 128` /
+  `background_opacity_cells false`.
+- **`from_config_sources_config_values`** — setting `font-thicken`,
+  `font-thicken-strength` 200, `background-opacity` 0.7, and `bold-color bright`
+  → `from_config` reflects each (`bold == Some(BoldColor::Bright)` via
+  `to_terminal`).
+- **`from_config_knobs_drive_a_frame`** — a config-sourced `FrameRenderKnobs` +
+  `FrameRenderState::from_terminal` rebuilds a full frame end to end.
+
+**Full suite (default parallelism, `scripts/bounded-run.sh`):**
+`4388 passed; 0 failed` (4385 + 3 new), 0 panics, 0 `PoisonError`,
+`STATUS=COMPLETED rc=0`, 185 s — green.
+
 ## Conclusion
 
-_(to be written after the run)_
+The config→renderer bridge exists: `FrameRenderKnobs::from_config` sources the
+render knobs from a `Config` (with named upstream-default constants for the four
+without a config option). Combined with `FrameRenderState::from_terminal`
+(842–844), a caller can now build a complete `FramePreparedRebuildInput` from
+`(terminal, config)` alone — no hand-built literals.
+
+Remaining toward the live draw path:
+
+- **Exp 847:** have `FrameRenderer::update_frame` / `update_and_present_frame`
+  take `&FrameRenderState` + `&FrameRenderKnobs` (or `(&Terminal, &Config)`)
+  directly, building the input internally — so callers no longer pass a raw
+  `FramePreparedRebuildInput`.
+- **Later config ports:** `faint-opacity` (f64) and `background-opacity-cells`
+  (bool) → source the last two placeholder knobs; `minimum-contrast` (f64) → the
+  `MetalUniforms` contrast uniform.
+- **Then:** build `FrameRenderState`/`FrameRenderKnobs` from live surface state
+  in `surface.draw()`; wire the search/hyperlink subsystems for the
+  `highlights`/`link_ranges` buffers — at which point the live draw path renders
+  through the new pipeline.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Independently confirmed: diff touches only `frame_renderer.rs`
+(scope clean); all 20 frame*renderer tests pass including the 3 new
+`from_config*\*`; fmt clean; **no `ghostty` literal anywhere in the code** (comments say "upstream"); v1.log shows 4388 passed / 0 failed, rc=0, default parallelism, no timeout; the constants are upstream-faithful (`generic.zig:2878`hardcodes non-faint text alpha 255;`generic.zig:623`derives faint`ceil(0.5×255)=128`; `bold`maps via`to_terminal`, `Bright
+=>
+Bright`); no masked bug in the assignments. **Verdict: CHANGES REQUIRED → fixed.** The lone Required was the stale README index status — flipped 846 `Designed
+→ Pass`.

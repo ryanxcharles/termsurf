@@ -7,7 +7,7 @@
 //! state, wiring into `surface.draw()`, and clearing the terminal's dirty bits
 //! are all later slices.
 
-use crate::config::WindowPaddingColor;
+use crate::config::{Config, WindowPaddingColor};
 use crate::font::run::Wide;
 use crate::font::shared_grid::SharedGrid;
 use crate::renderer::cell::{row_never_extend_bg_flags, Contents, Highlight, SelectionConfig};
@@ -134,10 +134,12 @@ impl FrameRenderer {
     }
 }
 
-/// Caller-supplied render knobs not yet sourced from `Config` (Issue 801, Exp
-/// 842). The whole struct is caller-fed because config-sourcing is deferred;
-/// four fields (`alpha`, `faint_opacity`, `thicken`, `thicken_strength`)
-/// additionally have no `Config` option yet (a configuration-arc dependency).
+/// The render knobs (Issue 801, Exp 842/846). `from_config` sources most from a
+/// `Config`: `bold`, `background_opacity`, `padding_color`, and (Exp 845)
+/// `thicken`/`thicken_strength`. Four fields have no `Config` option: `alpha` and
+/// `overlay_alpha` are the faithful opaque `255`; `faint_opacity` and
+/// `background_opacity_cells` are upstream-default placeholders awaiting their
+/// config ports (`faint-opacity`, `background-opacity-cells`).
 pub(crate) struct FrameRenderKnobs {
     pub(crate) bold: Option<BoldColor>,
     pub(crate) alpha: u8,
@@ -148,6 +150,27 @@ pub(crate) struct FrameRenderKnobs {
     pub(crate) background_opacity: f64,
     pub(crate) padding_color: WindowPaddingColor,
     pub(crate) overlay_alpha: u8,
+}
+
+impl FrameRenderKnobs {
+    /// Source the render knobs from a `Config`. Knobs without a config option yet
+    /// take upstream-faithful default constants (Exp 846): `alpha`/`overlay_alpha`
+    /// are opaque `255` (upstream hardcodes non-faint text alpha to 255);
+    /// `faint_opacity` is `ceil(0.5 × 255) = 128` (the `faint-opacity` 0.5 default);
+    /// `background_opacity_cells` is `false` (the `background-opacity-cells` default).
+    pub(crate) fn from_config(config: &Config) -> Self {
+        Self {
+            bold: config.bold_color.map(|c| c.to_terminal()),
+            alpha: 255,
+            faint_opacity: 128,
+            thicken: config.font_thicken,
+            thicken_strength: config.font_thicken_strength,
+            background_opacity_cells: false,
+            background_opacity: config.background_opacity,
+            padding_color: config.window_padding_color,
+            overlay_alpha: 255,
+        }
+    }
 }
 
 /// Render data derived from the live terminal — the effective default fg/bg,
@@ -893,5 +916,63 @@ mod tests {
         assert!(!state.row_never_extend[1]);
         assert!(state.row_never_extend[0]);
         assert!(state.row_never_extend[2]);
+    }
+
+    #[test]
+    fn from_config_defaults_flow_through() {
+        let knobs = FrameRenderKnobs::from_config(&Config::default());
+
+        // Config-sourced defaults.
+        assert!(knobs.bold.is_none());
+        assert!(!knobs.thicken);
+        assert_eq!(knobs.thicken_strength, 255);
+        assert_eq!(knobs.background_opacity, 1.0);
+        assert!(matches!(
+            knobs.padding_color,
+            WindowPaddingColor::Background
+        ));
+        // Upstream-faithful constants (no config option yet).
+        assert_eq!(knobs.alpha, 255);
+        assert_eq!(knobs.overlay_alpha, 255);
+        assert_eq!(knobs.faint_opacity, 128);
+        assert!(!knobs.background_opacity_cells);
+    }
+
+    #[test]
+    fn from_config_sources_config_values() {
+        let mut cfg = Config::default();
+        cfg.set("font-thicken", Some("true")).unwrap();
+        cfg.set("font-thicken-strength", Some("200")).unwrap();
+        cfg.set("background-opacity", Some("0.7")).unwrap();
+        cfg.set("bold-color", Some("bright")).unwrap();
+
+        let knobs = FrameRenderKnobs::from_config(&cfg);
+        assert!(knobs.thicken);
+        assert_eq!(knobs.thicken_strength, 200);
+        assert_eq!(knobs.background_opacity, 0.7);
+        assert!(matches!(knobs.bold, Some(BoldColor::Bright)));
+    }
+
+    #[test]
+    fn from_config_knobs_drive_a_frame() {
+        let term = terminal(4, 3);
+        let mut shared = menlo_grid();
+        let mut renderer = FrameRenderer::new(uniforms());
+        let state = FrameRenderState::from_terminal(&term);
+        let knobs = FrameRenderKnobs::from_config(&Config::default());
+
+        let app = renderer
+            .update_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Partial,
+                None,
+                state.rebuild_input(&knobs),
+            )
+            .expect("update frame from config-sourced knobs");
+
+        assert!(app.rows.reset_contents);
+        assert_eq!(app.rows.rebuilt_rows, vec![0, 1, 2]);
+        assert_eq!(renderer.current_grid(), grid(4, 3));
     }
 }
