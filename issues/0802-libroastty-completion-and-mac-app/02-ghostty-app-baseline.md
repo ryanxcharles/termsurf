@@ -170,6 +170,90 @@ locations are correct. Findings adopted:
 - **Nits — `nu` already installed; `cliclick` absent (harness falls back to
   `osascript`/XCUITest).** Noted.
 
+## Result
+
+**Result:** Partial — the conformance approach is feasible and the zig toolchain
+is resolved up to the SDK-link boundary, but a **real, precisely-diagnosed
+toolchain blocker** prevents building the app on this machine without a
+decision. (Per the design, this is the valuable "found the blocker on day one,
+cheaply, before any porting" outcome.)
+
+### What works (confirmed)
+
+- **zig 0.16.0 (installed) cannot build ghostty 1.3.2-dev** — `build.zig` uses a
+  0.15.x `readFileAlloc` signature and hard-requires
+  `minimum_zig_version 0.15.2`.
+- **zig 0.15.2** pinned (downloaded to
+  `vendor/toolchains/zig-aarch64-macos-0.15.2/`, gitignored) builds `build.zig`.
+  Under **`DEVELOPER_DIR=/Library/Developer/CommandLineTools`** it compiles the
+  entire ghostty Zig codebase cleanly (built `libghostty-vt`, 0 errors, ~18 s).
+- Network/dep fetch works; `nu` 0.113.0 / `osascript` / `screencapture` / Xcode
+  26.4 present; real GUI session confirmed.
+
+### The blocker (precisely characterized)
+
+- **zig 0.15.2 cannot link against Xcode 26.4's macOS SDK** —
+  `undefined symbol: __availability_version_check`. A sweep of every SDK on the
+  machine: **all Xcode-26.4 SDKs FAIL; all CommandLineTools SDKs PASS** a
+  `zig build-exe -lc` link. (The CLT SDK is the fix for the macOS link.)
+- **But `GhosttyKit.xcframework` also builds an iOS slice**, and
+  **CommandLineTools has no iOS SDK** → `DarwinSdkNotFound`; Xcode's iOS SDK is
+  also 26.4 (unlinkable by zig 0.15.2). Only **Xcode 26.4** is installed (no
+  older Xcode).
+- **Net:** no toolchain combination on this machine builds the full
+  **macOS+iOS** xcframework with the zig version ghostty pins. Building only the
+  macOS **GUI** lib (`GhosttyKit`) is not a simple flag — it is entangled with
+  the iOS xcframework path (lib-only flags build `libghostty-vt`, the standalone
+  VT library, not `GhosttyKit`), so isolating it requires **patching ghostty's
+  `build.zig`** (a deviation).
+
+### Remediations (the decision point)
+
+> **Correction (post-review):** an earlier draft of this section recommended
+> "install Xcode 16.x." **That was wrong** — the official docs _require_ **Xcode
+> 26** (which this machine has at 26.4), and zig can't be bumped to fit
+> (Ghostty's `requireZig` enforces an exact major.minor and even Ghostty `main`
+> still pins 0.15.2). The real gap is the **too-new SDK point release** (26.4),
+> not the Xcode major version. The chosen, working remediation is **(A) below**,
+> implemented and proven in [Experiment 3](03-macos-only-build.md).
+
+- **(A, chosen — see Exp 3) macOS-only build, no new install** — a minimal
+  **build-only** patch to Ghostty's `build.zig` to gate out the iOS xcframework
+  slice, building the macOS `GhosttyKit` under the **CommandLineTools 26.0** SDK
+  (which zig 0.15.2 _can_ link), then packaging + the Swift app under Xcode
+  26.4. The app's app-link resolves `__availability_version_check` against
+  libSystem 26.4. **Confirmed working in Exp 3** — the app builds and runs.
+- **(B) An earlier Xcode 26 point release** (26.0–26.2) alongside 26.4, whose
+  SDK zig 0.15.2 links — keeps the full unmodified build with no `build.zig`
+  patch, but is a download.
+- **(C) Pin a newer Ghostty** whose required zig supports SDK 26.4 — but that
+  changes the conformance target version away from what we vendored (and no such
+  version exists yet: Ghostty `main` is still on 0.15.2).
+
+### Deliverables produced
+
+- `vendor/toolchains/zig-aarch64-macos-0.15.2/` — the pinned zig (gitignored).
+- `scripts/ghostty-app/setup-zig.sh` — re-fetches/pins zig 0.15.2.
+- `scripts/ghostty-app/README.md` — the toolchain resolution + the blocker + the
+  build commands that work (and the one that's blocked), as the seed for the
+  harness.
+
+(The build/run/automate harness and the golden baseline are **deferred** until
+the SDK decision above unblocks an actual `.app` — they need a built app to
+capture.)
+
 ## Conclusion
 
-_(to be written after the run)_
+The spike did exactly its job: **the conformance strategy is sound and the zig
+toolchain is resolved, but the only-installed Xcode (26.4) is too new for the
+zig version Ghostty 1.3.2-dev pins (0.15.2)**, and the full xcframework's iOS
+slice can't be built without an iOS SDK that zig 0.15.2 can also link. This is
+an environment/SDK decision, not a flaw in the plan — and finding it now, before
+porting, is the point.
+
+**Resolution:** [Experiment 3](03-macos-only-build.md) implemented remediation
+**(A)** — the macOS-only build under CommandLineTools — and the real Ghostty app
+now **builds and runs** on this machine with no Xcode change. (My earlier
+"install Xcode 16" recommendation was wrong and is corrected above.) Phase A's
+build/run is unblocked; the remaining Phase-A work is agent-side window-isolated
+screenshot capture + the golden baseline.

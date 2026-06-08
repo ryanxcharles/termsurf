@@ -151,22 +151,22 @@ the live app, verified by a Phase-D UI test.)
 
 - [x] Architecture audit: what's done / partial / missing + the order (Exp 1)
 
-**Phase A — Baseline & feasibility: build/run/automate the real Ghostty app** (⏸
-paused on a toolchain decision — see Exp 2)
+**Phase A — Baseline & feasibility: build/run/automate the real Ghostty app**
 
 - [x] Resolve the zig toolchain (pinned **0.15.2** under `vendor/toolchains/`;
       compiles ghostty's zig under `DEVELOPER_DIR=CommandLineTools`)
-- [ ] **DECISION:** install **Xcode 16.x** (zig-0.15.2-era macOS/iOS SDKs → the
-      unmodified full build works) — _or_ a macOS-only build patch (remediation
-      B). _Blocker: zig 0.15.2 can't link Xcode 26.4's SDK, and the
-      xcframework's iOS slice needs an iOS SDK zig 0.15.2 can also link; only
-      Xcode 26.4 is installed._
-- [ ] Build the real, unmodified Ghostty macOS app from `vendor/ghostty/macos`
-- [ ] Launch it; confirm a working terminal (screenshot)
-- [ ] Drive it programmatically (input + screenshot) from this environment;
-      document the required permissions (Accessibility / Screen Recording)
-- [ ] Capture the golden baseline (reference screenshots) + a reusable
-      build/run/automate harness (Exp 2)
+- [x] Resolve the SDK blocker (Exp 2 → Exp 3): zig 0.15.2 can't link Xcode
+      26.4's SDK, so build the **macOS-only** `GhosttyKit` under the
+      CommandLineTools 26.0 SDK + a build-only iOS-slice patch — **no Xcode
+      change, app unaltered**.
+- [x] Build the real, unmodified Ghostty macOS app from `vendor/ghostty/macos`
+      (`scripts/ghostty-app/build-macos-app.sh` → `BUILD SUCCEEDED`)
+- [x] Launch it; confirm a working terminal window (user-confirmed in Exp 3)
+- [ ] Drive it programmatically (input + screenshot) — **`screencapture` works
+      (Screen Recording granted), but isolating Ghostty's window from the agent
+      is unsolved** (Spaces/entitlement; see Exp 3). Next Phase-A item.
+- [ ] Capture the golden baseline (reference screenshots) — blocked on the
+      window-isolated capture above
 
 **Phase B — App shell + ABI link**
 
@@ -257,8 +257,11 @@ stays unaltered except for the rename).
   — **Pass** · Claude (7 parallel subsystem audits)
 - [Experiment 2: Baseline & feasibility — build, run, and automate the real Ghostty app](02-ghostty-app-baseline.md)
   — **Partial** (toolchain blocker found: zig 0.15.2 ↔ Xcode 26.4 SDK +
-  iOS-slice; decision needed — install Xcode 16, or a macOS-only build patch) ·
-  Claude/Claude
+  iOS-slice; resolved by Exp 3's macOS-only build) · Claude/Claude
+- [Experiment 3: macOS-only build — the real Ghostty app builds and runs on this machine](03-macos-only-build.md)
+  — **Pass** (macOS-only `GhosttyKit` under CommandLineTools + build-only
+  iOS-slice patch; app builds via Xcode 26.4 and runs — no Xcode change) ·
+  Claude
 
 ## Process
 
