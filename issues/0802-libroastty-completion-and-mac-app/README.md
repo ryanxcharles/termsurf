@@ -475,6 +475,9 @@ stays unaltered except for the rename).
   — **Pass** (the app **launches cleanly** — no crash/panic — but renders blank;
   root cause: `surface_draw` is a stub, the live NSView present path (801 crux)
   is unwired → Exp 15; spawned app killed, 0 dangling) · Claude/Claude
+- [Experiment 15: Phase C — the live present path (the 801 crux), slice 1](15-live-present-path.md)
+  — **Designed** (wire the nsview→Metal IOSurface layer→present so
+  surface.draw() puts pixels on screen; first non-blank frame) · Claude
 
 ## Process
 
