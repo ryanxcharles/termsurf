@@ -182,11 +182,13 @@ the live app, verified by a Phase-D UI test.)
 - [x] Build the real, unmodified Ghostty macOS app from `vendor/ghostty/macos`
       (`scripts/ghostty-app/build-macos-app.sh` → `BUILD SUCCEEDED`)
 - [x] Launch it; confirm a working terminal window (user-confirmed in Exp 3)
-- [ ] Drive it programmatically (input + screenshot) — **`screencapture` works
-      (Screen Recording granted), but isolating Ghostty's window from the agent
-      is unsolved** (Spaces/entitlement; see Exp 3). Next Phase-A item.
-- [ ] Capture the golden baseline (reference screenshots) — blocked on the
-      window-isolated capture above
+- [x] Screenshot the window **in isolation** (Exp 4: `screencapture -l` +
+      `winid.swift`; cross-Space, live pixels, written outside the repo)
+- [ ] Drive it programmatically (**input injection** — type a deterministic
+      command, then capture) — next experiment; feeds the live-A/B comparison
+- [ ] Live-A/B compare (real app vs roastty app, same run) — replaces committed
+      "golden" images per the Screenshots policy; deferred to the diff
+      experiment
 
 **Phase B — App shell + ABI link**
 
@@ -283,8 +285,9 @@ stays unaltered except for the rename).
   iOS-slice patch; app builds via Xcode 26.4 and runs — no Xcode change) ·
   Claude
 - [Experiment 4: Window-isolated screenshot capture (+ no-screenshots-in-repo policy)](04-window-screenshot-capture.md)
-  — **Designed** (capture a named app's window via `screencapture -l<id>` + a
-  Swift window-ID lookup; screenshots never committed) · Claude
+  — **Pass** (`screencapture -l<id>` + `winid.swift` captures the Ghostty window
+  cross-Space, 1600×1264 px, outside the repo; ScreenCaptureKit fallback
+  unneeded) · Claude/Claude
 
 ## Process
 

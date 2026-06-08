@@ -39,8 +39,19 @@ screencapture -x shot.png                    # works (Screen Recording granted t
 osascript -e "tell application \"$APP\" to quit"
 ```
 
-**Known harness gap (Exp 3):** capturing _just Ghostty's window_ from the agent isn't
-solved yet — a full-screen `screencapture` grabs the agent's Wezboard fullscreen
-Space (not Ghostty's), and `CGWindowListCopyWindowInfo` from the agent returned no
-Ghostty window (a Spaces/entitlement nuance). The window is real and working
-(visually confirmed); window-isolated capture is a Phase-A/workstream-3 item.
+## Window-isolated screenshot (Exp 4)
+
+Capture **just** an app's window — independent of Space, occlusion, or which Space the
+agent's terminal occupies — via `screencapture -l<id>` with the window id resolved by
+`winid.swift`:
+
+```bash
+scripts/ghostty-app/screenshot.sh Ghostty [out-name]   # -> prints a PNG path (outside the repo)
+scripts/ghostty-app/screenshot.sh --list Ghostty       # list candidate windows
+# target may be an owner name (substring), a bundle id, or a pid
+```
+
+**Screenshots are never committed** (see the issue's Screenshots policy): output goes to
+`${TERMSURF_SHOT_DIR:-$HOME/.cache/termsurf/shots}`. Verified: a Ghostty window captured
+at `1600×1264 px` (= `800×632 pt` × 2 Retina) — the window crop, not the full display —
+with live terminal content, while Wezboard was fullscreen on another Space.

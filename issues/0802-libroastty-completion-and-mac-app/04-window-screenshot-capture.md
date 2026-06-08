@@ -184,8 +184,62 @@ Findings and fixes:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass.
+
+Implemented `scripts/ghostty-app/winid.swift` (CGWindowID lookup) and
+`scripts/ghostty-app/screenshot.sh` (capture wrapper). Against the running Exp-3
+Ghostty app (PID 86636), with the agent's Wezboard **fullscreen on its own
+Space**:
+
+1. `screenshot.sh --list Ghostty` correctly enumerated the app's windows
+   (`Ghostty[DEBUG]`), identifying the main terminal window `15662` at
+   `800×632 pt` (`onscreen=true`) and filtering out the off-screen helper
+   windows (`3200×30`, `500×500`).
+2. `screenshot.sh Ghostty` captured window `15662` to
+   `~/.cache/termsurf/shots/ghostty-launch-….png` at **`1600×1264 px`** —
+   exactly `800×632 pt × 2` (Retina backing scale): the **window crop, not** the
+   `5120×2880` display.
+3. The captured pixels are **live** — the image shows the "running a debug build
+   of Ghostty" banner and a working Nushell prompt (`ryan:` + cursor), **not** a
+   stale/black backing store and **not** the agent's Wezboard Space. So the
+   primary `screencapture -l` path handles the **cross-Space** case directly;
+   the ScreenCaptureKit fallback (`winshot.swift`) was **not needed** and was
+   not built.
+4. The PNG is **outside the repo** (`$TERMSURF_SHOT_DIR` default
+   `~/.cache/termsurf/shots`); `git status` shows no screenshot artifact in the
+   tree (only the new scripts).
+
+**Permission relied upon:** Screen Recording, already granted to the host
+terminal (Wezboard) — no new grant required. The window-ID lookup needed no
+permission.
 
 ## Conclusion
 
-_(to be added after the run.)_
+The Phase-A capture gap from Exp 3 is closed: the agent can reliably screenshot
+the Ghostty window alone, across Spaces, via `screencapture -l<id>` + the Swift
+window-ID lookup — the Exp-3 failure was indeed the bad JXA constant, not a real
+limit. The no-screenshots-in-repo policy is enforced (out-of-repo default +
+`__screenshots__/` gitignore) and the harness honors it. The ScreenCaptureKit
+fallback remains specified in the design if a future off-Space/occluded case
+returns stale pixels, but it was unnecessary here.
+
+**Phase A is complete** (build ✓, run ✓, window-isolated capture ✓). The
+remaining pre-baseline step — **input injection** (driving the app: type a
+deterministic command, then capture) — is the next experiment, and feeds
+directly into Phase B's live-A/B comparison of the real app vs the
+`roastty`-backed app.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only + live re-run). **Verdict: APPROVED, no Required findings.** The
+reviewer independently re-ran `screenshot.sh Ghostty` and reproduced the result
+— `1600×1264 px` window crop, live terminal content — and noted the window was
+`onscreen=false` at their capture, a **stronger** cross-Space confirmation than
+this doc's run. It also verified: output lands outside the repo with
+`git status` clean of image artifacts; `__screenshots__/` is ignored anywhere;
+the `basename` guard blocks `../`/absolute `out-name` escapes; the no-window
+case exits non-zero with a clear message; and the status flips are accurate. One
+**Optional** (owner-name substring could match a same-prefix app) is
+**intentional** — the debug build's owner is `Ghostty[DEBUG]`, so substring +
+pid/bundle disambiguation is correct; documented in `winid.swift`.
