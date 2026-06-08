@@ -1893,6 +1893,12 @@ struct Surface {
     process_exited: bool,
     dirty: bool,
     last_termio_error: Option<String>,
+    /// The app-provided `NSView` (macOS) captured from `surface_config.platform.macos.nsview`
+    /// (Issue 802 / Exp 15) — the live-render target. Null off-macOS or when not supplied.
+    nsview: *mut c_void,
+    /// The lazily-created live Metal present state (compositor + frame renderer + the
+    /// IOSurface layer attached to `nsview`). `None` until the first present on the main thread.
+    renderer: Option<SurfaceLiveRenderer>,
     #[cfg(test)]
     test_termio_events: VecDeque<termio::TermioWorkerEvent>,
 }
@@ -1913,6 +1919,20 @@ struct KittyClipboardWriteTransaction {
     terminator: osc::Terminator,
     text: Vec<u8>,
     failed: bool,
+}
+
+/// Live Metal present state owned by a `Surface` (Issue 802 / Exp 15, slice 1). Holds the
+/// compositor (device/queue/pipelines + the IOSurface `CALayer` attached to the app's NSView),
+/// the persistent CPU-side frame renderer, the font `SharedGrid`, and the glyph atlases the
+/// compositor samples. Not `Send` (it owns `Retained<MTLDevice>` + a `CALayer`) — created and
+/// used only on the main thread (`Surface` is already `!Send` via its raw-pointer fields).
+#[allow(dead_code)]
+struct SurfaceLiveRenderer {
+    compositor: renderer::metal::compositor::MetalFrameCompositor,
+    frame_renderer: renderer::frame_renderer::FrameRenderer,
+    shared_grid: font::shared_grid::SharedGrid,
+    grayscale_atlas: font::atlas::Atlas,
+    color_atlas: font::atlas::Atlas,
 }
 
 impl Drop for Surface {
@@ -13561,6 +13581,14 @@ pub extern "C" fn roastty_surface_new(
         process_exited: false,
         dirty: false,
         last_termio_error: None,
+        // Capture the app's NSView (macOS) for the live-render target (Exp 15). Null off-macOS.
+        nsview: if config.platform_tag == 1 {
+            // 1 == ROASTTY_PLATFORM_MACOS
+            unsafe { config.platform.macos.nsview }
+        } else {
+            ptr::null_mut()
+        },
+        renderer: None,
         #[cfg(test)]
         test_termio_events: VecDeque::new(),
     });
