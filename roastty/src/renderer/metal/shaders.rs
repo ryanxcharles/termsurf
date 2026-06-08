@@ -3,7 +3,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{MTLDevice, MTLLibrary};
 
-use crate::config::{AlphaBlending, BackgroundBlur, WindowColorspace, WindowPaddingColor};
+use crate::config::{AlphaBlending, BackgroundBlur, Config, WindowColorspace, WindowPaddingColor};
 use crate::font::metrics::Metrics;
 use crate::font::run::Wide;
 use crate::renderer::cell::block_cursor_pos;
@@ -198,6 +198,19 @@ impl MetalUniforms {
         uniforms.update_bg_color(background, background_opacity);
         uniforms.update_color_config(colorspace, blending);
         uniforms
+    }
+
+    /// Build the per-frame uniforms from a `Config` (Issue 801, Exp 849).
+    /// `min_contrast` is clamped to `[1, 21]` at this use site (roastty has no
+    /// config finalize step), matching upstream's finalize clamp.
+    pub(crate) fn from_config(config: &Config) -> Self {
+        Self::new(
+            config.minimum_contrast.clamp(1.0, 21.0) as f32,
+            config.background.to_terminal_rgb(),
+            config.background_opacity,
+            config.window_colorspace,
+            config.alpha_blending,
+        )
     }
 
     /// Update the screen-size-derived uniform fields (upstream
@@ -796,6 +809,32 @@ fragment float4 bg_image_fragment() {
         assert_eq!(uniforms.padding_extend, 15);
         uniforms.refine_padding_extend(WindowPaddingColor::ExtendAlways, false, true, true);
         assert_eq!(uniforms.padding_extend, 15);
+    }
+
+    #[test]
+    fn uniforms_from_config_sources_config_values() {
+        use crate::config::{AlphaBlending, Config, WindowColorspace};
+
+        let config = Config::default();
+        let expected = MetalUniforms::new(
+            1.0,
+            config.background.to_terminal_rgb(),
+            1.0,
+            WindowColorspace::Srgb,
+            AlphaBlending::Native,
+        );
+        assert_eq!(MetalUniforms::from_config(&config), expected);
+
+        // min_contrast is clamped to [1, 21] at the use site, and a value flows.
+        let mut hi = Config::default();
+        hi.set("minimum-contrast", Some("50.0")).unwrap();
+        assert_eq!(MetalUniforms::from_config(&hi).min_contrast, 21.0);
+        let mut lo = Config::default();
+        lo.set("minimum-contrast", Some("0.0")).unwrap();
+        assert_eq!(MetalUniforms::from_config(&lo).min_contrast, 1.0);
+        let mut mid = Config::default();
+        mid.set("minimum-contrast", Some("7.0")).unwrap();
+        assert_eq!(MetalUniforms::from_config(&mid).min_contrast, 7.0);
     }
 
     #[test]

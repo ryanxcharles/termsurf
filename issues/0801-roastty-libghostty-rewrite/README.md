@@ -2423,7 +2423,7 @@ are past the correctness-critical foundation.
 - [Experiment 848: Port faint-opacity and background-opacity-cells](848-port-faint-and-bg-opacity-cells.md)
   — **Pass** · Claude/Claude/Claude
 - [Experiment 849: minimum-contrast config + MetalUniforms::from_config](849-metal-uniforms-from-config.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 

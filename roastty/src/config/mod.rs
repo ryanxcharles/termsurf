@@ -96,6 +96,8 @@ pub(crate) struct Config {
     pub selection_foreground: Option<TerminalColor>,
     /// `selection-background`.
     pub selection_background: Option<TerminalColor>,
+    /// `minimum-contrast`.
+    pub minimum_contrast: f64,
     /// `bold-color`.
     pub bold_color: Option<BoldColor>,
     /// `faint-opacity`.
@@ -199,6 +201,7 @@ impl Default for Config {
             cursor_text: None,
             selection_foreground: None,
             selection_background: None,
+            minimum_contrast: 1.0,
             bold_color: None,
             faint_opacity: 0.5,
             confirm_close_surface: ConfirmCloseSurface::True,
@@ -282,6 +285,7 @@ impl Config {
             .entry_optional(self.selection_foreground, |v, f| v.format_entry(f));
         EntryFormatter::new("selection-background", out)
             .entry_optional(self.selection_background, |v, f| v.format_entry(f));
+        EntryFormatter::new("minimum-contrast", out).entry_float(self.minimum_contrast);
         EntryFormatter::new("cursor-color", out)
             .entry_optional(self.cursor_color, |v, f| v.format_entry(f));
         EntryFormatter::new("cursor-text", out)
@@ -673,6 +677,9 @@ impl Config {
                     set_optional_value_field(value, default.bold_color, BoldColor::parse_cli)?
             }
             "faint-opacity" => self.faint_opacity = set_f64_field(value, default.faint_opacity)?,
+            "minimum-contrast" => {
+                self.minimum_contrast = set_f64_field(value, default.minimum_contrast)?
+            }
             "font-style" => {
                 self.font_style = set_value_field(value, default.font_style, FontStyle::parse_cli)?
             }
@@ -4388,6 +4395,8 @@ mod tests {
         // Opacity options (Experiment 848): upstream defaults false / 0.5.
         assert!(!d.background_opacity_cells);
         assert_eq!(d.faint_opacity, 0.5);
+        // minimum-contrast (Experiment 849): upstream default 1.0.
+        assert_eq!(d.minimum_contrast, 1.0);
         // Background-image group (Experiment 466).
         assert_eq!(d.bg_image_opacity, 1.0);
         assert_eq!(d.bg_image_position, BackgroundImagePosition::Center);
@@ -7938,10 +7947,14 @@ mod tests {
         assert_eq!(cfg.faint_opacity, 2.0);
 
         cfg.faint_opacity = 0.25;
+        cfg.set("minimum-contrast", Some("5.0")).unwrap();
+        assert_eq!(cfg.minimum_contrast, 5.0);
+
         let mut out = String::new();
         cfg.format_config(&mut out);
         assert!(out.contains("background-opacity-cells = true"));
         assert!(out.contains("faint-opacity = 0.25"));
+        assert!(out.contains("minimum-contrast = 5"));
     }
 
     #[test]
@@ -8007,6 +8020,7 @@ mod tests {
                 "background-image-repeat",
                 "selection-foreground",
                 "selection-background",
+                "minimum-contrast",
                 "cursor-color",
                 "cursor-text",
                 "scroll-to-bottom",
