@@ -2416,6 +2416,8 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Claude/Claude
 - [Experiment 845: Port the font-thicken config options](845-port-font-thicken-config.md)
   — **Pass** · Claude/Claude/Claude
+- [Experiment 846: FrameRenderKnobs::from_config](846-render-knobs-from-config.md)
+  — **Designed** · Claude/Claude/Claude
 
 ## Non-Goals
 
