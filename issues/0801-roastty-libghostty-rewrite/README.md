@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-31"
+closed = "2026-06-08"
 +++
 
 # Issue 801: Reimplement libghostty as libroastty
@@ -2424,6 +2425,81 @@ are past the correctness-critical foundation.
   — **Pass** · Claude/Claude/Claude
 - [Experiment 849: minimum-contrast config + MetalUniforms::from_config](849-metal-uniforms-from-config.md)
   — **Pass** · Claude/Claude/Claude
+
+## Conclusion
+
+**Outcome: closed with substantial progress; audited and continued in a new
+issue.** Issue 801 ported the large majority of `libghostty` (Zig) to
+`libroastty` (Rust) across 849 reviewed experiments — the terminal core, the
+renderer's data and Metal/offscreen foundations, the font/text foundations,
+input encoding, a real configuration surface, and the `libroastty` C ABI — under
+a full test suite (4394 tests, green at default parallelism). We are closing
+here because enough of the library is in place to be useful and to be audited;
+the remaining partial subsystems and the live on-screen render wiring (which
+depends on the not-yet-built macOS app) move to a follow-up audit-and-continue
+issue.
+
+### What was accomplished
+
+- **Terminal core — largely complete.** Page/datastruct layer, VT parser +
+  stream, `Screen`/`Terminal`/`cursor`/`style`/`color`, SGR/OSC/DCS, selection +
+  mouse + clipboard, Kitty graphics + keyboard, highlight/hyperlink, formatter,
+  and scrollback search — ported and tested.
+- **Renderer — data + Metal/offscreen foundations, fully composed.** The
+  cell-contents builder, cursor, and Metal primitives (shaders/pipelines/atlas),
+  and — in this issue's final arc (Exps 838–849) — a complete **offscreen**
+  frame pipeline: a persistent `FrameRenderer` that derives its entire input
+  from a live `(terminal, config)` (`FrameRenderState::from_terminal`,
+  `FrameRenderKnobs::from_config`, `MetalUniforms::from_config`) and rebuilds +
+  presents a frame end-to-end against a Metal device, behind a single
+  `render_frame(terminal, config)` entry point. This is complete to the limit of
+  what is possible without the app: libghostty renders into an app-provided
+  `NSView`, so the _live_ `surface.draw()` → on-screen presentation is out of
+  scope until the macOS app exists.
+- **Font & text — foundations.** Metrics, atlas, glyph, sprite canvas + glyph
+  tables, CoreText face + shaper, collection / codepoint resolver, and the
+  `SharedGrid` render path.
+- **Input — encoding.** Key codes/events, VT/Kitty key encoding, mods, bracketed
+  paste, plus partial keybinding/keymap foundations.
+- **Configuration — a real surface.** Field groups, option parsing (CLI / file /
+  default / recursive), per-field parse + an upstream-ordered formatter, and the
+  full set of render-relevant options (`font-thicken` / `font-thicken-strength`,
+  `faint-opacity`, `background-opacity-cells`, `minimum-contrast`, …) wired into
+  the renderer.
+- **`libroastty` C ABI.** A growing `roastty_*` boundary for the terminal,
+  surface, render-state, and config.
+
+### This issue's final session (Exps 829–849)
+
+- **Test-suite stabilization (829–837).** Resolved a flaky-test cascade —
+  deadlock, lock-poison cascade, snapshot race, PTY-echo / byte / child-process
+  fixes, and a config `$HOME` race — fixing each to be robust at any parallelism
+  rather than quarantining, then dropping the temporary thread-cap. Added a
+  hard-capped bounded test runner (`scripts/bounded-run.sh`) and an adversarial
+  design/result review gate on every experiment.
+- **Renderer integration (838–849).** Built the offscreen render pipeline above,
+  bottom-up and gated: compose (838) → present (839) → persistent
+  `FrameRenderer` (840) → update-and-present (841) → derive colors/cursor/
+  row-never-extend from the terminal (842–844) → source the knobs and uniforms
+  from config, porting the missing options (845–846, 848–849) → the single
+  `render_frame` entry point (847).
+
+### Remaining (for the audit-and-continue issue)
+
+- **Live render wiring** — own a `FrameRenderer` + compositor + atlases on the
+  surface and drive `roastty_surface_draw` → on-screen presentation once the
+  macOS app provides an `NSView`/drawable. (The current `roastty_render_state_*`
+  C ABI is an intermediate divergence from libghostty that this pipeline
+  supersedes.)
+- **Partial subsystems** — `tmux` control mode; the keybinding system (`Binding`
+  / action dispatch) and keymaps; `SharedGridSet`, `opentype/` / embedded font
+  tables; `Config` finalize / validation / diagnostics and the full upstream
+  field set; and the remaining renderer `state` / `image` / `pipeline` /
+  main-loop items.
+
+`libroastty` is now a real, tested terminal core with a fully config-driven
+offscreen renderer — ready for the audit-and-continue issue and, beyond it, the
+macOS app integration.
 
 ## Non-Goals
 
