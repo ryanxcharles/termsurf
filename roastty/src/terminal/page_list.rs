@@ -2291,7 +2291,7 @@ impl PageList {
         self.scroll(Scroll::Pin(pin));
     }
 
-    fn get_top_left(&self, tag: point::Tag) -> Pin {
+    pub(in crate::terminal) fn get_top_left(&self, tag: point::Tag) -> Pin {
         match tag {
             point::Tag::Screen | point::Tag::History => Pin {
                 node: self.first_node_ptr(),
@@ -2327,7 +2327,7 @@ impl PageList {
         }
     }
 
-    fn get_bottom_right(&self, tag: point::Tag) -> Option<Pin> {
+    pub(in crate::terminal) fn get_bottom_right(&self, tag: point::Tag) -> Option<Pin> {
         match tag {
             point::Tag::Screen | point::Tag::Active => {
                 let node = self.pages.last()?;

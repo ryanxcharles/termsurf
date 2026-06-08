@@ -34,8 +34,8 @@ use terminal::selection_gesture::{
     SelectionGestureGeometry, SelectionGesturePress, SelectionGestureRelease, DEFAULT_BEHAVIORS,
 };
 use terminal::terminal::{
-    ClearScreenResult, KittyImageMedium, Terminal as InnerTerminal, TerminalBellCallback,
-    TerminalClipboardEvent, TerminalColorKind, TerminalColorSchemeCallback,
+    ClearScreenResult, EmbeddedPointCoord, KittyImageMedium, Terminal as InnerTerminal,
+    TerminalBellCallback, TerminalClipboardEvent, TerminalColorKind, TerminalColorSchemeCallback,
     TerminalDeviceAttributesCallback, TerminalEnquiryCallback, TerminalFormatterExtra,
     TerminalGridRef, TerminalGridRefPointError, TerminalPointTag, TerminalScreen,
     TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
@@ -1306,22 +1306,22 @@ pub struct RoasttySizeReportSize {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RoasttyPointCoordinate {
+pub struct RoasttyGridPointCoordinate {
     x: u16,
     y: u32,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub union RoasttyPointValue {
-    active: RoasttyPointCoordinate,
-    viewport: RoasttyPointCoordinate,
-    screen: RoasttyPointCoordinate,
-    history: RoasttyPointCoordinate,
+pub union RoasttyGridPointValue {
+    active: RoasttyGridPointCoordinate,
+    viewport: RoasttyGridPointCoordinate,
+    screen: RoasttyGridPointCoordinate,
+    history: RoasttyGridPointCoordinate,
     _padding: [u64; 2],
 }
 
-impl Default for RoasttyPointValue {
+impl Default for RoasttyGridPointValue {
     fn default() -> Self {
         Self { _padding: [0; 2] }
     }
@@ -1329,9 +1329,9 @@ impl Default for RoasttyPointValue {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct RoasttyPoint {
+pub struct RoasttyGridPoint {
     tag: c_int,
-    value: RoasttyPointValue,
+    value: RoasttyGridPointValue,
 }
 
 #[repr(C)]
@@ -1345,11 +1345,44 @@ pub struct RoasttyGridRef {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RoasttySelection {
+pub struct RoasttyGridSelection {
     size: usize,
     start: RoasttyGridRef,
     end: RoasttyGridRef,
     rectangle: bool,
+}
+
+/// Embedded `roastty_point_s` (Issue 802 / Exp 11) — byte-faithful `{tag, coord, x, y}`
+/// (16 B). `tag` is `point_tag_e`, `coord` is `point_coord_e`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct RoasttyPoint {
+    tag: c_int,
+    coord: c_int,
+    x: u32,
+    y: u32,
+}
+
+/// Embedded `roastty_selection_s` — `{top_left, bottom_right, rectangle}` (36 B).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct RoasttySelection {
+    top_left: RoasttyPoint,
+    bottom_right: RoasttyPoint,
+    rectangle: bool,
+}
+
+/// Map an embedded `point_s` to the terminal's `(tag, coord-kind, grid coordinate)`.
+fn embedded_point_spec(
+    point: RoasttyPoint,
+) -> Option<(TerminalPointTag, EmbeddedPointCoord, point::Coordinate)> {
+    let tag = TerminalPointTag::from_raw(point.tag)?;
+    let coord = EmbeddedPointCoord::from_raw(point.coord)?;
+    Some((
+        tag,
+        coord,
+        point::Coordinate::new(point.x.min(u32::from(u16::MAX)) as u16, point.y),
+    ))
 }
 
 #[repr(C)]
@@ -1459,7 +1492,7 @@ pub struct RoasttyTerminalSelectionFormatOptions {
     emit: c_int,
     unwrap: bool,
     trim: bool,
-    selection: *const RoasttySelection,
+    selection: *const RoasttyGridSelection,
 }
 
 #[repr(C)]
@@ -1495,7 +1528,7 @@ pub struct RoasttyFormatterTerminalOptions {
     unwrap: bool,
     trim: bool,
     extra: RoasttyFormatterTerminalExtra,
-    selection: *const RoasttySelection,
+    selection: *const RoasttyGridSelection,
 }
 
 struct SelectionGestureHandle {
@@ -6509,6 +6542,38 @@ fn try_surface_selection_text(
     Ok(text)
 }
 
+/// Resolve an embedded selection and read its text under a SINGLE `with_termio` lock hold,
+/// so the resolved `TerminalSelection` (raw page-node refs) never outlives the lock (Issue
+/// 802 / Exp 11). Mirrors upstream's single-mutex `read_text`.
+fn try_surface_embedded_selection_text(
+    surface: &Surface,
+    worker: &termio::TermioWorker,
+    start: (TerminalPointTag, EmbeddedPointCoord, point::Coordinate),
+    end: (TerminalPointTag, EmbeddedPointCoord, point::Coordinate),
+    rectangle: bool,
+) -> Result<RoasttyText, c_int> {
+    let resolved = worker.with_termio(|termio| {
+        let terminal = termio.terminal();
+        let selection = terminal.resolve_embedded_selection(start, end, rectangle)?;
+        let metadata = surface.selection_text_metadata(terminal, selection);
+        let text =
+            terminal.selection_format(TerminalSelectionFormat::Plain, true, false, Some(selection));
+        Some((text, metadata))
+    });
+    let Some((text, metadata)) = resolved else {
+        return Err(ROASTTY_INVALID_VALUE);
+    };
+    let Ok(text) = text else {
+        return Err(ROASTTY_INVALID_VALUE);
+    };
+    let mut text = try_allocated_text(text.as_bytes())?;
+    text.tl_px_x = metadata.tl_px_x;
+    text.tl_px_y = metadata.tl_px_y;
+    text.offset_start = metadata.offset_start;
+    text.offset_len = metadata.offset_len;
+    Ok(text)
+}
+
 fn try_allocated_string(bytes: &[u8]) -> Result<RoasttyString, c_int> {
     if bytes.is_empty() {
         return Ok(empty_string());
@@ -7477,7 +7542,7 @@ unsafe fn terminal_get_write(terminal: &InnerTerminal, data: c_int, out: *mut c_
             let Some(selection) = terminal.active_selection() else {
                 return ROASTTY_NO_VALUE;
             };
-            write_selection(out.cast::<RoasttySelection>(), selection);
+            write_selection(out.cast::<RoasttyGridSelection>(), selection);
         }
         ROASTTY_TERMINAL_DATA_SCROLLBAR
         | ROASTTY_TERMINAL_DATA_CURSOR_STYLE
@@ -7606,7 +7671,7 @@ fn point_tag_from_raw(value: c_int) -> Option<TerminalPointTag> {
     TerminalPointTag::from_raw(value)
 }
 
-fn point_coordinate(point: RoasttyPoint, tag: TerminalPointTag) -> RoasttyPointCoordinate {
+fn point_coordinate(point: RoasttyGridPoint, tag: TerminalPointTag) -> RoasttyGridPointCoordinate {
     unsafe {
         match tag {
             TerminalPointTag::Active => point.value.active,
@@ -7652,10 +7717,10 @@ fn read_grid_ref_ptr(grid_ref: *const RoasttyGridRef) -> Result<TerminalGridRef,
     read_grid_ref_value(unsafe { grid_ref.read() })
 }
 
-fn write_selection(out: *mut RoasttySelection, selection: TerminalSelection) {
+fn write_selection(out: *mut RoasttyGridSelection, selection: TerminalSelection) {
     unsafe {
-        out.write(RoasttySelection {
-            size: std::mem::size_of::<RoasttySelection>(),
+        out.write(RoasttyGridSelection {
+            size: std::mem::size_of::<RoasttyGridSelection>(),
             start: RoasttyGridRef {
                 size: std::mem::size_of::<RoasttyGridRef>(),
                 node: selection.start.node.cast_mut().cast(),
@@ -7673,13 +7738,13 @@ fn write_selection(out: *mut RoasttySelection, selection: TerminalSelection) {
     }
 }
 
-fn read_selection(selection: *const RoasttySelection) -> Result<TerminalSelection, c_int> {
+fn read_selection(selection: *const RoasttyGridSelection) -> Result<TerminalSelection, c_int> {
     if selection.is_null() {
         return Err(ROASTTY_INVALID_VALUE);
     }
 
     let selection_size = unsafe { (*selection).size };
-    if selection_size < std::mem::size_of::<RoasttySelection>() {
+    if selection_size < std::mem::size_of::<RoasttyGridSelection>() {
         return Err(ROASTTY_INVALID_VALUE);
     }
 
@@ -8084,7 +8149,7 @@ fn read_formatter_terminal_options(
             }
             extra = read_formatter_terminal_extra(ptr::addr_of!((*options).extra))?;
         }
-        if formatter_field_present::<RoasttyFormatterTerminalOptions, *const RoasttySelection>(
+        if formatter_field_present::<RoasttyFormatterTerminalOptions, *const RoasttyGridSelection>(
             size,
             std::mem::offset_of!(RoasttyFormatterTerminalOptions, selection),
         ) {
@@ -10351,7 +10416,7 @@ pub extern "C" fn roastty_terminal_set(
             let selection = if value.is_null() {
                 None
             } else {
-                match read_selection(value.cast::<RoasttySelection>()) {
+                match read_selection(value.cast::<RoasttyGridSelection>()) {
                     Ok(selection) => Some(selection),
                     Err(error) => return error,
                 }
@@ -10863,7 +10928,7 @@ pub extern "C" fn roastty_kitty_graphics_placement_rect(
     iterator: RoasttyKittyGraphicsPlacementIterator,
     image: RoasttyKittyGraphicsImage,
     terminal: RoasttyTerminal,
-    out: *mut RoasttySelection,
+    out: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(iterator) = kitty_graphics_placement_iterator_mut_from_handle(iterator) else {
         return ROASTTY_INVALID_VALUE;
@@ -10878,7 +10943,7 @@ pub extern "C" fn roastty_kitty_graphics_placement_rect(
         return ROASTTY_INVALID_VALUE;
     }
     let selection_size = unsafe { (*out).size };
-    if selection_size < std::mem::size_of::<RoasttySelection>() {
+    if selection_size < std::mem::size_of::<RoasttyGridSelection>() {
         return ROASTTY_INVALID_VALUE;
     }
     let key = match kitty_selected_placement_key(iterator) {
@@ -11397,7 +11462,7 @@ pub extern "C" fn roastty_terminal_take_pty_response(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_grid_ref(
     terminal: RoasttyTerminal,
-    point: RoasttyPoint,
+    point: RoasttyGridPoint,
     out_ref: *mut RoasttyGridRef,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
@@ -11553,7 +11618,7 @@ pub extern "C" fn roastty_terminal_point_from_grid_ref(
     terminal: RoasttyTerminal,
     grid_ref: *const RoasttyGridRef,
     tag: c_int,
-    out_coordinate: *mut RoasttyPointCoordinate,
+    out_coordinate: *mut RoasttyGridPointCoordinate,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11571,7 +11636,7 @@ pub extern "C" fn roastty_terminal_point_from_grid_ref(
     match terminal.terminal.point_from_grid_ref(grid_ref, tag) {
         Ok(coord) => {
             unsafe {
-                out_coordinate.write(RoasttyPointCoordinate {
+                out_coordinate.write(RoasttyGridPointCoordinate {
                     x: coord.x,
                     y: coord.y,
                 });
@@ -11585,7 +11650,7 @@ pub extern "C" fn roastty_terminal_point_from_grid_ref(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_grid_ref_track(
     terminal: RoasttyTerminal,
-    point: RoasttyPoint,
+    point: RoasttyGridPoint,
     out_ref: *mut RoasttyTrackedGridRef,
 ) -> c_int {
     if out_ref.is_null() {
@@ -11679,7 +11744,7 @@ pub extern "C" fn roastty_tracked_grid_ref_snapshot(
 pub extern "C" fn roastty_tracked_grid_ref_point(
     ref_: RoasttyTrackedGridRef,
     tag: c_int,
-    out_coordinate: *mut RoasttyPointCoordinate,
+    out_coordinate: *mut RoasttyGridPointCoordinate,
 ) -> c_int {
     let Some(ref_) = tracked_grid_ref_from_handle(ref_) else {
         return ROASTTY_INVALID_VALUE;
@@ -11699,7 +11764,7 @@ pub extern "C" fn roastty_tracked_grid_ref_point(
         Ok(coord) => {
             if !out_coordinate.is_null() {
                 unsafe {
-                    out_coordinate.write(RoasttyPointCoordinate {
+                    out_coordinate.write(RoasttyGridPointCoordinate {
                         x: coord.x,
                         y: coord.y,
                     });
@@ -11715,7 +11780,7 @@ pub extern "C" fn roastty_tracked_grid_ref_point(
 pub extern "C" fn roastty_tracked_grid_ref_set(
     ref_: RoasttyTrackedGridRef,
     terminal: RoasttyTerminal,
-    point: RoasttyPoint,
+    point: RoasttyGridPoint,
 ) -> c_int {
     let Some(ref_) = tracked_grid_ref_from_handle(ref_) else {
         return ROASTTY_INVALID_VALUE;
@@ -11755,7 +11820,7 @@ pub extern "C" fn roastty_tracked_grid_ref_set(
 pub extern "C" fn roastty_terminal_select_word(
     terminal: RoasttyTerminal,
     options: *const RoasttyTerminalSelectWordOptions,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11785,7 +11850,7 @@ pub extern "C" fn roastty_terminal_select_word(
 pub extern "C" fn roastty_terminal_select_word_between(
     terminal: RoasttyTerminal,
     options: *const RoasttyTerminalSelectWordBetweenOptions,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11815,7 +11880,7 @@ pub extern "C" fn roastty_terminal_select_word_between(
 pub extern "C" fn roastty_terminal_select_line(
     terminal: RoasttyTerminal,
     options: *const RoasttyTerminalSelectLineOptions,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11844,7 +11909,7 @@ pub extern "C" fn roastty_terminal_select_line(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_select_all(
     terminal: RoasttyTerminal,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11863,7 +11928,7 @@ pub extern "C" fn roastty_terminal_select_all(
 pub extern "C" fn roastty_terminal_select_output(
     terminal: RoasttyTerminal,
     ref_: *const RoasttyGridRef,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11888,7 +11953,7 @@ pub extern "C" fn roastty_terminal_select_output(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_selection_adjust(
     terminal: RoasttyTerminal,
-    selection: *mut RoasttySelection,
+    selection: *mut RoasttyGridSelection,
     adjustment: c_int,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
@@ -11915,7 +11980,7 @@ pub extern "C" fn roastty_terminal_selection_adjust(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_selection_order(
     terminal: RoasttyTerminal,
-    selection: *const RoasttySelection,
+    selection: *const RoasttyGridSelection,
     out_order: *mut c_int,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
@@ -11943,9 +12008,9 @@ pub extern "C" fn roastty_terminal_selection_order(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_selection_ordered(
     terminal: RoasttyTerminal,
-    selection: *const RoasttySelection,
+    selection: *const RoasttyGridSelection,
     desired_order: c_int,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
         return ROASTTY_INVALID_VALUE;
@@ -11977,8 +12042,8 @@ pub extern "C" fn roastty_terminal_selection_ordered(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_selection_contains(
     terminal: RoasttyTerminal,
-    selection: *const RoasttySelection,
-    point: RoasttyPoint,
+    selection: *const RoasttyGridSelection,
+    point: RoasttyGridPoint,
     out_contains: *mut bool,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
@@ -12014,8 +12079,8 @@ pub extern "C" fn roastty_terminal_selection_contains(
 #[no_mangle]
 pub extern "C" fn roastty_terminal_selection_equal(
     terminal: RoasttyTerminal,
-    a: *const RoasttySelection,
-    b: *const RoasttySelection,
+    a: *const RoasttyGridSelection,
+    b: *const RoasttyGridSelection,
     out_equal: *mut bool,
 ) -> c_int {
     let Some(terminal) = terminal_from_handle(terminal) else {
@@ -12508,7 +12573,7 @@ pub extern "C" fn roastty_selection_gesture_event_set(
             if value.is_null() {
                 event.viewport = None;
             } else {
-                let coordinate = unsafe { value.cast::<RoasttyPointCoordinate>().read() };
+                let coordinate = unsafe { value.cast::<RoasttyGridPointCoordinate>().read() };
                 event.viewport = Some(point::Coordinate::new(coordinate.x, coordinate.y));
             }
         }
@@ -12523,7 +12588,7 @@ pub extern "C" fn roastty_selection_gesture_handle_event(
     gesture: RoasttySelectionGesture,
     terminal: RoasttyTerminal,
     event: RoasttySelectionGestureEvent,
-    out_selection: *mut RoasttySelection,
+    out_selection: *mut RoasttyGridSelection,
 ) -> c_int {
     let Some(gesture) = selection_gesture_from_handle(gesture) else {
         return ROASTTY_INVALID_VALUE;
@@ -14273,13 +14338,22 @@ pub extern "C" fn roastty_surface_read_text(
     if surface.app.is_null() {
         return false;
     }
-    let Ok(selection) = read_selection(&selection) else {
+    let (Some(start), Some(end)) = (
+        embedded_point_spec(selection.top_left),
+        embedded_point_spec(selection.bottom_right),
+    ) else {
         return false;
     };
     let Some(worker) = surface.termio_worker.as_ref() else {
         return false;
     };
-    let Ok(text) = try_surface_selection_text(surface, worker, Some(selection)) else {
+    // Resolve the embedded endpoints AND read the text under a SINGLE termio lock: the
+    // resolved selection holds raw page-node refs that must not outlive the lock (the worker
+    // thread can prune scrollback pages between locks). The grid-ref reconstruction in
+    // `read_selection` can't be reused — the embedded points carry no page node.
+    let Ok(text) =
+        try_surface_embedded_selection_text(surface, worker, start, end, selection.rectangle)
+    else {
         return false;
     };
     unsafe {
@@ -15420,7 +15494,7 @@ mod tests {
         surface: RoasttySurface,
         start: (u16, u32),
         end: (u16, u32),
-    ) -> RoasttySelection {
+    ) -> RoasttyGridSelection {
         let surface = surface_from_handle(surface).unwrap();
         surface
             .termio_worker
@@ -15446,15 +15520,31 @@ mod tests {
                     end,
                     rectangle: false,
                 };
-                let mut out = RoasttySelection::default();
+                let mut out = RoasttyGridSelection::default();
                 write_selection(&mut out, selection);
                 out
             })
     }
 
+    /// Build an embedded `roastty_selection_s` from SCREEN/EXACT `(x, y)` endpoints — the
+    /// embedded equivalent of [`surface_worker_selection`] for the by-value `read_text`.
+    fn embedded_screen_selection(start: (u16, u32), end: (u16, u32)) -> RoasttySelection {
+        let point = |c: (u16, u32)| RoasttyPoint {
+            tag: ROASTTY_POINT_SCREEN,
+            coord: 0, // ROASTTY_POINT_COORD_EXACT
+            x: c.0 as u32,
+            y: c.1,
+        };
+        RoasttySelection {
+            top_left: point(start),
+            bottom_right: point(end),
+            rectangle: false,
+        }
+    }
+
     fn set_surface_worker_active_selection(
         surface: RoasttySurface,
-        selection: Option<RoasttySelection>,
+        selection: Option<RoasttyGridSelection>,
     ) {
         let selection = selection.map(|selection| read_selection(&selection).unwrap());
         let surface = surface_from_handle(surface).unwrap();
@@ -28693,7 +28783,7 @@ mod tests {
         let surface = new_test_surface_with_config(app, &config);
         set_surface_test_geometry(surface, 80, 24, 10, 20);
         surface_snapshot_text_after_start_until(app, surface, "Hello World");
-        let selection = surface_worker_selection(surface, (6, 0), (10, 0));
+        let selection = embedded_screen_selection((6, 0), (10, 0));
         let mut text = empty_text();
 
         assert!(roastty_surface_read_text(surface, selection, &mut text));
@@ -28722,7 +28812,7 @@ mod tests {
             surface.scale_factor_y = 4.0;
         }
         surface_snapshot_text_after_start_until(app, surface, "Hello World");
-        let selection = surface_worker_selection(surface, (6, 1), (10, 1));
+        let selection = embedded_screen_selection((6, 1), (10, 1));
         let mut text = empty_text();
 
         assert!(roastty_surface_read_text(surface, selection, &mut text));
@@ -28746,7 +28836,7 @@ mod tests {
         let surface = new_test_surface_with_config(app, &config);
         set_surface_test_geometry(surface, 80, 3, 10, 20);
         surface_snapshot_text_after_start_until(app, surface, "ggg");
-        let selection = surface_worker_selection(surface, (0, 0), (2, 0));
+        let selection = embedded_screen_selection((0, 0), (2, 0));
         let mut text = empty_text();
 
         assert!(roastty_surface_read_text(surface, selection, &mut text));
@@ -28770,16 +28860,19 @@ mod tests {
         let surface = new_test_surface_with_config(app, &config);
         set_surface_test_geometry(surface, 80, 3, 10, 20);
         surface_snapshot_text_after_start_until(app, surface, "ggg");
-        let selection = surface_worker_selection(surface, (0, 0), (2, 6));
+        let selection = embedded_screen_selection((0, 0), (2, 6));
         let mut text = empty_text();
 
         assert!(roastty_surface_read_text(surface, selection, &mut text));
 
-        assert_eq!(text.tl_px_x, 0.0);
-        assert_eq!(text.tl_px_y, 0.0);
+        // The bottom-right y=6 clamps to the active-row bound (upstream `pages.rows - 1`), so
+        // the SCREEN selection resolves to the top-of-scrollback rows 0..2 — above the
+        // viewport — yielding the text but the off-viewport metadata sentinel.
+        assert_eq!(text.tl_px_x, -1.0);
+        assert_eq!(text.tl_px_y, -1.0);
         assert_eq!(text.offset_start, 0);
-        assert_eq!(text.offset_len, 162);
-        assert!(take_roastty_text(text).starts_with(b"aaa"));
+        assert_eq!(text.offset_len, 0);
+        assert_eq!(take_roastty_text(text), b"aaa\nbbb\nccc");
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
@@ -28793,8 +28886,8 @@ mod tests {
         config.command = command.as_ptr();
         let surface = new_test_surface_with_config(app, &config);
         surface_snapshot_text_after_start_until(app, surface, "Hello World");
-        let mut selection = surface_worker_selection(surface, (0, 0), (4, 0));
-        selection.start.size = std::mem::size_of::<RoasttyGridRef>() - 1;
+        let mut selection = embedded_screen_selection((0, 0), (4, 0));
+        selection.top_left.tag = 99; // invalid point_tag_e -> spec is None
         let mut text = empty_text();
 
         assert!(!roastty_surface_read_text(surface, selection, &mut text));
@@ -28812,7 +28905,7 @@ mod tests {
         config.command = command.as_ptr();
         let surface = new_test_surface_with_config(app, &config);
         surface_snapshot_text_after_start_until(app, surface, "Hello World");
-        let selection = surface_worker_selection(surface, (0, 0), (4, 0));
+        let selection = embedded_screen_selection((0, 0), (4, 0));
         let mut text = empty_text();
 
         assert!(roastty_surface_read_text(surface, selection, &mut text));
@@ -28832,8 +28925,8 @@ mod tests {
         config.command = command.as_ptr();
         let surface = new_test_surface_with_config(app, &config);
         surface_snapshot_text_after_start_until(app, surface, "Hello World");
-        let hello = surface_worker_selection(surface, (0, 0), (4, 0));
-        let world = surface_worker_selection(surface, (6, 0), (10, 0));
+        let hello = embedded_screen_selection((0, 0), (4, 0));
+        let world = embedded_screen_selection((6, 0), (10, 0));
         let mut text = empty_text();
 
         assert!(roastty_surface_read_text(surface, hello, &mut text));
@@ -28842,6 +28935,92 @@ mod tests {
         text = empty_text();
         assert!(roastty_surface_read_text(surface, world, &mut text));
         assert_eq!(take_roastty_text(text), b"World");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn embedded_selection_abi_layout_matches_upstream() {
+        use core::mem::{align_of, offset_of, size_of};
+        assert_eq!(size_of::<RoasttyPoint>(), 16);
+        assert_eq!(align_of::<RoasttyPoint>(), 4);
+        assert_eq!(offset_of!(RoasttyPoint, tag), 0);
+        assert_eq!(offset_of!(RoasttyPoint, coord), 4);
+        assert_eq!(offset_of!(RoasttyPoint, x), 8);
+        assert_eq!(offset_of!(RoasttyPoint, y), 12);
+        assert_eq!(size_of::<RoasttySelection>(), 36);
+        assert_eq!(offset_of!(RoasttySelection, top_left), 0);
+        assert_eq!(offset_of!(RoasttySelection, bottom_right), 16);
+        assert_eq!(offset_of!(RoasttySelection, rectangle), 32);
+    }
+
+    #[test]
+    fn surface_read_text_resolves_top_left_to_bottom_right_coords() {
+        // The crux: SCREEN + TOP_LEFT..BOTTOM_RIGHT must select the WHOLE screen, not
+        // collapse to cell (0,0) (the bug a layout/compile-only check would miss).
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 80, 24, 10, 20);
+        surface_snapshot_text_after_start_until(app, surface, "Hello World");
+        let corner = |coord| RoasttyPoint {
+            tag: ROASTTY_POINT_SCREEN,
+            coord, // 1 = TOP_LEFT, 2 = BOTTOM_RIGHT; x/y ignored
+            x: 0,
+            y: 0,
+        };
+        let selection = RoasttySelection {
+            top_left: corner(1),
+            bottom_right: corner(2),
+            rectangle: false,
+        };
+        let mut text = empty_text();
+        assert!(roastty_surface_read_text(surface, selection, &mut text));
+        let got = take_roastty_text(text);
+        assert!(
+            got.windows(b"Hello World".len())
+                .any(|w| w == b"Hello World"),
+            "whole-screen read should contain the screen text, got {:?}",
+            String::from_utf8_lossy(&got)
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_read_text_clamps_out_of_bounds_exact_coords() {
+        // An EXACT endpoint past the screen edge must clamp to the edge (matching upstream),
+        // not fail — pixel->cell mouse drags routinely land one past the edge.
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let command = CString::new("printf 'Hello World'").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 80, 24, 10, 20);
+        surface_snapshot_text_after_start_until(app, surface, "Hello World");
+        let exact = |x, y| RoasttyPoint {
+            tag: ROASTTY_POINT_SCREEN,
+            coord: 0,
+            x,
+            y,
+        };
+        let selection = RoasttySelection {
+            top_left: exact(0, 0),
+            bottom_right: exact(9999, 9999), // far past the edge -> clamps to the last cell
+            rectangle: false,
+        };
+        let mut text = empty_text();
+        assert!(roastty_surface_read_text(surface, selection, &mut text));
+        let got = take_roastty_text(text);
+        assert!(
+            got.windows(b"Hello".len()).any(|w| w == b"Hello"),
+            "clamped read should include the screen text, got {:?}",
+            String::from_utf8_lossy(&got)
+        );
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
@@ -30333,20 +30512,20 @@ mod tests {
         panic!("missing Kitty graphics placement for image {image_id}");
     }
 
-    fn c_point(tag: c_int, x: u16, y: u32) -> RoasttyPoint {
-        let coordinate = RoasttyPointCoordinate { x, y };
+    fn c_point(tag: c_int, x: u16, y: u32) -> RoasttyGridPoint {
+        let coordinate = RoasttyGridPointCoordinate { x, y };
         let value = match tag {
-            ROASTTY_POINT_ACTIVE => RoasttyPointValue { active: coordinate },
-            ROASTTY_POINT_VIEWPORT => RoasttyPointValue {
+            ROASTTY_POINT_ACTIVE => RoasttyGridPointValue { active: coordinate },
+            ROASTTY_POINT_VIEWPORT => RoasttyGridPointValue {
                 viewport: coordinate,
             },
-            ROASTTY_POINT_SCREEN => RoasttyPointValue { screen: coordinate },
-            ROASTTY_POINT_HISTORY => RoasttyPointValue {
+            ROASTTY_POINT_SCREEN => RoasttyGridPointValue { screen: coordinate },
+            ROASTTY_POINT_HISTORY => RoasttyGridPointValue {
                 history: coordinate,
             },
-            _ => RoasttyPointValue { active: coordinate },
+            _ => RoasttyGridPointValue { active: coordinate },
         };
-        RoasttyPoint { tag, value }
+        RoasttyGridPoint { tag, value }
     }
 
     fn terminal_grid_ref_at(terminal: RoasttyTerminal, x: u16, y: u32) -> RoasttyGridRef {
@@ -30381,9 +30560,9 @@ mod tests {
         start: (u16, u32),
         end: (u16, u32),
         rectangle: bool,
-    ) -> RoasttySelection {
-        RoasttySelection {
-            size: std::mem::size_of::<RoasttySelection>(),
+    ) -> RoasttyGridSelection {
+        RoasttyGridSelection {
+            size: std::mem::size_of::<RoasttyGridSelection>(),
             start: terminal_grid_ref_at(terminal, start.0, start.1),
             end: terminal_grid_ref_at(terminal, end.0, end.1),
             rectangle,
@@ -35267,21 +35446,21 @@ mod tests {
 
     #[test]
     fn terminal_grid_ref_abi_layout_is_stable() {
-        assert_eq!(std::mem::size_of::<RoasttyPointCoordinate>(), 8);
-        assert_eq!(std::mem::align_of::<RoasttyPointCoordinate>(), 4);
-        assert_eq!(std::mem::offset_of!(RoasttyPointCoordinate, x), 0);
-        assert_eq!(std::mem::offset_of!(RoasttyPointCoordinate, y), 4);
-        assert_eq!(std::mem::size_of::<RoasttyPointValue>(), 16);
-        assert_eq!(std::mem::align_of::<RoasttyPointValue>(), 8);
-        assert_eq!(std::mem::offset_of!(RoasttyPointValue, active), 0);
-        assert_eq!(std::mem::offset_of!(RoasttyPointValue, viewport), 0);
-        assert_eq!(std::mem::offset_of!(RoasttyPointValue, screen), 0);
-        assert_eq!(std::mem::offset_of!(RoasttyPointValue, history), 0);
-        assert_eq!(std::mem::offset_of!(RoasttyPointValue, _padding), 0);
-        assert_eq!(std::mem::size_of::<RoasttyPoint>(), 24);
-        assert_eq!(std::mem::align_of::<RoasttyPoint>(), 8);
-        assert_eq!(std::mem::offset_of!(RoasttyPoint, tag), 0);
-        assert_eq!(std::mem::offset_of!(RoasttyPoint, value), 8);
+        assert_eq!(std::mem::size_of::<RoasttyGridPointCoordinate>(), 8);
+        assert_eq!(std::mem::align_of::<RoasttyGridPointCoordinate>(), 4);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointCoordinate, x), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointCoordinate, y), 4);
+        assert_eq!(std::mem::size_of::<RoasttyGridPointValue>(), 16);
+        assert_eq!(std::mem::align_of::<RoasttyGridPointValue>(), 8);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointValue, active), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointValue, viewport), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointValue, screen), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointValue, history), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPointValue, _padding), 0);
+        assert_eq!(std::mem::size_of::<RoasttyGridPoint>(), 24);
+        assert_eq!(std::mem::align_of::<RoasttyGridPoint>(), 8);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPoint, tag), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridPoint, value), 8);
         assert_eq!(std::mem::size_of::<RoasttyGridRef>(), 24);
         assert_eq!(std::mem::align_of::<RoasttyGridRef>(), 8);
         assert_eq!(std::mem::offset_of!(RoasttyGridRef, size), 0);
@@ -35304,7 +35483,7 @@ mod tests {
         assert!(!grid_ref.node.is_null());
         assert_eq!((grid_ref.x, grid_ref.y), (1, 0));
 
-        let mut coord = RoasttyPointCoordinate::default();
+        let mut coord = RoasttyGridPointCoordinate::default();
         assert_eq!(
             roastty_terminal_point_from_grid_ref(
                 terminal,
@@ -35314,7 +35493,7 @@ mod tests {
             ),
             ROASTTY_SUCCESS
         );
-        assert_eq!(coord, RoasttyPointCoordinate { x: 1, y: 0 });
+        assert_eq!(coord, RoasttyGridPointCoordinate { x: 1, y: 0 });
 
         let mut viewport_ref = RoasttyGridRef::default();
         assert_eq!(
@@ -35334,7 +35513,7 @@ mod tests {
             ),
             ROASTTY_SUCCESS
         );
-        assert_eq!(coord, RoasttyPointCoordinate { x: 2, y: 0 });
+        assert_eq!(coord, RoasttyGridPointCoordinate { x: 2, y: 0 });
 
         roastty_terminal_free(terminal);
     }
@@ -35355,7 +35534,7 @@ mod tests {
             ),
             ROASTTY_SUCCESS
         );
-        let mut coord = RoasttyPointCoordinate::default();
+        let mut coord = RoasttyGridPointCoordinate::default();
         assert_eq!(
             roastty_terminal_point_from_grid_ref(
                 terminal,
@@ -35365,7 +35544,7 @@ mod tests {
             ),
             ROASTTY_SUCCESS
         );
-        assert_eq!(coord, RoasttyPointCoordinate { x: 0, y: 0 });
+        assert_eq!(coord, RoasttyGridPointCoordinate { x: 0, y: 0 });
         assert_eq!(
             roastty_terminal_point_from_grid_ref(
                 terminal,
@@ -35483,7 +35662,7 @@ mod tests {
         assert_eq!(snapshot.x, 1);
         assert!(!snapshot.node.is_null());
 
-        let mut coord = RoasttyPointCoordinate::default();
+        let mut coord = RoasttyGridPointCoordinate::default();
         assert_eq!(
             roastty_tracked_grid_ref_point(tracked, ROASTTY_POINT_HISTORY, &mut coord),
             ROASTTY_SUCCESS
@@ -35568,12 +35747,12 @@ mod tests {
             ROASTTY_SUCCESS
         );
 
-        let mut coord = RoasttyPointCoordinate::default();
+        let mut coord = RoasttyGridPointCoordinate::default();
         assert_eq!(
             roastty_tracked_grid_ref_point(tracked, ROASTTY_POINT_ACTIVE, &mut coord),
             ROASTTY_SUCCESS
         );
-        assert_eq!(coord, RoasttyPointCoordinate { x: 3, y: 0 });
+        assert_eq!(coord, RoasttyGridPointCoordinate { x: 3, y: 0 });
 
         roastty_tracked_grid_ref_free(tracked);
         roastty_terminal_free(other);
@@ -35584,7 +35763,7 @@ mod tests {
     fn terminal_grid_ref_abi_validates_inputs() {
         let terminal = new_terminal(4, 2);
         let mut grid_ref = RoasttyGridRef::default();
-        let mut coord = RoasttyPointCoordinate::default();
+        let mut coord = RoasttyGridPointCoordinate::default();
 
         assert_eq!(
             roastty_terminal_grid_ref(
@@ -35924,12 +36103,12 @@ mod tests {
         assert_eq!(ROASTTY_SELECTION_ADJUST_LEFT, 0);
         assert_eq!(ROASTTY_SELECTION_ADJUST_END_OF_LINE, 9);
 
-        assert_eq!(std::mem::size_of::<RoasttySelection>(), 64);
-        assert_eq!(std::mem::align_of::<RoasttySelection>(), 8);
-        assert_eq!(std::mem::offset_of!(RoasttySelection, size), 0);
-        assert_eq!(std::mem::offset_of!(RoasttySelection, start), 8);
-        assert_eq!(std::mem::offset_of!(RoasttySelection, end), 32);
-        assert_eq!(std::mem::offset_of!(RoasttySelection, rectangle), 56);
+        assert_eq!(std::mem::size_of::<RoasttyGridSelection>(), 64);
+        assert_eq!(std::mem::align_of::<RoasttyGridSelection>(), 8);
+        assert_eq!(std::mem::offset_of!(RoasttyGridSelection, size), 0);
+        assert_eq!(std::mem::offset_of!(RoasttyGridSelection, start), 8);
+        assert_eq!(std::mem::offset_of!(RoasttyGridSelection, end), 32);
+        assert_eq!(std::mem::offset_of!(RoasttyGridSelection, rectangle), 56);
 
         assert_eq!(std::mem::size_of::<RoasttyTerminalSelectWordOptions>(), 48);
         assert_eq!(
@@ -36039,7 +36218,7 @@ mod tests {
         write_terminal(terminal, b"Hello World");
         let selection = terminal_selection(terminal, (6, 0), (10, 0), false);
 
-        let mut out = RoasttySelection::default();
+        let mut out = RoasttyGridSelection::default();
         assert_eq!(
             roastty_terminal_get(
                 terminal,
@@ -36064,7 +36243,7 @@ mod tests {
             ),
             ROASTTY_SUCCESS
         );
-        assert_eq!(out.size, std::mem::size_of::<RoasttySelection>());
+        assert_eq!(out.size, std::mem::size_of::<RoasttyGridSelection>());
         assert_eq!(out.start.size, std::mem::size_of::<RoasttyGridRef>());
         assert_eq!(out.end.size, std::mem::size_of::<RoasttyGridRef>());
         assert_eq!((out.start.x, out.start.y), (6, 0));
@@ -36388,7 +36567,7 @@ mod tests {
             boundary_codepoints: ptr::null(),
             boundary_codepoints_len: 0,
         };
-        let mut selection = RoasttySelection::default();
+        let mut selection = RoasttyGridSelection::default();
         assert_eq!(
             roastty_terminal_select_word(terminal, &options, &mut selection),
             ROASTTY_SUCCESS
@@ -36433,7 +36612,7 @@ mod tests {
         );
         assert_eq!(adjusted.end.x, 19);
 
-        let mut reversed = RoasttySelection::default();
+        let mut reversed = RoasttyGridSelection::default();
         assert_eq!(
             roastty_terminal_selection_ordered(
                 terminal,
@@ -36491,7 +36670,7 @@ mod tests {
             ),
             ROASTTY_INVALID_VALUE
         );
-        let mut out = RoasttySelection::default();
+        let mut out = RoasttyGridSelection::default();
         assert_eq!(
             roastty_terminal_get(
                 terminal,
@@ -36503,8 +36682,8 @@ mod tests {
         assert_eq!((out.start.x, out.end.x), (6, 10));
 
         let mut undersized = selection;
-        undersized.size = std::mem::size_of::<RoasttySelection>() - 1;
-        let mut result = RoasttySelection::default();
+        undersized.size = std::mem::size_of::<RoasttyGridSelection>() - 1;
+        let mut result = RoasttyGridSelection::default();
         let mut equal = false;
         assert_eq!(
             roastty_terminal_selection_equal(terminal, &undersized, &selection, &mut equal),
@@ -38305,9 +38484,9 @@ mod tests {
             (1, 2, 2, 1)
         );
 
-        let mut rect = RoasttySelection {
-            size: std::mem::size_of::<RoasttySelection>(),
-            ..RoasttySelection::default()
+        let mut rect = RoasttyGridSelection {
+            size: std::mem::size_of::<RoasttyGridSelection>(),
+            ..RoasttyGridSelection::default()
         };
         assert_eq!(
             roastty_kitty_graphics_placement_rect(iterator, image, terminal, &mut rect),
@@ -38357,10 +38536,10 @@ mod tests {
             (1, 2, 2, 1)
         );
 
-        let mut undersized_rect = RoasttySelection {
-            size: std::mem::size_of::<RoasttySelection>() - 1,
+        let mut undersized_rect = RoasttyGridSelection {
+            size: std::mem::size_of::<RoasttyGridSelection>() - 1,
             rectangle: true,
-            ..RoasttySelection::default()
+            ..RoasttyGridSelection::default()
         };
         assert_eq!(
             roastty_kitty_graphics_placement_rect(iterator, image, terminal, &mut undersized_rect),
@@ -38690,9 +38869,9 @@ mod tests {
             },
         );
 
-        let mut rect = RoasttySelection {
-            size: std::mem::size_of::<RoasttySelection>(),
-            ..RoasttySelection::default()
+        let mut rect = RoasttyGridSelection {
+            size: std::mem::size_of::<RoasttyGridSelection>(),
+            ..RoasttyGridSelection::default()
         };
         assert_eq!(
             roastty_kitty_graphics_placement_rect(iterator, image, terminal, &mut rect),
@@ -39856,7 +40035,7 @@ mod tests {
         custom_boundaries[0] = b' ' as u32;
         assert_eq!(custom_boundaries[0], b' ' as u32);
 
-        let mut selection = RoasttySelection::default();
+        let mut selection = RoasttyGridSelection::default();
         assert_eq!(
             roastty_selection_gesture_handle_event(gesture, terminal, press, &mut selection),
             ROASTTY_NO_VALUE

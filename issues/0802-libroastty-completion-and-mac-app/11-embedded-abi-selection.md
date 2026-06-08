@@ -154,8 +154,96 @@ findings, all folded in:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — the embedded `point_s`/`selection_s`/`point_coord_e` are
+byte-faithful, the grid pull-model types are cleanly separated, `read_text`
+resolves `coord` correctly (the crux behavioral test passes), `cargo test` is
+green, and **the app compiles past the selection/point errors** (the 14 errors
+are gone).
+
+### What landed
+
+- **Grid rename (mechanical, no behavior change):**
+  `RoasttySelection`→`RoasttyGridSelection`, `RoasttyPoint`→`RoasttyGridPoint`,
+  `RoasttyPointValue`→`RoasttyGridPointValue`,
+  `RoasttyPointCoordinate`→`RoasttyGridPointCoordinate` (~110 Rust refs) + the C
+  header
+  `roastty_grid_point_s`/`_selection_s`/`_point_value_u`/`_point_coordinate_s`
+  (32 refs) — word-boundary so the gesture types + `point_tag_e` (shared) are
+  untouched.
+- **Embedded types** byte-faithful: new `roastty_point_coord_e`
+  (EXACT/TOP_LEFT/BOTTOM_RIGHT), `roastty_point_s` `{tag, coord, x, y}` (16 B),
+  `roastty_selection_s` `{top_left, bottom_right, rectangle}` (36 B); C
+  `_Static_assert`s + Rust `offset_of` test agree. `point_tag_e` kept `HISTORY`
+  (matches the real embedded impl).
+- **The coord resolver (the real work):**
+  `Terminal::resolve_embedded_selection` + `EmbeddedPointCoord`, wiring
+  `screen.grid_ref` (EXACT) / `get_top_left` / `get_bottom_right` (now
+  `pub(in crate::terminal)`) → `GridRef` → `TerminalGridRef`. `read_text` takes
+  the embedded selection, resolves both endpoints inside the terminal context.
+- **Tests:** 11 read_text test sites migrated to the embedded selection (incl.
+  the invalid-selection test switched from a corrupt grid `size` to an invalid
+  tag), the layout test, and the **crux behavioral test** (SCREEN +
+  TOP_LEFT..BOTTOM_RIGHT returns the full screen, not cell (0,0)).
+
+### Verification
+
+- **`cargo test -p roastty --lib`: 4398 passed, 0 failed** (4396 + the 2 new
+  tests) — the rename + the read_text rewire caused no regression.
+- **App rebuild: 0 `point_s`/`selection_s`/`POINT_COORD` errors** — compiles
+  past selection.
 
 ## Conclusion
 
-_(to be added after the run.)_
+The selection/point divergence is closed and the app build advances again. The
+app-build-driven loop now surfaces the **next divergences** (80 errors, all in
+the app's action/target glue), which split into clear follow-ups:
+
+1. **`roastty_target_s` is missing its `target` union member (51 errors)** — the
+   app reads `target.target.surface`, but roastty's `target_s` is flat. This is
+   the **same tagged-union pattern as Exp 9's `action_u`**: define
+   `roastty_target_u {surface}` + change `target_s` to `{tag, target_u target}`,
+   byte-faithful.
+2. **`roastty_action_tag_e` is incomplete (~25 missing `ROASTTY_ACTION_*`
+   constants: `MOUSE_SHAPE`, `RENDERER_HEALTH`, `SIZE_LIMIT`,
+   `PRESENT_TERMINAL`, `KEY_TABLE`, `PROGRESS_REPORT`, …)** — Exp 9 added the
+   `action_u` types but roastty's tag enum has gaps vs upstream's 64. (The Exp-9
+   type-gap check counted `roastty_action_*` _types_, not the `ROASTTY_ACTION_*`
+   _constants_ — hence missed here, caught now at the app compile.)
+3. **A handful of misc:** `AppDelegate:579` passes `input_key_s` where a
+   `key_event_t` handle is expected (a key-event API shape), and a few app enums
+   (`floating`/`normal`) + a `DispatchWorkItem` closure.
+
+**Next (Exp 12):** the `target_s` tagged union + completing `action_tag_e` to
+upstream's 64 (the two big clusters), then re-attempt the compile to surface the
+misc tail.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: CHANGES REQUIRED → addressed.** It confirmed the
+byte-faithfulness, the resolver tag/coord mapping, the grid rename
+(behavior-preserving; grid layout test still asserts size 64; gesture types +
+`point_tag_e` untouched), the test integrity (the crux test genuinely uses coord
+1/2 and would fail on a (0,0) collapse), and that the Exp-12 deferral is honest.
+It found **two real correctness bugs** (so "Pass" wasn't yet earned), both
+fixed:
+
+- **Required — use-after-free across two lock holds.** `read_text` resolved the
+  selection in one `with_termio` (capturing raw page-node refs) then read in a
+  _second_ — and the worker thread can prune scrollback pages between them.
+  Upstream holds the mutex **once**. **Fixed:**
+  `try_surface_embedded_selection_text` resolves + formats under a **single**
+  `with_termio` hold, so the resolved `TerminalSelection` never outlives the
+  lock.
+- **Required — the EXACT arm dropped upstream's bounds clamp.** Upstream clamps
+  `x→min(x, cols-1)`, `y→min(y, rows-1)` (`embedded.zig`), so an out-of-edge
+  exact point (routine for pixel→cell mouse drags) yields the edge cell; roastty
+  returned `None`→false. **Fixed:** the EXACT arm clamps to
+  `screen.cols()/rows()` (verified = upstream `pages.rows` = active rows) before
+  resolving; `embedded_point_spec` uses a saturating cast. Added
+  `surface_read_text_clamps_out_of_bounds_exact_coords`, and corrected
+  `metadata_clamps_partially_visible_selection` to the faithful clamped result
+  (the SCREEN selection clamps to scrollback-top rows 0..2, off-viewport →
+  `(-1, -1, 0, 0)` metadata + `"aaa\nbbb\nccc"`).
+
+Re-verified: **`cargo test -p roastty --lib` green** after both fixes.

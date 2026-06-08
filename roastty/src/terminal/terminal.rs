@@ -130,6 +130,27 @@ impl From<TerminalPointTag> for super::point::Tag {
     }
 }
 
+/// Embedded `point_coord_e` — how an embedded `point_s` resolves within its tag's
+/// region (Issue 802 / Exp 11). `Exact` uses the `(x, y)` grid coordinate; `TopLeft`
+/// / `BottomRight` ignore it and resolve to the region's corner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmbeddedPointCoord {
+    Exact,
+    TopLeft,
+    BottomRight,
+}
+
+impl EmbeddedPointCoord {
+    pub(crate) fn from_raw(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Exact),
+            1 => Some(Self::TopLeft),
+            2 => Some(Self::BottomRight),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TerminalGridRef {
     pub(crate) node: *const (),
@@ -1590,6 +1611,66 @@ impl Terminal {
         };
 
         self.screens.active().grid_ref(point).map(Into::into)
+    }
+
+    /// Resolve an embedded `selection_s` (two `point_s` each `(tag, coord, x, y)`) into a
+    /// terminal selection (Issue 802 / Exp 11), matching `apprt/embedded.zig`: `Exact`
+    /// resolves the `(x, y)` grid point, `TopLeft`/`BottomRight` resolve the tag region's
+    /// corner. Returns `None` if either endpoint can't be resolved.
+    pub(crate) fn resolve_embedded_selection(
+        &self,
+        start: (
+            TerminalPointTag,
+            EmbeddedPointCoord,
+            super::point::Coordinate,
+        ),
+        end: (
+            TerminalPointTag,
+            EmbeddedPointCoord,
+            super::point::Coordinate,
+        ),
+        rectangle: bool,
+    ) -> Option<TerminalSelection> {
+        Some(TerminalSelection {
+            start: self.resolve_embedded_grid_ref(start.0, start.1, start.2)?,
+            end: self.resolve_embedded_grid_ref(end.0, end.1, end.2)?,
+            rectangle,
+        })
+    }
+
+    fn resolve_embedded_grid_ref(
+        &self,
+        tag: TerminalPointTag,
+        coord_kind: EmbeddedPointCoord,
+        coord: super::point::Coordinate,
+    ) -> Option<TerminalGridRef> {
+        let screen = self.screens.active();
+        let grid_ref = match coord_kind {
+            EmbeddedPointCoord::Exact => {
+                // Clamp to the screen bounds before resolving, matching upstream
+                // (`embedded.zig`: `clamped_x = @min(x, cols-1)`, `clamped_y = @min(y, rows-1)`)
+                // — an out-of-edge exact point (routine for pixel->cell mouse drags) yields the
+                // edge cell rather than failing.
+                let clamped = super::point::Coordinate::new(
+                    coord.x.min(screen.cols().saturating_sub(1)),
+                    coord.y.min(u32::from(screen.rows().saturating_sub(1))),
+                );
+                let point = match tag {
+                    TerminalPointTag::Active => super::point::Point::active(clamped),
+                    TerminalPointTag::Viewport => super::point::Point::viewport(clamped),
+                    TerminalPointTag::Screen => super::point::Point::screen(clamped),
+                    TerminalPointTag::History => super::point::Point::history(clamped),
+                };
+                screen.grid_ref(point)?
+            }
+            EmbeddedPointCoord::TopLeft => {
+                super::page_list::GridRef::from(screen.pages().get_top_left(tag.into()))
+            }
+            EmbeddedPointCoord::BottomRight => {
+                super::page_list::GridRef::from(screen.pages().get_bottom_right(tag.into())?)
+            }
+        };
+        Some(grid_ref.into())
     }
 
     pub(crate) fn track_grid_ref(

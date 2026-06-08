@@ -408,20 +408,44 @@ typedef enum {
 typedef struct {
   uint16_t x;
   uint32_t y;
-} roastty_point_coordinate_s;
+} roastty_grid_point_coordinate_s;
 
 typedef union {
-  roastty_point_coordinate_s active;
-  roastty_point_coordinate_s viewport;
-  roastty_point_coordinate_s screen;
-  roastty_point_coordinate_s history;
+  roastty_grid_point_coordinate_s active;
+  roastty_grid_point_coordinate_s viewport;
+  roastty_grid_point_coordinate_s screen;
+  roastty_grid_point_coordinate_s history;
   uint64_t _padding[2];
-} roastty_point_value_u;
+} roastty_grid_point_value_u;
 
 typedef struct {
   roastty_point_tag_e tag;
-  roastty_point_value_u value;
+  roastty_grid_point_value_u value;
+} roastty_grid_point_s;
+
+/* Embedded point/selection ABI (Issue 802 / Exp 11) — byte-faithful to upstream.
+ * `point_tag_e` (above, with HISTORY at idx 3) is shared with the grid types. */
+typedef enum {
+  ROASTTY_POINT_COORD_EXACT = 0,
+  ROASTTY_POINT_COORD_TOP_LEFT = 1,
+  ROASTTY_POINT_COORD_BOTTOM_RIGHT = 2,
+} roastty_point_coord_e;
+
+typedef struct {
+  roastty_point_tag_e tag;
+  roastty_point_coord_e coord;
+  uint32_t x;
+  uint32_t y;
 } roastty_point_s;
+
+typedef struct {
+  roastty_point_s top_left;
+  roastty_point_s bottom_right;
+  bool rectangle;
+} roastty_selection_s;
+
+_Static_assert(sizeof(roastty_point_s) == 16, "embedded point_s size");
+_Static_assert(sizeof(roastty_selection_s) == 36, "embedded selection_s size");
 
 /*
  * Borrowed snapshot reference into terminal page storage.
@@ -542,7 +566,7 @@ typedef struct {
   roastty_grid_ref_s start;
   roastty_grid_ref_s end;
   bool rectangle;
-} roastty_selection_s;
+} roastty_grid_selection_s;
 
 typedef struct {
   size_t size;
@@ -572,7 +596,7 @@ typedef struct {
   roastty_selection_format_e emit;
   bool unwrap;
   bool trim;
-  const roastty_selection_s* selection;
+  const roastty_grid_selection_s* selection;
 } roastty_terminal_selection_format_options_s;
 
 typedef struct {
@@ -602,7 +626,7 @@ typedef struct {
   bool unwrap;
   bool trim;
   roastty_formatter_terminal_extra_s extra;
-  const roastty_selection_s* selection;
+  const roastty_grid_selection_s* selection;
 } roastty_formatter_terminal_options_s;
 
 typedef struct {
@@ -2079,7 +2103,7 @@ ROASTTY_API roastty_result_e roastty_kitty_graphics_placement_rect(
     roastty_kitty_graphics_placement_iterator_t,
     roastty_kitty_graphics_image_t,
     roastty_terminal_t,
-    roastty_selection_s*);
+    roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e roastty_kitty_graphics_placement_pixel_size(
     roastty_kitty_graphics_placement_iterator_t,
     roastty_kitty_graphics_image_t,
@@ -2147,7 +2171,7 @@ ROASTTY_API roastty_result_e
 roastty_terminal_take_pty_response(roastty_terminal_t, roastty_string_s*);
 ROASTTY_API roastty_result_e
 roastty_terminal_grid_ref(roastty_terminal_t,
-                          roastty_point_s,
+                          roastty_grid_point_s,
                           roastty_grid_ref_s*);
 ROASTTY_API roastty_result_e
 roastty_grid_ref_cell(const roastty_grid_ref_s*, roastty_cell_t*);
@@ -2169,10 +2193,10 @@ ROASTTY_API roastty_result_e
 roastty_terminal_point_from_grid_ref(roastty_terminal_t,
                                      const roastty_grid_ref_s*,
                                      roastty_point_tag_e,
-                                     roastty_point_coordinate_s*);
+                                     roastty_grid_point_coordinate_s*);
 ROASTTY_API roastty_result_e
 roastty_terminal_grid_ref_track(roastty_terminal_t,
-                                roastty_point_s,
+                                roastty_grid_point_s,
                                 roastty_tracked_grid_ref_t*);
 ROASTTY_API void roastty_tracked_grid_ref_free(roastty_tracked_grid_ref_t);
 ROASTTY_API bool
@@ -2183,51 +2207,51 @@ roastty_tracked_grid_ref_snapshot(roastty_tracked_grid_ref_t,
 ROASTTY_API roastty_result_e
 roastty_tracked_grid_ref_point(roastty_tracked_grid_ref_t,
                                roastty_point_tag_e,
-                               roastty_point_coordinate_s*);
+                               roastty_grid_point_coordinate_s*);
 ROASTTY_API roastty_result_e
 roastty_tracked_grid_ref_set(roastty_tracked_grid_ref_t,
                              roastty_terminal_t,
-                             roastty_point_s);
+                             roastty_grid_point_s);
 ROASTTY_API roastty_result_e
 roastty_terminal_select_word(roastty_terminal_t,
                              const roastty_terminal_select_word_options_s*,
-                             roastty_selection_s*);
+                             roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e roastty_terminal_select_word_between(
     roastty_terminal_t,
     const roastty_terminal_select_word_between_options_s*,
-    roastty_selection_s*);
+    roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e
 roastty_terminal_select_line(roastty_terminal_t,
                              const roastty_terminal_select_line_options_s*,
-                             roastty_selection_s*);
+                             roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e
-roastty_terminal_select_all(roastty_terminal_t, roastty_selection_s*);
+roastty_terminal_select_all(roastty_terminal_t, roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e
 roastty_terminal_select_output(roastty_terminal_t,
                                const roastty_grid_ref_s*,
-                               roastty_selection_s*);
+                               roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e
 roastty_terminal_selection_adjust(roastty_terminal_t,
-                                  roastty_selection_s*,
+                                  roastty_grid_selection_s*,
                                   roastty_selection_adjustment_e);
 ROASTTY_API roastty_result_e
 roastty_terminal_selection_order(roastty_terminal_t,
-                                 const roastty_selection_s*,
+                                 const roastty_grid_selection_s*,
                                  roastty_selection_order_e*);
 ROASTTY_API roastty_result_e
 roastty_terminal_selection_ordered(roastty_terminal_t,
-                                   const roastty_selection_s*,
+                                   const roastty_grid_selection_s*,
                                    roastty_selection_order_e,
-                                   roastty_selection_s*);
+                                   roastty_grid_selection_s*);
 ROASTTY_API roastty_result_e
 roastty_terminal_selection_contains(roastty_terminal_t,
-                                    const roastty_selection_s*,
-                                    roastty_point_s,
+                                    const roastty_grid_selection_s*,
+                                    roastty_grid_point_s,
                                     bool*);
 ROASTTY_API roastty_result_e
 roastty_terminal_selection_equal(roastty_terminal_t,
-                                 const roastty_selection_s*,
-                                 const roastty_selection_s*,
+                                 const roastty_grid_selection_s*,
+                                 const roastty_grid_selection_s*,
                                  bool*);
 ROASTTY_API roastty_result_e roastty_terminal_selection_format_buf(
     roastty_terminal_t,
@@ -2283,7 +2307,7 @@ ROASTTY_API roastty_result_e roastty_selection_gesture_handle_event(
     roastty_selection_gesture_t,
     roastty_terminal_t,
     roastty_selection_gesture_event_t,
-    roastty_selection_s*);
+    roastty_grid_selection_s*);
 
 ROASTTY_API roastty_result_e roastty_key_event_new(roastty_key_event_t*);
 ROASTTY_API void roastty_key_event_free(roastty_key_event_t);
