@@ -457,6 +457,10 @@ stays unaltered except for the rename).
   — **Partial** (6 config types + 4 fn stubs + mouse/action/init ABI fixes; all
   11 symbols resolved, 4396 tests green; app build now reaches the
   `selection_s`/`point_s` divergence → Exp 11) · Claude/Claude
+- [Experiment 11: Embedded ABI — the selection/point layout divergence (Exp-6 #3)](11-embedded-abi-selection.md)
+  — **Designed** (separate the grid pull-model `point_s`/`selection_s` from the
+  embedded `{tag,coord,x,y}`/`{top_left,bottom_right,rectangle}`; rewire
+  `read_text`) · Claude
 
 ## Process
 
