@@ -420,6 +420,10 @@ stays unaltered except for the rename).
   — **Partial** (renamed app builds to Swift compile, links RoasttyKit; the real
   ABI gap is **56 missing symbols** — ~36 `action_*` payload types +
   input/config types — far larger than Exp 6's function audit) · Claude/Claude
+- [Experiment 8: Embedded ABI — the input type surface (tranche 1)](08-embedded-abi-input.md)
+  — **Designed** (by-value `input_key_s` + input enums + by-value
+  `surface_key`/`app_key`, byte-faithful; first of input/action/config tranches)
+  · Claude
 
 ## Process
 
