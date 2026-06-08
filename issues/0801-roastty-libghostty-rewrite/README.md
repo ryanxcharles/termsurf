@@ -2413,7 +2413,7 @@ are past the correctness-critical foundation.
 - [Experiment 843: Derive the cursor sub-inputs and screen_fg from the terminal](843-derive-cursor-and-screen-fg.md)
   — **Pass** · Claude/Claude/Claude
 - [Experiment 844: Derive row_never_extend from the terminal rows](844-derive-row-never-extend.md)
-  — **Designed** · Claude/Claude/Claude
+  — **Pass** · Claude/Claude/Claude
 
 ## Non-Goals
 

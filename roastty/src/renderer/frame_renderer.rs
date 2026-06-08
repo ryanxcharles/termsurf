@@ -10,7 +10,7 @@
 use crate::config::WindowPaddingColor;
 use crate::font::run::Wide;
 use crate::font::shared_grid::SharedGrid;
-use crate::renderer::cell::{Contents, Highlight, SelectionConfig};
+use crate::renderer::cell::{row_never_extend_bg_flags, Contents, Highlight, SelectionConfig};
 use crate::renderer::cursor::Style as CursorStyle;
 use crate::renderer::frame_rebuild::{
     FramePaddingExtendInput, FramePreparedFrameApplication, FramePreparedFrameError,
@@ -150,11 +150,10 @@ pub(crate) struct FrameRenderKnobs {
     pub(crate) overlay_alpha: u8,
 }
 
-/// Render data derived from the live terminal — the effective default fg/bg and
-/// palette — plus the dynamic buffers the rebuild input borrows. The dynamic
-/// buffers are stubs until their own slices: `highlights`/`link_ranges` empty,
-/// `selection_config` default, and `row_never_extend` all-false (the real
-/// per-row derivation is `cell::row_never_extend_bg_flags`).
+/// Render data derived from the live terminal — the effective default fg/bg,
+/// palette, cursor, and per-row never-extend flags — plus the dynamic buffers the
+/// rebuild input borrows. The remaining stubs (until their own slices):
+/// `highlights`/`link_ranges` empty and `selection_config` default.
 pub(crate) struct FrameRenderState {
     default_fg: Rgb,
     default_bg: Rgb,
@@ -198,6 +197,14 @@ impl FrameRenderState {
             (style, color)
         });
 
+        // Per-row "never extend window padding into this row" flags, derived from
+        // the shaped rows (a row with a default-background cell, a semantic prompt,
+        // or a perfect-fit powerline cell never-extends). Note: this shapes the
+        // rows a second time (the snapshot shapes them too); sharing one shaping is
+        // a later refactor (Issue 801, Exp 846+).
+        let rows = terminal.shape_run_options();
+        let row_never_extend = row_never_extend_bg_flags(&rows, &palette, default_bg);
+
         Self {
             default_fg,
             default_bg,
@@ -207,7 +214,7 @@ impl FrameRenderState {
             highlights: Vec::new(),
             link_ranges: Vec::new(),
             selection_config: SelectionConfig::default(),
-            row_never_extend: vec![false; terminal.rows() as usize],
+            row_never_extend,
         }
     }
 
@@ -849,5 +856,42 @@ mod tests {
         let input = state.rebuild_input(&knobs);
         assert!(input.text_overlay.cursor.is_none());
         assert!(input.cursor_uniform.block_cursor.is_none());
+    }
+
+    #[test]
+    fn render_state_row_never_extend_matches_helper() {
+        let term = terminal(4, 3);
+        let state = FrameRenderState::from_terminal(&term);
+
+        let expected =
+            row_never_extend_bg_flags(&term.shape_run_options(), &state.palette, state.default_bg);
+        assert_eq!(state.row_never_extend, expected);
+        assert_eq!(state.row_never_extend.len(), 3);
+    }
+
+    #[test]
+    fn render_state_default_terminal_never_extends_every_row() {
+        let term = terminal(4, 3);
+        let state = FrameRenderState::from_terminal(&term);
+
+        // A blank cell is a default-background codepoint cell, so every row of a
+        // default terminal never-extends (the all-false stub was behaviorally wrong).
+        assert_eq!(state.row_never_extend, vec![true, true, true]);
+    }
+
+    #[test]
+    fn render_state_non_default_background_row_may_extend() {
+        let mut term = terminal(4, 3);
+        // Row 1 (0-based): cursor to row 2 col 1, palette-red background, fill all
+        // four columns so no cell carries the default background.
+        term.next_slice(b"\x1b[2;1H\x1b[41mBBBB")
+            .expect("red background row");
+        let state = FrameRenderState::from_terminal(&term);
+
+        // Row 1's cells all have a non-default background → it may extend (false);
+        // the default-background rows around it never-extend (true).
+        assert!(!state.row_never_extend[1]);
+        assert!(state.row_never_extend[0]);
+        assert!(state.row_never_extend[2]);
     }
 }

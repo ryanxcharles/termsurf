@@ -116,6 +116,67 @@ path.
 `refine_padding_extend_rows` does not panic on a `true` flag; the implementation
 will verify the frame test passes before recording the result.)
 
+## Result
+
+**Result:** Pass
+
+`from_terminal` now derives `row_never_extend` via
+`row_never_extend_bg_flags(&terminal.shape_run_options(), &palette, default_bg)`
+(replacing the all-false stub); the `FrameRenderState` doc comment moved
+`row_never_extend` out of the stub list. Production `cargo build -p roastty` and
+`--tests` both clean (no warnings); fmt clean, no-ghostty clean,
+`git diff --check` clean.
+
+Three new tests, all passing (and the 842 frame test still rebuilds a frame with
+the all-true flags — no `refine_padding_extend_rows` panic, resolving the design
+review's open question):
+
+- **`render_state_row_never_extend_matches_helper`** — the derived flags equal
+  `row_never_extend_bg_flags` applied to the terminal's shaped rows; length 3.
+- **`render_state_default_terminal_never_extends_every_row`** — a default 4×3 is
+  `[true, true, true]` (blank cells are default-bg codepoint cells).
+- **`render_state_non_default_background_row_may_extend`** — a row filled with a
+  palette-red background (`\x1b[2;1H\x1b[41mBBBB`) is `false` while the
+  default-background rows around it are `true` — the derivation distinguishes
+  extend from never-extend.
+
+**Full suite (default parallelism, `scripts/bounded-run.sh`):**
+`4384 passed; 0 failed` (4381 + 3 new), 0 panics, 0 `PoisonError`,
+`STATUS=COMPLETED rc=0`, 281 s — green.
+
 ## Conclusion
 
-_(to be written after the run)_
+`row_never_extend` — the last stubbed input field — is now derived. Every field
+of `FramePreparedRebuildInput` except the three dynamic buffers
+(`highlights`/`link_ranges`/`selection_config`, still empty/default) and the
+config-knobs now comes from the live terminal.
+
+Continuing the input-derivation arc, in order:
+
+- **Exp 845:** derive selection / highlights / link ranges from the terminal
+  (the remaining empty dynamic buffers).
+- **Exp 846+:** the **configuration sub-arc** — port `font-thicken`,
+  `font-thicken-strength`, `minimum-contrast` (→ `alpha`/`faint_opacity`);
+  source the remaining knobs (`bold_color`, `background_opacity`,
+  `window_padding_color`) from `Config`; then have `FrameRenderer::update_frame`
+  take `&FrameRenderState` + `&FrameRenderKnobs` directly (and consider sharing
+  one `shape_run_options` between `FrameRenderState` and the snapshot — the perf
+  cost noted above); finally build the input from live surface state in
+  `surface.draw()`.
+
+## Completion Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). Independently confirmed: the diff matches the design (the
+`row_never_extend_bg_flags` import, the `from_terminal` derivation with the
+derived `&palette`/`default_bg`, the doc-comment update, 3 new tests); only
+`frame_renderer.rs` changed; 17/17 frame_renderer tests pass (3 new + 840–843);
+the non-default-bg test is genuine (row 1 red-filled → `false`, rows 0/2 →
+`true`); length == `terminal.rows()`; v1.log shows 4384 passed / 0 failed, rc=0,
+default parallelism, no timeout; fmt/build clean. **Verdict: CHANGES REQUIRED →
+fixed.**
+
+- **Required — stale README index status.** Flipped 844 `Designed → Pass`.
+- **Optional — self-citing comment.** The "sharing one shaping is a later
+  refactor" comment cited Exp 844 (itself); **fixed** to Exp 846+ (where the
+  shared-shaping refactor is scheduled).
