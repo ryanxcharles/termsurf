@@ -162,8 +162,89 @@ addressed:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — the embedded **input** ABI is implemented byte-faithful, the
+libroastty test suite is green, and the input subset of the worklist is fully
+resolved (gap **56 → 48**).
+
+### What landed
+
+- **`roastty.h`:** `roastty_key_e`'s 176 members renamed to ghostty's exact
+  names (`KEY_A`, `KEY_DIGIT_0`, `KEY_NUMPAD_0`, … — 48 cosmetic renames, values
+  unchanged); added `roastty_input_action_e`,
+  `typedef roastty_key_e roastty_input_key_e` (alias — same 176 values),
+  `roastty_input_mouse_button_e`/`_state_e`/`_momentum_e`, `roastty_input_key_s`
+  (7-field by-value), `roastty_binding_flags_e`; changed
+  `surface_key`/`surface_key_is_binding` to **by-value** + added `app_key` /
+  `app_keyboard_changed`. Header parses clean under clang.
+- **`lib.rs`:** `#[repr(C)] RoasttyInputKey` (layout-tested: size 32, align 8,
+  offsets 0/4/8/12/16/24/28); `input_key_to_event` (NUL-terminated `text` →
+  empty-on-null, UTF-8-validated; `Mods::from_int`; `unshifted_codepoint`
+  clamped to u21; **`keycode` is the NATIVE platform keycode → physical `Key`
+  via the ported `NATIVE_TO_KEY` table in `input/key.rs`** — see the review
+  finding below); by-value
+  `roastty_surface_key`/`roastty_app_key`/`roastty_surface_key_is_binding`
+  (flags widened to `c_int` = `binding_flags_e`); the opaque path retained as
+  `*_handle`; **all 65 test call sites migrated** to the `_handle` variants.
+- **`app_key`/`app_keyboard_changed`** are no-ops for now (app-scoped
+  global-keybind handling + keymap reload aren't wired in libroastty) —
+  documented feature-completion items, not crashes.
+
+### Verification
+
+- **`cargo test -p roastty --lib`: 4395 passed, 0 failed** (4394 prior + the new
+  `input_key_abi_layout_matches_upstream`) — no regression from the signature
+  change / test migration.
+- **The design review independently verified** roastty's internal `Key` matches
+  `ghostty_input_key_e` value-for-value (176) and `input_key_s` is
+  byte-identical; the member-name diff was confirmed to be 48 cosmetic renames
+  (value-equal).
+- **Static worklist check:** the input symbols (`input_key_s`, `input_action_e`,
+  `input_key_e`, `input_mouse_*_e`, `app_key`, `app_keyboard_changed`,
+  `binding_flags_e`) are all present in `roastty.h`; the gap dropped **56 →
+  48**. The app rebuild advances past the input symbols (next error is
+  `roastty_config_color_s`, a Exp-10 config type).
 
 ## Conclusion
 
-_(to be added after the run.)_
+The input tranche is closed byte-faithfully with zero test regression — the
+pattern is proven: roastty's internals already match upstream, so the embedded
+ABI is mostly header exposure + thin by-value entries + (the real cost) test
+migration off the interim opaque shapes. The remaining gap is **48**: the **36
+`action_*` payload types** (Exp 9 — the bulk, the tagged-union `action_s`
+members), **4 config value types** + 8 misc/functions (Exp 10). `roastty_app` in
+the "other" list is the Exp-7 Swift-var false positive (not an ABI symbol).
+
+**Next (Exp 9):** the `action_*` family — define `action_s` (tagged union) +
+each payload struct/enum byte-faithful, reconciling the Exp-6 `action_s`
+divergence (opaque `int+uintptr_t[8]` → the embedded tagged union).
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: CHANGES REQUIRED → addressed.** It independently
+confirmed the struct is byte-faithful (offsets 0/4/8/12/16/24/28, size 32, align
+8), the enums match upstream value-for-value (176 keys, action 0/1/2, binding
+flags 1<<0..1<<3, no dups), the header compiles clean, the flags-width
+reconciliation is sound, and the test migration is intact (0 bare by-value
+calls; the opaque `*_handle` path still exercised). It found one **real semantic
+bug** the "Pass" had glossed:
+
+- **Required — `keycode` was misinterpreted.** Upstream's `input_key_s.keycode`
+  is the **native platform keycode** (macOS `keyCode`), which
+  `apprt/embedded.zig` `KeyEvent.core()` translates to the physical `Key` via
+  `input/keycodes.zig`. My code did `key_from_int(keycode)` (treating it as a
+  `Key` enum index) — so macOS keyCode `0` (the **A** key) resolved to
+  `ALL_KEYS[0] = Unidentified`, breaking physical-key resolution for
+  keybindings. **Fixed:** ported `keycodes.zig`'s native(macOS)→`Key` table (117
+  entries) as `NATIVE_TO_KEY` + `key_from_native` in `input/key.rs`, and
+  `input_key_to_event` now uses it. The layout test now asserts native
+  `0x00`→`KeyA`, `0x35`→`Escape`. (The opaque `set_key` path keeps
+  `key_from_int`, which is correct for _it_ — it takes a `Key` index.)
+- **Optional — `unshifted_codepoint`** now clamped to u21 (zeroing
+  out-of-range), matching upstream `std.math.cast(u21, …) orelse 0`.
+- **Nit — `text`** is UTF-8-validated (silently dropped if invalid) to match the
+  opaque `set_utf8` semantics; upstream's embedded path assigns bytes
+  unvalidated — a low-risk behavioral note.
+
+The "no internal value-mapping needed" framing held for the enums but **not**
+for `keycode` — a native-keycode table port was required, now done.

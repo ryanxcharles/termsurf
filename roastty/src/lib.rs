@@ -13639,8 +13639,102 @@ pub extern "C" fn roastty_surface_key_translation_mods(
     key_mods_to_raw(key_mods_from_raw(mods).translation(key_mods::OptionAsAlt::False))
 }
 
+/// Embedded by-value key event (Issue 802 / Exp 8) — byte-faithful to
+/// `ghostty_input_key_s` / `roastty_input_key_s`.
+#[repr(C)]
+pub struct RoasttyInputKey {
+    pub action: c_int,
+    pub mods: c_int,
+    pub consumed_mods: c_int,
+    pub keycode: u32,
+    pub text: *const c_char,
+    pub unshifted_codepoint: u32,
+    pub composing: bool,
+}
+
+/// Build the internal `KeyEvent` from a by-value `roastty_input_key_s`.
+/// `text` is a NUL-terminated C string (null → empty), UTF-8-validated to match
+/// the opaque path's `set_utf8` semantics.
+fn input_key_to_event(k: &RoasttyInputKey) -> KeyEvent {
+    let mut ev = key::KeyEvent::default();
+    if let Some(action) = key_action_from_int(k.action) {
+        ev.action = action;
+    }
+    // `keycode` is the NATIVE platform keycode (e.g. macOS keyCode), not a Key enum
+    // index — resolve the physical key via the native→Key table, matching ghostty
+    // `apprt/embedded.zig` `KeyEvent.core()`.
+    ev.key = key::key_from_native(k.keycode);
+    ev.mods = key_mods::Mods::from_int(k.mods as u16);
+    ev.consumed_mods = key_mods::Mods::from_int(k.consumed_mods as u16);
+    ev.composing = k.composing;
+    // Clamp to u21 (`std.math.cast(u21, …) orelse 0` upstream), zeroing out-of-range.
+    ev.unshifted_codepoint = if k.unshifted_codepoint <= 0x1f_ffff {
+        k.unshifted_codepoint
+    } else {
+        0
+    };
+    if !k.text.is_null() {
+        let bytes = unsafe { CStr::from_ptr(k.text) }.to_bytes();
+        if let Ok(s) = core::str::from_utf8(bytes) {
+            ev.utf8 = s.as_bytes().to_vec();
+        }
+    }
+    KeyEvent { event: ev }
+}
+
+/// Embedded by-value `surface_key` (the app's path) — supersedes the opaque
+/// `*_handle` variant (kept for the existing tests).
 #[no_mangle]
-pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyKeyEvent) -> bool {
+pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyInputKey) -> bool {
+    let Some(surface) = surface_from_handle(surface) else {
+        return false;
+    };
+    let ev = input_key_to_event(&event);
+    surface.key(&ev)
+}
+
+/// Embedded by-value `app_key`. App-scoped (global keybind) handling is not yet
+/// wired in libroastty, so this returns `false` (not consumed) for now — the app
+/// then handles it. (A documented feature-completion item, not a crash.)
+#[no_mangle]
+pub extern "C" fn roastty_app_key(app: RoasttyApp, event: RoasttyInputKey) -> bool {
+    let _ = (app, input_key_to_event(&event));
+    false
+}
+
+/// Keyboard layout changed. libroastty has no keymap-reload path yet, so this is a
+/// no-op (layout-change remapping is a documented feature-completion item).
+#[no_mangle]
+pub extern "C" fn roastty_app_keyboard_changed(app: RoasttyApp) {
+    let _ = app;
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_surface_key_is_binding(
+    surface: RoasttySurface,
+    event: RoasttyInputKey,
+    flags: *mut c_int,
+) -> bool {
+    let ev = input_key_to_event(&event);
+    let mut u8flags: u8 = 0;
+    let result = match surface_from_handle(surface) {
+        Some(surface) => surface.key_is_binding(Some(&ev), &mut u8flags as *mut u8),
+        None => false,
+    };
+    if !flags.is_null() {
+        unsafe {
+            flags.write(u8flags as c_int);
+        }
+    }
+    result
+}
+
+/// Opaque-handle `surface_key` (pre-Exp-8 API) — retained for the existing tests.
+#[no_mangle]
+pub extern "C" fn roastty_surface_key_handle(
+    surface: RoasttySurface,
+    event: RoasttyKeyEvent,
+) -> bool {
     let Some(surface) = surface_from_handle(surface) else {
         return false;
     };
@@ -13651,7 +13745,7 @@ pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyKey
 }
 
 #[no_mangle]
-pub extern "C" fn roastty_surface_key_is_binding(
+pub extern "C" fn roastty_surface_key_is_binding_handle(
     surface: RoasttySurface,
     event: RoasttyKeyEvent,
     flags: *mut u8,
@@ -15828,8 +15922,8 @@ mod tests {
         let event = new_key_event();
         let mut flags = 0xffu8;
 
-        assert!(!roastty_surface_key(ptr::null_mut(), event));
-        assert!(!roastty_surface_key_is_binding(
+        assert!(!roastty_surface_key_handle(ptr::null_mut(), event));
+        assert!(!roastty_surface_key_is_binding_handle(
             ptr::null_mut(),
             event,
             &mut flags
@@ -15841,12 +15935,14 @@ mod tests {
         roastty_app_free(app);
         flags = 0xff;
 
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
         assert!(surface_from_handle(surface)
             .unwrap()
             .last_key_event
             .is_none());
-        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(!roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, 0);
 
         roastty_key_event_free(event);
@@ -15866,7 +15962,7 @@ mod tests {
         mods.ctrl = true;
         assert_eq!(roastty_key_event_set_mods(event, mods), ROASTTY_SUCCESS);
 
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
 
         let stored = surface_from_handle(surface)
             .unwrap()
@@ -15897,6 +15993,49 @@ mod tests {
     }
 
     #[test]
+    fn input_key_abi_layout_matches_upstream() {
+        // roastty_input_key_s must be byte-faithful to ghostty_input_key_s.
+        use core::mem::{align_of, offset_of, size_of};
+        assert_eq!(size_of::<RoasttyInputKey>(), 32);
+        assert_eq!(align_of::<RoasttyInputKey>(), 8);
+        assert_eq!(offset_of!(RoasttyInputKey, action), 0);
+        assert_eq!(offset_of!(RoasttyInputKey, mods), 4);
+        assert_eq!(offset_of!(RoasttyInputKey, consumed_mods), 8);
+        assert_eq!(offset_of!(RoasttyInputKey, keycode), 12);
+        assert_eq!(offset_of!(RoasttyInputKey, text), 16);
+        assert_eq!(offset_of!(RoasttyInputKey, unshifted_codepoint), 24);
+        assert_eq!(offset_of!(RoasttyInputKey, composing), 28);
+        // enum values match upstream (RELEASE=0, PRESS=1, REPEAT=2).
+        assert_eq!(key_action_to_int(key::KeyAction::Release), 0);
+        assert_eq!(key_action_to_int(key::KeyAction::Press), 1);
+        assert_eq!(key_action_to_int(key::KeyAction::Repeat), 2);
+        // by-value construction round-trips through the internal event.
+        let ik = RoasttyInputKey {
+            action: 1,
+            mods: 0,
+            consumed_mods: 0,
+            keycode: 0,
+            text: core::ptr::null(),
+            unshifted_codepoint: 0,
+            composing: false,
+        };
+        let ev = input_key_to_event(&ik);
+        assert_eq!(ev.event.action, key::KeyAction::Press);
+        assert!(ev.event.utf8.is_empty());
+        // keycode is the NATIVE macOS keyCode: 0x00 = A, 0x35 = Escape (not a Key index).
+        assert_eq!(ev.event.key, key::Key::KeyA);
+        assert_eq!(
+            input_key_to_event(&RoasttyInputKey {
+                keycode: 0x35,
+                ..ik
+            })
+            .event
+            .key,
+            key::Key::Escape
+        );
+    }
+
+    #[test]
     fn surface_key_printable_utf8_reaches_child_pty() {
         let _guard = pty_command_lock();
         let app = new_test_app();
@@ -15916,7 +16055,7 @@ mod tests {
         );
 
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         let text = surface_snapshot_text_until(app, surface, "a");
         assert!(text.contains('a'), "{text:?}");
 
@@ -15955,7 +16094,7 @@ mod tests {
             ),
             b"\x1bOA"
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);
@@ -16090,7 +16229,7 @@ mod tests {
             ROASTTY_SUCCESS
         );
 
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
         let stored = surface_from_handle(surface)
             .unwrap()
             .last_key_event
@@ -16127,7 +16266,7 @@ mod tests {
             .shutdown()
             .expect("shutdown worker");
 
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
         let surface_ref = surface_from_handle(surface).unwrap();
         assert!(surface_ref.process_exited);
         assert!(surface_ref.dirty);
@@ -16155,7 +16294,7 @@ mod tests {
             b"d",
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         let records = action_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].action_tag, ROASTTY_ACTION_NEW_SPLIT);
@@ -16172,9 +16311,9 @@ mod tests {
             &[],
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         assert_eq!(action_records().len(), 1);
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
         assert_eq!(action_records().len(), 1);
 
         roastty_key_event_free(event);
@@ -16196,7 +16335,7 @@ mod tests {
             b"d",
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         assert_eq!(action_records().len(), 1);
 
         roastty_key_event_free(event);
@@ -16214,7 +16353,7 @@ mod tests {
             b"d",
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);
@@ -16235,7 +16374,7 @@ mod tests {
             &[],
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         let records = action_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].action_tag, ROASTTY_ACTION_END_SEARCH);
@@ -16248,7 +16387,7 @@ mod tests {
             b"g",
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
 
         set_key_event(
             event,
@@ -16258,7 +16397,7 @@ mod tests {
             &[],
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
 
         set_key_event(
             event,
@@ -16268,7 +16407,7 @@ mod tests {
             b"g",
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
 
         let records = action_records();
         assert_eq!(records.len(), 3);
@@ -16309,7 +16448,7 @@ mod tests {
             b"d",
             0,
         );
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
 
         set_key_event(
             event,
@@ -16320,7 +16459,7 @@ mod tests {
             0,
         );
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         let text = surface_snapshot_text_until(app, surface, "^[[1;2D");
         assert!(
             text.contains("^[[1;2D") || text.contains("^[[D"),
@@ -16335,7 +16474,7 @@ mod tests {
             &[],
             0,
         );
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);
@@ -16364,7 +16503,7 @@ mod tests {
             0,
         );
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         // Assert the deterministic od hex of the legacy byte (0x05), not the racy
         // pre-`stty -echo` echo "^E", which is lost under load (Issue 801, Exp 835).
         let text = surface_snapshot_text_until(app, surface, "05");
@@ -16390,9 +16529,11 @@ mod tests {
             0,
         );
         let mut flags = 0;
-        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_PERFORMABLE);
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
         assert_eq!(action_records().len(), 1);
 
         set_key_event(
@@ -16403,7 +16544,7 @@ mod tests {
             &[],
             0,
         );
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
 
         roastty_key_event_free(event);
         roastty_surface_free(surface);
@@ -16434,7 +16575,7 @@ mod tests {
                 b"x",
                 0,
             );
-            assert!(roastty_surface_key(surface, event));
+            assert!(roastty_surface_key_handle(surface, event));
             let text = surface_snapshot_text_until(app, surface, "hello");
             assert!(text.contains("hello"), "{text:?}");
 
@@ -16469,7 +16610,7 @@ mod tests {
                     b"n",
                     0,
                 );
-                assert!(roastty_surface_key(surface, event));
+                assert!(roastty_surface_key_handle(surface, event));
                 set_key_event(
                     event,
                     key::KeyAction::Press,
@@ -16478,7 +16619,7 @@ mod tests {
                     b"q",
                     0,
                 );
-                assert!(roastty_surface_key(surface, event));
+                assert!(roastty_surface_key_handle(surface, event));
 
                 let records = action_records();
                 assert_eq!(records.len(), 2);
@@ -16518,7 +16659,7 @@ mod tests {
                 b"c",
                 0,
             );
-            assert!(roastty_surface_key(surface, event));
+            assert!(roastty_surface_key_handle(surface, event));
             assert!(clipboard_write_records().is_empty());
             let text = surface_snapshot_text_until(app, surface, "custom");
             assert!(text.contains("custom"), "{text:?}");
@@ -16554,7 +16695,7 @@ mod tests {
                     b"n",
                     0,
                 );
-                assert!(roastty_surface_key(surface, event));
+                assert!(roastty_surface_key_handle(surface, event));
                 assert_eq!(action_records().len(), 1);
 
                 set_key_event(
@@ -16565,7 +16706,7 @@ mod tests {
                     b"c",
                     0,
                 );
-                assert!(roastty_surface_key(surface, event));
+                assert!(roastty_surface_key_handle(surface, event));
 
                 roastty_key_event_free(event);
                 roastty_surface_free(surface);
@@ -16592,7 +16733,7 @@ mod tests {
                 b"d",
                 0,
             );
-            assert!(roastty_surface_key(surface, event));
+            assert!(roastty_surface_key_handle(surface, event));
 
             set_key_event(
                 event,
@@ -16602,8 +16743,8 @@ mod tests {
                 &[],
                 0,
             );
-            assert!(roastty_surface_key(surface, event));
-            assert!(!roastty_surface_key(surface, event));
+            assert!(roastty_surface_key_handle(surface, event));
+            assert!(!roastty_surface_key_handle(surface, event));
 
             roastty_key_event_free(event);
             roastty_surface_free(surface);
@@ -16645,7 +16786,7 @@ mod tests {
                     b"d",
                     0,
                 );
-                assert!(roastty_surface_key(surface, event));
+                assert!(roastty_surface_key_handle(surface, event));
 
                 set_key_event(
                     event,
@@ -16655,7 +16796,7 @@ mod tests {
                     b"x",
                     0,
                 );
-                assert!(roastty_surface_key(surface, event));
+                assert!(roastty_surface_key_handle(surface, event));
                 let text = surface_snapshot_text_until(app, surface, "18");
                 assert!(text.contains("^X") || text.contains("18"), "{text:?}");
 
@@ -16667,7 +16808,7 @@ mod tests {
                     &[],
                     0,
                 );
-                assert!(!roastty_surface_key(surface, event));
+                assert!(!roastty_surface_key_handle(surface, event));
 
                 roastty_key_event_free(event);
                 roastty_surface_free(surface);
@@ -16696,7 +16837,7 @@ mod tests {
                 b"n",
                 0,
             );
-            assert!(roastty_surface_key(surface, event));
+            assert!(roastty_surface_key_handle(surface, event));
             let records = action_records();
             assert_eq!(records.len(), 1);
             assert_eq!(records[0].action_tag, ROASTTY_ACTION_NEW_WINDOW);
@@ -16715,19 +16856,21 @@ mod tests {
         let event = new_key_event();
         let mut flags = 0xffu8;
 
-        assert!(!roastty_surface_key_is_binding(
+        assert!(!roastty_surface_key_is_binding_handle(
             surface,
             ptr::null_mut(),
             &mut flags
         ));
         assert_eq!(flags, 0);
-        assert!(!roastty_surface_key_is_binding(
+        assert!(!roastty_surface_key_is_binding_handle(
             surface,
             event,
             ptr::null_mut()
         ));
         flags = 0xff;
-        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(!roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, 0);
 
         set_key_event(
@@ -16738,7 +16881,7 @@ mod tests {
             b"c",
             0,
         );
-        assert!(roastty_surface_key_is_binding(
+        assert!(roastty_surface_key_is_binding_handle(
             surface,
             event,
             ptr::null_mut()
@@ -16753,7 +16896,9 @@ mod tests {
             0,
         );
         flags = 0xff;
-        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(!roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, 0);
 
         set_key_event(
@@ -16765,7 +16910,9 @@ mod tests {
             0,
         );
         flags = 0xff;
-        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(!roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, 0);
 
         roastty_key_event_free(event);
@@ -16806,7 +16953,9 @@ mod tests {
         ] {
             flags = 0xff;
             set_key_event(event, key::KeyAction::Press, key, mods, utf8, unshifted);
-            assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+            assert!(roastty_surface_key_is_binding_handle(
+                surface, event, &mut flags
+            ));
             assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
         }
 
@@ -16831,7 +16980,9 @@ mod tests {
         ] {
             flags = 0xff;
             set_key_event(event, key::KeyAction::Press, key, mods, utf8, 0);
-            assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+            assert!(roastty_surface_key_is_binding_handle(
+                surface, event, &mut flags
+            ));
             assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_PERFORMABLE);
         }
 
@@ -16855,7 +17006,9 @@ mod tests {
             &[],
             0,
         );
-        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
         flags = 0xff;
@@ -16867,7 +17020,9 @@ mod tests {
             b"c",
             0,
         );
-        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
         roastty_key_event_free(event);
@@ -16901,7 +17056,9 @@ mod tests {
                     &[],
                     0,
                 );
-                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
                 flags = 0xff;
@@ -16913,7 +17070,9 @@ mod tests {
                     b"x",
                     0,
                 );
-                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
                 flags = 0xff;
@@ -16925,7 +17084,9 @@ mod tests {
                     &[],
                     u32::from(b'z'),
                 );
-                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
                 set_key_event(
@@ -16936,7 +17097,7 @@ mod tests {
                     &[],
                     0,
                 );
-                assert!(roastty_surface_key_is_binding(
+                assert!(roastty_surface_key_is_binding_handle(
                     surface,
                     event,
                     ptr::null_mut()
@@ -16951,7 +17112,9 @@ mod tests {
                     0,
                 );
                 flags = 0xff;
-                assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(!roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, 0);
 
                 set_key_event(
@@ -16963,7 +17126,9 @@ mod tests {
                     0,
                 );
                 flags = 0xff;
-                assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(!roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, 0);
 
                 roastty_app_free(app);
@@ -16976,7 +17141,9 @@ mod tests {
                     0,
                 );
                 flags = 0xff;
-                assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(!roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, 0);
 
                 roastty_key_event_free(event);
@@ -17003,7 +17170,9 @@ mod tests {
                 b"c",
                 0,
             );
-            assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+            assert!(roastty_surface_key_is_binding_handle(
+                surface, event, &mut flags
+            ));
             assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
             roastty_key_event_free(event);
@@ -17032,7 +17201,9 @@ mod tests {
             b"a",
             0,
         );
-        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
         let updated = roastty_config_new();
@@ -17050,7 +17221,9 @@ mod tests {
             b"a",
             0,
         );
-        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(!roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, 0);
 
         flags = 0xff;
@@ -17062,7 +17235,9 @@ mod tests {
             b"b",
             0,
         );
-        assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
         roastty_key_event_free(event);
@@ -17096,7 +17271,9 @@ mod tests {
                     b"n",
                     0,
                 );
-                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
                 flags = 0xff;
@@ -17108,7 +17285,9 @@ mod tests {
                     b"n",
                     0,
                 );
-                assert!(roastty_surface_key_is_binding(surface, event, &mut flags));
+                assert!(roastty_surface_key_is_binding_handle(
+                    surface, event, &mut flags
+                ));
                 assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
 
                 roastty_key_event_free(event);
@@ -20076,7 +20255,7 @@ mod tests {
         let event = new_key_event();
         let mut flags = 0xffu8;
 
-        assert!(!roastty_surface_key_is_binding(
+        assert!(!roastty_surface_key_is_binding_handle(
             ptr::null_mut(),
             event,
             &mut flags
@@ -20085,7 +20264,9 @@ mod tests {
 
         roastty_app_free(app);
         flags = 0xff;
-        assert!(!roastty_surface_key_is_binding(surface, event, &mut flags));
+        assert!(!roastty_surface_key_is_binding_handle(
+            surface, event, &mut flags
+        ));
         assert_eq!(flags, 0);
 
         roastty_key_event_free(event);
@@ -27292,7 +27473,7 @@ mod tests {
             .shutdown()
             .expect("shutdown worker");
         assert!(binding_action(surface, "toggle_readonly"));
-        assert!(roastty_surface_key(surface, event));
+        assert!(roastty_surface_key_handle(surface, event));
         let surface_ref = surface_from_handle(surface).unwrap();
         assert_eq!(
             surface_ref.last_key_event.as_ref().unwrap().key,
@@ -27302,7 +27483,7 @@ mod tests {
         assert_eq!(surface_ref.last_termio_error, None);
 
         assert!(binding_action(surface, "toggle_readonly"));
-        assert!(!roastty_surface_key(surface, event));
+        assert!(!roastty_surface_key_handle(surface, event));
         let surface_ref = surface_from_handle(surface).unwrap();
         assert!(surface_ref.process_exited);
         assert_eq!(

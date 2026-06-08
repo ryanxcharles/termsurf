@@ -255,6 +255,16 @@ before re-reading experiments.
   Exp-6 function-signature audit missed these (nested in the union); to scope
   the embedded ABI, diff **all `roastty_*` idents the app references**
   (`grep -rhoE 'roastty_[a-z0-9_]+' roastty/macos/Sources`) vs `roastty.h`.
+- **Embedded-ABI implementation pattern (Exp 8):** roastty's internals already
+  match upstream value-for-value, so each tranche is mostly (a) expose the
+  enums/structs in `roastty.h` byte-faithful (rename existing enums to ghostty's
+  exact member names — e.g. `KEY_A`/`DIGIT_0` — values unchanged; alias when an
+  equivalent enum exists), (b) thin by-value `#[repr(C)]` + `extern "C"` entries
+  that build the internal type and call the existing path, (c) **the real cost:
+  migrate roastty's tests off the interim opaque/handle API** (rename the old
+  export to `*_handle`, sed the test call sites). Add a `size_of`/`offset_of`
+  layout test per struct. `cargo build` only checks the lib — run
+  `cargo test --lib` to compile+check the migrated tests.
 
 ### Where things live
 
@@ -315,13 +325,14 @@ the live app, verified by a Phase-D UI test.)
 - [x] Copy + rename the macOS app into `roastty/macos/`; point at
       `RoasttyKit.xcframework`; first build reaches Swift compile (Exp 7,
       `scripts/roastty-app/rename-app.sh`)
-- [ ] **Make it compile/link — the embedded ABI type surface (Exp 8+):** the
-      build exposed the real gap = **56 missing `roastty_*` symbols**, dominated
-      by the **~36 `action_*` payload types/enums** (the `action_s` tagged-union
-      members) + 6 input types/enums (`input_key_s`, `input_action_e`, …) + 4
-      config types + the 6 functions. Implement byte-faithful in
-      `libroastty`/`roastty.h`, drive the app's error list to zero. (Spans
-      several gated experiments.)
+- [~] **Make it compile/link — the embedded ABI type surface (Exp 8+):** Exp 8
+  done (input: 8 symbols, byte-faithful, 4395 tests green; gap 56→48).
+  Remaining: 36 `action_*` (Exp 9), config+misc (Exp 10). the build exposed the
+  real gap = **56 missing `roastty_*` symbols**, dominated by the **~36
+  `action_*` payload types/enums** (the `action_s` tagged-union members) + 6
+  input types/enums (`input_key_s`, `input_action_e`, …) + 4 config types + the
+  6 functions. Implement byte-faithful in `libroastty`/`roastty.h`, drive the
+  app's error list to zero. (Spans several gated experiments.)
 
 **Phase C — Live render path (the crux)**
 
@@ -421,9 +432,9 @@ stays unaltered except for the rename).
   ABI gap is **56 missing symbols** — ~36 `action_*` payload types +
   input/config types — far larger than Exp 6's function audit) · Claude/Claude
 - [Experiment 8: Embedded ABI — the input type surface (tranche 1)](08-embedded-abi-input.md)
-  — **Designed** (by-value `input_key_s` + input enums + by-value
-  `surface_key`/`app_key`, byte-faithful; first of input/action/config tranches)
-  · Claude
+  — **Pass** (input enums byte-faithful + by-value
+  `input_key_s`/`surface_key`/`app_key`; 4395 tests green; gap 56→48) ·
+  Claude/Claude
 
 ## Process
 
