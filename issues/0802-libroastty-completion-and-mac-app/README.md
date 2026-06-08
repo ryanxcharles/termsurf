@@ -127,6 +127,11 @@ Three workstreams, in rough dependency order.
   drive and screenshot the app headlessly/CI-ably; (d) version pinning so the
   app and ABI never skew.
 
+## Experiments
+
+- [Experiment 1: Architecture audit — what's done, what remains, and the order to finish](01-architecture-audit.md)
+  — **Pass** · Claude (7 parallel subsystem audits)
+
 ## Process
 
 Standard project process (see `CLAUDE.md`): one gated experiment at a time —
