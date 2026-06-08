@@ -134,6 +134,26 @@ Three workstreams, in rough dependency order.
   drive and screenshot the app headlessly/CI-ably; (d) version pinning so the
   app and ABI never skew.
 
+## Screenshots policy
+
+**Screenshots are never committed to this repo.** Verification in this issue is
+screenshot-heavy (the app as a visual conformance oracle), so the standing rule
+is:
+
+- The capture harness writes screenshots **outside the working tree** by default
+  — `${TERMSURF_SHOT_DIR:-$HOME/.cache/termsurf/shots}`.
+- As a safety net, a `__screenshots__/` directory name is **git-ignored**
+  anywhere in the repo, so an explicit in-repo path still cannot be committed.
+- We do **not** commit "golden" reference images. Visual checks are **live A/B**
+  — capture the real Ghostty app and the roastty app in the **same run** under
+  identical input, diff them, and record only the **verdict / diff metric**. Any
+  retained reference lives outside the repo. (The diff metric and tolerance are
+  defined by the later A/B-diff experiment; the pinned Ghostty version,
+  1.3.2-dev `2c62d18`, substitutes for a committed historical baseline.)
+
+Established in [Experiment 4](04-window-screenshot-capture.md); it supersedes
+the earlier "commit a small baseline PNG set" wording in Exp 2.
+
 ## Roadmap
 
 The ordered plan to 100%, derived from
@@ -262,6 +282,9 @@ stays unaltered except for the rename).
   — **Pass** (macOS-only `GhosttyKit` under CommandLineTools + build-only
   iOS-slice patch; app builds via Xcode 26.4 and runs — no Xcode change) ·
   Claude
+- [Experiment 4: Window-isolated screenshot capture (+ no-screenshots-in-repo policy)](04-window-screenshot-capture.md)
+  — **Designed** (capture a named app's window via `screencapture -l<id>` + a
+  Swift window-ID lookup; screenshots never committed) · Claude
 
 ## Process
 

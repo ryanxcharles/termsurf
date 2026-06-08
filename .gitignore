@@ -116,3 +116,6 @@ webtui/target/
 dist/
 
 vendor/toolchains/
+
+# Issue 802: automation screenshots are never committed (see issue README policy)
+__screenshots__/
