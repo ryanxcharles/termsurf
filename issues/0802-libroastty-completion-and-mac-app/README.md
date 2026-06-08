@@ -472,8 +472,9 @@ stays unaltered except for the rename).
   `** BUILD SUCCEEDED **`, Roastty.app produced, Phase B exit; 4401 tests green)
   · Claude/Claude
 - [Experiment 14: Phase C — launch Roastty.app and capture what it renders](14-launch-roastty-app.md)
-  — **Designed** (first Phase-C step: run the built app, capture the live state,
-  pin the first render work item; kill what we spawn) · Claude
+  — **Pass** (the app **launches cleanly** — no crash/panic — but renders blank;
+  root cause: `surface_draw` is a stub, the live NSView present path (801 crux)
+  is unwired → Exp 15; spawned app killed, 0 dangling) · Claude/Claude
 
 ## Process
 

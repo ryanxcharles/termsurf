@@ -104,8 +104,74 @@ owner-name match).
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — the built `Roastty.app` was launched, captured out-of-repo,
+characterized, and cleanly killed (0 dangling PIDs). The live state is
+**launched-blank**, and the first Phase-C work item is pinned precisely: the
+live `surface_draw` present path is unwired (the 801 "crux").
+
+### What happened
+
+- **Launches cleanly — no crash, no panic.** Running the binary directly with
+  `RUST_BACKTRACE=1`, the process stayed alive past 4s; `stderr`/`stdout` were
+  **empty** (no panic, no error). The whole newly-reconciled embedded ABI
+  (`roastty_app_new`, `roastty_surface_new`, the runtime-config callbacks)
+  initializes without faulting — a strong result on its own.
+- **A window appears but renders blank.** A window-isolated capture (by PID)
+  produced a **500×500pt / 1000×1000px white** image. Per the design's
+  cross-check, **white (not black) means the capture succeeded**
+  (Screen-Recording/TCC grant intact) and the window is genuinely blank — not a
+  permission failure.
+- **Process hygiene:** the trap + `stop-app.sh` killed the spawned app;
+  `pgrep -f 'roastty/macos/build/.*Roastty.app/Contents/MacOS/roastty'` → **0**.
+  The screenshot
+  - logs are out-of-repo (`~/.cache/termsurf/shots/`); nothing staged.
+
+### Root cause (the first Phase-C work item)
+
+`roastty_surface_draw(surface)` → `Surface::draw()` → `request_render()`, which
+only sets `self.dirty = true` and calls `wakeup_app()`. It renders **nothing**.
+The surface config carries `platform.macos.nsview`, but the `Surface` struct
+**never stores it**, never creates a `CAMetalLayer`/`CALayer` on it, and never
+presents a rendered frame. libroastty's renderer (the offscreen/Metal pipeline
+composed in 801) has **no bridge to the app's live NSView** — the exact "live
+`surface_draw` into the app-provided NSView" wiring that 801 deferred.
+
+(Tooling added:
+`scripts/roastty-app/{start-app.sh, stop-app.sh, screenshot.sh, winid.swift}` —
+launch/capture/kill by PID, screenshots out-of-repo. No `libroastty` code
+changed.)
 
 ## Conclusion
 
-_(to be added after the run.)_
+**The app runs.** That the entire freshly-reconciled embedded ABI initializes a
+window without a single crash or panic is a strong validation of Exp 6–13. The
+one thing missing is the live render present path — the renderer produces frames
+offscreen but nothing puts them on the app's NSView.
+
+**Next (Exp 15) — the crux:** wire the live present path. Capture the `nsview`
+on the `Surface` (from `surface_config.platform.macos.nsview`), stand up a
+Metal-backed layer on it (the app's `CAMetalLayer` / a `CALayerHost`, matching
+how ghostty's `surface_draw` presents), and make `surface_draw` drive the
+existing renderer pipeline to **present a frame into that layer**. Then
+re-launch and confirm the terminal content (the shell prompt) actually appears.
+This is the single largest Phase-C item; it likely splits into sub-steps (layer
+creation → present an offscreen frame → drive from the surface's content).
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** It verified the root cause **from source**
+(not inferred from the screenshot): `draw()`→`request_render()` only sets
+`dirty`+wakeup (renders nothing); the `Surface` struct has no
+`nsview`/`CAMetalLayer`/`CALayer`/metal field; `roastty_surface_new` reads the
+config but never touches `platform.macos.nsview` (defaulted null, dropped); and
+upstream `apprt/embedded.zig` _does_ store `Platform.macos.nsview` and present
+the Metal renderer into a layer on it — so roastty is missing exactly that
+bridge. "801 crux / live present path unwired" is correct and precise. Process
+hygiene safe (SIGKILL scoped to the build path; no quit dialog / broad pkill);
+screenshot + logs genuinely out-of-repo (nothing staged — only the 4 scripts + 2
+docs); "Pass" honest (it read the PNG — genuinely blank white; a prior real
+`ghostty-launch` capture in the same dir proves the TCC grant is live, so
+white≠black is sound). One Nit (the log-capture run vs `start-app.sh`'s `open`)
+— folded in. Exp-15 direction (capture nsview → Metal layer → present) confirmed
+correct.
