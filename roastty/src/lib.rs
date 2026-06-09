@@ -2012,10 +2012,11 @@ fn build_live_renderer(
         .ok()?;
     collection.update_metrics().ok()?;
     let metrics = *collection.metrics()?;
-    let shared_grid = font::shared_grid::SharedGrid::new(
-        font::codepoint_resolver::CodepointResolver::new(collection),
-        metrics,
-    );
+    // Enable CoreText discovery fallback (Issue 802 / Exp 21) so codepoints Menlo doesn't cover
+    // (CJK, emoji) resolve to a discovered system face instead of the `?` replacement glyph.
+    let mut resolver = font::codepoint_resolver::CodepointResolver::new(collection);
+    resolver.set_discover_enabled(true);
+    let shared_grid = font::shared_grid::SharedGrid::new(resolver, metrics);
     let compositor = renderer::metal::compositor::MetalFrameCompositor::new(
         renderer::metal::compositor::MetalFrameCompositorOptions {
             device,

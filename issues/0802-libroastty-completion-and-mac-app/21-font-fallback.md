@@ -102,8 +102,59 @@ Optional + one Nit, folded in:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — enabling discovery fixed the Exp-20 gap: the live app now
+renders **CJK and emoji** instead of `?`.
+
+### Change (only `libroastty`)
+
+`build_live_renderer` (`lib.rs`) builds the resolver as `let mut`, calls
+`resolver.set_discover_enabled(true)`, then passes it to `SharedGrid::new` — a
+3-line change.
+
+### Evidence (live launch, out-of-repo capture, app + descendant tree killed — 0 dangling)
+
+Same unicode probe as Exp 20 (`printf '日本語 🎉 café\n'` via `ZDOTDIR/.zshrc`):
+
+- **`日本語` renders as real CJK glyphs** (was `?` in Exp-20 `e20-unicode.png`).
+- **`🎉` renders in COLOR** — the party-popper emoji, proving the color-glyph
+  path (`Presentation::Emoji` → BGRA color atlas) works end to end.
+- `café` (Latin + combining accent) still correct; ASCII unaffected.
+
+(Known fidelity follow-up, per the design review: the CJK glyphs look slightly
+**tight** — the `Collection::set_point_size` ideographic-width fine-tune
+(`SizeAdjustment::IcWidth`) is never applied by the live renderer, so wide-cell
+advance isn't fully tuned. The glyphs render correctly at the Retina-correct
+inherited size; the exact wide-cell pitch is a separate, pre-existing refinement
+— not part of this Pass.)
+
+### Verification
+
+- **Full `cargo test -p roastty`:** lib 4403 + abi_harness 1, **0 failures** —
+  the change isn't exercised headlessly (needs a Metal device + nsview), so this
+  is a no-regression check; the discovery machinery itself is covered by the
+  existing 41 discovery tests (the design review ran them).
 
 ## Conclusion
 
-_(to be added after the run.)_
+Font fallback now works in the live app: any codepoint Menlo doesn't cover (CJK,
+emoji, and other scripts) is satisfied by a CoreText-discovered system face,
+with color emoji routed through the BGRA atlas. One of the two Exp-20 gaps is
+closed. **Next: Exp 22 — the `clear` gap** (post-clear content + prompt don't
+render). Noted refinements: the CJK ideographic-width fine-tune
+(`set_point_size`) and sprite/box-drawing glyphs.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED (no findings).** It verified the diff is exactly
+the described 3-line resolver change (no app/collateral edits, no "ghostty"
+literal), **ran the full suite** (`4403 passed; 0 failed` + abi_harness
+`1 passed` — matching the recorded count), and confirmed from the PNGs:
+`e20-unicode.png` (before) = `??? WIDE ? café`; `e21-unicode.png` (after) =
+`日本語 WIDE 🎉 café` with real distinguishable Japanese glyphs + a **color**
+party-popper emoji (not a black box) + correct `café`. It judged
+Pass-over-Partial defensible (CJK glyphs fully formed/readable at the inherited
+Retina size; only the wide-cell pitch is the disclosed `set_point_size`
+follow-up) and the no-regression framing honest (discovery is flag-gated with an
+early return for Menlo-covered codepoints + per-codepoint caching, so the
+global-enable risk is bounded).

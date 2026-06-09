@@ -510,8 +510,9 @@ stays unaltered except for the rename).
   (→Exp 22), CJK+emoji tofu / no font fallback (→Exp 21); selection+scrollback
   deferred) · Claude
 - [Experiment 21: Phase C — enable font-fallback discovery (CJK + emoji)](21-font-fallback.md)
-  — **Designed** (build_live_renderer never enables the resolver's discovery
-  fallback (default off) → CJK/emoji `?`; enable `set_discover_enabled(true)`) ·
+  — **Pass** (enabled the resolver's discovery fallback in `build_live_renderer`
+  — CJK `日本語` renders + `🎉` in COLOR vs `?` before; 4403+1 green; CJK
+  wide-pitch fine-tune a noted follow-up) ·
   Claude
 
 ## Process
