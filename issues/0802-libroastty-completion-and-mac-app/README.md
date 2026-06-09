@@ -495,8 +495,11 @@ stays unaltered except for the rename).
 - [Experiment 17: Phase C — atlas coherence (sample the grid's glyph atlas)](17-atlas-coherence.md)
   — **Partial** (present now samples the grid's rasterized atlas — proven by a
   discriminating GPU-readback test; but live text ALSO needs the
-  projection/screen-size uniforms, never wired → Exp 18) ·
-  Claude
+  projection/screen-size uniforms, never wired → Exp 18) · Claude
+- [Experiment 18: Phase C — wire the projection/screen-size uniforms (live text)](18-projection-uniforms.md)
+  — **Designed** (drive `update_screen_size`/`update_font_grid` from the surface
+  in `present_live` so the grid maps onto the NSView — the last gap before text)
+  · Claude
 
 ## Process
 
