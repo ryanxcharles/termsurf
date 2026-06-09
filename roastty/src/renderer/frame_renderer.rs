@@ -613,8 +613,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect("update and present");
@@ -653,8 +651,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect("first frame");
@@ -672,8 +668,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect("second frame");
@@ -712,8 +706,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect_err("rebuild should fail before present");
@@ -756,8 +748,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 0.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect_err("invalid scale should fail at present");
@@ -779,8 +769,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect("self-heal frame");
@@ -1104,8 +1092,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect("render and present from terminal+config");
@@ -1113,5 +1099,101 @@ mod tests {
         assert_eq!(app.rebuild.rows.rebuilt_rows, vec![0, 1, 2]);
         assert_eq!(renderer.current_grid(), grid(4, 3));
         assert_eq!(app.present.presentation.width, 8);
+    }
+
+    /// Issue 802 / Exp 17: the present must sample the **grid's** rasterized atlas, so glyph
+    /// pixels actually reach the GPU target. This reads back the rendered target and asserts it
+    /// is **non-uniform** — i.e. the glyph drew foreground pixels over the background. With the
+    /// pre-Exp-17 bug (present sampled a separate empty atlas), the target would be a uniform
+    /// background and this fails. The cursor is hidden (`\x1b[?25l`) so the only source of
+    /// variation is the glyph itself.
+    #[test]
+    fn present_samples_grid_atlas_so_glyphs_reach_the_target() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let mut shared = menlo_grid();
+        let cell = shared.cell_size();
+        let (cw, ch) = (cell.width as usize, cell.height as usize);
+        // 2x1 terminal, cursor hidden, two visible glyphs; target sized exactly to the grid so
+        // any non-background pixel must come from a rendered glyph (no padding region).
+        let mut term = Terminal::init(2, 1, None).expect("terminal");
+        term.next_slice(b"\x1b[?25l\x1b[91mWW")
+            .expect("hide cursor + bright fg + write");
+        let (w, h) = (cw * 2, ch);
+        let mut compositor = MetalFrameCompositor::new(MetalFrameCompositorOptions {
+            device,
+            width: w,
+            height: h,
+            pixel_format: MetalPixelFormat::Bgra8Unorm,
+            storage_mode: MetalStorageMode::Shared,
+            resource_options: MetalResourceOptions::image(MetalStorageMode::Shared),
+            grayscale_atlas: &shared.atlas_grayscale,
+            color_atlas: &shared.atlas_color,
+        })
+        .expect("compositor");
+        // Uniforms must match the grid + target (the rebuild updates grid_size but NOT the
+        // projection/screen_size/cell_size): set the ortho projection so the grid maps onto the
+        // target, black bg so the glyph stands out.
+        use crate::renderer::size::{CellSize, Padding, ScreenSize, Size};
+        let mut u = MetalUniforms::test_with_grid(
+            [w as u16, h as u16],
+            [2, 1],
+            [cw as f32, ch as f32],
+            [0.0; 4],
+            0,
+            [0, 0, 0, 255],
+        );
+        u.update_screen_size(
+            Size {
+                screen: ScreenSize {
+                    width: w as u32,
+                    height: h as u32,
+                },
+                cell: CellSize {
+                    width: cw as u32,
+                    height: ch as u32,
+                },
+                padding: Padding {
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    left: 0,
+                },
+            },
+            GridSize {
+                columns: 2,
+                rows: 1,
+            },
+        );
+        let mut renderer = FrameRenderer::new(u);
+        renderer
+            .render_and_present_frame(
+                &term,
+                &mut shared,
+                RenderDirty::Full,
+                None,
+                &Config::default(),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: w,
+                    height: h,
+                    contents_scale: 1.0,
+                },
+            )
+            .expect("render and present");
+
+        let bytes = compositor.target_bytes();
+        // Assert a specific bright-foreground glyph pixel reached the GPU — the target is BGRA,
+        // the bg is pure black, and the glyph fg is bright red (`\x1b[91m`), so a high red
+        // channel (byte index 2) can only come from a rendered glyph. This is stronger than a
+        // bare "non-uniform" check: it survives later setup changes (padding, a visible cursor,
+        // per-cell bg) that could otherwise make a uniform-vs-not test pass without a glyph.
+        let glyph_px = bytes.chunks(4).filter(|px| px[2] > 100).count();
+        assert!(
+            glyph_px > 0,
+            "no bright-foreground glyph pixel reached the GPU target — the present sampled an \
+             empty atlas instead of the grid's rasterized one",
+        );
     }
 }

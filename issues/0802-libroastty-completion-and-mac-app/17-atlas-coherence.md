@@ -128,8 +128,101 @@ fairly flagged. Three findings, folded in above:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Partial — **atlas coherence is fixed and proven by a discriminating
+GPU-readback test**: the present now samples the `SharedGrid`'s own rasterized
+atlases, so glyphs reach the target. But implementing the test surfaced a
+**second, separate gap** that still blocks live text: the live path never sets
+up the **projection / screen-size uniforms**, so glyphs render off-screen until
+that is wired (Exp 18).
+
+### Changes (only `libroastty`)
+
+- **`frame_rebuild.rs`** — removed `grayscale_atlas`/`color_atlas` from
+  `FramePreparedPresentationInput`; `rebuild_and_present_frame` now passes
+  `&targets.grid.atlas_grayscale`/`atlas_color` to the present (the `&mut grid`
+  rebuild borrow has ended, so the immutable re-borrow is sound).
+- **`lib.rs`** — `build_live_renderer` seeds the compositor from
+  `&shared_grid.atlas_*` (not a standalone `Atlas`); `SurfaceLiveRenderer`
+  dropped its `grayscale_atlas`/`color_atlas` fields; `present_live` drops the
+  removed args.
+- **Callers** — the 7 `frame_renderer.rs`
+  `update_and_present_*`/`render_and_present_frame_presents` test sites + the 2
+  `frame_rebuild.rs` test sites updated to the new (atlas-less) signature.
+- **`compositor.rs`** — `target_bytes` made `pub(crate)` (`#[cfg(test)]`) for
+  the cross-module readback test.
+
+### The discriminating test (the review's Required correction)
+
+`present_samples_grid_atlas_so_glyphs_reach_the_target` (`frame_renderer.rs`):
+presents a cursor-hidden 2×1 terminal of bright-fg glyphs through
+`render_and_present_frame` into a grid-sized target, reads back the GPU target
+(`target_bytes`), and asserts it is **non-uniform** (a glyph drew foreground
+over the background). **Verified it discriminates:** with the fix it passes (95
+distinct colors — the antialiased glyph over black); when the present is
+reverted to sample a fresh empty `Atlas`, it **fails** (1 distinct color —
+uniform background). This is the GPU-side assertion the review required (the
+earlier "grid atlas non-empty" idea was vacuous).
+
+### Discovery (→ Exp 18): the projection/uniform setup is also missing
+
+Getting the test to render at all required setting up the uniforms the **rebuild
+does not touch** — `update_screen_size` (the orthographic `projection_matrix` +
+`screen_size`) and the cell size (`test_with_grid`/`update_font_grid`). With
+`test_with_grid`'s default **identity** projection, glyphs map far outside NDC
+and nothing draws (the first test runs returned a uniform **black** target with
+`fg_count=2` — vertices emitted, but off-screen). The live path
+(`build_live_renderer` / `present_live`) **never calls
+`update_screen_size`/`update_font_grid`**, so even with atlas coherence the live
+app would render off-screen. Wiring those uniforms into the live present path
+(from the surface size + the grid metrics, updated on resize) is **Exp 18** —
+after which the launched app should finally show terminal text.
+
+### Verification
+
+- **Full `cargo test -p roastty`:** lib **4402 passed** (incl. the new readback
+  test) + `abi_harness` **1 passed**, **0 failures**.
+- Discrimination of the new test verified (break→fail→restore).
+- App launch deferred to Exp 18 (it would still render off-screen without the
+  projection wiring; no point capturing a known-black frame — the gap is pinned
+  from source).
 
 ## Conclusion
 
-_(to be added after the run.)_
+Atlas coherence — one of the two things standing between the wired present path
+and real text — is fixed and locked in by a test that genuinely fails if the
+present samples the wrong atlas. The remaining blocker is now precisely pinned:
+the live present path must set the **screen-size / font-grid uniforms**
+(`update_screen_size` + `update_font_grid`) so the orthographic projection maps
+the grid onto the NSView, instead of relying on an identity projection that puts
+every glyph off-screen. That is **Exp 18**; with both in place, `present_live`
+should put the shell prompt on screen — the first real terminal frame from
+libroastty. (Exp 19 remains the continuous `CVDisplayLink` driver for live
+updates.)
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** It independently reran the gates (both
+`present_samples_grid_atlas_…` and `render_and_present_frame_presents` pass on a
+**real Metal device** — the 4.7s runtime proves the `metal_device()` guard
+didn't early-return; `4402` lib + `abi_harness` 1, `cargo fmt --check` clean)
+and audited the routing: `rebuild_and_present_frame` is the **only** live
+present path and samples `&targets.grid.atlas_*` — no standalone empty atlas
+survives in the present path (the remaining standalone `Atlas` constructions are
+compositor _seeds_ or isolated `present_metal_frame` unit tests). The test
+**discriminates by construction** (target sized exactly to the grid, black bg,
+cursor hidden → the only non-uniformity source is a rasterized glyph). It
+confirmed from source that `build_live_renderer`/`present_live` never call
+`update_screen_size`/`update_font_grid` (so live glyphs render off-screen until
+Exp 18) and that the Partial framing is honest, with no weakened coverage and no
+`target_bytes` leak outside `#[cfg(test)]`. Two Optional findings:
+
+- **It could not re-run the break→fail check** (read-only, can't edit tracked
+  source) — flagged for legibility. (The implementer DID run it: reverting the
+  present to a fresh empty `Atlas` drops the readback to **1 distinct color**
+  and the test FAILS; restored.)
+- **Optional hardening — the `distinct.len() > 1` assertion** was slightly
+  weaker than "a foreground pixel is non-background." **Applied:** the test now
+  asserts a **bright-fg glyph pixel** specifically (BGRA red channel `> 100`,
+  which only a rendered glyph produces over the black bg), so it survives later
+  setup changes.

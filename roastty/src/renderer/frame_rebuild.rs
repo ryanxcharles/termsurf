@@ -260,8 +260,11 @@ impl FrameTerminalSnapshot {
                 contents_scale: presentation.contents_scale,
                 uniforms: targets.uniforms,
                 contents: targets.contents,
-                grayscale_atlas: presentation.grayscale_atlas,
-                color_atlas: presentation.color_atlas,
+                // Sample the SharedGrid's OWN atlases — the ones the rebuild just rasterized
+                // glyphs into (Issue 802 / Exp 17). The rebuild's `&mut grid` borrow has ended,
+                // so this immutable re-borrow is sound; presentation no longer carries atlases.
+                grayscale_atlas: &targets.grid.atlas_grayscale,
+                color_atlas: &targets.grid.atlas_color,
             },
         )?;
 
@@ -352,8 +355,6 @@ pub(crate) struct FramePreparedPresentationInput<'a> {
     pub(crate) width: usize,
     pub(crate) height: usize,
     pub(crate) contents_scale: f64,
-    pub(crate) grayscale_atlas: &'a Atlas,
-    pub(crate) color_atlas: &'a Atlas,
 }
 
 /// The result of one full prepared frame: the rebuild applications plus the Metal
@@ -5125,8 +5126,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect("rebuild and present");
@@ -5189,8 +5188,6 @@ mod tests {
                     width: 8,
                     height: 6,
                     contents_scale: 1.0,
-                    grayscale_atlas: &grayscale,
-                    color_atlas: &color,
                 },
             )
             .expect_err("should fail before presentation");

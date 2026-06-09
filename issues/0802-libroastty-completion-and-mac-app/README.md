@@ -493,8 +493,9 @@ stays unaltered except for the rename).
   broken since Exp 8 by `--lib`-only testing: 141 compile errors + the readonly
   assert; full `cargo test` green, 0 shell leaks) · Claude
 - [Experiment 17: Phase C — atlas coherence (sample the grid's glyph atlas)](17-atlas-coherence.md)
-  — **Designed** (present samples standalone empty atlases, not the SharedGrid's
-  rasterized ones → no text; re-borrow the grid immutably after the rebuild) ·
+  — **Partial** (present now samples the grid's rasterized atlas — proven by a
+  discriminating GPU-readback test; but live text ALSO needs the
+  projection/screen-size uniforms, never wired → Exp 18) ·
   Claude
 
 ## Process

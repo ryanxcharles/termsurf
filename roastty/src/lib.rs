@@ -1931,8 +1931,6 @@ struct SurfaceLiveRenderer {
     compositor: renderer::metal::compositor::MetalFrameCompositor,
     frame_renderer: renderer::frame_renderer::FrameRenderer,
     shared_grid: font::shared_grid::SharedGrid,
-    grayscale_atlas: font::atlas::Atlas,
-    color_atlas: font::atlas::Atlas,
 }
 
 /// Build the live Metal present state for a surface on the main thread (Issue 802 / Exp 15,
@@ -1965,8 +1963,6 @@ fn build_live_renderer(
         font::codepoint_resolver::CodepointResolver::new(collection),
         metrics,
     );
-    let grayscale_atlas = font::atlas::Atlas::new(512, font::atlas::Format::Grayscale);
-    let color_atlas = font::atlas::Atlas::new(512, font::atlas::Format::Bgra);
     let compositor = renderer::metal::compositor::MetalFrameCompositor::new(
         renderer::metal::compositor::MetalFrameCompositorOptions {
             device,
@@ -1977,8 +1973,10 @@ fn build_live_renderer(
             resource_options: renderer::metal::api::MetalResourceOptions::image(
                 renderer::metal::api::MetalStorageMode::Shared,
             ),
-            grayscale_atlas: &grayscale_atlas,
-            color_atlas: &color_atlas,
+            // Seed the compositor from the grid's own atlases (Issue 802 / Exp 17) — the
+            // same atlases the rebuild rasterizes glyphs into + the present samples.
+            grayscale_atlas: &shared_grid.atlas_grayscale,
+            color_atlas: &shared_grid.atlas_color,
         },
     )
     .ok()?;
@@ -1993,8 +1991,6 @@ fn build_live_renderer(
         compositor,
         frame_renderer,
         shared_grid,
-        grayscale_atlas,
-        color_atlas,
     })
 }
 
@@ -2384,8 +2380,6 @@ impl Surface {
             compositor,
             frame_renderer,
             shared_grid,
-            grayscale_atlas,
-            color_atlas,
         } = live;
         let config = config::Config::default();
         worker.with_termio(|termio| {
@@ -2401,8 +2395,6 @@ impl Surface {
                     width,
                     height,
                     contents_scale: scale,
-                    grayscale_atlas,
-                    color_atlas,
                 },
             ) {
                 eprintln!("[roastty] live present error: {e:?}");

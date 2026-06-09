@@ -234,7 +234,7 @@ impl MetalFrameCompositor {
         })
     }
 
-    fn target_bytes(&self) -> Vec<u8> {
+    pub(crate) fn target_bytes(&self) -> Vec<u8> {
         self.target
             .as_ref()
             .expect("compositor should have a target")
