@@ -528,6 +528,10 @@ stays unaltered except for the rename).
   with a pin-based `Terminal::cursor_viewport_position()` feeding both
   cursor-block-draw sites — `None` when scrolled off-viewport, faithful to
   upstream `cursor.viewport`; 4406 green + live-confirmed) · Claude
+- [Experiment 25: Phase C — mouse-drag text selection (deferred Exp-20 probe)](25-mouse-selection.md)
+  — **Designed** (mouse selection is unwired: `mouse_button`/`mouse_pos` only do
+  reports; wire the `SelectionGesture` into the core mouse handlers, faithful to
+  upstream's callbacks) · Claude
 
 ## Process
 
