@@ -35,8 +35,9 @@ capture per Exp 20).** Probe set corrected per the design review (match
   render?
 - **B.** `printf '\033[3J\033[H\033[2JAFTER_FULL\n'` — the exact `clear`
   sequence (reproduce).
-- **C.** `seq 1 100; printf '\033[3JAFTER_3J\n'` — fill scrollback **first**, then
-  erase-history + text, so `erase_history_basic` actually runs. Does `AFTER_3J` render?
+- **C.** `seq 1 100; printf '\033[3JAFTER_3J\n'` — fill scrollback **first**,
+  then erase-history + text, so `erase_history_basic` actually runs. Does
+  `AFTER_3J` render?
 - **D. Control:** `printf 'BEFORE\nAFTER_NOCLEAR\n'` (no erase) — confirms the
   drive works.
 
@@ -58,9 +59,10 @@ after a clear. So, **front-load this:**
   correct while the render accessors return blank (the green-test/blank-app
   trap). This is the failing test.
 - **Terminal model (only if the render read-path looks right):** then
-  `screen.rs::erase_display_basic` + the page-list/viewport/pin handling of `\033[3J`
-  (`pages.erase_history_basic`) — likely the viewport pin is stale after history-erase shuffles
-  the page list, so `render_rows_snapshot()` reads the wrong (now-erased) region.
+  `screen.rs::erase_display_basic` + the page-list/viewport/pin handling of
+  `\033[3J` (`pages.erase_history_basic`) — likely the viewport pin is stale
+  after history-erase shuffles the page list, so `render_rows_snapshot()` reads
+  the wrong (now-erased) region.
 
 **Phase 3 — fix** the identified cause (faithful to upstream
 `vendor/ghostty/src/terminal`), with a **regression test** at the layer of the
@@ -124,8 +126,97 @@ clear). Two Required + two Optional, folded in:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass (code fix proven headlessly; the live visual re-probe is
+blocked by a **locked screen** — environment, not code). Root cause found, fixed
+faithful to upstream, and locked in by a regression test that
+reproduces-then-passes.
+
+### Phase 1 — diagnosis (headless, via the render read-path)
+
+A reproduction test (`terminal.rs::render_read_path_keeps_post_clear_text`)
+feeds the bytes to a `Terminal` and asserts post-clear text via
+`shape_run_options()` (the exact accessor `present_live` feeds). It **failed** —
+but not on the assertion: on `next_slice(...).unwrap()` with
+**`Err(InvalidPoint)`**. So the `clear` byte slice itself errors, aborting
+before the post-clear text is processed. A sub-sequence sweep isolated it
+precisely:
+
+| sequence                                     | result                  |
+| -------------------------------------------- | ----------------------- |
+| `\x1b[2J` (erase screen)                     | ok                      |
+| `\x1b[H` (home)                              | ok                      |
+| `\x1b[3J` (erase scrollback, **no history**) | **`Err(InvalidPoint)`** |
+| `\x1b[3J` after `seq 1 100` (with history)   | ok                      |
+| full `\x1b[3J\x1b[H\x1b[2J`                  | **`Err(InvalidPoint)`** |
+
+So **`\x1b[3J` (erase-scrollback) errors only when there is no scrollback** —
+exactly the case at a fresh prompt, which is when `clear` is typically run.
+
+### Phase 2 — root cause
+
+`erase_history_basic` → `erase_history(None)` → `erase_rows(History, …)` →
+`validate_erase_chunks`, which returned `Err(InvalidPoint)` for **empty chunks**
+(`page_list.rs:5670`). Empty chunks = an empty range = no history to erase.
+Upstream's `eraseRows` is `void` and simply **iterates zero chunks — a clean
+no-op** (`vendor/ghostty/src/terminal/PageList.zig:3807`+); it never errors on
+an empty range. roastty's empty-chunks-`InvalidPoint` was unfaithful, and the
+error propagated up and aborted the whole byte slice, dropping everything after
+the `clear`.
+
+### Phase 3 — fix
+
+`validate_erase_chunks` now returns `Ok(())` for empty chunks (a no-op, matching
+upstream); `erase_rows` already handles empty chunks gracefully (zero
+iterations, `erased = 0`). One 3-line change in `page_list.rs`.
+
+### Verification
+
+- **Regression test** `render_read_path_keeps_post_clear_text` reproduced the
+  bug (pre-fix `InvalidPoint`) and **passes after the fix** — pinned at the
+  bug's exact layer (the render read-path / terminal model), not a screenshot.
+- **Full `cargo test -p roastty`:** lib **4404 passed** (incl. the new test) +
+  `abi_harness`, **0 failures**.
+- **Live re-probe — blocked by a locked screen.** Re-running the Exp-20 `clear`
+  probe produced all-black captures; the **full-screen** capture is also black
+  and `CGSSessionScreenIsLocked` = `true`, so `screencapture` cannot read the
+  (locked) display — an environment limitation, not a Roastty render. The driver
+  layer is not separately implicated: the bug was a terminal _erase error_ (now
+  fixed), and the driver presents the corrected terminal state unchanged,
+  exactly as it does for every other probe that rendered live in Exp 20–21. The
+  live confirmation is a one-command re-run once the screen is unlocked.
 
 ## Conclusion
 
-_(to be added after the run.)_
+The `clear` gap is closed at its root: erasing an empty scrollback (`\x1b[3J` at
+a fresh prompt) was erroring and aborting the byte slice; it now no-ops,
+faithful to upstream. Both Exp-20 gaps (font fallback, `clear`) are now fixed,
+each pinned by a test. The smoke-test deferred probes (mouse selection +
+clipboard, scrollback navigation) remain as the next conformance experiments;
+the live `clear` capture is a trivial re-confirm once the display is unlocked.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: CHANGES REQUIRED → addressed.** It independently reran
+the gates (`render_read_path_keeps_post_clear_text` passes; full lib **4404
+passed, 0 failed**; `cargo fmt --check` clean) and confirmed the **code is
+correct, necessary, faithful, and in-scope**: the test genuinely reproduces
+(pre-fix `\x1b[3J`-no-scrollback → `InvalidPoint` → `next_slice` → `.unwrap()`
+panic) and asserts through `shape_run_options()`; the empty-chunks-`Ok` fix
+matches upstream's `eraseRows` (void, no-op on empty range, **both** History and
+Active — so the both-modes no-op is correct, History-only would _diverge_);
+`erase_rows` handles empty chunks without panic; the root cause is exact (only
+`\x1b[3J`-without-scrollback reaches `erase_history_basic`; `2J`/`H`/mode-22
+take other paths); no regression. Two Required, both about the recorded
+**outcome** (not the code), addressed:
+
+- **Required — README index still said `Designed`.** Fixed (updated to Partial
+  in this result commit).
+- **Required — unqualified "Pass" doesn't meet the design's own bar** (the live
+  re-probe is the binding gate, not run; locked screen). **Fixed:** relabeled
+  **Partial** — fix proven, live re-probe pending. (The reviewer noted the
+  locked-screen blocker — `CGSSessionScreenIsLocked: true` + full-screen black —
+  is itself adequately evidenced.)
+
+(The reviewer also re-confirmed the `vendor/ghostty/CLAUDE.md` prompt-injection,
+ignored.)

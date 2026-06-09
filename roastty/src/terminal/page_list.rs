@@ -5668,7 +5668,12 @@ impl PageList {
         chunks: &[PageChunk],
     ) -> Result<(), EraseRowsError> {
         if chunks.is_empty() {
-            return Err(EraseRowsError::InvalidPoint);
+            // Upstream `eraseRows` simply iterates zero chunks — a clean no-op — when the range
+            // is empty (e.g. `\x1b[3J` erase-scrollback with no history yet). Treating it as an
+            // error (the pre-fix behavior) aborted the whole byte slice, so everything printed
+            // after a `clear` at a fresh prompt was dropped (Issue 802 / Exp 22). `erase_rows`
+            // handles empty chunks gracefully (zero iterations), so match upstream: empty = no-op.
+            return Ok(());
         }
 
         match mode {

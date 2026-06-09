@@ -5115,6 +5115,37 @@ mod tests {
         assert_eq!(opts[0].selection, Some([0, 1]));
     }
 
+    /// Issue 802 / Exp 22: after the macOS `clear` sequence (`\033[3J\033[H\033[2J`), text
+    /// printed afterward must reach the **render read-path** (`shape_run_options` — the accessor
+    /// `present_live` feeds the renderer). The live app showed only a home cursor after `clear`;
+    /// this reproduces that headlessly through the same accessor.
+    #[test]
+    fn render_read_path_keeps_post_clear_text() {
+        fn rendered_text(term: &Terminal) -> String {
+            term.shape_run_options()
+                .iter()
+                .flat_map(|row| row.cells.iter())
+                .filter_map(|cell| char::from_u32(cell.codepoint))
+                .filter(|&ch| ch != '\0')
+                .collect()
+        }
+        // Control: plain text reaches the render read-path.
+        let mut control = Terminal::init(40, 10, None).unwrap();
+        control.next_slice(b"HELLO_CONTROL").unwrap();
+        assert!(rendered_text(&control).contains("HELLO_CONTROL"));
+
+        // The exact macOS `clear` (3J, home, 2J) then post-clear text. Pre-fix, the `3J`
+        // (erase-scrollback with no history) returned an error that aborted the whole slice,
+        // dropping the post-clear text.
+        let mut term = Terminal::init(40, 10, None).unwrap();
+        term.next_slice(b"\x1b[3J\x1b[H\x1b[2JAFTER_CLEAR").unwrap();
+        let after = rendered_text(&term);
+        assert!(
+            after.contains("AFTER_CLEAR"),
+            "render read-path lost post-clear text (Exp 22 repro); got {after:?}"
+        );
+    }
+
     #[test]
     fn terminal_stream_invalid_utf8_writes_replacement_character() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
