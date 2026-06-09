@@ -492,6 +492,10 @@ stays unaltered except for the rename).
   — launched app spawns a live `/bin/zsh`; ALSO restored `abi_harness`, silently
   broken since Exp 8 by `--lib`-only testing: 141 compile errors + the readonly
   assert; full `cargo test` green, 0 shell leaks) · Claude
+- [Experiment 17: Phase C — atlas coherence (sample the grid's glyph atlas)](17-atlas-coherence.md)
+  — **Designed** (present samples standalone empty atlases, not the SharedGrid's
+  rasterized ones → no text; re-borrow the grid immutably after the rebuild) ·
+  Claude
 
 ## Process
 
