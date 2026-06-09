@@ -514,10 +514,10 @@ stays unaltered except for the rename).
   — CJK `日本語` renders + `🎉` in COLOR vs `?` before; 4403+1 green; CJK
   wide-pitch fine-tune a noted follow-up) · Claude
 - [Experiment 22: Phase C — diagnose + fix the `clear` gap](22-clear-screen.md)
-  — **Partial** (root cause: `\033[3J` erase-scrollback errored `InvalidPoint`
-  with no history → aborted the slice → post-clear content dropped; fixed to
-  no-op (upstream-faithful) + regression test, 4404 green; live re-probe pending
-  — screen locked) · Claude
+  — **Pass** (root cause: `\033[3J` erase-scrollback errored `InvalidPoint` with
+  no history → aborted the slice → post-clear content dropped; fixed to no-op
+  (upstream-faithful) + regression test, 4404 green; live re-probe CONFIRMS
+  post-clear content renders) · Claude
 
 ## Process
 
