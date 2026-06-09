@@ -157,6 +157,20 @@ impl FrameRenderer {
         self.update_and_present_frame(terminal, grid, dirty, preedit, input, presentation)
     }
 
+    /// Drive the screen-size + font-grid uniforms from the live surface (Issue 802 / Exp 18):
+    /// the orthographic `projection_matrix`, `screen_size`, and the cell pixel size. The rebuild
+    /// updates `grid_size`/contents on top but touches none of these, so without this call the
+    /// projection is identity and glyphs render off-screen.
+    pub(crate) fn update_screen(
+        &mut self,
+        size: crate::renderer::size::Size,
+        grid: GridSize,
+        metrics: &crate::font::metrics::Metrics,
+    ) {
+        self.uniforms.update_screen_size(size, grid);
+        self.uniforms.update_font_grid(metrics);
+    }
+
     pub(crate) fn contents(&self) -> &Contents {
         &self.contents
     }
@@ -1195,5 +1209,46 @@ mod tests {
             "no bright-foreground glyph pixel reached the GPU target — the present sampled an \
              empty atlas instead of the grid's rasterized one",
         );
+    }
+
+    /// Issue 802 / Exp 18: `update_screen` drives the geometry uniforms the rebuild never sets —
+    /// the ortho `projection_matrix`, `screen_size`, and the `cell_size` (from the font metrics).
+    /// Without these the projection is identity and glyphs render off-screen. Headless (no GPU).
+    #[test]
+    fn update_screen_sets_projection_screen_and_cell() {
+        use crate::renderer::metal::shaders::ortho2d;
+        use crate::renderer::size::{CellSize, Padding, ScreenSize, Size};
+        let shared = menlo_grid();
+        let mut renderer = FrameRenderer::new(uniforms());
+        renderer.update_screen(
+            Size {
+                screen: ScreenSize {
+                    width: 200,
+                    height: 100,
+                },
+                cell: CellSize {
+                    width: 10,
+                    height: 20,
+                },
+                padding: Padding::default(),
+            },
+            GridSize {
+                columns: 20,
+                rows: 5,
+            },
+            &shared.metrics,
+        );
+        let u = renderer.uniforms();
+        assert_eq!(u.screen_size, [200.0, 100.0]);
+        // cell_size comes from update_font_grid (the metrics), not the Size.cell argument.
+        assert_eq!(
+            u.cell_size,
+            [
+                shared.metrics.cell_width as f32,
+                shared.metrics.cell_height as f32
+            ]
+        );
+        // padding 0 → terminal == screen → ortho2d(0, 200, 100, 0); not the identity it starts as.
+        assert_eq!(u.projection_matrix, ortho2d(0.0, 200.0, 100.0, 0.0));
     }
 }

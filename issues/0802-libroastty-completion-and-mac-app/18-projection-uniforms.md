@@ -125,8 +125,87 @@ flagged as the likely Partial → Exp 19. One Required + two Optional, folded in
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — **the launched Roastty app renders the live shell prompt as
+real text.** This is the first real terminal frame from libroastty in the
+renamed Ghostty app — the culmination of Phase C's render path (Exp 14 runs → 15
+layer attach → 16 shell → 17 atlas → 18 projection).
+
+### Changes (only `libroastty`)
+
+- **`build_live_renderer`** rasterizes the grid font at **`font_size × scale`**,
+  so `metrics.cell_*` are physical pixels matching the px-space compositor
+  target/projection (Retina reconciliation).
+- **`FrameRenderer::update_screen(size, grid, metrics)`** → `update_screen_size`
+  (ortho projection + `screen_size`) + `update_font_grid` (cell pixel size) —
+  the geometry uniforms the rebuild never touches.
+- **`present_live`** drives `update_screen` every present from the surface
+  state, in physical-pixel space (clamped `width`/`height`,
+  `shared_grid.cell_size()`, grid from `self.size.columns/rows`).
+
+### Evidence (live launch, captured out-of-repo, app + children killed — 0 dangling PIDs)
+
+The window (`name="👻"`, 800×632) renders, top-left, **Retina-correct (full
+size, filling the width — not a half-size quadrant)**:
+
+- the **shell prompt `ryan@rxc termsurf %`** with a block cursor after it;
+- Ghostty's own debug-build banner: "⚠️ You're running a debug build of Roastty!
+  Performance will be degraded." (proof the _unaltered_ app's own UI text
+  renders through libroastty);
+- crisp glyphs at the correct cell pitch. No present error in stderr.
+
+(Capture note: `screencapture -l`/`-R` fail on the IOSurface-layer window, and
+`winid.swift` resolved the wrong window — the real Roastty window is
+`name="👻"`. Reliable path: enumerate `CGWindowListCopyWindowInfo` by the
+Roastty PID to get the `👻` window bounds, then full-screen `screencapture` +
+the new `scripts/roastty-app/crop.swift` to crop the region.)
+
+### Verification
+
+- **Full `cargo test -p roastty`** green (the present tests + the Exp-17
+  readback test pass; the new `update_screen` is on the live path, exercised by
+  the launch).
+- **App renders the prompt as text** (above), Retina-correct — the Pass bar
+  (text fills the NSView, not a quadrant) is met.
 
 ## Conclusion
 
-_(to be added after the run.)_
+**libroastty puts a real terminal on screen.** The copied-and-renamed Ghostty
+app — unaltered except for the `ghostty→roastty` rename — boots
+`roastty_app_new`/`surface_new`, starts a shell, and renders its prompt as text
+into its own NSView, all through the reconciled embedded ABI and the Rust
+renderer. The conformance oracle is now _live_.
+
+**What renders is the first frame.** The present fires only from
+`set_size`/`start_termio`/`draw` (Exp 16); the async shell output that arrives
+later sets `dirty` but nothing re-presents, so **typing / new output won't
+update live** yet. **Next (Exp 19): the continuous `CVDisplayLink` render
+driver** — a library-internal loop that presents on dirty, matching upstream's
+`renderer/Thread.zig` — after which the terminal is fully live, and
+feature-by-feature conformance testing (typing, selection, scrollback, colors,
+resize, …) can begin.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** It independently verified:
+`cargo build -p roastty` clean (0 warnings), `present_samples_grid_atlas_…` +
+`render_and_present_frame_presents` pass, `cargo fmt --check` clean; the
+projection is **not clobbered** (the rebuild's only geometry write is
+`update_grid_size` at `frame_rebuild.rs:1149` — never
+`projection_matrix`/`screen_size`/ `cell_size`; `update_screen` runs before the
+present); the **Retina scale is consistent** (the same `scale_factor_x` drives
+the font rasterization, the cell metrics, the layer bounds, the compositor
+target, and `contents_scale` — `cols × cell_phys ≈ width_px`, no half/double
+mismatch); the **borrows are sound** and `columns`/`rows`/`width`/`height` are
+captured as locals before the borrows (clamped, so no `inf`); **"Pass" is
+honest** (`apply_termio_event` only sets `dirty` and never presents, so live
+updates genuinely need Exp 19; the prompt was caught by an initial
+`set_size`/`start_termio`/`draw` present, evidenced by the specific content);
+and the **scope is clean** (only the two `libroastty` edits; the new
+`scripts/roastty-app/{crop,list-windows}.swift` are standalone tooling, no app
+edits). Three non-blocking findings: one Optional **fixed** (added a direct unit
+test `update_screen_sets_projection_screen_and_cell` asserting the projection /
+screen_size / cell_size); two noted for later slices (the `GridSize` from
+`self.size` only perturbs `grid_padding` cosmetically; the font cell binds
+`scale` at first build so a later DPI-change would desync — a pre-existing gap
+for a rebuild-on-scale-change slice).

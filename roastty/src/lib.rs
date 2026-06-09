@@ -1952,7 +1952,9 @@ fn build_live_renderer(
     let mut collection = font::collection::Collection::new();
     collection
         .add(
-            font::face::coretext::Face::new("Menlo", font_size.max(1.0) as f64),
+            // Rasterize at font_size * scale so the cell metrics are PHYSICAL pixels matching
+            // the px-space compositor target/projection (Issue 802 / Exp 18 — Retina).
+            font::face::coretext::Face::new("Menlo", (font_size as f64 * scale).max(1.0)),
             font::Style::Regular,
             false,
         )
@@ -2370,6 +2372,8 @@ impl Surface {
         let width = self.size.width_px.max(1) as usize;
         let height = self.size.height_px.max(1) as usize;
         let scale = self.scale_factor_x.max(1.0);
+        let columns = self.size.columns;
+        let rows = self.size.rows;
         let Some(live) = self.renderer.as_mut() else {
             return;
         };
@@ -2381,6 +2385,21 @@ impl Surface {
             frame_renderer,
             shared_grid,
         } = live;
+        // Drive the projection/screen-size + font-grid uniforms from the surface (Exp 18) — the
+        // rebuild updates grid_size but not the projection, so without this glyphs render
+        // off-screen. Physical-pixel space throughout (clamped width/height, scaled cell).
+        frame_renderer.update_screen(
+            renderer::size::Size {
+                screen: renderer::size::ScreenSize {
+                    width: width as u32,
+                    height: height as u32,
+                },
+                cell: shared_grid.cell_size(),
+                padding: renderer::size::Padding::default(),
+            },
+            renderer::size::GridSize { columns, rows },
+            &shared_grid.metrics,
+        );
         let config = config::Config::default();
         worker.with_termio(|termio| {
             let terminal = termio.terminal();
