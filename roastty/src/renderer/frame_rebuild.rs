@@ -82,8 +82,13 @@ impl FrameTerminalSnapshot {
             .map(|row| row.dirty)
             .collect();
         let rows = terminal.shape_run_options();
-        let (cursor_x, cursor_y) = terminal.cursor_position();
-        let cursor_viewport = cursor_viewport(cursor_x, cursor_y, terminal_grid);
+        // Issue 802 / Exp 24: the cursor's VIEWPORT position (None when scrolled off-viewport),
+        // so the cursor block isn't drawn on a scrollback history row. Still bounded by the render
+        // grid (defensive, matching the prior `cursor_viewport` check).
+        let cursor_viewport = terminal
+            .cursor_viewport_position()
+            .map(|(x, y)| Coordinate::new(x, u32::from(y)))
+            .filter(|c| c.x < terminal_grid.columns && c.y < u32::from(terminal_grid.rows));
 
         Self {
             current_grid,
@@ -1526,11 +1531,6 @@ fn preedit_width(codepoints: &[crate::renderer::state::Codepoint]) -> Unit {
         .sum()
 }
 
-fn cursor_viewport(cursor_x: Unit, cursor_y: Unit, terminal_grid: GridSize) -> Option<Coordinate> {
-    (cursor_x < terminal_grid.columns && cursor_y < terminal_grid.rows)
-        .then_some(Coordinate::new(cursor_x, u32::from(cursor_y)))
-}
-
 fn cursor_grid_pos(cursor: Option<Coordinate>) -> Option<[u16; 2]> {
     let cursor = cursor?;
     Some([cursor.x, u16::try_from(cursor.y).ok()?])
@@ -1737,8 +1737,6 @@ mod tests {
             FrameTerminalSnapshot::collect(&terminal, grid(4, 3), RenderDirty::Partial, None);
 
         assert_eq!(snapshot.cursor_viewport, Some(Coordinate::new(2, 1)));
-        assert_eq!(cursor_viewport(4, 1, grid(4, 3)), None);
-        assert_eq!(cursor_viewport(2, 3, grid(4, 3)), None);
     }
 
     #[test]

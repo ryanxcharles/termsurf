@@ -136,8 +136,67 @@ only the direct `cursor_viewport(..)` helper calls go).
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — the cursor block no longer renders in scrollback.
+
+### Change (only `libroastty`)
+
+- **New
+  `Terminal::cursor_viewport_position() -> Option<(CellCountInt, CellCountInt)>`**
+  (`terminal.rs` → `screen.rs` → `page_list.rs::cursor_viewport_row`): resolves
+  the cursor's active pin (`pin(Point::active(0, cursor.y))`), scans viewport
+  rows, returns `Some((cursor.x, vy))` where a viewport row's pin matches
+  (`pin.node == cursor_pin.node && pin.y == cursor_pin.y`), `None` if the
+  cursor's active row isn't in the viewport; with an explicit `cursor.x < cols`
+  guard.
+- **Both cursor-block-draw sites** now use it: `frame_rebuild.rs:85` (→
+  `FrameCursorOverlay`) and `lib.rs:7132` (→ `RenderStateCursorViewport`),
+  replacing `cursor_position()` + the `< cols/rows` bounds check. The obsolete
+  `cursor_viewport()` helper + its two direct-call test assertions were removed
+  (the snapshot assertion stays and now exercises the pin path).
+
+### Verification
+
+- **Headless regression test**
+  `cursor_viewport_position_hides_when_scrolled_into_history` (`terminal.rs`):
+  fills past the screen; **unscrolled** → `Some((x, active_row))`; **scrolled
+  into history** → `None`; **back at bottom** → `Some` again. Asserts on the
+  exact value feeding the renderer's cursor overlay.
+- **Full `cargo test -p roastty`:** lib **4406 passed**, 0 failures (the
+  snapshot test still passes under the pin path; unscrolled is unchanged).
+- **Live confirmation** (screen unlocked; app + descendant tree killed, 0
+  dangling): the `seq 1 200` + scroll-up capture (`e24-scrolled.png`, lines
+  118–141) shows **no cursor block** on line 141 — where `e23-scrolled_up.png`
+  had a stray white block. Out-of-repo.
 
 ## Conclusion
 
-_(to be added after the run.)_
+The cursor is now viewport-gated (faithful to upstream's `cursor.viewport`): it
+renders only when its active row is visible, so scrolling into scrollback no
+longer leaves a stray block on a history line. This closes the Exp-23 follow-up
+and completes the scrollback feature. **Next: mouse selection + clipboard** (the
+last Exp-20-deferred probe), then refinements (CJK wide-pitch, CVDisplayLink
+vsync, DPI-change). (Optional/out-of-scope, per the review:
+`shape_run_options`'s `cursor_x` run-segmentation hint still uses `cy == y` —
+harmless, shaping-only.)
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: CHANGES REQUIRED → addressed.** It independently
+reproduced **every** technical claim clean: the test passes and
+**discriminates** (asserts on `cursor_viewport_position` — the value feeding
+`RenderStateCursorViewport`/`FrameCursorOverlay` via `renderer/cursor.rs:96` —
+not the `RunOptions.cursor_x` shaping hint; scrolled→`None` only holds via the
+pin scan, unscrolled/back→ `Some(active)` pin no-regression); full lib **4406
+passed, 0 failed**; **no other cursor-block path** missed (grepped every
+`cursor_position()` caller — IME placement + ABI queries only); pin logic sound
+(`Pin.node` `NonNull<Node>` canonical; partial-scroll-visible returns the right
+`vy`, not over-suppressed; `cursor.x < cols` preserves prior semantics); **live
+evidence honest** (`e23-scrolled_up.png` has a white block at line 141,
+`e24-scrolled.png` at the same scroll has none); **upstream-faithful**
+(`generic.zig`: `cursor.viewport orelse break :cursor`); scope/hygiene clean
+(libroastty only, `fmt --check` clean, no new "ghostty" literals, plan/result
+commits separate). The sole finding:
+
+- **Required — README index still said `Designed`** (+ stale description of the
+  rejected plan). **Fixed** (→ Pass, with the pin-based description).

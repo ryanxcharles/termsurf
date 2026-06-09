@@ -2366,6 +2366,29 @@ impl PageList {
         Some(pin)
     }
 
+    /// The cursor's position in VIEWPORT coordinates, or `None` if the cursor's active row is not
+    /// currently visible (scrolled into scrollback) — Issue 802 / Exp 24. The cursor lives in the
+    /// active area; this maps it to the viewport by pin so the cursor block isn't drawn on a
+    /// history row when scrolled. Mirrors the viewport-row scan used by the render accessors.
+    pub(super) fn cursor_viewport_row(
+        &self,
+        active_cursor_y: CellCountInt,
+    ) -> Option<CellCountInt> {
+        let cursor_pin = self.pin(point::Point::active(Coordinate::new(
+            0,
+            active_cursor_y.into(),
+        )))?;
+        for y in 0..self.rows {
+            let Some(pin) = self.pin(point::Point::viewport(Coordinate::new(0, y.into()))) else {
+                continue;
+            };
+            if pin.node == cursor_pin.node && pin.y == cursor_pin.y {
+                return Some(y);
+            }
+        }
+        None
+    }
+
     pub(super) fn render_rows_snapshot(
         &self,
         selection: Option<selection::Selection>,

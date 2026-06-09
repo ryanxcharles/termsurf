@@ -1765,6 +1765,16 @@ impl Screen {
             .shape_run_options(self.selection, Some((self.cursor.x, self.cursor.y)))
     }
 
+    /// The cursor's VIEWPORT position, or `None` if scrolled off-viewport (Issue 802 / Exp 24).
+    pub(super) fn cursor_viewport_position(&self) -> Option<(CellCountInt, CellCountInt)> {
+        if self.cursor.x >= self.pages.cols() {
+            return None;
+        }
+        self.pages
+            .cursor_viewport_row(self.cursor.y)
+            .map(|vy| (self.cursor.x, vy))
+    }
+
     pub(super) fn kitty_virtual_placements_visible(
         &self,
     ) -> Vec<kitty::graphics_unicode::VirtualPlacement> {

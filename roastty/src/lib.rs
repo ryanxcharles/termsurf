@@ -7129,14 +7129,17 @@ fn render_state_from_terminal(terminal: &InnerTerminal) -> RenderStateScalar {
     let cursor = terminal
         .color_effective(TerminalColorKind::Cursor)
         .map(roastty_rgb);
-    let (cursor_x, cursor_y) = terminal.cursor_position();
-    let cursor_viewport = (cursor_x < terminal.columns() && cursor_y < terminal.rows()).then_some(
-        RenderStateCursorViewport {
-            x: cursor_x,
-            y: cursor_y,
-            wide_tail: false,
-        },
-    );
+    // Issue 802 / Exp 24: viewport-aware cursor (None when scrolled into scrollback) so the cursor
+    // block isn't drawn on a history row. The accessor already bounds x<cols and the row to the
+    // viewport (0..rows).
+    let cursor_viewport =
+        terminal
+            .cursor_viewport_position()
+            .map(|(x, y)| RenderStateCursorViewport {
+                x,
+                y,
+                wide_tail: false,
+            });
 
     RenderStateScalar {
         cols: terminal.columns(),

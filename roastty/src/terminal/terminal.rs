@@ -1212,6 +1212,12 @@ impl Terminal {
         self.screens.active().cursor_position()
     }
 
+    /// The cursor's VIEWPORT position, or `None` when scrolled into scrollback so the cursor's
+    /// active row isn't visible (Issue 802 / Exp 24). Used by the renderer's cursor-block path.
+    pub(crate) fn cursor_viewport_position(&self) -> Option<(CellCountInt, CellCountInt)> {
+        self.screens.active().cursor_viewport_position()
+    }
+
     pub(crate) fn columns(&self) -> CellCountInt {
         self.size.cols
     }
@@ -5142,6 +5148,43 @@ mod tests {
     /// printed afterward must reach the **render read-path** (`shape_run_options` — the accessor
     /// `present_live` feeds the renderer). The live app showed only a home cursor after `clear`;
     /// this reproduces that headlessly through the same accessor.
+    /// Issue 802 / Exp 24: the cursor block must not render in scrollback. Unscrolled, the cursor
+    /// maps to its active row; scrolled into history, `cursor_viewport_position` returns `None`
+    /// (the value feeding the renderer's cursor overlay).
+    #[test]
+    fn cursor_viewport_position_hides_when_scrolled_into_history() {
+        let mut term = Terminal::init(20, 6, None).unwrap();
+        let mut content = String::new();
+        for i in 0..40 {
+            content.push_str(&format!("line{i}\r\n"));
+        }
+        term.next_slice(content.as_bytes()).unwrap();
+
+        // Unscrolled (viewport == active): the cursor is visible at its active row.
+        let active = term.cursor_position();
+        assert_eq!(
+            term.cursor_viewport_position(),
+            Some(active),
+            "unscrolled cursor should map to its active row"
+        );
+
+        // Scrolled into history (clamps to top): the cursor (active bottom) is off-viewport.
+        term.scroll_viewport_delta_row(-100);
+        assert_eq!(
+            term.cursor_viewport_position(),
+            None,
+            "cursor must be hidden when scrolled into scrollback (Exp 24)"
+        );
+
+        // Back at the bottom: visible again at the same active position.
+        term.scroll_viewport_to_bottom();
+        assert_eq!(
+            term.cursor_viewport_position(),
+            Some(active),
+            "cursor visible again when scrolled back to the active viewport"
+        );
+    }
+
     #[test]
     fn render_read_path_keeps_post_clear_text() {
         fn rendered_text(term: &Terminal) -> String {
