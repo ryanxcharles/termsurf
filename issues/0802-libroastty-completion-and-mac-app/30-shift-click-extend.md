@@ -175,3 +175,17 @@ complete; locked-screen blocker real, Exp-29 precedent); hygiene clean
 edit is test-only + disclosed, not barred since 802 is open). Optional folded
 in: tightened the within-interval control with a positive `assert_eq!(… None)`
 (clears via the distance-reset).
+
+## Live Confirmation
+
+**The renamed Roastty.app was rebuilt on the final libroastty and verified
+running correctly** (live rendering of ASCII + CJK confirmed; the terminal is
+fully interactive on libroastty). This refinement is **headless-proven**
+(deterministic, adversarially-reviewed test) and its **underlying machinery is
+live-confirmed** in the core experiments. An _isolated_ synthetic-gesture
+capture in the live desktop was **not pursued**: driving CGEvent mouse gestures
+blindly is unreliable + intrusive when the Roastty window is occluded by the
+user's other windows (a diagnostic synthetic click landed on an unrelated
+window). The live confirmation therefore rests on: the app verified
+rendering/running correctly on this libroastty + the headless proof + the prior
+live confirmation of the underlying machinery.

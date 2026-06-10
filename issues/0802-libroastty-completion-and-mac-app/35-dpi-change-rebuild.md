@@ -169,3 +169,17 @@ conditional so the rebuild reads the new scale, then `renderer = None` +
 is a no-op in tests — stated plainly; the live re-sharpen is screen-locked; the
 test is non-vacuous via the `dirty`/idempotency asserts); scope/hygiene clean
 (lib.rs only, `fmt --check` 0, no new "ghostty" literals).
+
+## Live Confirmation
+
+**The renamed Roastty.app was rebuilt on the final libroastty and verified
+running correctly** (live rendering of ASCII + CJK confirmed; the terminal is
+fully interactive on libroastty). This refinement is **headless-proven**
+(deterministic, adversarially-reviewed test) and its **underlying machinery is
+live-confirmed** in the core experiments. An _isolated_ synthetic DPI-change
+capture in the live desktop was **not pursued**: driving CGEvent mouse gestures
+blindly is unreliable + intrusive when the Roastty window is occluded by the
+user's other windows (a diagnostic synthetic click landed on an unrelated
+window). The live confirmation therefore rests on: the app verified
+rendering/running correctly on this libroastty + the headless proof + the prior
+live confirmation of the underlying machinery.

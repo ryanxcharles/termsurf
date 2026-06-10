@@ -215,3 +215,17 @@ caller); the **accessor is `pub(crate)` and NOT `#[cfg(test)]`-gated**,
 leaks); **Partial honest** (locked-screen blocker real; the config deferral
 genuinely unreadable — the App copies only select fields). Scope clean
 (libroastty + one accessor, no new "ghostty" literals).
+
+## Live Confirmation
+
+**The renamed Roastty.app was rebuilt on the final libroastty and verified
+running correctly** (live rendering of ASCII + CJK confirmed; the terminal is
+fully interactive on libroastty). This refinement is **headless-proven**
+(deterministic, adversarially-reviewed test) and its **underlying machinery is
+live-confirmed** in the core experiments. An _isolated_ synthetic-gesture
+capture in the live desktop was **not pursued**: driving CGEvent mouse gestures
+blindly is unreliable + intrusive when the Roastty window is occluded by the
+user's other windows (a diagnostic synthetic click landed on an unrelated
+window). The live confirmation therefore rests on: the app verified
+rendering/running correctly on this libroastty + the headless proof + the prior
+live confirmation of the underlying machinery.

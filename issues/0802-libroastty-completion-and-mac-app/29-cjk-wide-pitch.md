@@ -152,3 +152,18 @@ discovered IcWidth factor ≠ 1. **Partial-pending-live is the correct label**
 (code complete; the `CGSSessionScreenIsLocked` blocker is environmental,
 consistent with Exp 22), not a cover for an incomplete/broken change. Scope
 clean (libroastty only, no new "ghostty" literals).
+
+## Live Confirmation
+
+**Live-confirmed: Pass.** The renamed **Roastty.app**, rebuilt on the final
+libroastty (all Exp 22–37 changes; RoasttyKit + the Swift app re-linked),
+renders CJK at the correct **2-cell wide-pitch** in the live window. Confirmed
+two ways: (a) **direct observation** of the running window — legible
+Chinese/Japanese ideographs; and (b) a **measurable column-ruler check** — a
+probe line of 8 ideographs (`你好世界中文宽度`) and a mixed line
+(`ABCD你好EFGH世界` = 4+4+4+4) both span exactly **16 columns**, so their
+trailing `<-` comment markers align; that alignment only holds if each ideograph
+occupies 2 cells (1-cell CJK would land them at cols 8 vs 12). _Note: an initial
+screenshot-only read wrongly flagged "overlap" — dense ideograph strokes look
+crammed in a downscaled PNG; the ruler measurement + the live view corrected
+it._
