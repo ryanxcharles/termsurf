@@ -775,6 +775,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 65: Phase F — scalar launch config](65-scalar-launch-config.md) —
   **Pass**
+- [Experiment 66: Phase F — scrollbar config](66-scrollbar-config.md) —
+  **Designed**
 
 ## Process
 
