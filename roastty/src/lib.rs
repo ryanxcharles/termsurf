@@ -1857,8 +1857,8 @@ impl App {
     }
 }
 
-/// Test-only override for the selection click clock (Issue 802 / Exp 27) — lets a test advance
-/// time deterministically across `mouse_button` presses so `press_repeat` sees them as a repeat.
+// Test-only override for the selection click clock (Issue 802 / Exp 27) — lets a test advance
+// time deterministically across `mouse_button` presses so `press_repeat` sees them as a repeat.
 #[cfg(test)]
 thread_local! {
     static SELECTION_TEST_CLOCK_NS: std::cell::Cell<Option<u64>> =
@@ -1987,6 +1987,9 @@ fn start_present_driver(surface: *mut Surface) -> std::sync::Arc<std::sync::atom
                 // running false before dropping the box, serialized on this same queue).
                 let surface = unsafe { &mut *tick_ptr.0 };
                 surface.tick_termio();
+                // Issue 802 / Exp 28: drive drag-selection autoscroll while a drag is held past the
+                // edge (no-op otherwise); before the dirty check so the scrolled row presents now.
+                surface.selection_autoscroll_tick();
                 if surface.dirty {
                     surface.present_live();
                     surface.dirty = false;
@@ -3909,6 +3912,22 @@ impl Surface {
         Some(geometry.pos_to_cell(pos))
     }
 
+    /// Like [`Self::position_to_cell`] but clamps to the grid edge instead of returning `None` past
+    /// the viewport edge (Issue 802 / Exp 28). A drag past the edge must still resolve to the edge
+    /// cell so the gesture can set the autoscroll direction.
+    fn position_to_cell_clamped(
+        &self,
+        terminal: &InnerTerminal,
+        x: f64,
+        y: f64,
+    ) -> Option<point::Coordinate> {
+        let geometry = self.mouse_report_geometry(terminal)?;
+        Some(geometry.pos_to_cell(mouse_encode::Position {
+            x: x as f32,
+            y: y as f32,
+        }))
+    }
+
     /// Geometry the drag gesture needs (cell width / padding / screen height for x-mapping + edge
     /// autoscroll detection).
     fn selection_geometry(&self, terminal: &InnerTerminal) -> Option<SelectionGestureGeometry> {
@@ -3991,7 +4010,9 @@ impl Surface {
         };
         let computed = worker.with_termio(|termio| {
             let terminal = termio.terminal();
-            let cell = self.position_to_cell(terminal, x, y)?;
+            // Clamp past-the-edge drags to the edge cell so a drag above/below the viewport sets the
+            // autoscroll direction (Issue 802 / Exp 28).
+            let cell = self.position_to_cell_clamped(terminal, x, y)?;
             let pin = terminal.viewport_pin(cell)?;
             let geometry = self.selection_geometry(terminal)?;
             Some((pin, geometry))
@@ -4004,6 +4025,52 @@ impl Surface {
                 termio.terminal_mut(),
                 SelectionGestureDrag {
                     pin,
+                    x,
+                    y,
+                    rectangle: false,
+                    word_boundary_codepoints: None,
+                    geometry,
+                },
+            );
+            let _ = termio.terminal_mut().set_selection(selection);
+        });
+        self.dirty = true;
+    }
+
+    /// Drive autoscroll while a drag is held past the top/bottom edge (Issue 802 / Exp 28): scroll
+    /// one row toward the edge and extend the selection. No-op unless a left drag with an active
+    /// `autoscroll` is in progress and we're not mouse-reporting. Called each present tick.
+    fn selection_autoscroll_tick(&mut self) {
+        if matches!(
+            self.selection_gesture.autoscroll(),
+            SelectionGestureAutoscroll::None
+        ) {
+            return;
+        }
+        if !self.left_button_pressed() || self.mouse_report_context().is_some() {
+            return;
+        }
+        let Some((x, y)) = self.mouse.position else {
+            return;
+        };
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        // Clamped cell (the mouse is past the edge → `position_to_cell` would be `None`).
+        let computed = worker.with_termio(|termio| {
+            let terminal = termio.terminal();
+            let cell = self.position_to_cell_clamped(terminal, x, y)?;
+            let geometry = self.selection_geometry(terminal)?;
+            Some((cell, geometry))
+        });
+        let Some((cell, geometry)) = computed else {
+            return;
+        };
+        worker.with_termio_mut(|termio| {
+            let selection = self.selection_gesture.autoscroll_tick(
+                termio.terminal_mut(),
+                SelectionGestureAutoscrollTick {
+                    viewport: cell,
                     x,
                     y,
                     rectangle: false,
@@ -16816,6 +16883,96 @@ mod tests {
             selected_text(surface).as_deref(),
             Some("foo TARGET bar"),
             "triple-click should select the line"
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 28: a drag held past the top edge autoscrolls the viewport into history;
+    /// it stops after the button releases.
+    #[test]
+    fn drag_autoscroll_scrolls_into_history() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        let mut content = String::new();
+        for i in 0..40 {
+            content.push_str(&format!("LINE{i:03}\r\n"));
+        }
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(content.as_bytes())
+                    .unwrap();
+            });
+
+        fn first_row_num(surface: RoasttySurface) -> i32 {
+            let text: String = surface_from_handle(surface)
+                .unwrap()
+                .termio_worker
+                .as_ref()
+                .unwrap()
+                .with_termio(|termio| {
+                    termio
+                        .terminal()
+                        .shape_run_options()
+                        .first()
+                        .map(|row| {
+                            row.cells
+                                .iter()
+                                .filter_map(|c| char::from_u32(c.codepoint))
+                                .filter(|&ch| ch != '\0')
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                });
+            text.trim_start_matches("LINE").parse::<i32>().unwrap_or(-1)
+        }
+
+        let before = first_row_num(surface);
+        assert!(
+            before >= 0,
+            "first row should be a numbered line, got {before}"
+        );
+
+        // Press inside the viewport, then drag up past the top edge → autoscroll Up.
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(55.0, 110.0, 0); // cell (5,5)
+        s.mouse_button(1, 1, 0); // press Left
+        s.mouse_pos(55.0, -10.0, 0); // drag ABOVE the top edge → clamps + autoscroll Up
+
+        // Tick (simulating the present loop) — scrolls up into history.
+        for _ in 0..5 {
+            surface_from_handle(surface)
+                .unwrap()
+                .selection_autoscroll_tick();
+        }
+        let after = first_row_num(surface);
+        assert!(
+            after >= 0 && after < before,
+            "autoscroll should scroll the viewport UP into history; before={before} after={after}"
+        );
+
+        // Release → autoscroll stops; further ticks are no-ops.
+        surface_from_handle(surface).unwrap().mouse_button(0, 1, 0); // release Left
+        let at_release = first_row_num(surface);
+        for _ in 0..3 {
+            surface_from_handle(surface)
+                .unwrap()
+                .selection_autoscroll_tick();
+        }
+        assert_eq!(
+            first_row_num(surface),
+            at_release,
+            "autoscroll must stop after the button releases"
         );
 
         roastty_surface_free(surface);

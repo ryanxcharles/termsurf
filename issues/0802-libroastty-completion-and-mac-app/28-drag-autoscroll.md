@@ -108,8 +108,76 @@ gate for symmetry; place the tick before the dirty check (present same frame).
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — a drag held past the top edge auto-scrolls into history and
+extends the selection.
+
+### Change (only `libroastty`)
+
+- **`Surface::selection_autoscroll_tick`** (`lib.rs`): when the left button is
+  held + `autoscroll()` is `Up`/`Down` + not mouse-reporting, computes the
+  clamped edge cell + geometry (read-then-mutate split, no nested lock) and
+  calls `gesture.autoscroll_tick(...)`, applying the returned selection +
+  marking dirty.
+- **Hooked into the present driver's ~16ms tick** (Exp 19), before the dirty
+  check.
+- **Discovered necessity:** `selection_drag` was changed to use a new
+  **`position_to_cell_clamped`** (`geometry.pos_to_cell`, no out-of-viewport
+  check) instead of `position_to_cell` (which returns `None` past the edge).
+  Without this, dragging **above** the window — the natural autoscroll gesture —
+  never _set_ `autoscroll` (only the exact top-1px in-viewport band would); the
+  headless test only passed because `y=0` is in-viewport. With the clamp, a drag
+  above/below clamps to the edge cell and sets the autoscroll direction. The
+  tick (also clamped) then re-drags to the edge each frame.
+
+### Verification
+
+- **Headless regression test** `drag_autoscroll_scrolls_into_history`
+  (`lib.rs`): fill 40 numbered lines; press inside the viewport, drag **above**
+  the top edge (`y = -10`) → `autoscroll = Up`; tick 5× → the rendered first-row
+  line number **decreases** (viewport scrolled up into history); after
+  **release**, further ticks are no-ops (autoscroll stops). Deterministic (calls
+  the tick directly).
+- **Full `cargo test -p roastty`:** lib **4411 passed**, 0 failures — the
+  Exp-25/26/27 selection tests still pass (the clamp is identical to
+  `position_to_cell` for in-viewport drags).
+- **Live confirmation** (screen unlocked; app + descendant tree killed, 0
+  dangling): `seq 1 100`, then `draghold.swift` drags from mid-content **above**
+  the top edge and **holds** 1.2s — the viewport **auto-scrolled into history**
+  (`e28-after.png`: now showing lines 55–78, was ~77–100) and the **selection
+  extended across the whole revealed region** (white highlight over 55–78).
+  Out-of-repo.
 
 ## Conclusion
 
-_(to be added after the run.)_
+Drag-selection autoscroll works: a drag held past the edge scrolls the viewport
+one row per present tick and extends the selection, stopping on release —
+faithful to upstream's held-past-edge loop. Implementing it surfaced that
+`selection_drag` must clamp past-edge positions (now fixed), completing the
+drag-selection feature. Mouse selection is now full: cell-drag (incl. past-edge
+autoscroll), double-word, triple-line, + clipboard copy. Remaining refinements:
+shift-while-reporting override, the reporting clear+reset widening, CJK
+ideographic wide-pitch, CVDisplayLink vsync, DPI-change rebuild,
+cursor-shaping-hint viewport-gating — then close.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** It attacked every axis and landed no Required
+finding: the test is **load-bearing** (drags `y=-10` above the edge — with the
+old `position_to_cell`, `pos_out_of_viewport` returns `None` so `selection_drag`
+bails, `autoscroll` stays `None`, the tick no-ops → assert fails; the release
+control genuinely proves autoscroll stops); the **clamp is an upstream-fidelity
+fix not a regression** (identical to `position_to_cell` in-viewport —
+Exp-25/26/27 untouched; the out-of-bounds clamp matches upstream
+`renderer/size.zig:142-148` `@max(0)`/`@min(col, cols-1)` and `Surface.zig:4153`
+feeds the clamped cell into the gesture unconditionally — roastty's old `None`
+was the divergence); **no runaway/deadlock** (two stop guards +
+`gesture.release` sets `autoscroll=None`; driver `platform_tag==1`-gated;
+read/mutate non-nested, mirroring upstream `selectionScrollTick`); **live
+evidence honest** (`e28-before` top=line 78, `e28-after` top=line 55 with the
+55-78 region highlighted); full lib **4411 passed, 0 failed**; scope clean
+(libroastty + test-only `draghold.swift`, `fmt` clean, no "ghostty" literals).
+Non-blocking notes: the one-line present-driver hook is covered only by the live
+screenshot (it calls the unit-tested `selection_autoscroll_tick`); a
+pre-existing `unused doc comment` warning from Exp 27 — **fixed** here (the
+`thread_local!` doc comment → line comment).

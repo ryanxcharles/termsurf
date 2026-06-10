@@ -542,9 +542,10 @@ stays unaltered except for the rename).
   word, triple-click line; 4410 green deterministic + live word/line highlight)
   · Claude
 - [Experiment 28: Phase C — drag-selection autoscroll past the edge](28-drag-autoscroll.md)
-  — **Designed** (gesture sets `autoscroll` but nothing calls `autoscroll_tick`;
-  wire a tick method + hook it into the present loop so a held past-edge drag
-  scrolls + extends) · Claude
+  — **Pass** (gesture set `autoscroll` but nothing called `autoscroll_tick`;
+  wired a tick into the present loop + clamped `selection_drag` past-edge
+  positions so a held drag-above-edge scrolls into history + extends; 4411
+  green + live 78→55 scroll w/ highlight) · Claude
 
 ## Process
 
