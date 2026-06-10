@@ -785,6 +785,8 @@ stays unaltered except for the rename).
 - [Experiment 67: Phase F — link URL and maximize config](67-link-url-maximize-config.md)
   — **Pass**
 - [Experiment 68: Phase F — class config](68-class-config.md) — **Pass**
+- [Experiment 69: Phase F — working-directory config](69-working-directory-config.md)
+  — **Designed**
 
 ## Process
 
