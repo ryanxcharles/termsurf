@@ -323,6 +323,11 @@ before re-reading experiments.
   They affect only app copy/paste behavior: trim and clear-on-copy apply to
   `copy_to_clipboard`, URL copying stays untouched, and paste confirmation now
   follows Ghostty's bracketed/unsafe-paste rules.
+- **Selection behavior config is app-facing:** Exp 58 represents
+  `selection-clear-on-typing` and `selection-word-chars` on `Config`. Mouse word
+  selection and quicklook word lookup use configured word boundaries; text,
+  raw-text, key, and preedit paths honor clear-on-typing, while Escape still
+  clears selection even when clear-on-typing is disabled.
 
 ### Input injection (Exp 5)
 
@@ -746,6 +751,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 58: Phase F — selection behavior config](58-selection-behavior-config.md)
   — **Pass**
+- [Experiment 59: Phase F — mouse behavior config](59-mouse-behavior-config.md)
+  — **Designed**
 
 ## Process
 
