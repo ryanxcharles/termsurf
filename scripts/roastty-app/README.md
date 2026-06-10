@@ -27,8 +27,8 @@ images.
 
 ## Live A/B Smoke
 
-`live-ab-smoke.sh` launches the debug Ghostty and Roastty apps, drives the same
-ASCII marker command into both, captures Ghostty with its window screenshot
+`live-ab-smoke.sh` launches the debug Ghostty and Roastty apps, drives the
+selected recipe command into both, captures Ghostty with its window screenshot
 wrapper, captures Roastty through the IOSurface-safe full-screen-plus-crop path,
 and compares the captures with `pngdiff.swift`.
 
@@ -39,6 +39,9 @@ scripts/roastty-app/live-ab-smoke.sh \
 
 scripts/roastty-app/live-ab-smoke.sh --list-recipes
 scripts/roastty-app/live-ab-smoke.sh --recipe ascii-grid \
+  --max-mismatch-ratio 1 \
+  --max-mean-channel-delta 255
+scripts/roastty-app/live-ab-smoke.sh --recipe color-grid \
   --max-mismatch-ratio 1 \
   --max-mean-channel-delta 255
 ```
@@ -54,3 +57,6 @@ Recipes:
 - `smoke` — default. Clears the terminal and prints one timestamped marker.
 - `ascii-grid` — clears the terminal, prints a timestamped marker plus fixed
   ASCII rows, and sleeps so capture happens before the prompt returns.
+- `color-grid` — clears the terminal, prints ANSI palette rows, bold/bright
+  rows, truecolor samples, and sleeps so capture happens before the prompt
+  returns.

@@ -225,6 +225,11 @@ before re-reading experiments.
   `scripts/roastty-app/live-ab-smoke.sh --recipe ascii-grid --max-mismatch-ratio 1 --max-mean-channel-delta 255`.
   The JSON summary includes `recipe`; `smoke` remains the default for Exp-39
   compatibility. (Exp 40.)
+- **Color live A/B recipe:**
+  `scripts/roastty-app/live-ab-smoke.sh --recipe color-grid --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  prints deterministic ANSI palette, background, bold/bright, and truecolor
+  rows. Strict thresholds currently fail with recorded metrics, as expected.
+  (Exp 41.)
 
 ### Input injection (Exp 5)
 
@@ -613,7 +618,7 @@ stays unaltered except for the rename).
 - [Experiment 40: Phase D — named live A/B recipes](40-live-ab-recipes.md) —
   **Pass**
 - [Experiment 41: Phase D — color live A/B recipe](41-live-ab-color-recipe.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 

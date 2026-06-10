@@ -5,7 +5,7 @@
 #   ${TERMSURF_SHOT_DIR:-$HOME/.cache/termsurf/shots}
 #
 # Usage:
-#   live-ab-smoke.sh [--recipe smoke|ascii-grid] [--max-mismatch-ratio N] [--max-mean-channel-delta N]
+#   live-ab-smoke.sh [--recipe smoke|ascii-grid|color-grid] [--max-mismatch-ratio N] [--max-mean-channel-delta N]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--recipe smoke|ascii-grid] [--max-mismatch-ratio N] [--max-mean-channel-delta N]" >&2
+      echo "usage: $0 [--recipe smoke|ascii-grid|color-grid] [--max-mismatch-ratio N] [--max-mean-channel-delta N]" >&2
       echo "       $0 --list-recipes" >&2
       exit 0
       ;;
@@ -50,13 +50,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-recipes=(smoke ascii-grid)
+recipes=(smoke ascii-grid color-grid)
 if [ "$list_recipes" -eq 1 ]; then
   printf '%s\n' "${recipes[@]}"
   exit 0
 fi
 case "$recipe" in
-  smoke|ascii-grid) ;;
+  smoke|ascii-grid|color-grid) ;;
   *)
     echo "unknown recipe: $recipe" >&2
     echo "supported recipes:" >&2
@@ -173,6 +173,9 @@ recipe_command() {
       ;;
     ascii-grid)
       printf "printf '\\033[2J\\033[H%s\\nABCDEFGHIJKLMNOPQRSTUVWXYZ\\nabcdefghijklmnopqrstuvwxyz\\n0123456789\\n@#$%%^&*()_+-=[]{};:,.<>/?\\n'; sleep 2" "$marker"
+      ;;
+    color-grid)
+      printf "printf '\\033[2J\\033[H%s\\n\\033[30mBLACK\\033[0m \\033[31mRED\\033[0m \\033[32mGREEN\\033[0m \\033[33mYELLOW\\033[0m \\033[34mBLUE\\033[0m \\033[35mMAGENTA\\033[0m \\033[36mCYAN\\033[0m \\033[37mWHITE\\033[0m\\n\\033[40m bg-black \\033[0m \\033[41m bg-red \\033[0m \\033[42m bg-green \\033[0m \\033[43m bg-yellow \\033[0m \\033[44m bg-blue \\033[0m \\033[45m bg-magenta \\033[0m \\033[46m bg-cyan \\033[0m \\033[47m bg-white \\033[0m\\n\\033[1;30mBRIGHT-BLACK\\033[0m \\033[1;31mBRIGHT-RED\\033[0m \\033[1;32mBRIGHT-GREEN\\033[0m \\033[1;33mBRIGHT-YELLOW\\033[0m\\n\\033[1;34mBRIGHT-BLUE\\033[0m \\033[1;35mBRIGHT-MAGENTA\\033[0m \\033[1;36mBRIGHT-CYAN\\033[0m \\033[1;37mBRIGHT-WHITE\\033[0m\\n\\033[38;2;255;128;0mTRUECOLOR-FG-ORANGE\\033[0m \\033[48;2;30;90;180mTRUECOLOR-BG-BLUE\\033[0m \\033[38;2;120;255;160;48;2;60;20;80mTRUECOLOR-FG-BG\\033[0m\\n'; sleep 2" "$marker"
       ;;
   esac
 }
