@@ -184,6 +184,10 @@ pub(crate) struct Config {
     pub fullscreen: Fullscreen,
     /// `title`.
     pub title: Option<String>,
+    /// `class`.
+    pub class: Option<String>,
+    /// `x11-instance-name`.
+    pub x11_instance_name: Option<String>,
     /// `macos-non-native-fullscreen`.
     pub macos_non_native_fullscreen: NonNativeFullscreen,
     /// `macos-titlebar-style`.
@@ -329,6 +333,8 @@ impl Default for Config {
             window_save_state: WindowSaveState::Default,
             fullscreen: Fullscreen::False,
             title: None,
+            class: None,
+            x11_instance_name: None,
             macos_non_native_fullscreen: NonNativeFullscreen::False,
             macos_titlebar_style: MacTitlebarStyle::Transparent,
             macos_titlebar_proxy_icon: MacTitlebarProxyIcon::Visible,
@@ -503,6 +509,10 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("fullscreen", out));
         EntryFormatter::new("title", out)
             .entry_optional(self.title.clone(), |v, f| f.entry_str(&v));
+        EntryFormatter::new("class", out)
+            .entry_optional(self.class.clone(), |v, f| f.entry_str(&v));
+        EntryFormatter::new("x11-instance-name", out)
+            .entry_optional(self.x11_instance_name.clone(), |v, f| f.entry_str(&v));
         self.window_padding_color
             .format_entry(&mut EntryFormatter::new("window-padding-color", out));
         self.window_subtitle
@@ -790,6 +800,13 @@ impl Config {
             }
             "title" => {
                 self.title = set_optional_value_field(value, default.title, parse_string_field)?
+            }
+            "class" => {
+                self.class = set_optional_value_field(value, default.class, parse_string_field)?
+            }
+            "x11-instance-name" => {
+                self.x11_instance_name =
+                    set_optional_value_field(value, default.x11_instance_name, parse_string_field)?
             }
             "macos-non-native-fullscreen" => {
                 self.macos_non_native_fullscreen = set_enum_field(
@@ -5435,6 +5452,8 @@ mod tests {
         // macOS-window group (Experiment 469).
         assert_eq!(d.fullscreen, Fullscreen::False);
         assert_eq!(d.title, None);
+        assert_eq!(d.class, None);
+        assert_eq!(d.x11_instance_name, None);
         assert_eq!(d.macos_non_native_fullscreen, NonNativeFullscreen::False);
         assert_eq!(d.macos_titlebar_style, MacTitlebarStyle::Transparent);
         assert_eq!(d.macos_titlebar_proxy_icon, MacTitlebarProxyIcon::Visible);
@@ -9280,6 +9299,8 @@ mod tests {
                 "maximize",
                 "fullscreen",
                 "title",
+                "class",
+                "x11-instance-name",
                 "window-padding-color",
                 "window-subtitle",
                 "window-decoration",
@@ -11137,6 +11158,79 @@ mod tests {
                 error: ConfigSetError::InvalidValue,
             }]
         );
+    }
+
+    #[test]
+    fn class_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.class, None);
+        assert_eq!(cfg.x11_instance_name, None);
+        assert_eq!(line(&cfg, "class"), "class = ");
+        assert_eq!(line(&cfg, "x11-instance-name"), "x11-instance-name = ");
+
+        cfg.set("class", Some("com.example.Roastty")).unwrap();
+        cfg.set("x11-instance-name", Some("roastty-dev")).unwrap();
+        assert_eq!(cfg.class.as_deref(), Some("com.example.Roastty"));
+        assert_eq!(cfg.x11_instance_name.as_deref(), Some("roastty-dev"));
+        assert_eq!(line(&cfg, "class"), "class = com.example.Roastty");
+        assert_eq!(
+            line(&cfg, "x11-instance-name"),
+            "x11-instance-name = roastty-dev"
+        );
+
+        cfg.set("class", Some("")).unwrap();
+        cfg.set("x11-instance-name", Some("")).unwrap();
+        assert_eq!(cfg.class, None);
+        assert_eq!(cfg.x11_instance_name, None);
+
+        assert_eq!(cfg.set("class", None), Err(ConfigSetError::ValueRequired));
+        assert_eq!(
+            cfg.set("x11-instance-name", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("class", Some("bad\0class")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("x11-instance-name", Some("bad\0instance")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "class = com.example.Valid\nclass = bad\0class\nx11-instance-name = roastty\nx11-instance-name = bad\0instance\n",
+        );
+        assert_eq!(cfg.class.as_deref(), Some("com.example.Valid"));
+        assert_eq!(cfg.x11_instance_name.as_deref(), Some("roastty"));
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "class".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "x11-instance-name".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.class.as_deref(), Some("com.example.Valid"));
+        assert_eq!(cloned.x11_instance_name.as_deref(), Some("roastty"));
     }
 
     #[test]

@@ -415,6 +415,9 @@ before re-reading experiments.
 - **Link URL / maximize config (Exp 67):** `link-url` and `maximize` now
   parse/format as faithful bool surfaces. Runtime URL matching and startup
   window maximization remain later app/link wiring work.
+- **Class config (Exp 68):** `class` and `x11-instance-name` now parse/format as
+  faithful optional string surfaces. Runtime GTK/X11/Wayland identity behavior
+  remains later app-runtime wiring work.
 
 ### Where things live
 
@@ -781,7 +784,7 @@ stays unaltered except for the rename).
 - [Experiment 66: Phase F — scrollbar config](66-scrollbar-config.md) — **Pass**
 - [Experiment 67: Phase F — link URL and maximize config](67-link-url-maximize-config.md)
   — **Pass**
-- [Experiment 68: Phase F — class config](68-class-config.md) — **Designed**
+- [Experiment 68: Phase F — class config](68-class-config.md) — **Pass**
 
 ## Process
 

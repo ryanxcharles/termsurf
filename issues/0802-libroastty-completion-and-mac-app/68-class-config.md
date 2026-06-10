@@ -100,3 +100,56 @@ match `title`, `class`, `x11-instance-name`, then `working-directory`, and
 deferring `working-directory` is justified by upstream finalize/default
 inheritance behavior. The reviewer had one nit to use canonical `cargo fmt` in
 the implementation step; the verification plan was updated accordingly.
+
+## Result
+
+**Result:** Pass
+
+Experiment 68 added the config-only `class` and `x11-instance-name` surfaces to
+`roastty/src/config/mod.rs`. `Config` now carries both values as optional
+strings with the upstream default `None`, routes both keys through
+`Config::set`, and emits them in `format_config` after `title`.
+
+The shared optional string parser accepts non-empty values, resets empty values
+to unset, reports `ValueRequired` for missing values, and reports `InvalidValue`
+for NUL-containing values. `Config::load_str` records line/key diagnostics for
+invalid `class` and `x11-instance-name` lines while applying valid neighboring
+lines.
+
+Runtime GTK/X11/Wayland application identity behavior remains out of scope; this
+experiment does not alter DBus, app identity, or launcher behavior.
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test -p roastty class_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+- `cargo fmt --check`
+- `git diff --check`
+- `git status --short`
+
+`cargo test -p roastty` passed with 4,503 unit tests, the C ABI harness, and doc
+tests. The C ABI harness still emits existing enum-conversion warnings unrelated
+to this config change.
+
+## Conclusion
+
+`class` and `x11-instance-name` now have faithful parser/formatter config
+surfaces with defaults, reset behavior, diagnostics, formatter-order coverage,
+and clone/equality coverage. `working-directory` remains the next adjacent
+config field, but it should stay separate because upstream's value type and
+finalize/default inheritance behavior are larger than an optional string slice.
+
+## Completion Review
+
+Codex-native adversarial reviewer `019eb3e4-18a4-7723-b8a9-d0217b1d56b7`
+returned **Approved** with no findings.
+
+The reviewer checked the completed experiment with fresh context, including the
+workflow contract, issue README, experiment file, implementation diff since the
+plan commit, `roastty/src/config/mod.rs`, and upstream
+`vendor/ghostty/src/config/Config.zig`. The reviewer independently verified
+`cargo fmt --check`, `git diff --check`, both targeted test commands, doc tests,
+and full `cargo test -p roastty`, which passed with 4,503 unit tests, the C ABI
+harness, and doc tests.
