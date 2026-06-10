@@ -646,6 +646,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 45: Phase D — live A/B recipe matrix runner](45-live-ab-recipe-matrix.md)
   — **Pass**
+- [Experiment 46: Phase D — paste-safe live A/B recipe input](46-live-ab-paste-safe-recipes.md)
+  — **Designed**
 
 ## Process
 
