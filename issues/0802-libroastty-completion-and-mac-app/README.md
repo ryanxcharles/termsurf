@@ -759,6 +759,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 59: Phase F — mouse behavior config](59-mouse-behavior-config.md)
   — **Pass**
+- [Experiment 60: Phase F — cursor default config](60-cursor-default-config.md)
+  — **Designed**
 
 ## Process
 
