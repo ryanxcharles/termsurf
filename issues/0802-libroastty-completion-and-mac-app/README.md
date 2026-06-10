@@ -261,6 +261,12 @@ before re-reading experiments.
   selected recipe script, so every matrix recipe visibly executes in both apps
   without paste or synthetic keyboard input. Ghostty capture now uses the same
   full-screen crop path as Roastty.
+- **Live A/B recipes hold their final frame through capture:** Exp 48 uses
+  `${TERMSURF_AB_HOLD_SECONDS:-20}` so recipes do not return to different
+  Ghostty/Roastty shell prompts before screenshot capture. Activation is
+  verified against the exact launched target process's own `frontmost` property
+  by Unix PID so full-screen crop captures fail instead of silently accepting
+  occluded pixels.
 
 ### Input injection (Exp 5)
 
@@ -663,7 +669,7 @@ stays unaltered except for the rename).
 - [Experiment 47: Phase D — launch-time live A/B recipe bootstrap](47-live-ab-launch-bootstrap.md)
   — **Pass**
 - [Experiment 48: Phase D — hold live A/B recipe frames through capture](48-live-ab-held-recipe-frame.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

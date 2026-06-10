@@ -15,6 +15,7 @@ SHOT_DIR="${TERMSURF_SHOT_DIR:-$HOME/.cache/termsurf/shots}"
 GHOSTTY_APP="${GHOSTTY_APP:-$ROOT/vendor/ghostty/macos/build/Debug/Ghostty.app}"
 ROASTTY_APP="${ROASTTY_APP:-$ROOT/roastty/macos/build/Debug/Roastty.app}"
 SWIFT="$(command -v swift || echo /usr/bin/swift)"
+HOLD_SECONDS="${TERMSURF_AB_HOLD_SECONDS:-20}"
 
 max_mismatch_ratio="0"
 max_mean_channel_delta="0"
@@ -137,19 +138,30 @@ delay() {
 
 activate() {
   local app="$1"
+  local pid="$2"
   local process_name frontmost
   process_name="$(basename "$app" .app | tr '[:upper:]' '[:lower:]')"
-  osascript >/dev/null <<OSA
+  [ -n "$pid" ] || { echo "activate requires pid for $process_name" >&2; return 1; }
+  for _ in $(seq 1 20); do
+    frontmost="$(osascript <<OSA 2>/dev/null || true
 tell application "System Events"
-  set frontmost of first process whose name is "$process_name" to true
+  set target_pid to $pid
+  if exists (first process whose unix id is target_pid) then
+    set frontmost of first process whose unix id is target_pid to true
+    return frontmost of first process whose unix id is target_pid
+  else
+    return false
+  end if
 end tell
 OSA
-  delay 0.8
-  frontmost="$(osascript -e 'tell application "System Events" to name of first process whose frontmost is true')"
-  if [ "$(printf '%s' "$frontmost" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$process_name" | tr '[:upper:]' '[:lower:]')" ]; then
-    echo "failed to activate $process_name; frontmost is $frontmost" >&2
-    return 1
-  fi
+)"
+    if [ "$frontmost" = "true" ]; then
+      return 0
+    fi
+    delay 0.4
+  done
+  echo "failed to activate $process_name pid=$pid; frontmost=${frontmost:-unknown}" >&2
+  return 1
 }
 
 dismiss_reopen_dialog() {
@@ -214,10 +226,11 @@ OSA
 
 type_shell_command() {
   local app="$1"
-  local command="$2"
+  local pid="$2"
+  local command="$3"
   local tmp="/tmp/termsurf-ab-smoke-command-$$.txt"
   printf '%s\n' "$command" >"$tmp"
-  activate "$app"
+  activate "$app" "$pid"
   focus_terminal_view "$app"
   "$SWIFT" "$GHOST_DIR/inject.swift" key 8 control
   delay 0.2
@@ -270,22 +283,22 @@ launch_with_bootstrap() {
 recipe_command() {
   case "$recipe" in
     smoke)
-      printf '%s' "clear; printf '%s\\n' '$marker'; sleep 2"
+      printf '%s' "clear; printf '%s\\n' '$marker'; sleep '$HOLD_SECONDS'"
       ;;
     ascii-grid)
-      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\nABCDEFGHIJKLMNOPQRSTUVWXYZ\\nabcdefghijklmnopqrstuvwxyz\\n0123456789\\n@#$%^&*()_+-=[]{};:,.<>/?\\n'; sleep 2"
+      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\nABCDEFGHIJKLMNOPQRSTUVWXYZ\\nabcdefghijklmnopqrstuvwxyz\\n0123456789\\n@#$%^&*()_+-=[]{};:,.<>/?\\n'; sleep '$HOLD_SECONDS'"
       ;;
     color-grid)
-      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\n\\033[30mBLACK\\033[0m \\033[31mRED\\033[0m \\033[32mGREEN\\033[0m \\033[33mYELLOW\\033[0m \\033[34mBLUE\\033[0m \\033[35mMAGENTA\\033[0m \\033[36mCYAN\\033[0m \\033[37mWHITE\\033[0m\\n\\033[40m bg-black \\033[0m \\033[41m bg-red \\033[0m \\033[42m bg-green \\033[0m \\033[43m bg-yellow \\033[0m \\033[44m bg-blue \\033[0m \\033[45m bg-magenta \\033[0m \\033[46m bg-cyan \\033[0m \\033[47m bg-white \\033[0m\\n\\033[1;30mBRIGHT-BLACK\\033[0m \\033[1;31mBRIGHT-RED\\033[0m \\033[1;32mBRIGHT-GREEN\\033[0m \\033[1;33mBRIGHT-YELLOW\\033[0m\\n\\033[1;34mBRIGHT-BLUE\\033[0m \\033[1;35mBRIGHT-MAGENTA\\033[0m \\033[1;36mBRIGHT-CYAN\\033[0m \\033[1;37mBRIGHT-WHITE\\033[0m\\n\\033[38;2;255;128;0mTRUECOLOR-FG-ORANGE\\033[0m \\033[48;2;30;90;180mTRUECOLOR-BG-BLUE\\033[0m \\033[38;2;120;255;160;48;2;60;20;80mTRUECOLOR-FG-BG\\033[0m\\n'; sleep 2"
+      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\n\\033[30mBLACK\\033[0m \\033[31mRED\\033[0m \\033[32mGREEN\\033[0m \\033[33mYELLOW\\033[0m \\033[34mBLUE\\033[0m \\033[35mMAGENTA\\033[0m \\033[36mCYAN\\033[0m \\033[37mWHITE\\033[0m\\n\\033[40m bg-black \\033[0m \\033[41m bg-red \\033[0m \\033[42m bg-green \\033[0m \\033[43m bg-yellow \\033[0m \\033[44m bg-blue \\033[0m \\033[45m bg-magenta \\033[0m \\033[46m bg-cyan \\033[0m \\033[47m bg-white \\033[0m\\n\\033[1;30mBRIGHT-BLACK\\033[0m \\033[1;31mBRIGHT-RED\\033[0m \\033[1;32mBRIGHT-GREEN\\033[0m \\033[1;33mBRIGHT-YELLOW\\033[0m\\n\\033[1;34mBRIGHT-BLUE\\033[0m \\033[1;35mBRIGHT-MAGENTA\\033[0m \\033[1;36mBRIGHT-CYAN\\033[0m \\033[1;37mBRIGHT-WHITE\\033[0m\\n\\033[38;2;255;128;0mTRUECOLOR-FG-ORANGE\\033[0m \\033[48;2;30;90;180mTRUECOLOR-BG-BLUE\\033[0m \\033[38;2;120;255;160;48;2;60;20;80mTRUECOLOR-FG-BG\\033[0m\\n'; sleep '$HOLD_SECONDS'"
       ;;
     clear-after)
-      printf '%s' "printf '%b' 'PRE_CLEAR_ONE\\nPRE_CLEAR_TWO\\nPRE_CLEAR_THREE\\n\\033[3J\\033[H\\033[2J$marker\\nAFTER_CLEAR_ROW_1\\nAFTER_CLEAR_ROW_2\\n'; sleep 2"
+      printf '%s' "printf '%b' 'PRE_CLEAR_ONE\\nPRE_CLEAR_TWO\\nPRE_CLEAR_THREE\\n\\033[3J\\033[H\\033[2J$marker\\nAFTER_CLEAR_ROW_1\\nAFTER_CLEAR_ROW_2\\n'; sleep '$HOLD_SECONDS'"
       ;;
     alt-screen)
-      printf '%s' "printf '%b' '\\033[?1049h\\033[2J\\033[5;10H$marker\\033[10;3HALT_ROW_10_COL_3\\033[15;20HALT_ROW_15_COL_20\\033[0m'; sleep 2"
+      printf '%s' "printf '%b' '\\033[?1049h\\033[2J\\033[5;10H$marker\\033[10;3HALT_ROW_10_COL_3\\033[15;20HALT_ROW_15_COL_20\\033[0m'; sleep '$HOLD_SECONDS'"
       ;;
     scroll-output)
-      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\n'; for i in {001..080}; do printf 'SCROLL_ROW_%s\\n' \"\$i\"; done; sleep 2"
+      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\n'; for i in {001..080}; do printf 'SCROLL_ROW_%s\\n' \"\$i\"; done; sleep '$HOLD_SECONDS'"
       ;;
   esac
 }
@@ -349,12 +362,12 @@ echo "Ghostty pid=$ghost_pid Roastty pid=$roast_pid recipe=$recipe marker=$marke
 dismiss_reopen_dialog "$GHOSTTY_APP"
 dismiss_reopen_dialog "$ROASTTY_APP"
 
-activate "$GHOSTTY_APP"
+activate "$GHOSTTY_APP" "$ghost_pid"
 set_window_bounds "$GHOSTTY_APP"
-activate "$ROASTTY_APP"
+activate "$ROASTTY_APP" "$roast_pid"
 set_window_bounds "$ROASTTY_APP"
 
-activate "$GHOSTTY_APP"
+activate "$GHOSTTY_APP" "$ghost_pid"
 ghost_full="$SHOT_DIR/ghostty-ab-full-$stamp.png"
 ghost_png="$SHOT_DIR/ghostty-ab-crop-$stamp.png"
 screencapture -x "$ghost_full"
@@ -366,7 +379,7 @@ ghost_h="$(image_dim "$ghost_png" pixelHeight)"
   exit 1
 }
 
-activate "$ROASTTY_APP"
+activate "$ROASTTY_APP" "$roast_pid"
 roast_full="$SHOT_DIR/roastty-ab-full-$stamp.png"
 roast_crop="$SHOT_DIR/roastty-ab-crop-$stamp.png"
 screencapture -x "$roast_full"

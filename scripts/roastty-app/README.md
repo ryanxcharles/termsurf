@@ -66,6 +66,9 @@ each app binary directly with generated zsh and Nushell startup files, so
 recipes execute at shell startup instead of relying on paste or synthetic UI
 typing. Recipe payloads use data arguments rather than `printf` format strings
 so literal `%`, backslashes, and ANSI escapes do not corrupt the shell command.
+Each recipe holds its drawn frame through capture with
+`${TERMSURF_AB_HOLD_SECONDS:-20}` seconds of sleep, so returned shell prompts do
+not contaminate the comparison.
 
 Recipes:
 
