@@ -171,8 +171,76 @@ folded in:
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — mouse-drag text selection now works in the live app.
+
+### Change (only `libroastty`)
+
+- **`Surface` owns a `SelectionGesture`** (`lib.rs`), driven by the core mouse
+  handlers, faithful to upstream `Surface.zig` (the renamed app forwards raw
+  mouse events):
+  - **`mouse_button`** (left): not-actually-mouse-reporting → `selection_press`
+    (press) / `selection_release` (release); reporting + press →
+    `selection_clear_and_reset` (clear + report).
+  - **`mouse_pos`** (left held + not reporting) → `selection_drag` (extend).
+- **Pixel → VIEWPORT pin** (`position_to_cell` + `terminal.viewport_pin`) —
+  selection anchors in viewport space, so a drag over scrollback selects the
+  visible history rows (the report path's `pos_to_cell` → `Viewport` grid_ref,
+  mirrored). Gate is the compound `mouse_report_context().is_some()`.
+- Borrows via disjoint fields (compute the pin in a `with_termio` closure,
+  mutate `self.gesture` in a `with_termio_mut` closure). `time_ns: None`
+  (cell-drag has no repeat path). Shift-while-reporting override + word/line
+  double/triple-click + clipboard copy are follow-ups (Exp 26+).
+
+### Verification
+
+- **Headless regression test (two cases)** asserting the exact selected text via
+  `selection_format(Plain, …, None)` (the active selection):
+  - `mouse_drag_selects_text` — unscrolled drag selects `TARGET`.
+  - `mouse_drag_selects_scrollback_text` — **scrolled into history first**, drag
+    selects the _history_ substring `TARGET` (the case that distinguishes the
+    **viewport** pin from active; an active-pin mapping would select the live
+    bottom rows). Both fail pre-wire (no selection), pass after.
+- **Full `cargo test -p roastty`:** lib **4408 passed**, 0 failures —
+  mouse-reporting surfaces still get reports (the gate).
+- **Live confirmation** (screen unlocked; app + descendant tree killed, 0
+  dangling): launched with `echo DRAGSELECTME_TARGET_HERE`; the CGEvent **drag
+  driver** (`scripts/roastty-app/drag.swift`:
+  `leftMouseDown`→`leftMouseDragged`→`leftMouseUp` at `.cghidEventTap`) over the
+  line **renders the dragged span highlighted** (`e25-after.png`, white
+  selection background; `e25-before.png` had none). Out-of-repo.
 
 ## Conclusion
 
-_(to be added after the run.)_
+Mouse-drag selection is wired into the core (faithful to upstream's
+`mouseButtonCallback`/ `cursorPosCallback`), anchored in viewport space so it
+works in scrollback, and live-confirmed. The **last major Exp-20-deferred
+feature is now functional** (the selection itself). **Next: Exp 26 — clipboard
+copy** (cmd-C → `copy_to_clipboard` → `NSPasteboard`, verified via `pbpaste`),
+then the selection follow-ups (word/line double/triple-click, drag-autoscroll,
+shift-while-reporting) and the remaining refinements (CJK wide-pitch,
+CVDisplayLink vsync, DPI-change), then close the issue.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** It led with a use-after-free hypothesis on
+the split-closure pin (compute in a `with_termio` scope, consume in a separate
+`with_termio_mut` scope, with the worker thread able to prune a page in the gap)
+and **could not land it**: every consumer validates the pin by **pointer
+identity** (`pin_is_valid`/`node_for_pin` compare `NonNull` against the live
+page set without dereferencing) and `drag_selection` bails on an invalid pin — a
+pruned pin is rejected gracefully, not dereferenced. It also confirmed: both
+tests **discriminate** (the scrollback case fails with an active-pin mapping;
+pixel math = "TARGET" inclusive, not whole-line) and pass; full lib **4408
+passed, 0 failed**; the compound gate leaves mouse-reporting surfaces reporting
+with no selection side-effect; `selection_clear_and_reset` mirrors upstream
+`Surface.zig:3886-3892`; viewport-pin anchor matches upstream
+`posToViewport`/`pin(.viewport)`; the live PNGs are honest (`e25-after` shows
+the white selection highlight `e25-before` lacks); scope/hygiene clean
+(libroastty + test-only `drag.swift`, `fmt --check` clean, no "ghostty"
+literals). Two **Optional** follow-ups (non-blocking), folded into the deferral
+list: (1) the reporting clear+reset is narrower than upstream (only Left+Press
+vs any-button/press-release); (2) the split-closure could silently drop one
+press/drag update if the worker prunes the pin's page in the lock gap (sound,
+self-correcting on the next event). Nit: include `drag.swift` in the result
+commit (done).

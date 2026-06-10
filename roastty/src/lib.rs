@@ -1885,6 +1885,9 @@ struct Surface {
     last_consumed_default_binding: Option<DefaultBindingReleaseIdentity>,
     mouse: SurfaceMouseState,
     mouse_reporting: bool,
+    /// Mouse-drag text selection gesture (Issue 802 / Exp 25), driven by the core mouse handlers
+    /// (faithful to upstream `Surface.zig`'s `self.mouse.selection_gesture`).
+    selection_gesture: SelectionGesture,
     readonly: bool,
     termio_worker: Option<termio::TermioWorker>,
     retained_write_file_dirs: Vec<os::temp_dir::TempDir>,
@@ -3762,6 +3765,10 @@ impl Surface {
             None
         };
         if self.mouse.position.is_some() {
+            // Drag-extend selection (Issue 802 / Exp 25) when the left button is held + not reporting.
+            if self.left_button_pressed() && self.mouse_report_context().is_none() {
+                self.selection_drag();
+            }
             self.dispatch_mouse_report(mouse::MouseAction::Motion, self.pressed_mouse_button());
         }
     }
@@ -3783,6 +3790,18 @@ impl Surface {
             SurfaceMouseButtonState::Release => mouse::MouseAction::Release,
             SurfaceMouseButtonState::Press => mouse::MouseAction::Press,
         };
+        // Mouse-drag selection (Issue 802 / Exp 25): the core drives the gesture when not actually
+        // mouse-reporting (faithful to upstream). Shift-while-reporting override is deferred.
+        if matches!(button, mouse::MouseButton::Left) {
+            if self.mouse_report_context().is_none() {
+                match state {
+                    SurfaceMouseButtonState::Press => self.selection_press(),
+                    SurfaceMouseButtonState::Release => self.selection_release(),
+                }
+            } else if matches!(state, SurfaceMouseButtonState::Press) {
+                self.selection_clear_and_reset();
+            }
+        }
         self.dispatch_mouse_report(action, Some(button))
     }
 
@@ -3855,6 +3874,151 @@ impl Surface {
         }
         self.mouse.pressure_stage = stage;
         self.mouse.pressure = pressure;
+    }
+
+    // --- Mouse-drag text selection (Issue 802 / Exp 25) ---
+    // Faithful to upstream `Surface.zig`'s core selection: the renamed app forwards raw mouse
+    // events, so `mouse_button`/`mouse_pos` drive an owned `SelectionGesture`. Anchors in VIEWPORT
+    // space (so a drag over scrollback selects the visible history rows).
+
+    /// Map the current mouse pixel position to a viewport cell, or `None` if outside the grid.
+    fn position_to_cell(
+        &self,
+        terminal: &InnerTerminal,
+        x: f64,
+        y: f64,
+    ) -> Option<point::Coordinate> {
+        let geometry = self.mouse_report_geometry(terminal)?;
+        let pos = mouse_encode::Position {
+            x: x as f32,
+            y: y as f32,
+        };
+        if geometry.pos_out_of_viewport(pos) {
+            return None;
+        }
+        Some(geometry.pos_to_cell(pos))
+    }
+
+    /// Geometry the drag gesture needs (cell width / padding / screen height for x-mapping + edge
+    /// autoscroll detection).
+    fn selection_geometry(&self, terminal: &InnerTerminal) -> Option<SelectionGestureGeometry> {
+        let geometry = self.mouse_report_geometry(terminal)?;
+        Some(SelectionGestureGeometry {
+            columns: u32::from(terminal.columns()).max(1),
+            cell_width: geometry.cell.width,
+            padding_left: geometry.padding.left,
+            screen_height: geometry.screen.height,
+        })
+    }
+
+    fn left_button_pressed(&self) -> bool {
+        matches!(
+            self.mouse.buttons[mouse_button_index(mouse::MouseButton::Left)],
+            Some(SurfaceMouseButtonState::Press)
+        )
+    }
+
+    /// Left-press: begin a selection gesture at the cursor (clears any prior selection for a
+    /// cell-press; word/line behaviors return a selection immediately).
+    fn selection_press(&mut self) {
+        let Some((x, y)) = self.mouse.position else {
+            return;
+        };
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        let pin = worker.with_termio(|termio| {
+            let terminal = termio.terminal();
+            let cell = self.position_to_cell(terminal, x, y)?;
+            terminal.viewport_pin(cell)
+        });
+        let Some(pin) = pin else {
+            return;
+        };
+        worker.with_termio_mut(|termio| {
+            let selection = self.selection_gesture.press(
+                termio.terminal_mut(),
+                SelectionGesturePress {
+                    time_ns: None,
+                    pin,
+                    x,
+                    y,
+                    max_distance: 0.0,
+                    repeat_interval_ns: 0,
+                    word_boundary_codepoints: None,
+                    behaviors: DEFAULT_BEHAVIORS,
+                },
+            );
+            let _ = termio.terminal_mut().set_selection(selection);
+        });
+        self.dirty = true;
+    }
+
+    /// Drag (left held): extend the selection to the cursor.
+    fn selection_drag(&mut self) {
+        let Some((x, y)) = self.mouse.position else {
+            return;
+        };
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        let computed = worker.with_termio(|termio| {
+            let terminal = termio.terminal();
+            let cell = self.position_to_cell(terminal, x, y)?;
+            let pin = terminal.viewport_pin(cell)?;
+            let geometry = self.selection_geometry(terminal)?;
+            Some((pin, geometry))
+        });
+        let Some((pin, geometry)) = computed else {
+            return;
+        };
+        worker.with_termio_mut(|termio| {
+            let selection = self.selection_gesture.drag(
+                termio.terminal_mut(),
+                SelectionGestureDrag {
+                    pin,
+                    x,
+                    y,
+                    rectangle: false,
+                    word_boundary_codepoints: None,
+                    geometry,
+                },
+            );
+            let _ = termio.terminal_mut().set_selection(selection);
+        });
+        self.dirty = true;
+    }
+
+    /// Left-release: end the gesture.
+    fn selection_release(&mut self) {
+        let Some((x, y)) = self.mouse.position else {
+            return;
+        };
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        let pin = worker.with_termio(|termio| {
+            let terminal = termio.terminal();
+            let cell = self.position_to_cell(terminal, x, y)?;
+            terminal.viewport_pin(cell)
+        });
+        worker.with_termio_mut(|termio| {
+            self.selection_gesture
+                .release(termio.terminal_mut(), SelectionGestureRelease { pin });
+        });
+    }
+
+    /// Reporting + non-shift press: clear any selection + reset the gesture (upstream), so a
+    /// later report→no-report transition can't resume a stale selection.
+    fn selection_clear_and_reset(&mut self) {
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        worker.with_termio_mut(|termio| {
+            let _ = termio.terminal_mut().set_selection(None);
+            self.selection_gesture.reset(Some(termio.terminal_mut()));
+        });
+        self.dirty = true;
     }
 
     fn dispatch_mouse_report(
@@ -13821,6 +13985,7 @@ pub extern "C" fn roastty_surface_new(
         last_consumed_default_binding: None,
         mouse: SurfaceMouseState::default(),
         mouse_reporting: true,
+        selection_gesture: SelectionGesture::default(),
         readonly: false,
         termio_worker: None,
         retained_write_file_dirs: Vec::new(),
@@ -16421,6 +16586,112 @@ mod tests {
         });
 
         assert!(surface_from_handle(surface).unwrap().dirty);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    fn set_test_size_80x24(surface: RoasttySurface) {
+        surface_from_handle(surface).unwrap().size = RoasttySurfaceSize {
+            columns: 80,
+            rows: 24,
+            width_px: 800,
+            height_px: 480,
+            cell_width_px: 10,
+            cell_height_px: 20,
+        };
+    }
+
+    fn selected_text(surface: RoasttySurface) -> Option<String> {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| {
+                termio
+                    .terminal()
+                    .selection_format(TerminalSelectionFormat::Plain, true, false, None)
+                    .ok()
+            })
+    }
+
+    /// Issue 802 / Exp 25: a left-button drag must select text. Cell mapping at 10px/col:
+    /// "SELECTME_TARGET_0123" → "TARGET" is cols 9..=14 on row 0.
+    #[test]
+    fn mouse_drag_selects_text() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(b"SELECTME_TARGET_0123")
+                    .unwrap();
+            });
+
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(92.0, 10.0, 0); // col 9 (the first T)
+        s.mouse_button(1, 1, 0); // Press Left
+        s.mouse_pos(149.0, 10.0, 0); // drag well into col 14 (the last T)
+        s.mouse_button(0, 1, 0); // Release Left
+
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("TARGET"),
+            "drag should select TARGET"
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 25: a drag while scrolled into scrollback must select the VISIBLE history
+    /// row (viewport pin), not the active bottom. This distinguishes viewport from active anchoring.
+    /// "HISTORY_TARGET_XXXX" → "TARGET" is cols 8..=13.
+    #[test]
+    fn mouse_drag_selects_scrollback_text() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        let mut content = String::from("HISTORY_TARGET_XXXX\r\n");
+        for _ in 0..40 {
+            content.push_str("filler\r\n");
+        }
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(content.as_bytes())
+                    .unwrap();
+                // scroll to the top so the HISTORY_TARGET line is at viewport row 0.
+                termio.terminal_mut().scroll_viewport_to_top();
+            });
+
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(82.0, 10.0, 0); // col 8 (the first T), row 0 (history)
+        s.mouse_button(1, 1, 0); // Press Left
+        s.mouse_pos(139.0, 10.0, 0); // drag well into col 13 (the last T)
+        s.mouse_button(0, 1, 0); // Release Left
+
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("TARGET"),
+            "drag while scrolled must select the history substring (viewport pin)"
+        );
+
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
