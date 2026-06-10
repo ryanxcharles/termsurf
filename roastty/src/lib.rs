@@ -1857,6 +1857,14 @@ impl App {
     }
 }
 
+/// Test-only override for the selection click clock (Issue 802 / Exp 27) — lets a test advance
+/// time deterministically across `mouse_button` presses so `press_repeat` sees them as a repeat.
+#[cfg(test)]
+thread_local! {
+    static SELECTION_TEST_CLOCK_NS: std::cell::Cell<Option<u64>> =
+        const { std::cell::Cell::new(None) };
+}
+
 struct Surface {
     app: RoasttyApp,
     userdata: *mut c_void,
@@ -1888,6 +1896,8 @@ struct Surface {
     /// Mouse-drag text selection gesture (Issue 802 / Exp 25), driven by the core mouse handlers
     /// (faithful to upstream `Surface.zig`'s `self.mouse.selection_gesture`).
     selection_gesture: SelectionGesture,
+    /// Monotonic epoch for click-repeat timing (Issue 802 / Exp 27 — double/triple-click word/line).
+    selection_click_epoch: std::time::Instant,
     readonly: bool,
     termio_worker: Option<termio::TermioWorker>,
     retained_write_file_dirs: Vec<os::temp_dir::TempDir>,
@@ -3918,33 +3928,50 @@ impl Surface {
         )
     }
 
-    /// Left-press: begin a selection gesture at the cursor (clears any prior selection for a
-    /// cell-press; word/line behaviors return a selection immediately).
+    /// Monotonic nanoseconds for click-repeat timing (Issue 802 / Exp 27). In tests a thread-local
+    /// override makes the click-count deterministic (real wall-clock spacing between two FFI presses
+    /// is load-dependent and can exceed the 500ms repeat interval under a parallel suite).
+    fn selection_time_ns(&self) -> u64 {
+        #[cfg(test)]
+        {
+            if let Some(ns) = SELECTION_TEST_CLOCK_NS.with(std::cell::Cell::get) {
+                return ns;
+            }
+        }
+        self.selection_click_epoch.elapsed().as_nanos() as u64
+    }
+
+    /// Left-press: begin a selection gesture at the cursor. A repeat click at the same cell within
+    /// the interval advances the behavior (Cell → Word → Line) via the gesture's click count.
     fn selection_press(&mut self) {
         let Some((x, y)) = self.mouse.position else {
             return;
         };
+        let time_ns = self.selection_time_ns();
         let Some(worker) = self.termio_worker.as_ref() else {
             return;
         };
-        let pin = worker.with_termio(|termio| {
+        let computed = worker.with_termio(|termio| {
             let terminal = termio.terminal();
             let cell = self.position_to_cell(terminal, x, y)?;
-            terminal.viewport_pin(cell)
+            let pin = terminal.viewport_pin(cell)?;
+            let geometry = self.selection_geometry(terminal)?;
+            Some((pin, f64::from(geometry.cell_width)))
         });
-        let Some(pin) = pin else {
+        let Some((pin, max_distance)) = computed else {
             return;
         };
         worker.with_termio_mut(|termio| {
             let selection = self.selection_gesture.press(
                 termio.terminal_mut(),
                 SelectionGesturePress {
-                    time_ns: None,
+                    time_ns: Some(time_ns),
                     pin,
                     x,
                     y,
-                    max_distance: 0.0,
-                    repeat_interval_ns: 0,
+                    // Upstream `Surface.zig:3945-3952`: 500ms repeat interval, one-cell max distance.
+                    max_distance,
+                    repeat_interval_ns: 500_000_000,
                     word_boundary_codepoints: None,
                     behaviors: DEFAULT_BEHAVIORS,
                 },
@@ -13986,6 +14013,7 @@ pub extern "C" fn roastty_surface_new(
         mouse: SurfaceMouseState::default(),
         mouse_reporting: true,
         selection_gesture: SelectionGesture::default(),
+        selection_click_epoch: std::time::Instant::now(),
         readonly: false,
         termio_worker: None,
         retained_write_file_dirs: Vec::new(),
@@ -16741,6 +16769,53 @@ mod tests {
             plain.as_deref(),
             Some("TARGET"),
             "drag-selected text must be copied to the clipboard; records={records:?}"
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 27: a double-click selects the word, a triple-click selects the line.
+    /// "foo TARGET bar": cell 6 ('R') is inside TARGET (cols 4..=9, space-bounded).
+    #[test]
+    fn double_click_word_triple_click_line() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio.terminal_mut().next_slice(b"foo TARGET bar").unwrap();
+            });
+
+        // Cursor over cell 6 (inside TARGET); clicks reuse this position.
+        surface_from_handle(surface)
+            .unwrap()
+            .mouse_pos(65.0, 10.0, 0);
+        let click = |surface: RoasttySurface| {
+            let s = surface_from_handle(surface).unwrap();
+            s.mouse_button(1, 1, 0); // Press Left
+            s.mouse_button(0, 1, 0); // Release Left
+        };
+
+        click(surface); // click 1 → Cell (clears)
+        click(surface); // click 2 → Word
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("TARGET"),
+            "double-click should select the word"
+        );
+
+        click(surface); // click 3 → Line
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("foo TARGET bar"),
+            "triple-click should select the line"
         );
 
         roastty_surface_free(surface);

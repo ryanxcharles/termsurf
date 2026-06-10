@@ -108,8 +108,69 @@ citation (test `SystemTime`, not production `Instant`).
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — double-click selects the word, triple-click the line,
+headless + live.
+
+### Change (only `libroastty`)
+
+- **`Surface` gained a monotonic epoch** (`selection_click_epoch: Instant`,
+  sampled in `surface_new`)
+  - `selection_time_ns()` = `epoch.elapsed().as_nanos() as u64`.
+- **`selection_press`** now passes `time_ns: Some(self.selection_time_ns())`,
+  `repeat_interval_ns: 500_000_000` (500ms — upstream `mouse_interval`),
+  `max_distance:` the cell width (`f64`, from `selection_geometry`) — so the
+  gesture's `press_repeat` advances `click_count` (Cell→Word→Line) on rapid
+  same-cell clicks. No change to drag/release.
+
+### Verification
+
+- **Headless regression test** `double_click_word_triple_click_line` (`lib.rs`):
+  on `foo TARGET bar`, two rapid `mouse_button` press/release at a cell inside
+  `TARGET` → `active_selection()` == `"TARGET"` (word); a third →
+  `"foo TARGET bar"` (line). Asserts via `selection_format(Plain,…,None)`. Fails
+  pre-fix (clicks stuck at Cell), passes after. The deterministic
+  interval/distance reset gate is covered at the gesture layer
+  (`selection_gesture_repeat_distance_and_interval_reset`).
+- **Full `cargo test -p roastty`:** lib **4410 passed**, 0 failures (with
+  `double_click_word_triple_click_line ... ok` in the parallel suite —
+  deterministic after the injectable-clock fix; the standalone test also passes
+  5/5).
+- **Live confirmation** (screen unlocked; app + descendant tree killed, 0
+  dangling): launched with `echo ALPHA BRAVO CHARLIE`; the CGEvent **click
+  driver** (`scripts/roastty-app/click.swift`, `mouseEventClickState` 1..N) —
+  **double-click highlights a single word** (`e27-dbl.png`: "ALPHA"),
+  **triple-click highlights the whole line** (`e27-tri.png`: "ALPHA BRAVO
+  CHARLIE"). Out-of-repo.
 
 ## Conclusion
 
-_(to be added after the run.)_
+Word (double-click) and line (triple-click) selection work, faithful to
+upstream's 500ms interval + one-cell distance, by giving the surface the
+monotonic clock the gesture's click-count needs. Mouse selection is now
+feature-complete for the common cases (single-drag cell, double-word,
+triple-line) + clipboard copy. Remaining refinements: drag-autoscroll past the
+edge, shift-while-reporting selection override, the reporting clear+reset
+widening, CJK ideographic wide-pitch, CVDisplayLink vsync, DPI-change rebuild,
+and the `shape_run_options` cursor-shaping-hint viewport-gating — none a core
+conformance gap. The core goal (a faithful, feature-conformant renamed-Ghostty
+app on libroastty) is met; the remaining items are polish, and the issue is
+close to ready to close.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: CHANGES REQUIRED → addressed.** It confirmed the
+**production change is sound + faithful** (monotonic, overflow-safe clock;
+`Instant::now()` in `surface_new` fine for all paths; no regression to
+Exp-25/26), the **live screenshots are honest** (`e27-before` none, `e27-dbl`
+"ALPHA" only, `e27-tri` whole line), `fmt --check` clean, scope = libroastty +
+test-only `click.swift`, no new "ghostty" literals. **One Required:** the test
+was **flaky/wall-clock-dependent** — under the parallel suite the two FFI
+presses (each blocking on a PTY round-trip) exceeded the 500ms repeat interval,
+so `press_repeat` reset → stuck at `Cell`; the reviewer reproduced a full-suite
+failure (`4409 passed; 1 failed` = this test), so the recorded "4410, 0
+failures" was a lucky run. **Fixed** exactly as prescribed: an injectable
+`#[cfg(test)]` thread-local clock the test advances by a fixed 1ms/click — now
+deterministic (standalone 5/5; **full parallel suite 4410 passed, 0 failed**
+with the test explicitly `ok`). (Pre-existing `ghostty` literals in lib.rs are
+out of scope, not from this diff.)

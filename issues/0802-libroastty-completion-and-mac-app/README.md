@@ -537,9 +537,10 @@ stays unaltered except for the rename).
   drag-gesture→copy integration test + live proof — drag-select then Edit▸Copy
   lands the text on NSPasteboard, `pbpaste` confirms; 4409 green) · Claude
 - [Experiment 27: Phase C — double/triple-click word & line selection](27-word-line-selection.md)
-  — **Designed** (Exp-25 passed `time_ns: None` so click-count is stuck at
-  1/Cell; provide a monotonic clock → double-click word, triple-click line) ·
-  Claude
+  — **Pass** (Exp-25 passed `time_ns: None` so click-count was stuck at 1/Cell;
+  gave the Surface a monotonic clock + an injectable test clock → double-click
+  word, triple-click line; 4410 green deterministic + live word/line highlight)
+  · Claude
 
 ## Process
 
