@@ -239,6 +239,11 @@ before re-reading experiments.
   enters alternate screen mode, draws fixed cursor-addressed text, and captures
   while the alt screen is active. Strict thresholds currently fail with recorded
   metrics, as expected. (Exp 43.)
+- **Scroll-output live A/B recipe:**
+  `scripts/roastty-app/live-ab-smoke.sh --recipe scroll-output --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  prints 80 deterministic rows and captures the settled bottom-of-output
+  viewport. Strict thresholds currently fail with recorded metrics, as expected.
+  (Exp 44.)
 
 ### Input injection (Exp 5)
 
@@ -633,7 +638,7 @@ stays unaltered except for the rename).
 - [Experiment 43: Phase D — alt-screen live A/B recipe](43-live-ab-alt-screen-recipe.md)
   — **Pass**
 - [Experiment 44: Phase D — scroll-output live A/B recipe](44-live-ab-scroll-output-recipe.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

@@ -50,6 +50,9 @@ scripts/roastty-app/live-ab-smoke.sh --recipe clear-after \
 scripts/roastty-app/live-ab-smoke.sh --recipe alt-screen \
   --max-mismatch-ratio 1 \
   --max-mean-channel-delta 255
+scripts/roastty-app/live-ab-smoke.sh --recipe scroll-output \
+  --max-mismatch-ratio 1 \
+  --max-mean-channel-delta 255
 ```
 
 The script prints one JSON summary object to stdout and diagnostics to stderr.
@@ -71,3 +74,6 @@ Recipes:
 - `alt-screen` — enters alternate screen mode, draws fixed text at cursor
   addressed positions, and sleeps so capture happens while the alt screen is
   active.
+- `scroll-output` — clears the terminal, prints a timestamped marker plus 80
+  numbered rows, and sleeps so capture happens after the viewport scrolls to the
+  bottom.

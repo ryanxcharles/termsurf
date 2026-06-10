@@ -95,3 +95,82 @@ larger rewrite.
 
 **Reviewer:** Codex-native adversarial subagent (`multi_agent_v1.spawn_agent`,
 fresh context, read-only). **Verdict: APPROVED with no findings.**
+
+## Result
+
+**Result:** Pass
+
+Added `scroll-output` to the live A/B harness recipe layer:
+
+- `--list-recipes` now prints `smoke`, `ascii-grid`, `color-grid`,
+  `clear-after`, `alt-screen`, and `scroll-output`.
+- `--help` / usage text now lists
+  `smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output`.
+- `--recipe scroll-output` clears the screen, prints a timestamped marker, emits
+  `SCROLL_ROW_001` through `SCROLL_ROW_080`, and sleeps before the prompt
+  returns so the capture sees the final scrolled viewport.
+- Existing recipes, IOSurface-safe Roastty capture, `swift pngdiff.swift`,
+  screenshot policy, and exact launched-PID cleanup are preserved.
+
+Updated `scripts/roastty-app/README.md` and the Issue 802 Operating notes with
+`scroll-output`. The Issue 802 experiment index now marks Experiment 44 `Pass`.
+
+Verification:
+
+- `bash -n scripts/roastty-app/live-ab-smoke.sh`
+- `scripts/roastty-app/live-ab-smoke.sh --list-recipes`
+  - Exited `0`.
+  - Printed `smoke`, `ascii-grid`, `color-grid`, `clear-after`, `alt-screen`,
+    and `scroll-output`.
+  - Did not launch either app.
+- `scripts/roastty-app/live-ab-smoke.sh --help`
+  - Exited `0`.
+  - Printed usage including
+    `--recipe smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output`.
+- Scroll-output recipe permissive run:
+  - `scripts/roastty-app/live-ab-smoke.sh --recipe scroll-output --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  - Exited `0`.
+  - Launched Ghostty PID `57809` and Roastty PID `57824`.
+  - Captured both comparison images at `1000x1000`.
+  - Printed one JSON summary object with `recipe: scroll-output`,
+    `verdict: PASS`, `diff_exit_status: 0`, `mismatch_ratio: 1`, and
+    `mean_channel_delta: 111.80187825`.
+  - The trap killed Ghostty descendants `57817`, `57818`, Ghostty PID `57809`,
+    Roastty descendant `57831`, and Roastty PID `57824`.
+- Scroll-output recipe strict run:
+  - `bash -lc 'scripts/roastty-app/live-ab-smoke.sh --recipe scroll-output; rc=$?; echo strict_exit=$rc; exit 0'`
+  - Harness exited `1`, wrapper printed `strict_exit=1`.
+  - Launched Ghostty PID `58069` and Roastty PID `58083`.
+  - Captured both comparison images at `1000x1000`.
+  - Printed one JSON summary object with `recipe: scroll-output`,
+    `verdict: FAIL`, `diff_exit_status: 1`, `mismatch_ratio: 1`, and
+    `mean_channel_delta: 107.50902775`.
+  - The trap killed Ghostty descendants `58076`, `58077`, Ghostty PID `58069`,
+    Roastty descendant `58090`, and Roastty PID `58083`.
+- `pgrep -fl '[G]hostty.app/Contents/MacOS/ghostty|[R]oastty.app/Contents/MacOS/roastty' || true`
+  - no output after cleanup.
+- `prettier --write --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/README.md issues/0802-libroastty-completion-and-mac-app/44-live-ab-scroll-output-recipe.md scripts/roastty-app/README.md`
+- `git diff --check`
+- `git status --short`
+  - no screenshot or PNG artifacts in the repo.
+
+## Conclusion
+
+The live A/B harness now has an ordinary long-output fixture that captures the
+settled bottom of a scrolled terminal viewport. This moves another Experiment 20
+conformance probe into the reusable Phase-D visual comparison surface.
+
+Strict parity still fails, and this experiment does not claim otherwise. The
+important progress is that long-output scrolling now has a repeatable live app
+comparison recipe with machine-readable metrics.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent (`multi_agent_v1.spawn_agent`,
+fresh context, read-only). **Verdict: APPROVED with no findings.**
+
+The reviewer independently ran `bash -n scripts/roastty-app/live-ab-smoke.sh`,
+`scripts/roastty-app/live-ab-smoke.sh --list-recipes`,
+`scripts/roastty-app/live-ab-smoke.sh --help`, `git diff --check`, the scoped
+`pgrep` process check, `git status --short`, and source/diff inspection. It did
+not run the live GUI harness.
