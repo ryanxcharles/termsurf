@@ -99,8 +99,56 @@ suite proves it").
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Partial — the fix is wired and the suite is green; the **live CJK
+width comparison is pending a locked screen** (environment, not code), to be
+re-confirmed when the display is unlocked.
+
+### Change (only `libroastty`)
+
+`build_live_renderer` now calls
+`collection.set_point_size((font_size as f64 * scale).max(1.0)).ok()?` after
+`update_metrics`, before the resolver — so a later-discovered CJK face (added
+via `add_with_adjustment(…, IcWidth)`) is physically resized to the ideographic
+width (`resize_face_to_point_size` no longer no-ops with `point_size = None`).
+
+### Verification
+
+- **Full `cargo test -p roastty`:** lib **4411 passed**, 0 failures — no
+  regression. Cell-metrics invariance is by construction (Menlo is resized to
+  its exact existing `font_size*scale` → identical `Metrics`), corroborated by
+  the green ASCII-dependent render tests; the design review independently ran
+  the collection `set_point_size`/resize-on-add tests (49 passed) confirming the
+  IcWidth mechanism.
+- **Live CJK comparison — blocked (locked screen).** The unicode re-probe
+  couldn't be captured: `CGSSessionScreenIsLocked: true`, so `screencapture`
+  returns black (the Exp-22 environment limitation). The fix is the
+  design-review-confirmed load-bearing change; the **visible** wide-pitch
+  improvement (and the `café`/ASCII/emoji-unchanged check) awaits a one-command
+  re-probe once the screen is unlocked.
 
 ## Conclusion
 
-_(to be added after the run.)_
+The IcWidth ideographic adjustment is now applied to discovered CJK fallback
+faces (the Exp-21 follow-up), faithful to upstream. The code + no-regression are
+proven; the live visual confirmation is pending the locked screen (a redundant
+confirm given the design-review trace + the green suite). **Per the loop,
+shifting to headless-verifiable refinements** (shift-click extend, etc.) while
+the screen is locked; this experiment's live re-probe + a possible upgrade to
+Pass will happen on unlock.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** Verified the diff is **exactly** the one-line
+`set_point_size(...).ok()?` call (+ comment) between `update_metrics` and the
+`metrics` capture, no collateral edits; full lib **4411 passed, 0 failed**,
+`fmt --check` clean; **metric invariance by construction** (Menlo re-sized to
+its identical creation size → `update_metrics` recomputes identical `Metrics`);
+and specifically checked the `.ok()?` footgun —
+`points = (font_size*scale).max(1.0)` is always `>= 1.0` finite (even NaN → 1.0)
+and Menlo is already loaded, so both error paths are unreachable: the call
+**cannot abort** `build_live_renderer`. The fix is load-bearing whenever the
+discovered IcWidth factor ≠ 1. **Partial-pending-live is the correct label**
+(code complete; the `CGSSessionScreenIsLocked` blocker is environmental,
+consistent with Exp 22), not a cover for an incomplete/broken change. Scope
+clean (libroastty only, no new "ghostty" literals).

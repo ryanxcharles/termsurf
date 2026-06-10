@@ -2027,6 +2027,13 @@ fn build_live_renderer(
         )
         .ok()?;
     collection.update_metrics().ok()?;
+    // Issue 802 / Exp 29: set the point size so discovered CJK faces get the ideographic-width
+    // (IcWidth) adjustment physically applied (`resize_face_to_point_size` no-ops when `point_size`
+    // is `None`). Menlo is resized to its existing `font_size*scale`, so the cell metrics are
+    // unchanged; capture them after the call.
+    collection
+        .set_point_size((font_size as f64 * scale).max(1.0))
+        .ok()?;
     let metrics = *collection.metrics()?;
     // Enable CoreText discovery fallback (Issue 802 / Exp 21) so codepoints Menlo doesn't cover
     // (CJK, emoji) resolve to a discovered system face instead of the `?` replacement glyph.
