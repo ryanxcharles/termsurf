@@ -35,13 +35,19 @@ pub(crate) enum GraphemeBreak {
     ExtendedPictographic,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct BreakState {
+    regional_indicator_count: u8,
+    extended_pictographic_zwj: bool,
+}
+
 pub(crate) fn get(codepoint: u32) -> Properties {
     let Some(ch) = char::from_u32(codepoint) else {
         return fallback();
     };
 
     let width = standalone_width(ch, codepoint);
-    let grapheme_break = grapheme_break(codepoint);
+    let grapheme_break = grapheme_break_property(codepoint);
 
     Properties {
         width,
@@ -49,6 +55,51 @@ pub(crate) fn get(codepoint: u32) -> Properties {
         grapheme_break,
         emoji_vs_base: emoji_vs_base(codepoint),
     }
+}
+
+pub(crate) fn grapheme_break(previous: u32, current: u32, state: &mut BreakState) -> bool {
+    let previous_break = get(previous).grapheme_break;
+    let current_break = get(current).grapheme_break;
+
+    if previous_break == GraphemeBreak::ExtendedPictographic && current_break == GraphemeBreak::Zwj
+    {
+        state.extended_pictographic_zwj = true;
+        return false;
+    }
+
+    if state.extended_pictographic_zwj && current_break == GraphemeBreak::ExtendedPictographic {
+        state.extended_pictographic_zwj = false;
+        return false;
+    }
+    if current_break != GraphemeBreak::Extend && current_break != GraphemeBreak::Zwj {
+        state.extended_pictographic_zwj = false;
+    }
+
+    match (previous_break, current_break) {
+        (GraphemeBreak::L, GraphemeBreak::L)
+        | (GraphemeBreak::L, GraphemeBreak::V)
+        | (GraphemeBreak::L, GraphemeBreak::Lv)
+        | (GraphemeBreak::L, GraphemeBreak::Lvt)
+        | (GraphemeBreak::Lv, GraphemeBreak::V)
+        | (GraphemeBreak::Lv, GraphemeBreak::T)
+        | (GraphemeBreak::V, GraphemeBreak::V)
+        | (GraphemeBreak::V, GraphemeBreak::T)
+        | (GraphemeBreak::Lvt, GraphemeBreak::T)
+        | (GraphemeBreak::T, GraphemeBreak::T)
+        | (_, GraphemeBreak::Extend)
+        | (_, GraphemeBreak::Zwj)
+        | (_, GraphemeBreak::SpacingMark)
+        | (GraphemeBreak::Prepend, _) => return false,
+        (GraphemeBreak::RegionalIndicator, GraphemeBreak::RegionalIndicator) => {
+            let should_break = state.regional_indicator_count % 2 == 1;
+            state.regional_indicator_count = state.regional_indicator_count.saturating_add(1);
+            return should_break;
+        }
+        _ => {}
+    }
+
+    state.regional_indicator_count = u8::from(current_break == GraphemeBreak::RegionalIndicator);
+    true
 }
 
 fn standalone_width(ch: char, codepoint: u32) -> u8 {
@@ -774,7 +825,7 @@ const fn is_nonspacing_or_enclosing_mark(codepoint: u32) -> bool {
     )
 }
 
-const fn grapheme_break(codepoint: u32) -> GraphemeBreak {
+const fn grapheme_break_property(codepoint: u32) -> GraphemeBreak {
     if codepoint == 0x200D {
         return GraphemeBreak::Zwj;
     }

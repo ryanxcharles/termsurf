@@ -135,3 +135,73 @@ variation selectors; fixed by spelling out Ghostty's two branches: mode 2027
 uses `emoji_vs_base`, while the legacy zero-width fallback accepts a previous
 `ExtendedPictographic` cell. Re-review approved with no remaining Required
 findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now routes printable scalars through the Rust Unicode property facade.
+The terminal print path writes representative width-2 CJK and emoji codepoints
+as `Wide` cells with `SpacerTail` followers, emits a right-edge `SpacerHead`
+before wrapping a wide cell when wraparound is enabled, ignores a wide cell that
+would start at the right edge when wraparound is disabled, and shifts insert
+mode by the printed cell width. Zero-width legacy attachments still append to
+the previous printable cell, and `Mode::GraphemeCluster` now exercises the
+representative `unicode::grapheme_break` path for combining marks and
+variation-selector updates.
+
+Verification run:
+
+- `cargo fmt -- roastty/src/unicode/mod.rs roastty/src/terminal/terminal.rs roastty/src/terminal/screen.rs roastty/src/terminal/page.rs roastty/src/terminal/page_list.rs`
+- `cargo test -p roastty terminal_stream_print` — 21 passed.
+- `cargo test -p roastty unicode` — 24 passed.
+- `cargo test -p roastty terminal_stream_unicode` — completed successfully with
+  0 matching tests for that filter.
+- `cargo test -p roastty` — 4442 Rust tests passed; C ABI harness passed (1
+  integration test) with existing enum-conversion warnings.
+- `bash -n scripts/roastty-app/live-ab-smoke.sh`
+- `bash -n scripts/roastty-app/live-ab-matrix.sh`
+- `scripts/roastty-app/live-ab-smoke.sh --recipe unicode-width --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  — Pass. Content-region metric: `mean_channel_delta=3.8088447916666666`,
+  `mismatch_ratio=0.04076041666666667`, `mismatched_pixels=58695`,
+  `compared_pixels=1440000`.
+- `git diff --check`
+
+No screenshots or generated artifacts were added to the repo; the live A/B
+captures were written under `/Users/ryan/.cache/termsurf/shots/`.
+
+## Conclusion
+
+Experiment 52 completes the first durable Phase-E terminal-print slice:
+Roastty's grid now uses Unicode width/grapheme properties at the terminal model
+boundary instead of treating every printable scalar as a narrow basic cell. This
+is still a representative implementation; the next Unicode-focused work should
+replace the local classifier and grapheme helper with generated Ghostty-table
+parity without needing another terminal print rewrite.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent (`multi_agent_v1.spawn_agent`,
+fresh context, read-only). **Initial verdict: CHANGES REQUIRED. Final verdict:
+APPROVED.**
+
+The reviewer found three Required issues:
+
+- Mode 2027 grapheme-break state was not replaying existing appended grapheme
+  codepoints before testing the next scalar, so emoji ZWJ sequences such as
+  black flag + ZWJ + skull + VS16 could split into new cells. Fixed by exposing
+  active-cell grapheme lookup through the page list/screen helpers, replaying
+  existing graphemes through the representative break state, and adding
+  `terminal_stream_print_mode_2027_replays_emoji_zwj_graphemes`.
+- Wide characters at the right edge of a horizontal scrolling margin could write
+  the spacer tail outside the margin. Fixed by matching Ghostty's margin path:
+  clear the margin edge as a narrow cell, mark pending wrap, invoke the shared
+  wrap path, then write the wide cell at the left margin. Covered by
+  `terminal_stream_print_wide_wraps_from_horizontal_margin_edge`.
+- Disabled-wrap zero-width/grapheme attachment at the right edge could select
+  the cell to the left instead of the current edge cell. Fixed by making
+  previous-cell lookup aware of `right_limit` and current edge-cell content.
+  Covered by
+  `terminal_stream_print_disabled_wraparound_grapheme_attaches_to_edge_cell`.
+
+Re-review confirmed all three findings resolved with no new Required findings.

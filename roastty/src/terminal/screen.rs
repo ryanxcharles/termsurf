@@ -10,7 +10,7 @@ use super::kitty::graphics_image::{Image, ImageLoadError};
 use super::kitty::graphics_storage::{
     CellMetrics, ImageStorage, Placement, PlacementAddResult, PlacementError, PlacementKey,
 };
-use super::page::{SemanticContent, SemanticPrompt};
+use super::page::{Cell, SemanticContent, SemanticPrompt, Wide};
 use super::page_list::{
     BasicCellWriteError, CodepointMapEntry, DragGeometry, GridRef, GridRefPointError, Node,
     PageList, PageListAllocError, PageOutputFormat, PageStringWithPinMap, Pin, RenderRowSnapshot,
@@ -801,49 +801,7 @@ impl Screen {
         };
         let right_edge = right_limit.saturating_sub(1);
 
-        if self.cursor.pending_wrap && wraparound {
-            let mark_wrap = self.cursor.x == cols.saturating_sub(1);
-            if self.cursor.y == rows - 1 {
-                if self.pages.scrollback_disabled() {
-                    self.pages
-                        .delete_active_lines(0, rows - 1, 0, cols - 1, 1, true)
-                        .map_err(BasicPrintError::Cell)?;
-                } else {
-                    let old_row = self
-                        .pages
-                        .active_row_pin(self.cursor.y.into())
-                        .map_err(BasicPrintError::Cell)?;
-                    self.pages
-                        .grow_active()
-                        .map_err(|_| BasicPrintError::PageAlloc)?;
-                    if mark_wrap {
-                        self.pages
-                            .set_row_wrap_at_pin(old_row, true)
-                            .map_err(BasicPrintError::Cell)?;
-                    }
-                }
-                self.cursor.y = rows - 1;
-            } else {
-                self.pages
-                    .check_active_cell_for_styled_print(left_margin, (self.cursor.y + 1).into())
-                    .map_err(BasicPrintError::Cell)?;
-                if mark_wrap {
-                    self.pages
-                        .set_active_row_wrap(self.cursor.y.into(), true)
-                        .map_err(BasicPrintError::Cell)?;
-                }
-                self.cursor.y += 1;
-            }
-            self.cursor.x = left_margin;
-            self.cursor.pending_wrap = false;
-            if mark_wrap {
-                self.pages
-                    .set_active_row_wrap_continuation(self.cursor.y.into(), true)
-                    .map_err(BasicPrintError::Cell)?;
-                self.mark_semantic_prompt_continuation_on_wrap()
-                    .map_err(BasicPrintError::Cell)?;
-            }
-        }
+        self.apply_pending_wrap(cols, rows, wraparound, left_margin)?;
 
         if insert_mode && self.cursor.x.saturating_add(1) < right_limit {
             self.insert_chars_basic(1, left_margin, right_margin)
@@ -872,6 +830,267 @@ impl Screen {
             self.cursor.pending_wrap = false;
         }
         Ok(())
+    }
+
+    pub(super) fn print_width_cell(
+        &mut self,
+        cols: CellCountInt,
+        rows: CellCountInt,
+        codepoint: char,
+        width: u8,
+        insert_mode: bool,
+        wraparound: bool,
+        left_margin: CellCountInt,
+        right_margin: CellCountInt,
+    ) -> Result<bool, BasicPrintError> {
+        if width <= 1 {
+            self.print_basic_cell(
+                cols,
+                rows,
+                codepoint,
+                insert_mode,
+                wraparound,
+                left_margin,
+                right_margin,
+            )?;
+            return Ok(true);
+        }
+
+        let right_limit = if self.cursor.x > right_margin {
+            cols
+        } else {
+            right_margin.saturating_add(1)
+        };
+        let right_edge = right_limit.saturating_sub(1);
+        if right_limit.saturating_sub(left_margin) < 2 {
+            return Ok(false);
+        }
+
+        self.apply_pending_wrap(cols, rows, wraparound, left_margin)?;
+
+        if self.cursor.x == right_edge {
+            if !wraparound {
+                return Ok(false);
+            }
+            if right_limit == cols {
+                self.write_cell_with_wide('\0', Wide::SpacerHead)?;
+            } else {
+                self.write_cell_with_wide('\0', Wide::Narrow)?;
+            }
+            self.cursor.pending_wrap = true;
+            self.apply_pending_wrap(cols, rows, wraparound, left_margin)?;
+        }
+
+        if insert_mode && self.cursor.x.saturating_add(2) < right_limit {
+            self.insert_chars_basic(2, left_margin, right_margin)
+                .map_err(BasicPrintError::from)?;
+        }
+
+        let codepoint = self.map_charset_codepoint(codepoint);
+        self.write_cell_with_wide(codepoint, Wide::Wide)?;
+        self.cursor.x += 1;
+        self.cursor.pending_wrap = false;
+        self.write_cell_with_wide('\0', Wide::SpacerTail)?;
+        if self.cursor.x == right_edge {
+            self.cursor.pending_wrap = true;
+        } else {
+            self.cursor.x += 1;
+            self.cursor.pending_wrap = false;
+        }
+        Ok(true)
+    }
+
+    pub(super) fn append_grapheme_to_previous_cell(
+        &mut self,
+        codepoint: u32,
+        wraparound: bool,
+        right_limit: CellCountInt,
+        require_extended_pictographic: bool,
+    ) -> Result<bool, BasicPrintError> {
+        let Some((x, y, cell)) = self.previous_print_cell(wraparound, right_limit) else {
+            return Ok(false);
+        };
+        if !cell.has_text() {
+            return Ok(false);
+        }
+        if require_extended_pictographic
+            && !matches!(cell.wide(), Wide::Wide)
+            && cell.codepoint() != 0x2764
+            && cell.codepoint() != 0x2614
+        {
+            return Ok(false);
+        }
+        self.pages
+            .append_active_grapheme(x, y, codepoint)
+            .map_err(BasicPrintError::from)?;
+        Ok(true)
+    }
+
+    pub(super) fn previous_print_cell(
+        &self,
+        wraparound: bool,
+        right_limit: CellCountInt,
+    ) -> Option<(CellCountInt, u32, Cell)> {
+        let y = self.cursor.y.into();
+        let left = if wraparound {
+            CellCountInt::from(!self.cursor.pending_wrap)
+        } else if self.cursor.x == right_limit.saturating_sub(1) {
+            let current_cell = self.pages.active_cell_copy(self.cursor.x, y).ok()?;
+            CellCountInt::from(current_cell.codepoint() == 0)
+        } else {
+            1
+        };
+        if left > self.cursor.x {
+            return None;
+        }
+        let mut x = self.cursor.x - left;
+        let mut cell = self.pages.active_cell_copy(x, y).ok()?;
+        if matches!(cell.wide(), Wide::SpacerTail) {
+            if x == 0 {
+                return None;
+            }
+            x -= 1;
+            cell = self.pages.active_cell_copy(x, y).ok()?;
+        }
+        Some((x, y, cell))
+    }
+
+    pub(super) fn active_cell_graphemes(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Result<Option<Vec<u32>>, BasicCellWriteError> {
+        self.pages.active_cell_graphemes(x, y)
+    }
+
+    pub(super) fn set_previous_cell_wide(
+        &mut self,
+        x: CellCountInt,
+        y: u32,
+        wide: bool,
+        right_limit: CellCountInt,
+    ) -> Result<(), BasicPrintError> {
+        if wide {
+            self.pages
+                .set_active_cell_wide(x, y, Wide::Wide)
+                .map_err(BasicPrintError::Cell)?;
+            let tail_x = x.saturating_add(1);
+            self.pages
+                .write_active_cell_with_wide(
+                    tail_x,
+                    y,
+                    '\0',
+                    Wide::SpacerTail,
+                    self.cursor.style,
+                    self.cursor
+                        .hyperlink
+                        .as_ref()
+                        .map(ScreenCursorHyperlink::as_page_hyperlink),
+                    self.cursor.semantic_content,
+                )
+                .map_err(BasicPrintError::from)?;
+            if self.cursor.x <= tail_x {
+                if tail_x >= right_limit.saturating_sub(1) {
+                    self.cursor.x = tail_x;
+                    self.cursor.pending_wrap = true;
+                } else {
+                    self.cursor.x = tail_x.saturating_add(1);
+                    self.cursor.pending_wrap = false;
+                }
+            }
+        } else {
+            self.pages
+                .set_active_cell_wide(x, y, Wide::Narrow)
+                .map_err(BasicPrintError::Cell)?;
+            self.pages
+                .write_active_cell_with_wide(
+                    x.saturating_add(1),
+                    y,
+                    '\0',
+                    Wide::Narrow,
+                    style::Style::default(),
+                    None,
+                    SemanticContent::Output,
+                )
+                .map_err(BasicPrintError::from)?;
+            if self.cursor.x > x {
+                self.cursor.x -= 1;
+                self.cursor.pending_wrap = false;
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_pending_wrap(
+        &mut self,
+        cols: CellCountInt,
+        rows: CellCountInt,
+        wraparound: bool,
+        left_margin: CellCountInt,
+    ) -> Result<(), BasicPrintError> {
+        if !(self.cursor.pending_wrap && wraparound) {
+            return Ok(());
+        }
+
+        let mark_wrap = self.cursor.x == cols.saturating_sub(1);
+        if self.cursor.y == rows - 1 {
+            if self.pages.scrollback_disabled() {
+                self.pages
+                    .delete_active_lines(0, rows - 1, 0, cols - 1, 1, true)
+                    .map_err(BasicPrintError::Cell)?;
+            } else {
+                let old_row = self
+                    .pages
+                    .active_row_pin(self.cursor.y.into())
+                    .map_err(BasicPrintError::Cell)?;
+                self.pages
+                    .grow_active()
+                    .map_err(|_| BasicPrintError::PageAlloc)?;
+                if mark_wrap {
+                    self.pages
+                        .set_row_wrap_at_pin(old_row, true)
+                        .map_err(BasicPrintError::Cell)?;
+                }
+            }
+            self.cursor.y = rows - 1;
+        } else {
+            self.pages
+                .check_active_cell_for_styled_print(left_margin, (self.cursor.y + 1).into())
+                .map_err(BasicPrintError::Cell)?;
+            if mark_wrap {
+                self.pages
+                    .set_active_row_wrap(self.cursor.y.into(), true)
+                    .map_err(BasicPrintError::Cell)?;
+            }
+            self.cursor.y += 1;
+        }
+        self.cursor.x = left_margin;
+        self.cursor.pending_wrap = false;
+        if mark_wrap {
+            self.pages
+                .set_active_row_wrap_continuation(self.cursor.y.into(), true)
+                .map_err(BasicPrintError::Cell)?;
+            self.mark_semantic_prompt_continuation_on_wrap()
+                .map_err(BasicPrintError::Cell)?;
+        }
+        Ok(())
+    }
+
+    fn write_cell_with_wide(&mut self, codepoint: char, wide: Wide) -> Result<(), BasicPrintError> {
+        self.pages
+            .write_active_cell_with_wide(
+                self.cursor.x,
+                self.cursor.y.into(),
+                codepoint,
+                wide,
+                self.cursor.style,
+                self.cursor
+                    .hyperlink
+                    .as_ref()
+                    .map(ScreenCursorHyperlink::as_page_hyperlink),
+                self.cursor.semantic_content,
+            )
+            .map_err(BasicPrintError::from)
     }
 
     fn map_charset_codepoint(&mut self, codepoint: char) -> char {
@@ -2244,6 +2463,25 @@ impl Screen {
     #[cfg(test)]
     pub(super) fn active_cell_style_for_tests(&self, x: CellCountInt, y: u32) -> style::Style {
         self.pages.active_cell_style_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_codepoint_for_tests(&self, x: CellCountInt, y: u32) -> u32 {
+        self.pages.active_cell_codepoint_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_wide_for_tests(&self, x: CellCountInt, y: u32) -> Wide {
+        self.pages.active_cell_wide_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_graphemes_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Option<Vec<u32>> {
+        self.pages.active_cell_graphemes_for_tests(x, y)
     }
 
     #[cfg(test)]

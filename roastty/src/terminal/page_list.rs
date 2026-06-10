@@ -4571,6 +4571,107 @@ impl PageList {
         })
     }
 
+    pub(super) fn write_active_cell_with_wide(
+        &mut self,
+        x: CellCountInt,
+        y: u32,
+        codepoint: char,
+        wide: Wide,
+        cell_style: style::Style,
+        cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
+        semantic_content: SemanticContent,
+    ) -> Result<(), StyledCellWriteError> {
+        let point = point::Point::active(point::Coordinate::new(x, y));
+        let pin = self.pin(point).ok_or(StyledCellWriteError::Cell(
+            BasicCellWriteError::InvalidPoint,
+        ))?;
+        let index = self.node_index(pin.node).ok_or(StyledCellWriteError::Cell(
+            BasicCellWriteError::InvalidPoint,
+        ))?;
+        let page = &mut self.pages[index].page;
+        page.write_print_cell_with_wide(
+            pin.x as usize,
+            pin.y as usize,
+            codepoint,
+            wide,
+            cell_style,
+            cell_hyperlink,
+            semantic_content,
+        )
+        .map_err(|err| match err {
+            super::page::PrintCellError::UnsupportedManagedCell => {
+                StyledCellWriteError::Cell(BasicCellWriteError::ManagedCell)
+            }
+            super::page::PrintCellError::StyleOutOfMemory
+            | super::page::PrintCellError::HyperlinkOutOfMemory => StyledCellWriteError::PageAlloc,
+        })
+    }
+
+    pub(super) fn active_cell_copy(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Result<Cell, BasicCellWriteError> {
+        let point = point::Point::active(point::Coordinate::new(x, y));
+        let pin = self.pin(point).ok_or(BasicCellWriteError::InvalidPoint)?;
+        let index = self
+            .node_index(pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        Ok(self.pages[index]
+            .page
+            .cell_copy_at(pin.x as usize, pin.y as usize))
+    }
+
+    pub(super) fn append_active_grapheme(
+        &mut self,
+        x: CellCountInt,
+        y: u32,
+        codepoint: u32,
+    ) -> Result<(), StyledCellWriteError> {
+        let point = point::Point::active(point::Coordinate::new(x, y));
+        let pin = self.pin(point).ok_or(StyledCellWriteError::Cell(
+            BasicCellWriteError::InvalidPoint,
+        ))?;
+        let index = self.node_index(pin.node).ok_or(StyledCellWriteError::Cell(
+            BasicCellWriteError::InvalidPoint,
+        ))?;
+        self.pages[index]
+            .page
+            .append_grapheme_at(pin.x as usize, pin.y as usize, codepoint)
+            .map_err(|_| StyledCellWriteError::PageAlloc)
+    }
+
+    pub(super) fn active_cell_graphemes(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Result<Option<Vec<u32>>, BasicCellWriteError> {
+        let point = point::Point::active(point::Coordinate::new(x, y));
+        let pin = self.pin(point).ok_or(BasicCellWriteError::InvalidPoint)?;
+        let node = self
+            .node_for_pin(&pin)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        Ok(node.page.lookup_grapheme_at(pin.x as usize, pin.y as usize))
+    }
+
+    pub(super) fn set_active_cell_wide(
+        &mut self,
+        x: CellCountInt,
+        y: u32,
+        wide: Wide,
+    ) -> Result<(), BasicCellWriteError> {
+        let point = point::Point::active(point::Coordinate::new(x, y));
+        let pin = self.pin(point).ok_or(BasicCellWriteError::InvalidPoint)?;
+        let index = self
+            .node_index(pin.node)
+            .ok_or(BasicCellWriteError::InvalidPoint)?;
+        let page = &mut self.pages[index].page;
+        let rac = page.get_row_and_cell_mut(pin.x as usize, pin.y as usize);
+        rac.cell.set_wide(wide);
+        rac.row.set_dirty(true);
+        Ok(())
+    }
+
     pub(super) fn set_active_row_semantic_prompt(
         &mut self,
         y: u32,
@@ -4663,6 +4764,30 @@ impl PageList {
         } else {
             node.page.get_style(style_id)
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_codepoint_for_tests(&self, x: CellCountInt, y: u32) -> u32 {
+        self.active_cell_copy(x, y)
+            .expect("test active cell must resolve")
+            .codepoint()
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_wide_for_tests(&self, x: CellCountInt, y: u32) -> Wide {
+        self.active_cell_copy(x, y)
+            .expect("test active cell must resolve")
+            .wide()
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_graphemes_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Option<Vec<u32>> {
+        self.active_cell_graphemes(x, y)
+            .expect("test active cell must resolve")
     }
 
     #[cfg(test)]

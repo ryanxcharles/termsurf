@@ -287,6 +287,13 @@ before re-reading experiments.
   The full generated table and `unicode.graphemeBreak` state machine are still
   Phase-E work; the next slice should rewrite `Terminal::print()` against this
   API.
+- **Terminal Unicode print widths:** Exp 52 rewires `Terminal::print()` to use
+  the Rust Unicode facade for representative wide CJK/emoji cells, spacer tails,
+  right-edge spacer heads, legacy zero-width attachments, and mode 2027 grapheme
+  accumulation/variation selectors. The live `unicode-width` content metric
+  remains passing (`mean_channel_delta=3.8088447916666666`,
+  `mismatch_ratio=0.04076041666666667`); the remaining Phase-E gap is the full
+  generated Unicode table/state-machine parity.
 
 ### Input injection (Exp 5)
 
@@ -697,7 +704,7 @@ stays unaltered except for the rename).
 - [Experiment 51: Phase E — Unicode width properties](51-unicode-width-properties.md)
   — **Pass**
 - [Experiment 52: Phase E — Terminal print Unicode width](52-terminal-print-unicode-width.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

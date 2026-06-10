@@ -1758,6 +1758,27 @@ impl Page {
         cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
         semantic_content: SemanticContent,
     ) -> Result<(), PrintCellError> {
+        self.write_print_cell_with_wide(
+            x,
+            y,
+            codepoint,
+            Wide::Narrow,
+            cell_style,
+            cell_hyperlink,
+            semantic_content,
+        )
+    }
+
+    pub(super) fn write_print_cell_with_wide(
+        &mut self,
+        x: usize,
+        y: usize,
+        codepoint: char,
+        wide: Wide,
+        cell_style: style::Style,
+        cell_hyperlink: Option<hyperlink::Hyperlink<'_>>,
+        semantic_content: SemanticContent,
+    ) -> Result<(), PrintCellError> {
         let cell_offset = self.cell_offset_at(x, y);
         let old_cell = self.cell_copy_at_offset(cell_offset);
         if cell_has_unsupported_print_replace_state(old_cell) {
@@ -1797,10 +1818,14 @@ impl Page {
             }
         };
         let old_style_id = old_cell.style_id();
+        if old_cell.has_grapheme() {
+            self.clear_grapheme_at_offset(cell_offset);
+        }
 
         {
             let rac = self.get_row_and_cell_mut(x, y);
             *rac.cell = Cell::init(codepoint as u32);
+            rac.cell.set_wide(wide);
             rac.cell.set_style_id(new_style_id);
             rac.cell.set_hyperlink(new_hyperlink_id.is_some());
             rac.cell.set_semantic_content(semantic_content);
@@ -1818,6 +1843,7 @@ impl Page {
 
         self.update_row_styled_flag(y);
         self.update_row_hyperlink_flag(y);
+        self.update_row_grapheme_flag(y);
         self.update_row_kitty_virtual_placeholder_flag(y);
         Ok(())
     }
@@ -2937,10 +2963,10 @@ const fn cell_bits() -> usize {
 }
 
 fn cell_has_unsupported_print_replace_state(cell: Cell) -> bool {
-    !matches!(cell.content_tag(), ContentTag::Codepoint)
-        || cell.has_grapheme()
-        || !matches!(cell.wide(), Wide::Narrow)
-        || cell.protected()
+    !matches!(
+        cell.content_tag(),
+        ContentTag::Codepoint | ContentTag::CodepointGrapheme
+    ) || cell.protected()
         || !matches!(cell.semantic_content(), SemanticContent::Output)
 }
 

@@ -2707,6 +2707,25 @@ impl Terminal {
     }
 
     #[cfg(test)]
+    pub(super) fn active_cell_codepoint_for_tests(&self, x: CellCountInt, y: u32) -> u32 {
+        self.screens.active().active_cell_codepoint_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_wide_for_tests(&self, x: CellCountInt, y: u32) -> super::page::Wide {
+        self.screens.active().active_cell_wide_for_tests(x, y)
+    }
+
+    #[cfg(test)]
+    pub(super) fn active_cell_graphemes_for_tests(
+        &self,
+        x: CellCountInt,
+        y: u32,
+    ) -> Option<Vec<u32>> {
+        self.screens.active().active_cell_graphemes_for_tests(x, y)
+    }
+
+    #[cfg(test)]
     pub(super) fn active_cell_style_ref_count_for_tests(
         &self,
         x: CellCountInt,
@@ -3183,19 +3202,115 @@ impl TerminalStreamHandler<'_> {
             return Err(TerminalStreamError::UnsupportedCodepoint(cp));
         }
 
-        *self.previous_char = Some(cp);
-        self.screens
+        let codepoint = cp as u32;
+        let props = crate::unicode::get(codepoint);
+        let wraparound = self.modes.get(modes::Mode::Wraparound);
+        let cursor_x = self.screens.active().cursor_position().0;
+        let right_limit = if cursor_x > self.scrolling_region.right {
+            self.size.cols
+        } else {
+            self.scrolling_region.right.saturating_add(1)
+        };
+
+        if codepoint > 0xFF && self.modes.get(modes::Mode::GraphemeCluster) {
+            let previous = self
+                .screens
+                .active()
+                .previous_print_cell(wraparound, right_limit);
+            if let Some((x, y, previous_cell)) = previous {
+                if previous_cell.has_text() {
+                    let mut previous_codepoint = previous_cell.codepoint();
+                    let mut state = crate::unicode::BreakState::default();
+                    if let Some(graphemes) = self
+                        .screens
+                        .active()
+                        .active_cell_graphemes(x, y)
+                        .map_err(TerminalStreamError::from)?
+                    {
+                        for grapheme in graphemes {
+                            let _ = crate::unicode::grapheme_break(
+                                previous_codepoint,
+                                grapheme,
+                                &mut state,
+                            );
+                            previous_codepoint = grapheme;
+                        }
+                    }
+                    if !crate::unicode::grapheme_break(previous_codepoint, codepoint, &mut state) {
+                        if matches!(codepoint, 0xFE0E | 0xFE0F) {
+                            let previous_props = crate::unicode::get(previous_codepoint);
+                            if !previous_props.emoji_vs_base {
+                                return Ok(());
+                            }
+                            self.screens
+                                .active_mut()
+                                .set_previous_cell_wide(x, y, codepoint == 0xFE0F, right_limit)
+                                .map_err(TerminalStreamError::from)?;
+                        } else if !props.width_zero_in_grapheme {
+                            self.screens
+                                .active_mut()
+                                .set_previous_cell_wide(x, y, true, right_limit)
+                                .map_err(TerminalStreamError::from)?;
+                        }
+                        self.screens
+                            .active_mut()
+                            .append_grapheme_to_previous_cell(
+                                codepoint,
+                                wraparound,
+                                right_limit,
+                                false,
+                            )
+                            .map_err(TerminalStreamError::from)?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        if props.width == 0 {
+            if self.modes.get(modes::Mode::GraphemeCluster) {
+                return Ok(());
+            }
+            if matches!(codepoint, 0xFE0E | 0xFE0F) {
+                let Some((_, _, previous_cell)) = self
+                    .screens
+                    .active()
+                    .previous_print_cell(wraparound, right_limit)
+                else {
+                    return Ok(());
+                };
+                let previous_props = crate::unicode::get(previous_cell.codepoint());
+                if previous_props.grapheme_break
+                    != crate::unicode::GraphemeBreak::ExtendedPictographic
+                {
+                    return Ok(());
+                }
+            }
+            self.screens
+                .active_mut()
+                .append_grapheme_to_previous_cell(codepoint, wraparound, right_limit, false)
+                .map_err(TerminalStreamError::from)?;
+            return Ok(());
+        }
+
+        let printed = self
+            .screens
             .active_mut()
-            .print_basic_cell(
+            .print_width_cell(
                 self.size.cols,
                 self.size.rows,
                 cp,
+                props.width,
                 self.modes.get(modes::Mode::Insert),
-                self.modes.get(modes::Mode::Wraparound),
+                wraparound,
                 self.scrolling_region.left,
                 self.scrolling_region.right,
             )
-            .map_err(TerminalStreamError::from)
+            .map_err(TerminalStreamError::from)?;
+        if printed {
+            *self.previous_char = Some(cp);
+        }
+        Ok(())
     }
 
     fn print_repeat(&mut self, count: u16) -> Result<(), TerminalStreamError> {
@@ -4600,7 +4715,7 @@ mod tests {
     };
     use crate::terminal::kitty::{KeyFlags, KeySetMode};
     use crate::terminal::modes::Mode;
-    use crate::terminal::page::{HyperlinkSnapshotId, SemanticContent, SemanticPrompt};
+    use crate::terminal::page::{HyperlinkSnapshotId, SemanticContent, SemanticPrompt, Wide};
     use crate::terminal::page_list::{CodepointReplacement, Pin};
     use crate::terminal::point::{Coordinate, Point};
     use crate::terminal::screen::ScreenCursorHyperlinkId;
@@ -6002,6 +6117,232 @@ mod tests {
 
             assert_eq!(plain_with_unwrap(&terminal, false), expected);
         }
+    }
+
+    #[test]
+    fn terminal_stream_print_cjk_uses_wide_cell_and_spacer_tail() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice("\u{65E5}A".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 0), 0x65E5);
+        assert_eq!(terminal.active_cell_wide_for_tests(0, 0), Wide::Wide);
+        assert_eq!(terminal.active_cell_wide_for_tests(1, 0), Wide::SpacerTail);
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(2, 0),
+            u32::from(b'A')
+        );
+        assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+    }
+
+    #[test]
+    fn terminal_stream_print_emoji_uses_wide_cell_and_spacer_tail() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice("\u{1F642}A".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 0), 0x1F642);
+        assert_eq!(terminal.active_cell_wide_for_tests(0, 0), Wide::Wide);
+        assert_eq!(terminal.active_cell_wide_for_tests(1, 0), Wide::SpacerTail);
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(2, 0),
+            u32::from(b'A')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_wide_wraps_from_right_edge() {
+        let mut terminal = Terminal::init(4, 2, None).unwrap();
+
+        terminal.next_slice("ABC\u{65E5}".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(3, 0), 0);
+        assert_eq!(terminal.active_cell_wide_for_tests(3, 0), Wide::SpacerHead);
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 1), 0x65E5);
+        assert_eq!(terminal.active_cell_wide_for_tests(0, 1), Wide::Wide);
+        assert_eq!(terminal.active_cell_wide_for_tests(1, 1), Wide::SpacerTail);
+    }
+
+    #[test]
+    fn terminal_stream_print_wide_right_edge_without_wraparound_is_ignored() {
+        let mut terminal = Terminal::init(4, 2, None).unwrap();
+
+        terminal
+            .next_slice("\x1b[?7lABC\u{65E5}".as_bytes())
+            .unwrap();
+
+        assert_eq!(plain_with_unwrap(&terminal, false), "ABC");
+        assert_eq!(terminal.cursor_position_for_tests(), (3, 0));
+    }
+
+    #[test]
+    fn terminal_stream_print_insert_mode_uses_wide_width() {
+        let mut terminal = Terminal::init(8, 1, None).unwrap();
+
+        terminal.next_slice(b"ABCD\x1b[1G\x1b[4h").unwrap();
+        terminal.next_slice("\u{65E5}".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 0), 0x65E5);
+        assert_eq!(terminal.active_cell_wide_for_tests(1, 0), Wide::SpacerTail);
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(2, 0),
+            u32::from(b'A')
+        );
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(5, 0),
+            u32::from(b'D')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_mode_2027_combining_mark_attaches() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal.next_slice("x\u{0301}Y".as_bytes()).unwrap();
+
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(0, 0),
+            u32::from(b'x')
+        );
+        assert_eq!(
+            terminal.active_cell_graphemes_for_tests(0, 0),
+            Some(vec![0x0301])
+        );
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(1, 0),
+            u32::from(b'Y')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_mode_2027_vs16_widens_valid_base() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal.next_slice("\u{2764}\u{FE0F}A".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 0), 0x2764);
+        assert_eq!(terminal.active_cell_wide_for_tests(0, 0), Wide::Wide);
+        assert_eq!(terminal.active_cell_wide_for_tests(1, 0), Wide::SpacerTail);
+        assert_eq!(
+            terminal.active_cell_graphemes_for_tests(0, 0),
+            Some(vec![0xFE0F])
+        );
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(2, 0),
+            u32::from(b'A')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_mode_2027_replays_emoji_zwj_graphemes() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal
+            .next_slice("\u{1F3F4}\u{200D}\u{2620}\u{FE0F}A".as_bytes())
+            .unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 0), 0x1F3F4);
+        assert_eq!(
+            terminal.active_cell_graphemes_for_tests(0, 0),
+            Some(vec![0x200D, 0x2620, 0xFE0F])
+        );
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(2, 0),
+            u32::from(b'A')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_mode_2027_vs15_narrows_valid_base() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal.next_slice("\u{2614}\u{FE0E}A".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(0, 0), 0x2614);
+        assert_eq!(terminal.active_cell_wide_for_tests(0, 0), Wide::Narrow);
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(1, 0),
+            u32::from(b'A')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_wide_wraps_from_horizontal_margin_edge() {
+        let mut terminal = Terminal::init(8, 3, None).unwrap();
+        terminal.set_scrolling_region_for_tests(0, 2, 2, 5);
+        terminal.set_cursor_position_for_tests(5, 0);
+
+        terminal.next_slice("\u{65E5}".as_bytes()).unwrap();
+
+        assert_eq!(terminal.active_cell_codepoint_for_tests(5, 0), 0);
+        assert_eq!(terminal.active_cell_wide_for_tests(5, 0), Wide::Narrow);
+        assert_eq!(terminal.active_cell_codepoint_for_tests(2, 1), 0x65E5);
+        assert_eq!(terminal.active_cell_wide_for_tests(2, 1), Wide::Wide);
+        assert_eq!(terminal.active_cell_wide_for_tests(3, 1), Wide::SpacerTail);
+        assert_eq!(terminal.cursor_position_for_tests(), (4, 1));
+    }
+
+    #[test]
+    fn terminal_stream_print_invalid_variation_selector_is_ignored() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal.next_slice("x\u{FE0F}Y".as_bytes()).unwrap();
+
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(0, 0),
+            u32::from(b'x')
+        );
+        assert_eq!(terminal.active_cell_graphemes_for_tests(0, 0), None);
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(1, 0),
+            u32::from(b'Y')
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_disabled_wraparound_grapheme_attaches_to_edge_cell() {
+        let mut terminal = Terminal::init(4, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal
+            .next_slice("ABCD\x1b[?7l\u{0301}".as_bytes())
+            .unwrap();
+
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(3, 0),
+            u32::from(b'D')
+        );
+        assert_eq!(terminal.active_cell_graphemes_for_tests(2, 0), None);
+        assert_eq!(
+            terminal.active_cell_graphemes_for_tests(3, 0),
+            Some(vec![0x0301])
+        );
+    }
+
+    #[test]
+    fn terminal_stream_print_repeat_ignores_zero_width_previous_char() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.modes.set(modes::Mode::GraphemeCluster, true);
+
+        terminal.next_slice("x\u{0301}\x1b[b".as_bytes()).unwrap();
+
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(0, 0),
+            u32::from(b'x')
+        );
+        assert_eq!(
+            terminal.active_cell_graphemes_for_tests(0, 0),
+            Some(vec![0x0301])
+        );
+        assert_eq!(
+            terminal.active_cell_codepoint_for_tests(1, 0),
+            u32::from(b'x')
+        );
     }
 
     #[test]
