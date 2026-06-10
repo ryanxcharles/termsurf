@@ -546,6 +546,10 @@ stays unaltered except for the rename).
   wired a tick into the present loop + clamped `selection_drag` past-edge
   positions so a held drag-above-edge scrolls into history + extends; 4411
   green + live 78→55 scroll w/ highlight) · Claude
+- [Experiment 29: Phase C — CJK ideographic wide-pitch (`set_point_size`)](29-cjk-wide-pitch.md)
+  — **Designed** (build_live_renderer never calls set_point_size → point_size
+  None → the IcWidth resize no-ops → CJK tight; call it so discovered CJK faces
+  get the 2-cell ideographic width) · Claude
 
 ## Process
 
