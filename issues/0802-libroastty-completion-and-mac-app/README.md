@@ -317,6 +317,12 @@ before re-reading experiments.
   `clipboard-codepoint-map` on `Config` and applies it only to copy-to-clipboard
   formatting, including styled HTML payloads. URL copying remains a direct URI
   write and intentionally bypasses the map.
+- **Clipboard behavior config is app-facing:** Exp 57 represents
+  `clipboard-trim-trailing-spaces`, `clipboard-paste-protection`,
+  `clipboard-paste-bracketed-safe`, and `selection-clear-on-copy` on `Config`.
+  They affect only app copy/paste behavior: trim and clear-on-copy apply to
+  `copy_to_clipboard`, URL copying stays untouched, and paste confirmation now
+  follows Ghostty's bracketed/unsafe-paste rules.
 
 ### Input injection (Exp 5)
 
@@ -737,7 +743,7 @@ stays unaltered except for the rename).
 - [Experiment 56: Phase F — clipboard codepoint map](56-clipboard-codepoint-map.md)
   — **Pass**
 - [Experiment 57: Phase F — clipboard behavior config](57-clipboard-behavior-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

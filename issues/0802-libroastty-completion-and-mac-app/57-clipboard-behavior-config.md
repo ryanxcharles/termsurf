@@ -100,3 +100,69 @@ Reviewed by Codex adversarial reviewer (`Newton`,
 **Verdict:** Approved.
 
 No findings.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the four clipboard behavior config fields on `Config` with upstream
+defaults, bool parsing, formatter output, CLI/file loading, and focused tests.
+`Surface::copy_to_clipboard` now reads `clipboard-trim-trailing-spaces`, applies
+`selection-clear-on-copy` only after successful standard copy actions, and still
+leaves URL copying untouched.
+
+Paste completion now follows Ghostty's unsafe-paste policy: disabling
+`clipboard-paste-protection` allows unsafe text, confirmed pastes are allowed,
+bracketed pastes are trusted when `clipboard-paste-bracketed-safe` is true,
+bracketed pastes containing the closing marker remain unsafe, and bracketed
+pastes fall back to normal safety checks when bracketed-safe is false. The C
+paste helpers and OSC52/Kitty clipboard policy paths were left unchanged.
+
+Verification:
+
+- `cargo fmt -- roastty/src/config/mod.rs roastty/src/lib.rs`
+- `prettier --write --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/README.md issues/0802-libroastty-completion-and-mac-app/57-clipboard-behavior-config.md`
+- `cargo test -p roastty clipboard_behavior_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty surface_binding_action_copy_to_clipboard`
+- `cargo test -p roastty surface_binding_action_copy_url_to_clipboard`
+- `cargo test -p roastty paste_from_clipboard`
+- `cargo test -p roastty clipboard_read_completion`
+- `cargo test -p roastty surface_complete_clipboard_request`
+- `cargo test -p roastty app_and_surface_update_config_sync_clipboard_paste_behavior`
+- `cargo test -p roastty` — 4467 unit tests, 1 ABI harness integration test, and
+  0 doc-tests passed. The ABI harness still emits the pre-existing enum-cast
+  warnings.
+
+## Completion Review
+
+Reviewed by Codex adversarial reviewer (`Schrodinger`,
+`019eb321-59d2-7ba3-a7f3-86d1395c9b2c`).
+
+**Initial verdict:** Changes required.
+
+- **Required:** Paste behavior config was stale after app/surface config update.
+  The first implementation copied `clipboard-paste-protection` and
+  `clipboard-paste-bracketed-safe` into `Surface` at creation, but did not
+  refresh those cached fields in `roastty_app_update_config` or
+  `roastty_surface_update_config`.
+
+Fix:
+
+- Added `Surface::apply_config` and used it from both update paths so
+  `confirm-close-surface`, `clipboard-paste-protection`, and
+  `clipboard-paste-bracketed-safe` refresh together.
+- Added `app_and_surface_update_config_sync_clipboard_paste_behavior`, which
+  covers protection-disabled and bracketed-safe changes through the real app and
+  surface config update APIs.
+
+**Final verdict:** Approved.
+
+No findings. The reviewer confirmed the prior Required finding is resolved.
+
+## Conclusion
+
+The remaining Phase-F clipboard behavior toggles are represented on the app
+config and connected to the same copy/paste surfaces that already had lower
+level formatter, selection, and paste-safety machinery. The next experiment can
+continue Phase-F config completeness from another narrow upstream field group.

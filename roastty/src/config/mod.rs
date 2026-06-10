@@ -43,10 +43,18 @@ pub(crate) struct Config {
     pub quit_after_last_window_closed: bool,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
+    /// `selection-clear-on-copy`.
+    pub selection_clear_on_copy: bool,
     /// `clipboard-read`.
     pub clipboard_read: ClipboardAccess,
     /// `clipboard-write`.
     pub clipboard_write: ClipboardAccess,
+    /// `clipboard-trim-trailing-spaces`.
+    pub clipboard_trim_trailing_spaces: bool,
+    /// `clipboard-paste-protection`.
+    pub clipboard_paste_protection: bool,
+    /// `clipboard-paste-bracketed-safe`.
+    pub clipboard_paste_bracketed_safe: bool,
     /// `mouse-shift-capture`.
     pub mouse_shift_capture: MouseShiftCapture,
     /// `right-click-action`.
@@ -190,8 +198,12 @@ impl Default for Config {
             initial_window: true,
             quit_after_last_window_closed: false,
             copy_on_select: CopyOnSelect::True,
+            selection_clear_on_copy: false,
             clipboard_read: ClipboardAccess::Ask,
             clipboard_write: ClipboardAccess::Allow,
+            clipboard_trim_trailing_spaces: true,
+            clipboard_paste_protection: true,
+            clipboard_paste_bracketed_safe: true,
             mouse_shift_capture: MouseShiftCapture::False,
             right_click_action: RightClickAction::ContextMenu,
             middle_click_action: MiddleClickAction::PrimaryPaste,
@@ -386,8 +398,16 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("clipboard-read", out));
         self.clipboard_write
             .format_entry(&mut EntryFormatter::new("clipboard-write", out));
+        EntryFormatter::new("clipboard-trim-trailing-spaces", out)
+            .entry_bool(self.clipboard_trim_trailing_spaces);
+        EntryFormatter::new("clipboard-paste-protection", out)
+            .entry_bool(self.clipboard_paste_protection);
+        EntryFormatter::new("clipboard-paste-bracketed-safe", out)
+            .entry_bool(self.clipboard_paste_bracketed_safe);
         self.copy_on_select
             .format_entry(&mut EntryFormatter::new("copy-on-select", out));
+        EntryFormatter::new("selection-clear-on-copy", out)
+            .entry_bool(self.selection_clear_on_copy);
         self.right_click_action
             .format_entry(&mut EntryFormatter::new("right-click-action", out));
         self.middle_click_action
@@ -451,6 +471,10 @@ impl Config {
                 self.copy_on_select =
                     set_enum_field(value, default.copy_on_select, CopyOnSelect::from_keyword)?
             }
+            "selection-clear-on-copy" => {
+                self.selection_clear_on_copy =
+                    set_bool_field(value, default.selection_clear_on_copy)?
+            }
             "clipboard-read" => {
                 self.clipboard_read =
                     set_enum_field(value, default.clipboard_read, ClipboardAccess::from_keyword)?
@@ -461,6 +485,18 @@ impl Config {
                     default.clipboard_write,
                     ClipboardAccess::from_keyword,
                 )?
+            }
+            "clipboard-trim-trailing-spaces" => {
+                self.clipboard_trim_trailing_spaces =
+                    set_bool_field(value, default.clipboard_trim_trailing_spaces)?
+            }
+            "clipboard-paste-protection" => {
+                self.clipboard_paste_protection =
+                    set_bool_field(value, default.clipboard_paste_protection)?
+            }
+            "clipboard-paste-bracketed-safe" => {
+                self.clipboard_paste_bracketed_safe =
+                    set_bool_field(value, default.clipboard_paste_bracketed_safe)?
             }
             "mouse-shift-capture" => {
                 self.mouse_shift_capture = set_enum_field(
@@ -4641,8 +4677,12 @@ mod tests {
         assert!(d.initial_window);
         assert!(!d.quit_after_last_window_closed);
         assert_eq!(d.copy_on_select, CopyOnSelect::True);
+        assert!(!d.selection_clear_on_copy);
         assert_eq!(d.clipboard_read, ClipboardAccess::Ask);
         assert_eq!(d.clipboard_write, ClipboardAccess::Allow);
+        assert!(d.clipboard_trim_trailing_spaces);
+        assert!(d.clipboard_paste_protection);
+        assert!(d.clipboard_paste_bracketed_safe);
         // Mouse / click group (Experiment 462).
         assert_eq!(d.mouse_shift_capture, MouseShiftCapture::False);
         assert_eq!(d.right_click_action, RightClickAction::ContextMenu);
@@ -8550,7 +8590,11 @@ mod tests {
                 "window-colorspace",
                 "clipboard-read",
                 "clipboard-write",
+                "clipboard-trim-trailing-spaces",
+                "clipboard-paste-protection",
+                "clipboard-paste-bracketed-safe",
                 "copy-on-select",
+                "selection-clear-on-copy",
                 "right-click-action",
                 "middle-click-action",
                 "config-file",
@@ -8575,6 +8619,10 @@ mod tests {
         assert!(out.contains("background-opacity = 1\n"));
         assert!(out.contains("bell-audio-volume = 0.5\n"));
         assert!(out.contains("notify-on-command-finish-after = 5s\n"));
+        assert!(out.contains("clipboard-trim-trailing-spaces = true\n"));
+        assert!(out.contains("clipboard-paste-protection = true\n"));
+        assert!(out.contains("clipboard-paste-bracketed-safe = true\n"));
+        assert!(out.contains("selection-clear-on-copy = false\n"));
 
         // The default optionals (all `None`) format as the void line, and `theme`
         // (default `None`) too.
@@ -8584,6 +8632,73 @@ mod tests {
         assert!(out.contains("title = \n"));
         assert!(out.contains("window-position-x = \n"));
         assert!(out.contains("window-position-y = \n"));
+    }
+
+    #[test]
+    fn clipboard_behavior_config_routes_and_formats() {
+        let has = |out: &str, key: &str, val: &str| {
+            out.lines().any(|l| l == format!("{} = {}", key, val))
+        };
+        let mut cfg = Config::default();
+        cfg.set("clipboard-trim-trailing-spaces", Some("false"))
+            .unwrap();
+        cfg.set("clipboard-paste-protection", Some("false"))
+            .unwrap();
+        cfg.set("clipboard-paste-bracketed-safe", Some("false"))
+            .unwrap();
+        cfg.set("selection-clear-on-copy", Some("true")).unwrap();
+
+        assert!(!cfg.clipboard_trim_trailing_spaces);
+        assert!(!cfg.clipboard_paste_protection);
+        assert!(!cfg.clipboard_paste_bracketed_safe);
+        assert!(cfg.selection_clear_on_copy);
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(has(&out, "clipboard-trim-trailing-spaces", "false"));
+        assert!(has(&out, "clipboard-paste-protection", "false"));
+        assert!(has(&out, "clipboard-paste-bracketed-safe", "false"));
+        assert!(has(&out, "selection-clear-on-copy", "true"));
+
+        cfg.set("clipboard-trim-trailing-spaces", Some("")).unwrap();
+        cfg.set("clipboard-paste-protection", Some("")).unwrap();
+        cfg.set("clipboard-paste-bracketed-safe", Some("")).unwrap();
+        cfg.set("selection-clear-on-copy", Some("")).unwrap();
+        assert!(cfg.clipboard_trim_trailing_spaces);
+        assert!(cfg.clipboard_paste_protection);
+        assert!(cfg.clipboard_paste_bracketed_safe);
+        assert!(!cfg.selection_clear_on_copy);
+
+        assert_eq!(
+            cfg.set("clipboard-paste-protection", Some("maybe")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let mut cfg = Config::default();
+        let diags = cfg.set_cli_args([
+            "--clipboard-trim-trailing-spaces=false",
+            "--clipboard-paste-protection=false",
+            "--clipboard-paste-bracketed-safe=false",
+            "--selection-clear-on-copy",
+        ]);
+        assert!(diags.is_empty());
+        assert!(!cfg.clipboard_trim_trailing_spaces);
+        assert!(!cfg.clipboard_paste_protection);
+        assert!(!cfg.clipboard_paste_bracketed_safe);
+        assert!(cfg.selection_clear_on_copy);
+
+        let mut cfg = Config::default();
+        let diags = cfg.load_str(
+            "clipboard-trim-trailing-spaces = false\n\
+             clipboard-paste-protection = false\n\
+             clipboard-paste-bracketed-safe = false\n\
+             selection-clear-on-copy = true\n",
+        );
+        assert!(diags.is_empty());
+        assert!(!cfg.clipboard_trim_trailing_spaces);
+        assert!(!cfg.clipboard_paste_protection);
+        assert!(!cfg.clipboard_paste_bracketed_safe);
+        assert!(cfg.selection_clear_on_copy);
     }
 
     #[test]

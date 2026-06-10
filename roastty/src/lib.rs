@@ -1892,6 +1892,8 @@ struct Surface {
     confirm_close_surface: config::ConfirmCloseSurface,
     clipboard_read: config::ClipboardAccess,
     clipboard_write: config::ClipboardAccess,
+    clipboard_paste_protection: bool,
+    clipboard_paste_bracketed_safe: bool,
     preedit: Option<String>,
     inspector: Option<NonNull<Inspector>>,
     last_key_event: Option<key::KeyEvent>,
@@ -2203,6 +2205,12 @@ fn clipboard_codepoint_map_entries(
 }
 
 impl Surface {
+    fn apply_config(&mut self, config: &Config) {
+        self.confirm_close_surface = config.confirm_close_surface;
+        self.clipboard_paste_protection = config.parsed.clipboard_paste_protection;
+        self.clipboard_paste_bracketed_safe = config.parsed.clipboard_paste_bracketed_safe;
+    }
+
     fn sanitized_scale(value: f64) -> f64 {
         if value.is_finite() && value > 0.0 {
             value
@@ -2855,6 +2863,7 @@ impl Surface {
             clipboard_codepoint_map_entries(&app.parsed_config.clipboard_codepoint_map);
         let codepoint_map = (!codepoint_map.is_empty()).then_some(codepoint_map);
         let codepoint_map = codepoint_map.as_deref();
+        let trim_trailing_spaces = app.parsed_config.clipboard_trim_trailing_spaces;
         let Some(formatted) = worker.with_termio(|termio| {
             let terminal = termio.terminal();
             let selection = terminal.active_selection()?;
@@ -2863,7 +2872,7 @@ impl Surface {
                     .selection_format_with_codepoint_map(
                         TerminalSelectionFormat::Plain,
                         true,
-                        true,
+                        trim_trailing_spaces,
                         Some(selection),
                         codepoint_map,
                     )
@@ -2873,7 +2882,7 @@ impl Surface {
                     .selection_format_with_codepoint_map(
                         TerminalSelectionFormat::Vt,
                         true,
-                        true,
+                        trim_trailing_spaces,
                         Some(selection),
                         codepoint_map,
                     )
@@ -2883,7 +2892,7 @@ impl Surface {
                     .selection_format_with_codepoint_map(
                         TerminalSelectionFormat::Html,
                         true,
-                        true,
+                        trim_trailing_spaces,
                         Some(selection),
                         codepoint_map,
                     )
@@ -2894,7 +2903,7 @@ impl Surface {
                         .selection_format_with_codepoint_map(
                             TerminalSelectionFormat::Plain,
                             true,
-                            true,
+                            trim_trailing_spaces,
                             Some(selection),
                             codepoint_map,
                         )
@@ -2903,7 +2912,7 @@ impl Surface {
                         .selection_format_with_codepoint_map(
                             TerminalSelectionFormat::Html,
                             true,
-                            true,
+                            trim_trailing_spaces,
                             Some(selection),
                             codepoint_map,
                         )
@@ -2944,7 +2953,33 @@ impl Surface {
                 false,
             );
         }
+        if app.parsed_config.selection_clear_on_copy {
+            self.selection_clear_and_reset();
+        }
         true
+    }
+
+    fn clipboard_paste_is_unsafe(&self, bytes: &[u8], confirmed: bool) -> bool {
+        if !self.clipboard_paste_protection || confirmed {
+            return false;
+        }
+        let bracketed = self
+            .termio_worker
+            .as_ref()
+            .map(|worker| worker.with_termio(|termio| termio.terminal().bracketed_paste_enabled()))
+            .unwrap_or(false);
+        if bracketed {
+            if bytes
+                .windows(b"\x1b[201~".len())
+                .any(|window| window == b"\x1b[201~")
+            {
+                return true;
+            }
+            if self.clipboard_paste_bracketed_safe {
+                return false;
+            }
+        }
+        !paste::is_safe(bytes)
     }
 
     fn copy_url_to_clipboard(&mut self) -> bool {
@@ -10876,6 +10911,7 @@ pub extern "C" fn roastty_app_update_config(app: RoasttyApp, config: RoasttyConf
     for mut surface in app.surfaces.clone() {
         let surface = unsafe { surface.as_mut() };
         if surface.app == app as *mut App as RoasttyApp {
+            surface.apply_config(config);
             surface.renderer = None;
             surface.dirty = true;
         }
@@ -14178,6 +14214,12 @@ pub extern "C" fn roastty_surface_new(
     let clipboard_write = app_from_handle(app)
         .map(|app| app.clipboard_write)
         .unwrap_or(config::ClipboardAccess::Allow);
+    let clipboard_paste_protection = app_from_handle(app)
+        .map(|app| app.parsed_config.clipboard_paste_protection)
+        .unwrap_or(true);
+    let clipboard_paste_bracketed_safe = app_from_handle(app)
+        .map(|app| app.parsed_config.clipboard_paste_bracketed_safe)
+        .unwrap_or(true);
 
     let font_size_points = sanitized_font_size_points(config.font_size);
     let surface = Box::new(Surface {
@@ -14209,6 +14251,8 @@ pub extern "C" fn roastty_surface_new(
         confirm_close_surface,
         clipboard_read,
         clipboard_write,
+        clipboard_paste_protection,
+        clipboard_paste_bracketed_safe,
         preedit: None,
         inspector: None,
         last_key_event: None,
@@ -14324,7 +14368,7 @@ pub extern "C" fn roastty_surface_update_config(surface: RoasttySurface, config:
     let Some(config) = config_from_handle(config) else {
         return;
     };
-    surface.confirm_close_surface = config.confirm_close_surface;
+    surface.apply_config(config);
 }
 
 #[no_mangle]
@@ -14903,8 +14947,7 @@ pub extern "C" fn roastty_surface_complete_clipboard_request(
                 surface.take_clipboard_request(state);
                 return;
             }
-            let unsafe_paste = bytes.iter().any(|byte| matches!(*byte, b'\n' | b'\r'));
-            if !confirmed && unsafe_paste {
+            if surface.clipboard_paste_is_unsafe(bytes, confirmed) {
                 let Some(app) = app_from_handle(surface.app) else {
                     return;
                 };
@@ -15787,6 +15830,17 @@ mod tests {
         config
     }
 
+    fn new_test_config_with_clipboard_paste_behavior(
+        paste_protection: bool,
+        bracketed_safe: bool,
+    ) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        let config = config_from_handle(handle).unwrap();
+        config.parsed.clipboard_paste_protection = paste_protection;
+        config.parsed.clipboard_paste_bracketed_safe = bracketed_safe;
+        handle
+    }
+
     unsafe extern "C" fn wakeup_cb(userdata: *mut c_void) {
         WAKEUP_COUNT.fetch_add(1, Ordering::SeqCst);
         WAKEUP_USERDATA.store(userdata as usize, Ordering::SeqCst);
@@ -15970,6 +16024,48 @@ mod tests {
             .clipboard_codepoint_map
             .parse_cli(Some(spec))
             .unwrap();
+    }
+
+    fn set_app_clipboard_trim_trailing_spaces(app: RoasttyApp, enabled: bool) {
+        app_from_handle(app)
+            .unwrap()
+            .parsed_config
+            .clipboard_trim_trailing_spaces = enabled;
+    }
+
+    fn set_app_selection_clear_on_copy(app: RoasttyApp, enabled: bool) {
+        app_from_handle(app)
+            .unwrap()
+            .parsed_config
+            .selection_clear_on_copy = enabled;
+    }
+
+    fn set_app_clipboard_paste_protection(app: RoasttyApp, enabled: bool) {
+        let app_ref = app_from_handle(app).unwrap();
+        app_ref.parsed_config.clipboard_paste_protection = enabled;
+        for surface in &app_ref.surfaces {
+            unsafe {
+                surface
+                    .as_ptr()
+                    .as_mut()
+                    .unwrap()
+                    .clipboard_paste_protection = enabled;
+            }
+        }
+    }
+
+    fn set_app_clipboard_paste_bracketed_safe(app: RoasttyApp, enabled: bool) {
+        let app_ref = app_from_handle(app).unwrap();
+        app_ref.parsed_config.clipboard_paste_bracketed_safe = enabled;
+        for surface in &app_ref.surfaces {
+            unsafe {
+                surface
+                    .as_ptr()
+                    .as_mut()
+                    .unwrap()
+                    .clipboard_paste_bracketed_safe = enabled;
+            }
+        }
     }
 
     fn new_test_app_with_clipboard_write_config(
@@ -22495,6 +22591,45 @@ mod tests {
     }
 
     #[test]
+    fn app_and_surface_update_config_sync_clipboard_paste_behavior() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .clipboard_paste_is_unsafe(b"unsafe\npaste", false));
+
+        let no_protection = new_test_config_with_clipboard_paste_behavior(false, true);
+        roastty_app_update_config(app, no_protection);
+        assert!(!surface_from_handle(surface)
+            .unwrap()
+            .clipboard_paste_is_unsafe(b"unsafe\npaste", false));
+
+        let no_bracketed_safe = new_test_config_with_clipboard_paste_behavior(true, false);
+        roastty_app_update_config(app, no_bracketed_safe);
+        set_surface_worker_dec_mode(surface, 2004, true);
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .clipboard_paste_is_unsafe(b"unsafe\npaste", false));
+
+        let bracketed_safe = new_test_config_with_clipboard_paste_behavior(true, true);
+        roastty_surface_update_config(surface, bracketed_safe);
+        assert!(!surface_from_handle(surface)
+            .unwrap()
+            .clipboard_paste_is_unsafe(b"unsafe\npaste", false));
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .clipboard_paste_is_unsafe(b"plain\x1b[201~tail", false));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(no_protection);
+        roastty_config_free(no_bracketed_safe);
+        roastty_config_free(bracketed_safe);
+    }
+
+    #[test]
     fn surface_request_close_passes_computed_confirm_policy() {
         let _guard = CLOSE_LOCK.lock().unwrap();
         let config = new_test_config_with_confirm_close(config::ConfirmCloseSurface::Always);
@@ -24099,13 +24234,21 @@ mod tests {
         surface: RoasttySurface,
         format: TerminalSelectionFormat,
     ) -> String {
+        surface_worker_selection_format_with_trim(surface, format, true)
+    }
+
+    fn surface_worker_selection_format_with_trim(
+        surface: RoasttySurface,
+        format: TerminalSelectionFormat,
+        trim_trailing_spaces: bool,
+    ) -> String {
         let surface_ref = surface_from_handle(surface).unwrap();
         let worker = surface_ref.termio_worker.as_ref().unwrap();
         worker.with_termio(|termio| {
             let selection = termio.terminal().active_selection().unwrap();
             termio
                 .terminal()
-                .selection_format(format, true, true, Some(selection))
+                .selection_format(format, true, trim_trailing_spaces, Some(selection))
                 .unwrap()
         })
     }
@@ -24302,6 +24445,106 @@ mod tests {
                 assert!(!text.contains('Σ'), "{action}: {text}");
             }
         }
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_copy_to_clipboard_honors_trim_config() {
+        let _guard = pty_command_lock();
+        let app = new_test_app_with_clipboard_write(0xC017);
+        set_app_clipboard_trim_trailing_spaces(app, false);
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 20, 3, 10, 20);
+        surface_snapshot_text_after_start_until(app, surface, "ready");
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio_mut(|termio| {
+                termio.terminal_mut().reset();
+                termio.terminal_mut().next_slice(b"abc   \n").unwrap();
+            });
+        }
+        let selection = surface_worker_selection(surface, (0, 0), (5, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+        let expected = surface_worker_selection_format_with_trim(
+            surface,
+            TerminalSelectionFormat::Plain,
+            false,
+        );
+
+        reset_clipboard_write_records();
+        assert!(binding_action(surface, "copy_to_clipboard:plain"));
+        assert_eq!(
+            clipboard_write_records(),
+            vec![ClipboardWriteRecord {
+                userdata: 0xC017,
+                clipboard: ROASTTY_CLIPBOARD_STANDARD,
+                contents: vec![("text/plain".to_owned(), expected)],
+                confirm: false,
+            }]
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_copy_to_clipboard_clears_selection_when_configured() {
+        let _guard = pty_command_lock();
+        let app = new_test_app_with_clipboard_write(0xC017);
+        set_app_selection_clear_on_copy(app, true);
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 20, 3, 10, 20);
+        surface_snapshot_text_after_start_until(app, surface, "ready");
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            let worker = surface_ref.termio_worker.as_ref().unwrap();
+            worker.with_termio_mut(|termio| {
+                termio.terminal_mut().reset();
+                termio.terminal_mut().next_slice(b"abc").unwrap();
+            });
+        }
+        let selection = surface_worker_selection(surface, (0, 0), (2, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+
+        assert!(surface_worker_active_selection(surface).is_some());
+        assert!(!roastty_surface_needs_render(surface));
+        reset_clipboard_write_records();
+        assert!(binding_action(surface, "copy_to_clipboard:plain"));
+        assert_eq!(clipboard_write_records().len(), 1);
+        assert!(surface_worker_active_selection(surface).is_none());
+        assert!(roastty_surface_needs_render(surface));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_binding_action_copy_url_to_clipboard_does_not_clear_selection() {
+        let _guard = pty_command_lock();
+        let app = new_test_app_with_clipboard_write(0xC017);
+        set_app_selection_clear_on_copy(app, true);
+        let command = CString::new("printf ready; sleep 5").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        set_surface_test_geometry(surface, 40, 3, 10, 20);
+        surface_snapshot_text_after_start_until(app, surface, "ready");
+        write_surface_worker_osc8_link(surface);
+        surface_from_handle(surface).unwrap().mouse.position = Some((5.0, 0.0));
+        let selection = surface_worker_selection(surface, (0, 0), (3, 0));
+        set_surface_worker_active_selection(surface, Some(selection));
+
+        assert!(binding_action(surface, "copy_url_to_clipboard"));
+        assert!(surface_worker_active_selection(surface).is_some());
 
         roastty_surface_free(surface);
         roastty_app_free(app);
@@ -25827,6 +26070,113 @@ mod tests {
             .unwrap()
             .active_clipboard_requests
             .is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_paste_protection_disabled_allows_unsafe_text() {
+        let app = new_test_app_with_clipboard_read_confirm(0xCA57, true, true);
+        set_app_clipboard_paste_protection(app, false);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        assert!(binding_action(surface, "paste_from_clipboard"));
+        let state = clipboard_read_records()[0].state as *mut c_void;
+        let text = CString::new("unsafe\npaste").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), state, false);
+
+        assert!(clipboard_confirm_records().is_empty());
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_bracketed_paste_safe_config_controls_newlines() {
+        let app = new_test_app_with_clipboard_read_confirm(0xCA57, true, true);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        set_surface_worker_dec_mode(surface, 2004, true);
+        assert!(binding_action(surface, "paste_from_clipboard"));
+        let state = clipboard_read_records()[0].state as *mut c_void;
+        let text = CString::new("unsafe\npaste").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), state, false);
+
+        assert!(clipboard_confirm_records().is_empty());
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .active_clipboard_requests
+            .is_empty());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+
+        let app = new_test_app_with_clipboard_read_confirm(0xCA57, true, true);
+        let surface = new_test_surface(app);
+        set_app_clipboard_paste_bracketed_safe(app, false);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        set_surface_worker_dec_mode(surface, 2004, true);
+        reset_clipboard_read_records(true);
+        assert!(binding_action(surface, "paste_from_clipboard"));
+        let state = clipboard_read_records()[0].state as *mut c_void;
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), state, false);
+
+        assert_eq!(
+            clipboard_confirm_records(),
+            vec![ClipboardConfirmRecord {
+                userdata: 0xCA57,
+                text: "unsafe\npaste".to_string(),
+                state: state as usize,
+                request: ROASTTY_CLIPBOARD_REQUEST_PASTE,
+            }]
+        );
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .active_clipboard_requests
+                .len(),
+            1
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_complete_clipboard_request_bracketed_paste_closing_marker_is_unsafe() {
+        let app = new_test_app_with_clipboard_read_confirm(0xCA57, true, true);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        set_surface_worker_dec_mode(surface, 2004, true);
+        assert!(binding_action(surface, "paste_from_clipboard"));
+        let state = clipboard_read_records()[0].state as *mut c_void;
+        let text = CString::new("plain\x1b[201~tail").unwrap();
+
+        roastty_surface_complete_clipboard_request(surface, text.as_ptr(), state, false);
+
+        assert_eq!(
+            clipboard_confirm_records(),
+            vec![ClipboardConfirmRecord {
+                userdata: 0xCA57,
+                text: "plain\x1b[201~tail".to_string(),
+                state: state as usize,
+                request: ROASTTY_CLIPBOARD_REQUEST_PASTE,
+            }]
+        );
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .active_clipboard_requests
+                .len(),
+            1
+        );
 
         roastty_surface_free(surface);
         roastty_app_free(app);
