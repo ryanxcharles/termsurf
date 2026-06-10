@@ -5,7 +5,7 @@
 #   ${TERMSURF_SHOT_DIR:-$HOME/.cache/termsurf/shots}
 #
 # Usage:
-#   live-ab-smoke.sh [--recipe smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output] [--comparison-region content|full] [--max-mismatch-ratio N] [--max-mean-channel-delta N]
+#   live-ab-smoke.sh [--recipe smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output|unicode-width] [--comparison-region content|full] [--max-mismatch-ratio N] [--max-mean-channel-delta N]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -65,7 +65,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--recipe smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output] [--comparison-region content|full] [--max-mismatch-ratio N] [--max-mean-channel-delta N]" >&2
+      echo "usage: $0 [--recipe smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output|unicode-width] [--comparison-region content|full] [--max-mismatch-ratio N] [--max-mean-channel-delta N]" >&2
       echo "       $0 --list-recipes" >&2
       exit 0
       ;;
@@ -76,13 +76,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-recipes=(smoke ascii-grid color-grid clear-after alt-screen scroll-output)
+recipes=(smoke ascii-grid color-grid clear-after alt-screen scroll-output unicode-width)
 if [ "$list_recipes" -eq 1 ]; then
   printf '%s\n' "${recipes[@]}"
   exit 0
 fi
 case "$recipe" in
-  smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output) ;;
+  smoke|ascii-grid|color-grid|clear-after|alt-screen|scroll-output|unicode-width) ;;
   *)
     echo "unknown recipe: $recipe" >&2
     echo "supported recipes:" >&2
@@ -332,6 +332,9 @@ recipe_command() {
       ;;
     scroll-output)
       printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\n'; for i in {001..080}; do printf 'SCROLL_ROW_%s\\n' \"\$i\"; done; sleep '$HOLD_SECONDS'"
+      ;;
+    unicode-width)
+      printf '%s' "printf '%b' '\\033[2J\\033[H$marker\\nCOLS: 0123456789 0123456789 0123456789 0123456789\\nASCII: A|B|C|D|E|F|G|H|I|J\\nCOMBINING: e\\xCC\\x81|a\\xCC\\x88|n\\xCC\\x83|o\\xCC\\x82|END\\nCJK-WIDE: \\xE6\\x97\\xA5\\xE6\\x9C\\xAC\\xE8\\xAA\\x9E|\\xE6\\xBC\\xA2\\xE5\\xAD\\x97|\\xED\\x95\\x9C\\xEA\\xB5\\xAD|END\\nEMOJI: \\xF0\\x9F\\x8E\\x89|\\xF0\\x9F\\x99\\x82|\\xE2\\x9D\\xA4\\xEF\\xB8\\x8F|END\\nBOX-SYM: \\xE2\\x94\\x80\\xE2\\x94\\x82\\xE2\\x94\\x8C\\xE2\\x94\\x90|\\xE2\\x96\\x88\\xE2\\x96\\x91\\xE2\\x97\\x86|\\xEF\\x84\\x81|END\\n\\033[10;1HALIGN-A\\033[10;20H\\xE6\\x97\\xA5\\xE6\\x9C\\xAC\\xE8\\xAA\\x9E\\033[10;40HALIGN-B\\033[11;1HEND-ROW\\n'; sleep '$HOLD_SECONDS'"
       ;;
   esac
 }

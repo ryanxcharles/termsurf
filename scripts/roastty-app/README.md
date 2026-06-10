@@ -53,6 +53,9 @@ scripts/roastty-app/live-ab-smoke.sh --recipe alt-screen \
 scripts/roastty-app/live-ab-smoke.sh --recipe scroll-output \
   --max-mismatch-ratio 1 \
   --max-mean-channel-delta 255
+scripts/roastty-app/live-ab-smoke.sh --recipe unicode-width \
+  --max-mismatch-ratio 1 \
+  --max-mean-channel-delta 255
 ```
 
 The script prints one JSON summary object to stdout and diagnostics to stderr.
@@ -95,6 +98,9 @@ Recipes:
 - `scroll-output` — clears the terminal, prints a timestamped marker plus 80
   numbered rows, and sleeps so capture happens after the viewport scrolls to the
   bottom.
+- `unicode-width` — clears the terminal, prints guide columns plus escaped UTF-8
+  samples for combining marks, CJK wide text, emoji/variation selectors,
+  box/symbol glyphs, and cursor-addressed alignment.
 
 ## Live A/B Matrix
 

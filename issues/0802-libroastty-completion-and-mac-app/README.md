@@ -274,6 +274,13 @@ before re-reading experiments.
   `${TERMSURF_AB_CONTENT_CROP_Y:-132}`, `${TERMSURF_AB_CONTENT_CROP_W:-1600}`,
   `${TERMSURF_AB_CONTENT_CROP_H:-900}`. Use `--comparison-region full` for the
   legacy titlebar/debug-banner-inclusive verdict.
+- **Unicode-width live A/B recipe:** Exp 50 adds `unicode-width`, a
+  content-region recipe for guide columns, combining marks, CJK wide text,
+  emoji/variation selectors, box/symbol glyphs, and cursor-addressed alignment.
+  Current content metric: `mean_channel_delta=3.8124979166666666`,
+  `mismatch_ratio=0.04077708333333333`; visual inspection shows the expected
+  Roastty width/fallback differences, so the next Phase-E step should port the
+  Unicode width/grapheme behavior behind this oracle.
 
 ### Input injection (Exp 5)
 
@@ -680,7 +687,7 @@ stays unaltered except for the rename).
 - [Experiment 49: Phase D — content-region live A/B diffs](49-live-ab-content-region-diff.md)
   — **Pass**
 - [Experiment 50: Phase E — Unicode-width live A/B recipe](50-live-ab-unicode-width-recipe.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

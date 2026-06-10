@@ -96,3 +96,72 @@ The reviewer found no issues. It verified that the issue README links Experiment
 the test-first Unicode-width recipe is sensible before terminal internals
 changes, and the verification plan includes concrete syntax, recipe discovery,
 standalone run, matrix run, formatting, cleanup, and artifact-hygiene checks.
+
+## Result
+
+**Result:** Pass
+
+Implemented the `unicode-width` live A/B recipe:
+
+- `scripts/roastty-app/live-ab-smoke.sh`
+  - adds `unicode-width` to recipe discovery and validation;
+  - draws a marker, ASCII guide columns, combining marks, CJK wide text,
+    emoji/variation-selector samples, box/symbol glyphs, and a cursor-addressed
+    alignment row;
+  - uses escaped UTF-8 byte sequences in the harness source, so the script stays
+    mostly ASCII while the launched bash recipe prints real codepoints at
+    runtime;
+  - reuses the existing held-frame and content-region diff behavior.
+- `scripts/roastty-app/README.md`
+  - documents the new recipe and the Unicode classes it exercises.
+- `issues/0802-libroastty-completion-and-mac-app/README.md`
+  - records the current metrics and marks Experiment 50 `Pass`.
+
+Verification:
+
+- `bash -n scripts/roastty-app/live-ab-smoke.sh`
+- `bash -n scripts/roastty-app/live-ab-matrix.sh`
+- `scripts/roastty-app/live-ab-smoke.sh --list-recipes`
+  - Printed `smoke`, `ascii-grid`, `color-grid`, `clear-after`, `alt-screen`,
+    `scroll-output`, and `unicode-width`.
+- Standalone Unicode-width recipe:
+  - `scripts/roastty-app/live-ab-smoke.sh --recipe unicode-width --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  - Exited `0`.
+  - Content-region metric: `mean_channel_delta=3.812397048611111`,
+    `mismatch_ratio=0.040785416666666664`.
+  - Full-window metric: `mean_channel_delta=3.9459993077531648`,
+    `mismatch_ratio=0.08596073971518987`.
+  - Visual inspection of
+    `/Users/ryan/.cache/termsurf/shots/ghostty-ab-content-20260610-120551.png`
+    and
+    `/Users/ryan/.cache/termsurf/shots/roastty-ab-content-20260610-120551.png`
+    confirmed both apps showed the marker, guide rows, and Unicode test rows.
+    The captures also showed expected Roastty differences in width/fallback
+    behavior, especially around CJK, emoji, symbol, and alignment rows.
+- Full default matrix:
+  - `scripts/roastty-app/live-ab-matrix.sh`
+  - Exited `0`.
+  - Emitted seven JSON Lines objects, including `unicode-width`.
+  - Final matrix `unicode-width` content-region metric:
+    `mean_channel_delta=3.8124979166666666`,
+    `mismatch_ratio=0.04077708333333333`.
+- `prettier --write --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/README.md issues/0802-libroastty-completion-and-mac-app/50-live-ab-unicode-width-recipe.md scripts/roastty-app/README.md`
+
+## Conclusion
+
+Phase E now has a live app-level Unicode-width oracle. The new recipe does not
+fix Unicode width or grapheme behavior, but it makes the gap repeatable and
+visible in both standalone and full-matrix A/B runs. The next Phase-E experiment
+should start porting Unicode width/grapheme behavior behind this recipe, using
+the content-region metric and visual alignment rows as the regression target.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent (`multi_agent_v1.spawn_agent`,
+fresh context, read-only). **Verdict: APPROVED.**
+
+The reviewer found no issues. It independently verified shell syntax for both
+harness scripts, recipe discovery, `git diff --check`, worktree scope, cleanup
+checks for launched app binaries and bootstrap temp dirs, and that no result
+commit existed before review. It did not rerun the standalone smoke or full
+matrix because those launch GUI apps and the review was read-only.
