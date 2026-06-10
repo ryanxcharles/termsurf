@@ -1834,6 +1834,7 @@ struct App {
     confirm_close_surface: config::ConfirmCloseSurface,
     clipboard_read: config::ClipboardAccess,
     clipboard_write: config::ClipboardAccess,
+    mouse_shift_capture: config::MouseShiftCapture,
     has_global_keybinds: bool,
     keybind_triggers: Vec<ConfigKeybind>,
     surfaces: Vec<NonNull<Surface>>,
@@ -3984,12 +3985,16 @@ impl Surface {
     /// captured (shift overrides). The config `Never`/`Always`/`True` is deferred (the App doesn't
     /// surface `mouse_shift_capture`).
     fn mouse_shift_capture(&self) -> bool {
-        self.termio_worker
-            .as_ref()
-            .and_then(|worker| {
-                worker.with_termio(|termio| termio.terminal().mouse_shift_capture_flag())
-            })
-            .unwrap_or(false)
+        // Full upstream `mouseShiftCapture` (Issue 802 / Exp 34): config `Never`/`Always` decide
+        // outright; otherwise the terminal's `XTSHIFTESCAPE` flag, else the config default — via the
+        // shared, tested `MouseShiftCapture::capture_shift`.
+        let config = app_from_handle(self.app)
+            .map(|app| app.mouse_shift_capture)
+            .unwrap_or(config::MouseShiftCapture::False);
+        let flag = self.termio_worker.as_ref().and_then(|worker| {
+            worker.with_termio(|termio| termio.terminal().mouse_shift_capture_flag())
+        });
+        config.capture_shift(flag)
     }
 
     /// Whether a left-press should EXTEND the existing selection (shift-click) rather than start a
@@ -10723,6 +10728,7 @@ pub extern "C" fn roastty_app_new(
         confirm_close_surface,
         clipboard_read,
         clipboard_write,
+        mouse_shift_capture,
         has_global_keybinds,
         keybind_triggers,
     ) = config_from_handle(config)
@@ -10731,6 +10737,7 @@ pub extern "C" fn roastty_app_new(
                 config.confirm_close_surface,
                 config.parsed.clipboard_read,
                 config.parsed.clipboard_write,
+                config.parsed.mouse_shift_capture,
                 config.has_global_keybinds,
                 config.keybind_triggers.clone(),
             )
@@ -10739,6 +10746,7 @@ pub extern "C" fn roastty_app_new(
             config::ConfirmCloseSurface::True,
             config::ClipboardAccess::Ask,
             config::ClipboardAccess::Allow,
+            config::MouseShiftCapture::False,
             false,
             Vec::new(),
         ));
@@ -10750,6 +10758,7 @@ pub extern "C" fn roastty_app_new(
         confirm_close_surface,
         clipboard_read,
         clipboard_write,
+        mouse_shift_capture,
         has_global_keybinds,
         keybind_triggers,
         surfaces: Vec::new(),
@@ -10808,6 +10817,7 @@ pub extern "C" fn roastty_app_update_config(app: RoasttyApp, config: RoasttyConf
         return;
     };
     app.confirm_close_surface = config.confirm_close_surface;
+    app.mouse_shift_capture = config.parsed.mouse_shift_capture;
     app.has_global_keybinds = config.has_global_keybinds;
     app.keybind_triggers = config.keybind_triggers.clone();
 }
@@ -17215,6 +17225,59 @@ mod tests {
             !has_selection(surface),
             "Left press while reporting still clears"
         );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 34: `mouse_shift_capture()` honors the `mouse-shift-capture` config
+    /// (Never/Always decide outright; False/True fall through to the XTSHIFTESCAPE flag, else the
+    /// config default).
+    #[test]
+    fn mouse_shift_capture_honors_config() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_set_size(surface, 800, 480);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+
+        let set_config = |v: config::MouseShiftCapture| {
+            app_from_handle(app).unwrap().mouse_shift_capture = v;
+        };
+        let capture =
+            |surface: RoasttySurface| surface_from_handle(surface).unwrap().mouse_shift_capture();
+
+        // No XTSHIFTESCAPE flag yet → config decides.
+        set_config(config::MouseShiftCapture::Never);
+        assert!(!capture(surface), "Never → not captured (shift overrides)");
+        set_config(config::MouseShiftCapture::Always);
+        assert!(
+            capture(surface),
+            "Always → captured (shift does not override)"
+        );
+        set_config(config::MouseShiftCapture::False);
+        assert!(!capture(surface), "False default + no flag → not captured");
+        set_config(config::MouseShiftCapture::True);
+        assert!(capture(surface), "True default + no flag → captured");
+
+        // Feed XTSHIFTESCAPE `CSI > 1 s` → flag Some(true): wins for False/True, ignored by Never/Always.
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|t| {
+                t.terminal_mut().next_slice(b"\x1b[>1s").unwrap();
+            });
+        set_config(config::MouseShiftCapture::False);
+        assert!(
+            capture(surface),
+            "False + flag Some(true) → captured (flag wins)"
+        );
+        set_config(config::MouseShiftCapture::Never);
+        assert!(!capture(surface), "Never ignores the flag");
+        set_config(config::MouseShiftCapture::Always);
+        assert!(capture(surface), "Always ignores the flag");
 
         roastty_surface_free(surface);
         roastty_app_free(app);

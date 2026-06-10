@@ -570,9 +570,10 @@ stays unaltered except for the rename).
   motion still reports); flag-first shiftCapture (config deferred); 4-case
   headless test + 4416 green; live shift-drag pending — screen locked) · Claude
 - [Experiment 34: Phase C — plumb the `mouse-shift-capture` config into `shiftCapture`](34-shift-capture-config.md)
-  — **Designed** (Exp-33 deferred the config Never/Always/True; plumb
-  `config.parsed.mouse_shift_capture` → App → the full `mouseShiftCapture`
-  logic; fully headless) · Claude
+  — **Pass** (plumbed `mouse-shift-capture` config (parsed → App →
+  `capture_shift`) into the full `mouseShiftCapture` logic;
+  Never/Always/flag/default all honored; 4417 green, fully headless — closes
+  Exp-33's config sub-deferral) · Claude
 
 ## Process
 

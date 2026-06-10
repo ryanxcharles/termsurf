@@ -107,8 +107,57 @@ drift); note the no-worker→`None`→config-default case.
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — the `mouse-shift-capture` config is plumbed into the full
+`shiftCapture` logic (fully headless; no live needed).
+
+### Change (only `libroastty`)
+
+- `App` gains `mouse_shift_capture: config::MouseShiftCapture`, set in
+  `roastty_app_new` (tuple + map body `config.parsed.mouse_shift_capture` +
+  `unwrap_or` default `False` + the `App {}` literal) and refreshed in
+  `roastty_app_update_config`.
+- `Surface::mouse_shift_capture()` now reads the App config + the terminal
+  `XTSHIFTESCAPE` flag and delegates to the **existing tested**
+  `MouseShiftCapture::capture_shift(Option<bool>)` (no inlined logic copy).
+
+### Verification
+
+- **Headless regression test** `mouse_shift_capture_honors_config` (`lib.rs`):
+  with no flag — `Never`→`false`, `Always`→`true`, `False`→`false`,
+  `True`→`true`; with `CSI > 1 s` (flag `Some(true)`) — `False`→`true` (flag
+  wins), `Never`/`Always` ignore it. Fails pre-fix (config ignored —
+  `Always`/`Never` had no effect), passes after.
+- **Full `cargo test -p roastty`:** lib **4417 passed**, 0 failures — the Exp-33
+  test (`shift_overrides_mouse_reporting_for_selection`, default config `False`)
+  still passes (default behavior unchanged), as do the existing `capture_shift`
+  truth-table + XTSHIFTESCAPE-stream tests.
+- **No live confirmation needed** — a config-driven logic completion; the
+  per-variant model assertion is the proof. **Completes fully while the screen
+  is locked.**
 
 ## Conclusion
 
-_(to be added after the run.)_
+`Surface::mouse_shift_capture()` is now the **full** upstream
+`mouseShiftCapture` (config `Never`/`Always` + the `XTSHIFTESCAPE` flag + config
+default), via the shared `capture_shift` helper. This closes the Exp-33 config
+sub-deferral, so **shift-while-reporting is now fully faithful**. The remaining
+follow-ups (CVDisplayLink vsync, DPI-change rebuild) are genuinely live/perf.
+The live re-confirmations (Exp 29 CJK, Exp 30 shift-click, Exp 33 shift-drag) +
+closing 802 await the screen unlock.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED (no findings).** Verified: the test is
+**load-bearing** (exercises the real App path `surface.mouse_shift_capture()` →
+`app_from_handle(self.app)`; fails pre-fix at multiple asserts — `Always`/`True`
+no-flag (old=false) and `Never` ignoring the flag (old=true); all six cases
+asserted); **no regression** (full lib **4417 passed, 0 failed**; Exp-33
+default-`False` test still passes — identical to the old `unwrap_or(false)`;
+`capture_shift` truth-table + XTSHIFTESCAPE-stream tests pass); **plumbing
+complete** (all five sites — App field, the four `roastty_app_new` sub-sites,
+`update_config`; reads `config.parsed.mouse_shift_capture`, not the hoisted
+wrapper, no stale site); **faithful** (`capture_shift` reproduces
+`Surface.zig:3689-3713` arm-for-arm; borrow clean — Copy value dropped before
+the worker read); scope/hygiene clean (lib.rs only, `fmt --check` 0, no new
+"ghostty" literals); Pass honest (pure config-logic completion, no live needed).
