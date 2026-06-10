@@ -589,6 +589,8 @@ stays unaltered except for the rename).
   (`set_mode_basic`) + on resize (`set_size`→`report_in_band_size`) — was
   registered+encoded but never emitted; deterministic terminal-level test + 4420
   green, fully headless) · Claude
+- [Experiment 38: Phase D — screenshot diff metric for live A/B checks](38-screenshot-diff-metric.md)
+  — **Designed** · Codex/Codex/Codex
 
 ## Process
 
