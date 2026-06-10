@@ -552,9 +552,10 @@ stays unaltered except for the rename).
   load-bearing/no-regression; live CJK width comparison pending — screen locked)
   · Claude
 - [Experiment 30: Phase C — shift-click extends the selection](30-shift-click-extend.md)
-  — **Designed** (shift+left-click should extend the existing selection
-  (upstream Surface.zig:3763); branch the not-reporting press to selection_drag
-  when shift+click_count>0+has-selection+>500ms) · Claude
+  — **Partial** (shift-click extends the selection from its anchor when >500ms
+  since the last press; not-reporting press branches to selection_drag; 2
+  headless tests + 4413 green deterministic (also fixed a latent Exp-27
+  double_click flaky test); live shift-click pending — screen locked) · Claude
 
 ## Process
 

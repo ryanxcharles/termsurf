@@ -110,8 +110,68 @@ phrasing (falls to `selection_press`, distance-resets).
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Partial — shift-click extend is wired + headless-proven (suite
+green); the **live shift-click confirmation is pending a locked screen**
+(environment, not code), to re-confirm on unlock.
+
+### Change (only `libroastty`)
+
+- `SelectionGesture::click_time_ns()` accessor.
+- `Surface::should_shift_extend()` (shift + `click_count() > 0` + active
+  selection + `> 500ms` since the last press, via `saturating_sub`); the
+  not-mouse-reporting left-**press** branch calls `selection_drag()` (extend
+  from the anchor) instead of `selection_press()` when it's true.
+
+### Verification
+
+- **Headless regression tests** (deterministic via the Exp-27 injectable clock):
+  `shift_click_extends_selection` — initial drag `2..5` = "2345", then a
+  shift-click at col 9 (>500ms later) extends to "23456789";
+  `shift_click_within_interval_does_not_extend` — a shift-click within 500ms
+  does **not** extend. Fail pre-fix, pass after.
+- **Full `cargo test -p roastty`:** lib **4413 passed**, 0 failures,
+  deterministic.
+- **Latent flaky-test fix (Exp 27):** while running the suite,
+  `double_click_word_triple_click_line` failed under parallel load — the Exp-27
+  injectable-clock fix had only added the `selection_time_ns` _reader_; the
+  **test itself never set `SELECTION_TEST_CLOCK_NS`** (a silent no-match in the
+  Exp-27 edit), so it was still wall-clock-flaky (the earlier passes were
+  lucky). Fixed here: the test's `click` helper now advances the injectable
+  clock +1ms/click (deterministic 8/8 standalone + green in the full parallel
+  suite).
+- **Live shift-click — blocked (locked screen).**
+  `CGSSessionScreenIsLocked: true` (Exp-22 limitation); the visible "select word
+  then shift-click extends" re-probe awaits the unlock.
 
 ## Conclusion
 
-_(to be added after the run.)_
+Shift-click-extend is wired faithfully (upstream `Surface.zig:3763-3797`) and
+headless-proven; the live confirmation is pending the locked screen. This + the
+latent double-click flaky-test fix hardens the selection suite. **Mouse
+selection is now feature-complete to upstream fidelity** (cell-drag +
+autoscroll, double-word, triple-line, shift-extend, + clipboard copy). Per the
+loop, the remaining live confirmations (Exp 29 CJK, Exp 30 shift-click) +
+closing the issue await the screen unlock; the truly-minor refinements
+(reporting clear+reset widening, shift-while-reporting, CVDisplayLink vsync,
+DPI-change, cursor-shaping-hint gating) are documented follow-ups.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** Independently reproduced: the **shift-click
+tests are load-bearing** (pre-fix the press branch unconditionally
+`selection_press`'d → at clock 1e9 `press_repeat` resets to a fresh Cell press
+that clears, so the extend assert "23456789" would fail without the branch; the
+within-interval test catches a broken interval guard); the **double_click flaky
+fix is real + complete** (`git show HEAD` confirmed the prior committed test's
+`click` closure never set `SELECTION_TEST_CLOCK_NS` — only the reader was added
+in Exp 27; now +1ms/click, deterministic 6×); **full suite 4413, 0 failed**
+(matches); **no regression** (`should_shift_extend` gates on `mods.shift` first
+→ no-shift clicks untouched; borrow clean `&self` Copy-bool before `&mut`
+`selection_drag`; `saturating_sub` + `>500ms` match upstream
+`Surface.zig:3765-3796` and the `repeat_interval_ns`); **Partial honest** (code
+complete; locked-screen blocker real, Exp-29 precedent); hygiene clean
+(libroastty only, no "ghostty" literals, `fmt` clean; the prior-experiment test
+edit is test-only + disclosed, not barred since 802 is open). Optional folded
+in: tightened the within-interval control with a positive `assert_eq!(… None)`
+(clears via the distance-reset).

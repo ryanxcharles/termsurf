@@ -116,6 +116,11 @@ impl SelectionGesture {
         self.click_count
     }
 
+    /// The time of the last press (Issue 802 / Exp 30 — shift-click-extend interval check).
+    pub(crate) fn click_time_ns(&self) -> Option<u64> {
+        self.click_time_ns
+    }
+
     pub(crate) fn dragged(&self) -> bool {
         self.dragged
     }

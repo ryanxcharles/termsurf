@@ -3815,7 +3815,13 @@ impl Surface {
         if matches!(button, mouse::MouseButton::Left) {
             if self.mouse_report_context().is_none() {
                 match state {
-                    SurfaceMouseButtonState::Press => self.selection_press(),
+                    SurfaceMouseButtonState::Press => {
+                        if self.should_shift_extend() {
+                            self.selection_drag(); // shift-click extends from the anchor
+                        } else {
+                            self.selection_press();
+                        }
+                    }
                     SurfaceMouseButtonState::Release => self.selection_release(),
                 }
             } else if matches!(state, SurfaceMouseButtonState::Press) {
@@ -3952,6 +3958,27 @@ impl Surface {
             self.mouse.buttons[mouse_button_index(mouse::MouseButton::Left)],
             Some(SurfaceMouseButtonState::Press)
         )
+    }
+
+    /// Whether a left-press should EXTEND the existing selection (shift-click) rather than start a
+    /// new one (Issue 802 / Exp 30, upstream `Surface.zig:3763-3797`): shift held + an in-progress
+    /// gesture + an active selection + the click is not within the 500ms multi-click interval (else
+    /// it's a double/triple-click increment). The `!shift_capture` clause is implicit (not modeled;
+    /// faithful for the default config in the non-reporting branch this runs in).
+    fn should_shift_extend(&self) -> bool {
+        if !self.mouse.mods.shift || self.selection_gesture.click_count() == 0 {
+            return false;
+        }
+        let Some(last) = self.selection_gesture.click_time_ns() else {
+            return false;
+        };
+        if self.selection_time_ns().saturating_sub(last) <= 500_000_000 {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        worker.with_termio(|termio| termio.terminal().active_selection().is_some())
     }
 
     /// Monotonic nanoseconds for click-repeat timing (Issue 802 / Exp 27). In tests a thread-local
@@ -16871,27 +16898,32 @@ mod tests {
         surface_from_handle(surface)
             .unwrap()
             .mouse_pos(65.0, 10.0, 0);
-        let click = |surface: RoasttySurface| {
+        // Drive the injectable clock (+1ms/click, within the 500ms repeat interval) so the
+        // click-count is deterministic regardless of suite load (real wall-clock spacing between two
+        // FFI presses can exceed 500ms under the parallel suite — flaky).
+        let click = |surface: RoasttySurface, t_ns: u64| {
+            SELECTION_TEST_CLOCK_NS.with(|c| c.set(Some(t_ns)));
             let s = surface_from_handle(surface).unwrap();
             s.mouse_button(1, 1, 0); // Press Left
             s.mouse_button(0, 1, 0); // Release Left
         };
 
-        click(surface); // click 1 → Cell (clears)
-        click(surface); // click 2 → Word
+        click(surface, 0); // click 1 → Cell (clears)
+        click(surface, 1_000_000); // +1ms → click 2 → Word
         assert_eq!(
             selected_text(surface).as_deref(),
             Some("TARGET"),
             "double-click should select the word"
         );
 
-        click(surface); // click 3 → Line
+        click(surface, 2_000_000); // +1ms → click 3 → Line
         assert_eq!(
             selected_text(surface).as_deref(),
             Some("foo TARGET bar"),
             "triple-click should select the line"
         );
 
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(None));
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
@@ -16982,6 +17014,112 @@ mod tests {
             "autoscroll must stop after the button releases"
         );
 
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 30: shift-click extends the existing selection from its anchor. "0123456789…"
+    /// — initial drag 2..5 = "2345"; a shift-click at col 9 (>500ms later) extends to 2..9.
+    #[test]
+    fn shift_click_extends_selection() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(b"0123456789ABCDEF")
+                    .unwrap();
+            });
+
+        // Initial selection 2..5 = "2345" (clock 0).
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(Some(0)));
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(25.0, 10.0, 0); // col 2
+        s.mouse_button(1, 1, 0); // press (no shift)
+        s.mouse_pos(59.0, 10.0, 0); // drag to col 5
+        s.mouse_button(0, 1, 0); // release
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("2345"),
+            "initial selection"
+        );
+
+        // Shift-click at col 9, > 500ms later → extend from anchor (col 2) to col 9.
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(Some(1_000_000_000)));
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(99.0, 10.0, 0); // col 9
+        s.mouse_button(1, 1, 1); // press WITH shift (mods bit 1<<0)
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("23456789"),
+            "shift-click should extend the selection to col 9"
+        );
+
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(None));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 30: a shift-click WITHIN the 500ms interval does NOT extend (it's treated as a
+    /// potential multi-click increment, falling to the fresh `selection_press` path which clears).
+    #[test]
+    fn shift_click_within_interval_does_not_extend() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(b"0123456789ABCDEF")
+                    .unwrap();
+            });
+
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(Some(0)));
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(25.0, 10.0, 0);
+        s.mouse_button(1, 1, 0);
+        s.mouse_pos(59.0, 10.0, 0);
+        s.mouse_button(0, 1, 0);
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            Some("2345"),
+            "initial selection"
+        );
+
+        // Shift-click WITHIN 500ms (0.1s) of the press → NOT an extend → fresh single Cell press clears.
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(Some(100_000_000)));
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(99.0, 10.0, 0);
+        s.mouse_button(1, 1, 1); // shift, but within interval
+        // Not an extend: falls to the fresh `selection_press` path, which (a single Cell press at a
+        // distance from the anchor) resets + clears the selection.
+        assert_ne!(
+            selected_text(surface).as_deref(),
+            Some("23456789"),
+            "a within-interval shift-click must not extend"
+        );
+        assert_eq!(
+            selected_text(surface).as_deref(),
+            None,
+            "a within-interval shift-click clears (fresh press), not extends"
+        );
+
+        SELECTION_TEST_CLOCK_NS.with(|c| c.set(None));
         roastty_surface_free(surface);
         roastty_app_free(app);
     }
