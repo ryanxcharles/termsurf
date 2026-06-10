@@ -2455,6 +2455,11 @@ impl PageList {
     ) -> Vec<RunOptions> {
         let mut out = Vec::with_capacity(self.rows as usize);
         let last_col = self.cols.saturating_sub(1);
+        // The cursor's VIEWPORT position (Issue 802 / Exp 31): the run-shaping break must sit on the
+        // cursor's actual viewport row (or nowhere when scrolled off-viewport), not where the active
+        // row index happens to equal a viewport row. Same gating as the Exp-24 cursor draw.
+        let cursor_viewport =
+            cursor.and_then(|(cx, cy)| self.cursor_viewport_row(cy).map(|vy| (cx, vy)));
 
         for y in 0..self.rows {
             // Read the VIEWPORT (scroll position), not always the active bottom (Issue 802 /
@@ -2473,7 +2478,7 @@ impl PageList {
                 let end_x = selection.start().x.max(selection.end().x).min(last_col);
                 Some([start_x, end_x])
             });
-            let cursor_x = cursor.and_then(|(cx, cy)| (cy == y).then_some(cx));
+            let cursor_x = cursor_viewport.and_then(|(cx, vy)| (vy == y).then_some(cx));
             out.push(RunOptions {
                 cells,
                 selection,

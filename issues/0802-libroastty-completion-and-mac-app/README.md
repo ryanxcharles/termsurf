@@ -557,9 +557,9 @@ stays unaltered except for the rename).
   headless tests + 4413 green deterministic (also fixed a latent Exp-27
   double_click flaky test); live shift-click pending — screen locked) · Claude
 - [Experiment 31: Phase C — viewport-gate the cursor run-shaping hint](31-cursor-hint-viewport.md)
-  — **Designed** (Exp-24 loose end: `shape_run_options` cursor_x run-hint still
-  uses active `cy==y` not the viewport; reuse `cursor_viewport_row` to gate it;
-  fully headless, no live needed) · Claude
+  — **Pass** (Exp-24 loose end: the `shape_run_options` cursor run-shaping hint
+  used active `cy==y`, breaking a ligature on a scrolled history row; gated on
+  the viewport via `cursor_viewport_row`; 4414 green, fully headless) · Claude
 
 ## Process
 

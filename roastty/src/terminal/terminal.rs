@@ -5148,6 +5148,44 @@ mod tests {
     /// printed afterward must reach the **render read-path** (`shape_run_options` — the accessor
     /// `present_live` feeds the renderer). The live app showed only a home cursor after `clear`;
     /// this reproduces that headlessly through the same accessor.
+    /// Issue 802 / Exp 31: the cursor run-shaping hint (`RunOptions.cursor_x`) must sit on the
+    /// cursor's VIEWPORT row, and vanish when the cursor is scrolled off-viewport (not a stray hint
+    /// on a history row). Same gating as the Exp-24 cursor draw.
+    #[test]
+    fn cursor_shaping_hint_gated_by_viewport() {
+        let mut term = Terminal::init(20, 6, None).unwrap();
+        let mut content = String::new();
+        for i in 0..40 {
+            content.push_str(&format!("line{i}\r\n"));
+        }
+        term.next_slice(content.as_bytes()).unwrap();
+
+        // Unscrolled: exactly one row carries the hint, at the cursor's row.
+        let (cx, cy) = term.cursor_position();
+        let rows = term.shape_run_options();
+        let with_hint: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.cursor_x.is_some())
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            with_hint.len(),
+            1,
+            "unscrolled: exactly one row has the cursor hint"
+        );
+        assert_eq!(with_hint[0] as CellCountInt, cy, "hint at the cursor row");
+        assert_eq!(rows[with_hint[0]].cursor_x, Some(cx));
+
+        // Scrolled into history: the cursor is off-viewport → no row carries the hint.
+        term.scroll_viewport_delta_row(-100);
+        let rows = term.shape_run_options();
+        assert!(
+            rows.iter().all(|r| r.cursor_x.is_none()),
+            "scrolled into history: no stray cursor hint"
+        );
+    }
+
     /// Issue 802 / Exp 24: the cursor block must not render in scrollback. Unscrolled, the cursor
     /// maps to its active row; scrolled into history, `cursor_viewport_position` returns `None`
     /// (the value feeding the renderer's cursor overlay).

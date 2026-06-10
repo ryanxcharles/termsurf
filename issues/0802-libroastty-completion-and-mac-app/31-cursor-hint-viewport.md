@@ -93,8 +93,55 @@ sound.
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — the cursor run-shaping hint is now viewport-gated (fully
+headless; no live needed).
+
+### Change (only `libroastty`)
+
+`page_list.rs::shape_run_options` computes
+`cursor_viewport = cursor.and_then(|(cx, cy)| self.cursor_viewport_row(cy).map(|vy| (cx, vy)))`
+**once** before the row loop (reusing the Exp-24 `cursor_viewport_row`), and the
+per-row hint becomes
+`cursor_x = cursor_viewport.and_then(|(cx, vy)| (vy == y).then_some(cx))` — so
+the run-shaping break sits on the cursor's **viewport** row, or nowhere when the
+cursor is scrolled off-viewport (no stray hint on a history row).
+
+### Verification
+
+- **Headless regression test** `cursor_shaping_hint_gated_by_viewport`
+  (`terminal.rs`): unscrolled → exactly one row carries `cursor_x` at the cursor
+  row (unchanged); scrolled into history → **no** row carries `cursor_x`. Fails
+  pre-fix (a history row got a stray hint), passes after.
+- **Full `cargo test -p roastty`:** lib **4414 passed**, 0 failures — all
+  existing `shape_run_options` cursor/selection/snapshot tests still pass
+  (unscrolled is identical).
+- **No live confirmation needed** — segmentation-only (no cursor-draw effect;
+  the visible block was Exp 24); the only effect, a marginal ligature-shaping
+  break on a scrolled row, is exactly what the model assertion proves corrected.
+  This refinement therefore **completes fully while the screen is locked**.
 
 ## Conclusion
 
-_(to be added after the run.)_
+The cursor handling is now fully viewport-consistent — both the draw (Exp 24)
+and the run-shaping hint (here) gate on the cursor's viewport position. This
+closes the Exp-24 loose end. A clean, fully-headless Pass — useful progress
+while the live-confirmation items (Exp 29 CJK, Exp 30 shift-click) + closing
+remain blocked on the locked screen.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** Verified: the test is **load-bearing**
+(pre-fix `cy=5` after 40 lines in a 6-row screen compared against viewport row
+index `y`, so a scrolled-into-history row 5 got a stray `Some(cx)`; post-fix
+`cursor_viewport_row` returns `None` off-viewport, so `all(cursor_x.is_none())`
+genuinely fails pre-fix; the unscrolled `len()==1` at `cy` is non-vacuous); **no
+regression** (full lib **4414 passed, 0 failed**; existing
+`shape_run_options_assembles_rows` still asserts unscrolled
+`row0.cursor_x==Some(1)`/`row1==None` — identical since `cursor_viewport_row`
+returns the same row unscrolled); the **page_list.rs diff is exactly**
+compute-once + gated `cursor_x`; **Pass is honest/headless** (`cursor_x` feeds
+only run segmentation, not the cursor block — Exp 24); hygiene clean
+(`fmt --check` 0, no new "ghostty" literals). Optional: the working tree also
+carried an **incidental `cargo fmt` re-indent in `lib.rs`** (an Exp-30 fmt
+drift) — fmt-mandated, kept per the no-revert-fmt rule.

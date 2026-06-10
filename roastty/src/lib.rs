@@ -17106,8 +17106,8 @@ mod tests {
         let s = surface_from_handle(surface).unwrap();
         s.mouse_pos(99.0, 10.0, 0);
         s.mouse_button(1, 1, 1); // shift, but within interval
-        // Not an extend: falls to the fresh `selection_press` path, which (a single Cell press at a
-        // distance from the anchor) resets + clears the selection.
+                                 // Not an extend: falls to the fresh `selection_press` path, which (a single Cell press at a
+                                 // distance from the anchor) resets + clears the selection.
         assert_ne!(
             selected_text(surface).as_deref(),
             Some("23456789"),
