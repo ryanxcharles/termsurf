@@ -105,3 +105,94 @@ design promised default `smoke` compatibility but only verified the new
 argument and requiring the JSON summary to include `"recipe":"smoke"`.
 
 The focused re-review approved the fix and found no new Required issues.
+
+## Result
+
+**Result:** Pass
+
+Added named recipe support to `scripts/roastty-app/live-ab-smoke.sh`:
+
+- `--list-recipes` prints supported recipes without launching either app.
+- `--recipe <name>` selects the command recipe.
+- `smoke` remains the default recipe and preserves Experiment 39's no-argument
+  behavior.
+- `ascii-grid` clears the terminal, prints a timestamped recipe marker plus
+  fixed ASCII rows, and sleeps long enough for the harness to capture before the
+  prompt returns.
+- The JSON summary now includes `recipe`.
+- The harness still keeps screenshots outside the repo, uses the IOSurface-safe
+  Roastty full-screen-plus-crop path, invokes `pngdiff.swift` through `swift`,
+  and cleans up only the launched PID trees after expected-path verification.
+
+Updated `scripts/roastty-app/README.md` with recipe usage and recorded the
+durable recipe commands in the Issue 802 Operating notes. The Issue 802
+experiment index now marks Experiment 40 `Pass`.
+
+Verification:
+
+- `bash -n scripts/roastty-app/live-ab-smoke.sh`
+- `scripts/roastty-app/live-ab-smoke.sh --list-recipes`
+  - Exited `0`.
+  - Printed `smoke` and `ascii-grid`.
+  - Did not launch either app.
+- Default smoke compatibility run:
+  - `scripts/roastty-app/live-ab-smoke.sh --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  - Exited `0`.
+  - Launched Ghostty PID `49670` and Roastty PID `49685`.
+  - Printed one JSON summary object with `recipe: smoke`, `verdict: PASS`,
+    `marker: ISSUE802_AB_SMOKE_20260610-100021`, `diff_exit_status: 0`,
+    `mismatch_ratio: 1`, and `mean_channel_delta: 107.9859555`.
+  - The trap killed Ghostty descendants `49678`, `49679`, Ghostty PID `49670`,
+    Roastty descendant `49692`, and Roastty PID `49685`.
+- ASCII recipe permissive run:
+  - `scripts/roastty-app/live-ab-smoke.sh --recipe ascii-grid --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  - Exited `0`.
+  - Launched Ghostty PID `48304` and Roastty PID `48318`.
+  - Printed one JSON summary object with `recipe: ascii-grid`, `verdict: PASS`,
+    `diff_exit_status: 0`, `mismatch_ratio: 1`, and
+    `mean_channel_delta: 107.5086925`.
+  - The trap killed Ghostty descendants `48311`, `48312`, Ghostty PID `48304`,
+    Roastty descendant `48325`, and Roastty PID `48318`.
+- ASCII recipe strict run:
+  - `bash -lc 'scripts/roastty-app/live-ab-smoke.sh --recipe ascii-grid; rc=$?; echo strict_exit=$rc; exit 0'`
+  - Harness exited `1`, wrapper printed `strict_exit=1`.
+  - Launched Ghostty PID `48542` and Roastty PID `48556`.
+  - Printed one JSON summary object with `recipe: ascii-grid`, `verdict: FAIL`,
+    `diff_exit_status: 1`, `mismatch_ratio: 1`, and
+    `mean_channel_delta: 110.90070025`.
+  - The trap killed Ghostty descendants `48550`, `48549`, Ghostty PID `48542`,
+    Roastty descendant `48564`, and Roastty PID `48556`.
+- `pgrep -fl '[G]hostty.app/Contents/MacOS/ghostty|[R]oastty.app/Contents/MacOS/roastty' || true`
+  - no output after cleanup.
+- `prettier --write --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/README.md issues/0802-libroastty-completion-and-mac-app/40-live-ab-recipes.md scripts/roastty-app/README.md`
+- `git diff --check`
+- `git status --short`
+  - no screenshot or PNG artifacts in the repo.
+
+## Conclusion
+
+The live A/B harness now has the start of a feature-recipe surface instead of a
+single baked-in smoke command. `ascii-grid` gives later Phase-D work a stable
+ASCII content recipe that captures while the command is still sleeping, and the
+JSON output identifies which recipe produced the metric.
+
+Strict parity still fails, as expected, and this experiment does not claim
+otherwise. The next Phase-D experiments can add recipes for colors, clear,
+scrollback, selection, and other known feature areas, or start turning recipe
+metrics into per-feature thresholds.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent (`multi_agent_v1.spawn_agent`,
+fresh context, read-only). **Verdict: APPROVED after fixes.**
+
+The first completion review found one Required compatibility issue: the default
+`smoke` recipe changed the Experiment 39 marker contract from
+`ISSUE802_AB_SMOKE_<timestamp>` to `ISSUE802_AB_smoke_<timestamp>`. Fixed by
+restoring the exact uppercase `ISSUE802_AB_SMOKE_<timestamp>` marker for the
+`smoke` recipe while keeping recipe-specific markers for other recipes.
+
+After the fix, the default permissive live run exited `0` and its JSON summary
+included `recipe: smoke` with `marker: ISSUE802_AB_SMOKE_20260610-100021`.
+
+The focused re-review approved the marker fix and found no new Required issues.

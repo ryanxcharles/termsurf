@@ -5,7 +5,7 @@
 #   ${TERMSURF_SHOT_DIR:-$HOME/.cache/termsurf/shots}
 #
 # Usage:
-#   live-ab-smoke.sh [--max-mismatch-ratio N] [--max-mean-channel-delta N]
+#   live-ab-smoke.sh [--recipe smoke|ascii-grid] [--max-mismatch-ratio N] [--max-mean-channel-delta N]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -18,8 +18,18 @@ SWIFT="$(command -v swift || echo /usr/bin/swift)"
 
 max_mismatch_ratio="0"
 max_mean_channel_delta="0"
+recipe="smoke"
+list_recipes=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --recipe)
+      recipe="${2:?missing value for --recipe}"
+      shift 2
+      ;;
+    --list-recipes)
+      list_recipes=1
+      shift
+      ;;
     --max-mismatch-ratio)
       max_mismatch_ratio="${2:?missing value for --max-mismatch-ratio}"
       shift 2
@@ -29,7 +39,8 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     -h|--help)
-      echo "usage: $0 [--max-mismatch-ratio N] [--max-mean-channel-delta N]" >&2
+      echo "usage: $0 [--recipe smoke|ascii-grid] [--max-mismatch-ratio N] [--max-mean-channel-delta N]" >&2
+      echo "       $0 --list-recipes" >&2
       exit 0
       ;;
     *)
@@ -39,9 +50,27 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+recipes=(smoke ascii-grid)
+if [ "$list_recipes" -eq 1 ]; then
+  printf '%s\n' "${recipes[@]}"
+  exit 0
+fi
+case "$recipe" in
+  smoke|ascii-grid) ;;
+  *)
+    echo "unknown recipe: $recipe" >&2
+    echo "supported recipes:" >&2
+    printf '  %s\n' "${recipes[@]}" >&2
+    exit 2
+    ;;
+esac
+
 mkdir -p "$SHOT_DIR"
 stamp="$(date +%Y%m%d-%H%M%S)"
-marker="ISSUE802_AB_SMOKE_$stamp"
+case "$recipe" in
+  smoke) marker="ISSUE802_AB_SMOKE_$stamp" ;;
+  *) marker="ISSUE802_AB_${recipe//-/_}_$stamp" ;;
+esac
 ghost_pid=""
 roast_pid=""
 cleanup_done=0
@@ -137,6 +166,17 @@ type_shell_command() {
   delay 1.0
 }
 
+recipe_command() {
+  case "$recipe" in
+    smoke)
+      printf 'clear; echo %s' "$marker"
+      ;;
+    ascii-grid)
+      printf "printf '\\033[2J\\033[H%s\\nABCDEFGHIJKLMNOPQRSTUVWXYZ\\nabcdefghijklmnopqrstuvwxyz\\n0123456789\\n@#$%%^&*()_+-=[]{};:,.<>/?\\n'; sleep 2" "$marker"
+      ;;
+  esac
+}
+
 image_dim() {
   local png="$1"
   local key="$2"
@@ -186,14 +226,14 @@ crop_roastty_window() {
 echo "starting Ghostty and Roastty" >&2
 ghost_pid="$("$GHOST_DIR/start-app.sh")"
 roast_pid="$("$DIR/start-app.sh")"
-echo "Ghostty pid=$ghost_pid Roastty pid=$roast_pid marker=$marker" >&2
+echo "Ghostty pid=$ghost_pid Roastty pid=$roast_pid recipe=$recipe marker=$marker" >&2
 
 activate "$GHOSTTY_APP"
 set_window_bounds "$GHOSTTY_APP"
 activate "$ROASTTY_APP"
 set_window_bounds "$ROASTTY_APP"
 
-command="clear; echo $marker"
+command="$(recipe_command)"
 type_shell_command "$GHOSTTY_APP" "$command"
 type_shell_command "$ROASTTY_APP" "$command"
 
@@ -229,7 +269,7 @@ roast_h="$(image_dim "$roast_crop" pixelHeight)"
 harness_verdict="FAIL"
 [ "$diff_status" -eq 0 ] && harness_verdict="PASS"
 
-python3 - "$harness_verdict" "$diff_status" "$ghost_pid" "$roast_pid" "$marker" \
+python3 - "$harness_verdict" "$diff_status" "$ghost_pid" "$roast_pid" "$recipe" "$marker" \
   "$ghost_png" "$roast_full" "$roast_crop" "$ghost_w" "$ghost_h" "$roast_w" "$roast_h" \
   "$max_mismatch_ratio" "$max_mean_channel_delta" "$diff_json" <<'PY'
 import json
@@ -240,6 +280,7 @@ import sys
     diff_status,
     ghost_pid,
     roast_pid,
+    recipe,
     marker,
     ghost_png,
     roast_full,
@@ -260,6 +301,7 @@ except json.JSONDecodeError:
 
 summary = {
     "verdict": verdict,
+    "recipe": recipe,
     "marker": marker,
     "ghostty_pid": int(ghost_pid),
     "roastty_pid": int(roast_pid),

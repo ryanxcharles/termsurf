@@ -217,9 +217,14 @@ before re-reading experiments.
   `scripts/roastty-app/live-ab-smoke.sh --max-mismatch-ratio 1 --max-mean-channel-delta 255`
   launches debug Ghostty + Roastty, drives the same ASCII marker, captures
   Ghostty by window id, captures Roastty through the IOSurface-safe full-screen
-  crop path, diffs the captures, prints one JSON summary, and traps scoped app
-  cleanup. Strict thresholds currently fail with a useful metric rather than
-  parity. (Exp 39.)
+  crop path, diffs the captures, prints one JSON summary, and traps exact
+  launched-PID-tree cleanup. Strict thresholds currently fail with a useful
+  metric rather than parity. (Exp 39.)
+- **Choose a live A/B recipe:**
+  `scripts/roastty-app/live-ab-smoke.sh --list-recipes`, then
+  `scripts/roastty-app/live-ab-smoke.sh --recipe ascii-grid --max-mismatch-ratio 1 --max-mean-channel-delta 255`.
+  The JSON summary includes `recipe`; `smoke` remains the default for Exp-39
+  compatibility. (Exp 40.)
 
 ### Input injection (Exp 5)
 
@@ -606,7 +611,7 @@ stays unaltered except for the rename).
 - [Experiment 39: Phase D — live A/B smoke harness](39-live-ab-smoke-harness.md)
   — **Pass**
 - [Experiment 40: Phase D — named live A/B recipes](40-live-ab-recipes.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 

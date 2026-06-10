@@ -36,9 +36,21 @@ and compares the captures with `pngdiff.swift`.
 scripts/roastty-app/live-ab-smoke.sh \
   --max-mismatch-ratio 1 \
   --max-mean-channel-delta 255
+
+scripts/roastty-app/live-ab-smoke.sh --list-recipes
+scripts/roastty-app/live-ab-smoke.sh --recipe ascii-grid \
+  --max-mismatch-ratio 1 \
+  --max-mean-channel-delta 255
 ```
 
 The script prints one JSON summary object to stdout and diagnostics to stderr.
-It traps cleanup through the scoped app stop scripts, but run
-`scripts/ghostty-app/stop-app.sh` and `scripts/roastty-app/stop-app.sh` after
-manual debugging if a run is interrupted externally.
+It traps cleanup by killing only the launched Ghostty/Roastty PID trees after
+expected debug app path verification. Run `scripts/ghostty-app/stop-app.sh` and
+`scripts/roastty-app/stop-app.sh` after manual debugging if a run is interrupted
+externally.
+
+Recipes:
+
+- `smoke` — default. Clears the terminal and prints one timestamped marker.
+- `ascii-grid` — clears the terminal, prints a timestamped marker plus fixed
+  ASCII rows, and sleeps so capture happens before the prompt returns.
