@@ -679,6 +679,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 49: Phase D — content-region live A/B diffs](49-live-ab-content-region-diff.md)
   — **Pass**
+- [Experiment 50: Phase E — Unicode-width live A/B recipe](50-live-ab-unicode-width-recipe.md)
+  — **Designed**
 
 ## Process
 
