@@ -565,9 +565,10 @@ stays unaltered except for the rename).
   Left-only branch → any button + press/release clears while reporting, faithful
   to upstream; 4415 green, fully headless) · Claude
 - [Experiment 33: Phase C — shift overrides mouse-reporting for selection](33-shift-while-reporting.md)
-  — **Designed** (shift-drag-select in a mouse-mode TUI: when reporting +
-  shift + !shift_capture, run selection + suppress the report; flag-first
-  shiftCapture, config nuance deferred) · Claude
+  — **Partial** (shift overrides mouse-reporting for selection — shift-drag
+  selects in a mouse-mode TUI + suppresses the report (button-gated so bare
+  motion still reports); flag-first shiftCapture (config deferred); 4-case
+  headless test + 4416 green; live shift-drag pending — screen locked) · Claude
 
 ## Process
 

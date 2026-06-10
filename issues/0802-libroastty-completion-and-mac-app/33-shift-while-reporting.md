@@ -147,8 +147,71 @@ the coarse `self.mouse_reporting` flag which defaults true).
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Partial — shift-while-reporting is wired + fully headless-proven (4
+cases, suite green); the **live shift-drag confirmation is pending a locked
+screen** (environment), to re-confirm on unlock. (The config
+`Never`/`Always`/`True` plumbing is a documented sub-deferral.)
+
+### Change (only `libroastty`)
+
+- `Terminal::mouse_shift_capture_flag()` (`pub(crate)`) exposes the
+  `XTSHIFTESCAPE` flag.
+- `Surface::mouse_shift_capture()` — flag-first (`Some(v)=>v, None=>false`);
+  config nuance deferred.
+- `mouse_button`/`mouse_pos`:
+  `shift_override = reporting && mods.shift && !mouse_shift_capture()`. When
+  override: run the **selection** (not the clear), and **suppress the report**
+  (`mouse_button` returns `false`; `mouse_pos` suppresses the motion report
+  **only while a button is held** — `any_mouse_button_pressed()` — so bare
+  shift-motion in mode 1003 still reports).
+
+### Verification
+
+- **Headless regression test** `shift_overrides_mouse_reporting_for_selection`
+  (`lib.rs`), 4 cases: (1) shift-drag while reporting → an **active
+  selection** + the press/drag/release **suppress the report**
+  (`last_reported_cell` stays `None`); (a) no-shift press while reporting → no
+  selection (clear path); (c) **mode 1003, shift, no button** → bare motion
+  **still reports** (the button-gated suppression — the Required fidelity fix);
+  (b) **`CSI > 1 s`** (XTSHIFTESCAPE) → shift does **not** override. Fails
+  pre-fix (shift-drag while reporting made no selection), passes after.
+- **Full `cargo test -p roastty`:** lib **4416 passed**, 0 failures — no
+  regression to the not-reporting selection path (Exp 25/27/28/30) or the
+  reporting clear (Exp 32) or the mouse-report-mode tests.
+- **Live shift-drag — blocked (locked screen):**
+  `CGSSessionScreenIsLocked: true`; the visible "shift-drag selects in a
+  mouse-mode TUI" awaits the unlock.
 
 ## Conclusion
 
-_(to be added after the run.)_
+Shift now overrides mouse-reporting for selection (faithful to upstream
+`Surface.zig:3882`/ `mouseShiftCapture`, flag-first), with the report correctly
+suppressed only while a button is held. **Mouse selection is now
+feature-complete to upstream fidelity** (cell-drag + autoscroll, word, line,
+shift-extend, shift-while-reporting) + clipboard. The remaining items — the
+config-`mouse-shift-capture` plumbing (a sub-deferral), CVDisplayLink vsync,
+DPI-change rebuild — are live/perf follow-ups. The live re-confirmations (Exp 29
+CJK, Exp 30 shift-click, Exp 33 shift-drag) + closing 802 await the screen
+unlock.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED (no findings).** It attacked the most damaging
+axes and each held: the test **passes + is load-bearing across all 4 cases**
+((1) would fail pre-fix on both asserts — Exp 32's clear makes `has_sel` false +
+always dispatches; the `last_reported_cell` proxy is sound
+(`dispatch_mouse_report` passes `last_cell` to the encoder); (c) the mode-1003
+bare-motion would fail under the pre-fix unconditional suppression — the
+button-gating fix; `buttons.fill(None)` is legitimate fixture isolation, not a
+mask; (b) isolates the XTSHIFTESCAPE flag); **no regression** (full lib **4416
+passed, 0 failed**; `mouse_button` returning `false` on override broke no
+caller); the **accessor is `pub(crate)` and NOT `#[cfg(test)]`-gated**,
+`build`/`fmt --check` clean; **upstream-faithful** (verified
+`Surface.zig:3905-3912` shift-override+`return false`,
+`cursorPosCallback:4586-4607` button-gated `break :report`,
+`mouseShiftCapture:3689-3713` flag-first `.false` path;
+`any_mouse_button_pressed()` == upstream's `state != .release` loop; no report
+leaks); **Partial honest** (locked-screen blocker real; the config deferral
+genuinely unreadable — the App copies only select fields). Scope clean
+(libroastty + one accessor, no new "ghostty" literals).

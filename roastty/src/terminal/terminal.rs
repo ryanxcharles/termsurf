@@ -2447,6 +2447,12 @@ impl Terminal {
         self.flags.mouse_format
     }
 
+    /// The `XTSHIFTESCAPE` flag (`CSI > 1 s`) — whether shift should be captured by the program vs
+    /// available for selection (Issue 802 / Exp 33). `None` = unset (config decides).
+    pub(crate) fn mouse_shift_capture_flag(&self) -> Option<bool> {
+        self.flags.mouse_shift_capture
+    }
+
     #[cfg(test)]
     pub(super) fn mouse_shift_capture_for_tests(&self) -> Option<bool> {
         self.flags.mouse_shift_capture

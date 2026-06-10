@@ -3785,11 +3785,19 @@ impl Surface {
             None
         };
         if self.mouse.position.is_some() {
-            // Drag-extend selection (Issue 802 / Exp 25) when the left button is held + not reporting.
-            if self.left_button_pressed() && self.mouse_report_context().is_none() {
+            let reporting = self.mouse_report_context().is_some();
+            let shift_override = reporting && self.mouse.mods.shift && !self.mouse_shift_capture();
+            // Drag-extend selection (Issue 802 / Exp 25/28) when the left button is held + not
+            // reporting, OR shift overrides reporting (Exp 33).
+            if self.left_button_pressed() && (!reporting || shift_override) {
                 self.selection_drag();
             }
-            self.dispatch_mouse_report(mouse::MouseAction::Motion, self.pressed_mouse_button());
+            // Suppress the motion report only while a button is held under a shift override (Exp 33,
+            // upstream `Surface.zig:4586-4607`) — bare shift-motion (mode 1003) must still report.
+            let suppress = shift_override && self.any_mouse_button_pressed();
+            if !suppress {
+                self.dispatch_mouse_report(mouse::MouseAction::Motion, self.pressed_mouse_button());
+            }
         }
     }
 
@@ -3812,12 +3820,16 @@ impl Surface {
         };
         // Mouse-drag selection (Issue 802 / Exp 25): the core drives the gesture when not actually
         // mouse-reporting (faithful to upstream). Shift-while-reporting override is deferred.
-        if self.mouse_report_context().is_some() {
-            // Reporting: clear+reset the selection on ANY button + press/release (Issue 802 / Exp 32,
-            // upstream `Surface.zig:3879-3895`), so a stale selection can't linger or resume on a
-            // report→no-report transition. (Shift-while-reporting override is deferred — follow-up.)
+        let reporting = self.mouse_report_context().is_some();
+        // Shift overrides mouse-reporting for selection (Issue 802 / Exp 33, upstream
+        // `Surface.zig:3882`): when reporting + shift + the terminal isn't shift-capturing, run the
+        // selection (and suppress the report) instead of clearing.
+        let shift_override = reporting && self.mouse.mods.shift && !self.mouse_shift_capture();
+        if reporting && !shift_override {
+            // Reporting (no override): clear+reset on ANY button + press/release (Exp 32).
             self.selection_clear_and_reset();
         } else if matches!(button, mouse::MouseButton::Left) {
+            // Not reporting, OR shift overrides reporting: run the selection.
             match state {
                 SurfaceMouseButtonState::Press => {
                     if self.should_shift_extend() {
@@ -3829,7 +3841,12 @@ impl Surface {
                 SurfaceMouseButtonState::Release => self.selection_release(),
             }
         }
-        self.dispatch_mouse_report(action, Some(button))
+        // On a shift override, suppress the report and report not-consumed (upstream returns false).
+        if shift_override {
+            false
+        } else {
+            self.dispatch_mouse_report(action, Some(button))
+        }
     }
 
     fn mouse_scroll(&mut self, x: f64, y: f64, scroll_mods: c_int) {
@@ -3959,6 +3976,20 @@ impl Surface {
             self.mouse.buttons[mouse_button_index(mouse::MouseButton::Left)],
             Some(SurfaceMouseButtonState::Press)
         )
+    }
+
+    /// Whether shift is captured by the program (so it does NOT override mouse-reporting for
+    /// selection) — Issue 802 / Exp 33, upstream `mouseShiftCapture`. Flag-first: the terminal's
+    /// `XTSHIFTESCAPE` flag (`CSI > 1 s`) decides; absent it, the default config (`.false`) → not
+    /// captured (shift overrides). The config `Never`/`Always`/`True` is deferred (the App doesn't
+    /// surface `mouse_shift_capture`).
+    fn mouse_shift_capture(&self) -> bool {
+        self.termio_worker
+            .as_ref()
+            .and_then(|worker| {
+                worker.with_termio(|termio| termio.terminal().mouse_shift_capture_flag())
+            })
+            .unwrap_or(false)
     }
 
     /// Whether a left-press should EXTEND the existing selection (shift-click) rather than start a
@@ -17183,6 +17214,128 @@ mod tests {
         assert!(
             !has_selection(surface),
             "Left press while reporting still clears"
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    /// Issue 802 / Exp 33: shift overrides mouse-reporting for selection (shift-drag selects in a
+    /// mouse-mode TUI + suppresses the report); bare shift-motion still reports; XTSHIFTESCAPE
+    /// disables the override.
+    #[test]
+    fn shift_overrides_mouse_reporting_for_selection() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        roastty_surface_set_size(surface, 800, 480);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|t| {
+                t.terminal_mut().next_slice(b"0123456789ABCDEF").unwrap();
+            });
+        set_surface_worker_mouse_mode(surface, 1000, true); // mouse-reporting on
+
+        let has_sel = |surface: RoasttySurface| -> bool {
+            surface_from_handle(surface)
+                .unwrap()
+                .termio_worker
+                .as_ref()
+                .unwrap()
+                .with_termio(|t| t.terminal().active_selection().is_some())
+        };
+        let reported = |surface: RoasttySurface| -> bool {
+            surface_from_handle(surface)
+                .unwrap()
+                .mouse
+                .last_reported_cell
+                .is_some()
+        };
+        let reset = |surface: RoasttySurface| {
+            let s = surface_from_handle(surface).unwrap();
+            s.mouse.last_reported_cell = None;
+            s.mouse.buttons.fill(None); // clear stale button state between cases
+            s.termio_worker.as_ref().unwrap().with_termio_mut(|t| {
+                let _ = t.terminal_mut().set_selection(None);
+            });
+        };
+
+        // (1) shift-drag while reporting → selection; press/drag/release suppress the report.
+        roastty_surface_mouse_pos(surface, 25.0, 10.0, ROASTTY_MODS_SHIFT); // pos cell 2 (bare motion reports)
+        reset(surface); // clear that bare-motion report before the press
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_SHIFT,
+        );
+        roastty_surface_mouse_pos(surface, 59.0, 10.0, ROASTTY_MODS_SHIFT); // drag to cell 5
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_RELEASE,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_SHIFT,
+        );
+        assert!(has_sel(surface), "shift-drag while reporting must select");
+        assert!(
+            !reported(surface),
+            "shift-override press/drag/release suppress the report"
+        );
+
+        // (a) no-shift press while reporting → no selection (the clear path runs).
+        reset(surface);
+        roastty_surface_mouse_pos(surface, 25.0, 10.0, ROASTTY_MODS_NONE);
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_NONE,
+        );
+        assert!(
+            !has_sel(surface),
+            "no-shift press while reporting must not select"
+        );
+
+        // (c) mode 1003, shift, NO button → bare motion still reports (the button-gated suppression).
+        set_surface_worker_mouse_mode(surface, 1003, true);
+        reset(surface);
+        roastty_surface_mouse_pos(surface, 35.0, 30.0, ROASTTY_MODS_SHIFT);
+        assert!(
+            reported(surface),
+            "bare shift-motion in mode 1003 must still report"
+        );
+
+        // (b) XTSHIFTESCAPE (CSI > 1 s) → shift does NOT override (program captures shift).
+        reset(surface);
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|t| {
+                t.terminal_mut().next_slice(b"\x1b[>1s").unwrap();
+            });
+        roastty_surface_mouse_pos(surface, 25.0, 10.0, ROASTTY_MODS_SHIFT);
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_SHIFT,
+        );
+        roastty_surface_mouse_pos(surface, 59.0, 10.0, ROASTTY_MODS_SHIFT);
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_RELEASE,
+            ROASTTY_MOUSE_BUTTON_LEFT,
+            ROASTTY_MODS_SHIFT,
+        );
+        assert!(
+            !has_sel(surface),
+            "shift must not override when XTSHIFTESCAPE captures it"
         );
 
         roastty_surface_free(surface);
