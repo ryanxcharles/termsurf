@@ -94,6 +94,14 @@ pub(crate) struct Config {
     pub alpha_blending: AlphaBlending,
     /// `background-blur`.
     pub background_blur: BackgroundBlur,
+    /// `unfocused-split-opacity`.
+    pub unfocused_split_opacity: f64,
+    /// `unfocused-split-fill`.
+    pub unfocused_split_fill: Option<Color>,
+    /// `split-divider-color`.
+    pub split_divider_color: Option<Color>,
+    /// `split-preserve-zoom`.
+    pub split_preserve_zoom: SplitPreserveZoom,
     /// `window-padding-color`.
     pub window_padding_color: WindowPaddingColor,
     /// `background-opacity`.
@@ -242,6 +250,10 @@ impl Default for Config {
             window_colorspace: WindowColorspace::Srgb,
             alpha_blending: AlphaBlending::Native,
             background_blur: BackgroundBlur::False,
+            unfocused_split_opacity: 0.7,
+            unfocused_split_fill: None,
+            split_divider_color: None,
+            split_preserve_zoom: SplitPreserveZoom::default(),
             window_padding_color: WindowPaddingColor::Background,
             background_opacity: 1.0,
             background_opacity_cells: false,
@@ -391,6 +403,14 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("mouse-scroll-multiplier", out));
         self.background_blur
             .format_entry(&mut EntryFormatter::new("background-blur", out));
+        EntryFormatter::new("unfocused-split-opacity", out)
+            .entry_float(self.unfocused_split_opacity);
+        EntryFormatter::new("unfocused-split-fill", out)
+            .entry_optional(self.unfocused_split_fill, |v, f| v.format_entry(f));
+        EntryFormatter::new("split-divider-color", out)
+            .entry_optional(self.split_divider_color, |v, f| v.format_entry(f));
+        self.split_preserve_zoom
+            .format_entry(&mut EntryFormatter::new("split-preserve-zoom", out));
         EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
         EntryFormatter::new("background-opacity-cells", out)
             .entry_bool(self.background_opacity_cells);
@@ -766,6 +786,25 @@ impl Config {
                     NotifyOnCommandFinishAction::parse_cli,
                 )?
             }
+            "unfocused-split-opacity" => {
+                self.unfocused_split_opacity =
+                    set_f64_field(value, default.unfocused_split_opacity)?
+            }
+            "unfocused-split-fill" => {
+                self.unfocused_split_fill =
+                    set_optional_value_field(value, default.unfocused_split_fill, Color::parse_cli)?
+            }
+            "split-divider-color" => {
+                self.split_divider_color =
+                    set_optional_value_field(value, default.split_divider_color, Color::parse_cli)?
+            }
+            "split-preserve-zoom" => {
+                self.split_preserve_zoom = set_packed_field(
+                    value,
+                    default.split_preserve_zoom,
+                    SplitPreserveZoom::parse_cli,
+                )?
+            }
             "background-image-repeat" => {
                 self.bg_image_repeat = set_bool_field(value, default.bg_image_repeat)?
             }
@@ -891,6 +930,7 @@ impl Config {
             self.mouse_scroll_multiplier.precision.clamp(0.01, 10_000.0);
         self.mouse_scroll_multiplier.discrete =
             self.mouse_scroll_multiplier.discrete.clamp(0.01, 10_000.0);
+        self.unfocused_split_opacity = self.unfocused_split_opacity.clamp(0.15, 1.0);
     }
 
     /// Load config from a source string (upstream's config-file `parse` driving
@@ -4169,6 +4209,41 @@ impl Default for ScrollToBottom {
     }
 }
 
+/// The `split-preserve-zoom` config (upstream `SplitPreserveZoom`): which split
+/// operations keep the current split zoomed. `navigation` defaults to `false`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SplitPreserveZoom {
+    /// Preserve zoom while navigating between splits.
+    pub navigation: bool,
+}
+
+impl SplitPreserveZoom {
+    /// Format as a config entry (upstream's packed-struct branch): the `[no-]flag`
+    /// keywords comma-joined.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_flags(&[("navigation", self.navigation)]);
+    }
+
+    /// Parse a packed-struct flag value (upstream `cli.args.parsePackedStruct`): a
+    /// standalone bool sets every flag; otherwise a `[no-]flag` comma-list sets the
+    /// named flags, with defaults for the rest.
+    pub(crate) fn parse_cli(value: &str) -> Result<Self, FlagsParseError> {
+        let mut result = SplitPreserveZoom::default();
+        parse_packed_flags(value, |tok| match tok {
+            FlagToken::All(b) => {
+                result.navigation = b;
+                true
+            }
+            FlagToken::One("navigation", on) => {
+                result.navigation = on;
+                true
+            }
+            FlagToken::One(_, _) => false,
+        })?;
+        Ok(result)
+    }
+}
+
 /// The `grapheme-width-method` config (upstream `GraphemeWidthMethod`): how the
 /// terminal measures grapheme width. The `Config` default is `Unicode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4709,11 +4784,11 @@ mod tests {
         RepeatableClipboardCodepointMap, RepeatableCodepointMap, RepeatableConfigPath,
         RepeatableConfigPathParseError, RepeatableString, RepeatableStringParseError,
         RightClickAction, ScrollToBottom, SelectionWordChars, SelectionWordCharsParseError,
-        ShellIntegration, ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme,
-        ThemeParseError, WindowColorspace, WindowDecoration, WindowDecorationParseError,
-        WindowPadding, WindowPaddingColor, WindowPaddingParseError, WindowSaveState,
-        WindowSubtitle, WindowTheme, WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS,
-        NS_PER_S,
+        ShellIntegration, ShellIntegrationFeatures, SplitPreserveZoom, TerminalBoldColor,
+        TerminalColor, Theme, ThemeParseError, WindowColorspace, WindowDecoration,
+        WindowDecorationParseError, WindowPadding, WindowPaddingColor, WindowPaddingParseError,
+        WindowSaveState, WindowSubtitle, WindowTheme, WorkingDirectory, WorkingDirectoryParseError,
+        NS_PER_MS, NS_PER_S,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::cursor;
@@ -4930,6 +5005,10 @@ mod tests {
         assert_eq!(d.window_colorspace, WindowColorspace::Srgb);
         assert_eq!(d.alpha_blending, AlphaBlending::Native);
         assert_eq!(d.background_blur, BackgroundBlur::False);
+        assert_eq!(d.unfocused_split_opacity, 0.7);
+        assert_eq!(d.unfocused_split_fill, None);
+        assert_eq!(d.split_divider_color, None);
+        assert_eq!(d.split_preserve_zoom, SplitPreserveZoom::default());
         assert_eq!(d.window_padding_color, WindowPaddingColor::Background);
         assert_eq!(d.background_opacity, 1.0);
         // Opacity options (Experiment 848): upstream defaults false / 0.5.
@@ -8804,6 +8883,10 @@ mod tests {
                 "mouse-reporting",
                 "mouse-scroll-multiplier",
                 "background-blur",
+                "unfocused-split-opacity",
+                "unfocused-split-fill",
+                "split-divider-color",
+                "split-preserve-zoom",
                 "background-opacity",
                 "background-opacity-cells",
                 "bell-audio-path",
@@ -9679,6 +9762,222 @@ mod tests {
                 cloned == cfg && cloned.background_opacity == 0.25
             }),
             Ok(true)
+        );
+    }
+
+    #[test]
+    fn split_visual_config_defaults_parse_format_and_finalize() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.unfocused_split_opacity, 0.7);
+        assert_eq!(
+            line(&cfg, "unfocused-split-opacity"),
+            "unfocused-split-opacity = 0.7"
+        );
+        assert_eq!(
+            line(&cfg, "unfocused-split-fill"),
+            "unfocused-split-fill = "
+        );
+        assert_eq!(line(&cfg, "split-divider-color"), "split-divider-color = ");
+        assert_eq!(
+            line(&cfg, "split-preserve-zoom"),
+            "split-preserve-zoom = no-navigation"
+        );
+
+        cfg.set("unfocused-split-opacity", Some("0.12345678901234568"))
+            .unwrap();
+        assert_eq!(cfg.unfocused_split_opacity, 0.12345678901234568_f64);
+        assert_eq!(
+            line(&cfg, "unfocused-split-opacity"),
+            "unfocused-split-opacity = 0.12345678901234568"
+        );
+
+        cfg.set("unfocused-split-opacity", Some("-0.25")).unwrap();
+        assert_eq!(cfg.unfocused_split_opacity, -0.25);
+        assert_eq!(
+            line(&cfg, "unfocused-split-opacity"),
+            "unfocused-split-opacity = -0.25"
+        );
+        cfg.finalize();
+        assert_eq!(cfg.unfocused_split_opacity, 0.15);
+        assert_eq!(
+            line(&cfg, "unfocused-split-opacity"),
+            "unfocused-split-opacity = 0.15"
+        );
+
+        cfg.set("unfocused-split-opacity", Some("1.5")).unwrap();
+        assert_eq!(cfg.unfocused_split_opacity, 1.5);
+        cfg.finalize();
+        assert_eq!(cfg.unfocused_split_opacity, 1.0);
+        assert_eq!(
+            line(&cfg, "unfocused-split-opacity"),
+            "unfocused-split-opacity = 1"
+        );
+
+        cfg.set("unfocused-split-opacity", Some("")).unwrap();
+        assert_eq!(cfg.unfocused_split_opacity, 0.7);
+        assert_eq!(
+            line(&cfg, "unfocused-split-opacity"),
+            "unfocused-split-opacity = 0.7"
+        );
+        assert_eq!(
+            cfg.set("unfocused-split-opacity", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("unfocused-split-opacity", Some("not-a-float")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let mut parsed = Config::default();
+        assert!(parsed
+            .load_str("unfocused-split-opacity = 0.01\n")
+            .is_empty());
+        assert_eq!(parsed.unfocused_split_opacity, 0.01);
+        parsed.finalize();
+        assert_eq!(parsed.unfocused_split_opacity, 0.15);
+
+        let mut parsed = Config::default();
+        assert!(parsed.load_str("unfocused-split-opacity = 8\n").is_empty());
+        assert_eq!(parsed.unfocused_split_opacity, 8.0);
+        parsed.finalize();
+        assert_eq!(parsed.unfocused_split_opacity, 1.0);
+    }
+
+    #[test]
+    fn split_visual_config_colors_parse_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        cfg.set("unfocused-split-fill", Some("#0a0b0c")).unwrap();
+        assert_eq!(
+            cfg.unfocused_split_fill,
+            Some(Color {
+                r: 0x0a,
+                g: 0x0b,
+                b: 0x0c,
+            })
+        );
+        assert_eq!(
+            line(&cfg, "unfocused-split-fill"),
+            "unfocused-split-fill = #0a0b0c"
+        );
+
+        cfg.set("split-divider-color", Some("ForestGreen")).unwrap();
+        assert_eq!(
+            cfg.split_divider_color,
+            Some(Color {
+                r: 0x22,
+                g: 0x8b,
+                b: 0x22,
+            })
+        );
+        assert_eq!(
+            line(&cfg, "split-divider-color"),
+            "split-divider-color = #228b22"
+        );
+
+        cfg.set("unfocused-split-fill", Some("")).unwrap();
+        cfg.set("split-divider-color", Some("")).unwrap();
+        assert_eq!(cfg.unfocused_split_fill, None);
+        assert_eq!(cfg.split_divider_color, None);
+        assert_eq!(
+            line(&cfg, "unfocused-split-fill"),
+            "unfocused-split-fill = "
+        );
+        assert_eq!(line(&cfg, "split-divider-color"), "split-divider-color = ");
+
+        assert_eq!(
+            cfg.set("unfocused-split-fill", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("split-divider-color", Some("notacolor")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("split-divider-color", Some("#010203")).map(|_| {
+                let cloned = cfg.clone();
+                cloned == cfg && cloned.split_divider_color == Some(Color { r: 1, g: 2, b: 3 })
+            }),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn split_preserve_zoom_config_flags_parse_format_and_reset() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("split-preserve-zoom = "))
+                .unwrap()
+                .to_string()
+        };
+
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("navigation"),
+            Ok(SplitPreserveZoom { navigation: true })
+        );
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("no-navigation"),
+            Ok(SplitPreserveZoom { navigation: false })
+        );
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("true"),
+            Ok(SplitPreserveZoom { navigation: true })
+        );
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("false"),
+            Ok(SplitPreserveZoom { navigation: false })
+        );
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("zoom"),
+            Err(FlagsParseError::InvalidValue)
+        );
+
+        let mut cfg = Config::default();
+        assert_eq!(line(&cfg), "split-preserve-zoom = no-navigation");
+        cfg.set("split-preserve-zoom", Some("navigation")).unwrap();
+        assert_eq!(
+            cfg.split_preserve_zoom,
+            SplitPreserveZoom { navigation: true }
+        );
+        assert_eq!(line(&cfg), "split-preserve-zoom = navigation");
+
+        cfg.set("split-preserve-zoom", Some("false")).unwrap();
+        assert_eq!(
+            cfg.split_preserve_zoom,
+            SplitPreserveZoom { navigation: false }
+        );
+        assert_eq!(line(&cfg), "split-preserve-zoom = no-navigation");
+
+        cfg.set("split-preserve-zoom", Some("navigation")).unwrap();
+        cfg.set("split-preserve-zoom", Some("")).unwrap();
+        assert_eq!(cfg.split_preserve_zoom, SplitPreserveZoom::default());
+        assert_eq!(line(&cfg), "split-preserve-zoom = no-navigation");
+        assert_eq!(
+            cfg.set("split-preserve-zoom", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("split-preserve-zoom", Some("unknown")),
+            Err(ConfigSetError::InvalidValue)
         );
     }
 

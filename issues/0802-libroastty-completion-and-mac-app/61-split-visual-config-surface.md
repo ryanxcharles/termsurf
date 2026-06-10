@@ -106,3 +106,57 @@ Re-review returned **Approved**. The reviewer confirmed the required finding is
 resolved because the design now explicitly requires permissive parsing plus
 `Config::finalize` clamping to `[0.15, 1.0]`, with verification for raw
 pre-finalize round-trip behavior and post-finalize clamping.
+
+## Result
+
+**Result:** Pass
+
+Implemented the split visual config surface in `roastty/src/config/mod.rs`:
+
+- added `unfocused_split_opacity`, `unfocused_split_fill`,
+  `split_divider_color`, and `split_preserve_zoom` to `Config`;
+- added upstream defaults and formatter order immediately after
+  `background-blur`;
+- routed all four keys through `Config::set` with empty-value resets and
+  diagnostics;
+- added `SplitPreserveZoom` as a packed flag config type with `navigation` /
+  `no-navigation` and standalone bool parsing;
+- added `Config::finalize` clamping for `unfocused_split_opacity` to
+  `[0.15, 1.0]`;
+- added focused tests for defaults, formatter order, raw pre-finalize float
+  round-trips, post-finalize clamping, optional color parse/reset/error
+  behavior, packed flag parse/reset/error behavior, and clone/equality.
+
+Verification:
+
+- `cargo fmt -- roastty/src/config/mod.rs` passed.
+- `cargo test -p roastty split_visual_config` passed.
+- `cargo test -p roastty split_preserve_zoom` passed.
+- `cargo test -p roastty config_format_config` passed.
+- `cargo test -p roastty` passed: 4495 unit tests, ABI harness, and doc-tests.
+  The ABI harness still emits the existing enum conversion warnings.
+- `cargo fmt --check` passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The Phase-F split visual config keys now exist as a faithful config surface with
+the upstream finalize-time opacity clamp. Runtime split dimming, divider
+painting, and zoom-preservation behavior remain intentionally out of scope until
+the app split tree / renderer ownership is present.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb38c-48ba-7d90-9918-d37834e77a46` returned
+**Approved** with no Required, Optional, or Nit findings.
+
+The reviewer independently verified the implementation scope, upstream defaults,
+formatter order, parsing/reset behavior, finalize clamp, README `Pass` status,
+and Result/Conclusion sections. It also reran:
+
+- `cargo test -p roastty split_visual_config`
+- `cargo test -p roastty split_preserve_zoom`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+- `cargo fmt --check`
+- `git diff --check`
