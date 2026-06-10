@@ -7,6 +7,7 @@
 use crate::font::discovery::Descriptor;
 
 /// A single range → descriptor mapping.
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MapEntry {
     /// Inclusive Unicode codepoint range; `range[0] <= range[1]`. Upstream uses
     /// `u21`; values stay within that domain.
@@ -17,7 +18,7 @@ pub(crate) struct MapEntry {
 
 /// A map of codepoint ranges to font-search [`Descriptor`]s. A linear scan is
 /// used since maps are expected to have very few entries.
-#[derive(Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct CodepointMap {
     entries: Vec<MapEntry>,
 }
@@ -28,6 +29,21 @@ impl CodepointMap {
     pub(crate) fn add(&mut self, range: [u32; 2], descriptor: Descriptor) {
         assert!(range[0] <= range[1], "inverted codepoint range");
         self.entries.push(MapEntry { range, descriptor });
+    }
+
+    /// Number of stored range mappings.
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether there are no stored range mappings.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterate range mappings in insertion order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &MapEntry> {
+        self.entries.iter()
     }
 
     /// The descriptor for `cp`, or `None`. Scans entries in **reverse** so a

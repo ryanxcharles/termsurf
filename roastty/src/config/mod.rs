@@ -20,6 +20,9 @@ mod unicode_range;
 use crate::config::comma_splitter::CommaSplitter;
 use crate::config::formatter::EntryFormatter;
 use crate::config::string::{codepoint_iterator, parse_quoted_string};
+use crate::config::unicode_range::{InvalidRange, UnicodeRangeParser};
+use crate::font::codepoint_map::CodepointMap;
+use crate::font::discovery::Descriptor;
 use crate::os::homedir::expand_home;
 use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAULT_PALETTE};
 use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
@@ -132,6 +135,14 @@ pub(crate) struct Config {
     pub macos_window_buttons: MacWindowButtons,
     /// `macos-hidden`.
     pub macos_hidden: MacHidden,
+    /// `font-family`.
+    pub font_family: RepeatableString,
+    /// `font-family-bold`.
+    pub font_family_bold: RepeatableString,
+    /// `font-family-italic`.
+    pub font_family_italic: RepeatableString,
+    /// `font-family-bold-italic`.
+    pub font_family_bold_italic: RepeatableString,
     /// `font-style`.
     pub font_style: FontStyle,
     /// `font-style-bold`.
@@ -140,6 +151,12 @@ pub(crate) struct Config {
     pub font_style_italic: FontStyle,
     /// `font-style-bold-italic`.
     pub font_style_bold_italic: FontStyle,
+    /// `font-synthetic-style`.
+    pub font_synthetic_style: FontSyntheticStyle,
+    /// `font-size`.
+    pub font_size: f32,
+    /// `font-codepoint-map`.
+    pub font_codepoint_map: RepeatableCodepointMap,
     /// `font-thicken`.
     pub font_thicken: bool,
     /// `font-thicken-strength`.
@@ -219,10 +236,21 @@ impl Default for Config {
             macos_titlebar_proxy_icon: MacTitlebarProxyIcon::Visible,
             macos_window_buttons: MacWindowButtons::Visible,
             macos_hidden: MacHidden::Never,
+            font_family: RepeatableString::default(),
+            font_family_bold: RepeatableString::default(),
+            font_family_italic: RepeatableString::default(),
+            font_family_bold_italic: RepeatableString::default(),
             font_style: FontStyle::Default,
             font_style_bold: FontStyle::Default,
             font_style_italic: FontStyle::Default,
             font_style_bold_italic: FontStyle::Default,
+            font_synthetic_style: FontSyntheticStyle::default(),
+            font_size: if cfg!(target_os = "macos") {
+                13.0
+            } else {
+                12.0
+            },
+            font_codepoint_map: RepeatableCodepointMap::default(),
             font_thicken: false,
             font_thicken_strength: 255,
             font_shaping_break: FontShapingBreak::default(),
@@ -253,6 +281,14 @@ impl Config {
         EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
         EntryFormatter::new("quit-after-last-window-closed", out)
             .entry_bool(self.quit_after_last_window_closed);
+        self.font_family
+            .format_entry(&mut EntryFormatter::new("font-family", out));
+        self.font_family_bold
+            .format_entry(&mut EntryFormatter::new("font-family-bold", out));
+        self.font_family_italic
+            .format_entry(&mut EntryFormatter::new("font-family-italic", out));
+        self.font_family_bold_italic
+            .format_entry(&mut EntryFormatter::new("font-family-bold-italic", out));
         self.font_style
             .format_entry(&mut EntryFormatter::new("font-style", out));
         self.font_style_bold
@@ -261,6 +297,11 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("font-style-italic", out));
         self.font_style_bold_italic
             .format_entry(&mut EntryFormatter::new("font-style-bold-italic", out));
+        self.font_synthetic_style
+            .format_entry(&mut EntryFormatter::new("font-synthetic-style", out));
+        EntryFormatter::new("font-size", out).entry_float(self.font_size);
+        self.font_codepoint_map
+            .format_entry(&mut EntryFormatter::new("font-codepoint-map", out));
         EntryFormatter::new("font-thicken", out).entry_bool(self.font_thicken);
         EntryFormatter::new("font-thicken-strength", out).entry_int(self.font_thicken_strength);
         self.font_shaping_break
@@ -680,6 +721,10 @@ impl Config {
             "minimum-contrast" => {
                 self.minimum_contrast = set_f64_field(value, default.minimum_contrast)?
             }
+            "font-family" => self.font_family.parse_cli(value)?,
+            "font-family-bold" => self.font_family_bold.parse_cli(value)?,
+            "font-family-italic" => self.font_family_italic.parse_cli(value)?,
+            "font-family-bold-italic" => self.font_family_bold_italic.parse_cli(value)?,
             "font-style" => {
                 self.font_style = set_value_field(value, default.font_style, FontStyle::parse_cli)?
             }
@@ -695,6 +740,15 @@ impl Config {
                 self.font_style_bold_italic =
                     set_value_field(value, default.font_style_bold_italic, FontStyle::parse_cli)?
             }
+            "font-synthetic-style" => {
+                self.font_synthetic_style = set_packed_field(
+                    value,
+                    default.font_synthetic_style,
+                    FontSyntheticStyle::parse_cli,
+                )?
+            }
+            "font-size" => self.font_size = set_f32_field(value, default.font_size)?,
+            "font-codepoint-map" => self.font_codepoint_map.parse_cli(value)?,
             // `BackgroundBlur::parse_cli` is `&mut self` (it overwrites `self` in
             // place), so its arm is inline: a set-but-empty value resets to the
             // default; otherwise parse in place (a missing value sets `.true`, the
@@ -712,6 +766,24 @@ impl Config {
             _ => return Err(ConfigSetError::UnknownField),
         }
         Ok(())
+    }
+
+    /// Finalize derived config defaults (upstream `Config.finalize`). If a
+    /// regular font family is configured and a styled family list is empty, copy
+    /// the regular list so style discovery stays within the requested family.
+    pub(crate) fn finalize(&mut self) {
+        if self.font_family.count() == 0 {
+            return;
+        }
+        if self.font_family_bold.count() == 0 {
+            self.font_family_bold = self.font_family.clone();
+        }
+        if self.font_family_italic.count() == 0 {
+            self.font_family_italic = self.font_family.clone();
+        }
+        if self.font_family_bold_italic.count() == 0 {
+            self.font_family_bold_italic = self.font_family.clone();
+        }
     }
 
     /// Load config from a source string (upstream's config-file `parse` driving
@@ -863,6 +935,10 @@ impl Config {
         I: IntoIterator<Item = &'a str>,
     {
         let mut diagnostics = Vec::new();
+        self.font_family.overwrite_next = true;
+        self.font_family_bold.overwrite_next = true;
+        self.font_family_italic.overwrite_next = true;
+        self.font_family_bold_italic.overwrite_next = true;
         for (i, arg) in args.into_iter().enumerate() {
             match loader::parse_cli_arg(arg) {
                 Some((key, value)) => {
@@ -882,6 +958,10 @@ impl Config {
                 }),
             }
         }
+        self.font_family.overwrite_next = false;
+        self.font_family_bold.overwrite_next = false;
+        self.font_family_italic.overwrite_next = false;
+        self.font_family_bold_italic.overwrite_next = false;
         let base = std::fs::canonicalize(base).unwrap_or_else(|_| base.to_path_buf());
         self.expand_config_file_paths_from_base(&base);
         diagnostics
@@ -1223,6 +1303,84 @@ impl RepeatableConfigPath {
     }
 }
 
+/// A repeatable codepoint-to-font map (upstream
+/// `Config.RepeatableCodepointMap`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct RepeatableCodepointMap {
+    pub map: CodepointMap,
+}
+
+impl RepeatableCodepointMap {
+    pub(crate) fn parse_cli(
+        &mut self,
+        input: Option<&str>,
+    ) -> Result<(), RepeatableCodepointMapParseError> {
+        let input = input.ok_or(RepeatableCodepointMapParseError::ValueRequired)?;
+        let eql = input
+            .find('=')
+            .ok_or(RepeatableCodepointMapParseError::InvalidValue)?;
+        let key = input[..eql].trim_matches(|c: char| c == ' ' || c == '\t');
+        let value = input[eql + 1..].trim_matches(|c: char| c == ' ' || c == '\t');
+
+        let mut parser = UnicodeRangeParser::new(key.as_bytes());
+        while let Some(range) = parser
+            .next()
+            .map_err(|_| RepeatableCodepointMapParseError::InvalidValue)?
+        {
+            self.map.add(
+                range,
+                Descriptor {
+                    family: Some(value.to_string()),
+                    monospace: false,
+                    ..Default::default()
+                },
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn format_entry(&self, formatter: &mut EntryFormatter) {
+        if self.map.is_empty() {
+            formatter.entry_void();
+            return;
+        }
+
+        for entry in self.map.iter() {
+            let family = entry.descriptor.family.as_deref().unwrap_or("");
+            if entry.range[0] == entry.range[1] {
+                formatter.entry_str(&format!("U+{:04X}={}", entry.range[0], family));
+            } else {
+                formatter.entry_str(&format!(
+                    "U+{:04X}-U+{:04X}={}",
+                    entry.range[0], entry.range[1], family
+                ));
+            }
+        }
+    }
+}
+
+/// An error parsing `font-codepoint-map`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepeatableCodepointMapParseError {
+    ValueRequired,
+    InvalidValue,
+}
+
+impl From<RepeatableCodepointMapParseError> for ConfigSetError {
+    fn from(error: RepeatableCodepointMapParseError) -> Self {
+        match error {
+            RepeatableCodepointMapParseError::ValueRequired => ConfigSetError::ValueRequired,
+            RepeatableCodepointMapParseError::InvalidValue => ConfigSetError::InvalidValue,
+        }
+    }
+}
+
+impl From<InvalidRange> for RepeatableCodepointMapParseError {
+    fn from(_: InvalidRange) -> Self {
+        RepeatableCodepointMapParseError::InvalidValue
+    }
+}
+
 fn lexical_normalize_path(path: PathBuf) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
@@ -1289,6 +1447,15 @@ fn set_f64_field(value: Option<&str>, default_value: f64) -> Result<f64, ConfigS
         Some("") => Ok(default_value),
         None => Err(ConfigSetError::ValueRequired),
         Some(v) => v.parse::<f64>().map_err(|_| ConfigSetError::InvalidValue),
+    }
+}
+
+/// Resolve an `f32` field (upstream's type-magic `parseFloat` case).
+fn set_f32_field(value: Option<&str>, default_value: f32) -> Result<f32, ConfigSetError> {
+    match value {
+        Some("") => Ok(default_value),
+        None => Err(ConfigSetError::ValueRequired),
+        Some(v) => v.parse::<f32>().map_err(|_| ConfigSetError::InvalidValue),
     }
 }
 
@@ -2241,6 +2408,63 @@ pub(crate) enum MagicParseError {
     ValueRequired,
 }
 
+/// Controls synthetic bold/italic font styles (upstream
+/// `Config.FontSyntheticStyle`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FontSyntheticStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub bold_italic: bool,
+}
+
+impl Default for FontSyntheticStyle {
+    fn default() -> Self {
+        Self {
+            bold: true,
+            italic: true,
+            bold_italic: true,
+        }
+    }
+}
+
+impl FontSyntheticStyle {
+    /// Format as a packed-struct config entry.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_flags(&[
+            ("bold", self.bold),
+            ("italic", self.italic),
+            ("bold-italic", self.bold_italic),
+        ]);
+    }
+
+    /// Parse a standalone bool or `[no-]bold,[no-]italic,[no-]bold-italic`.
+    pub(crate) fn parse_cli(value: &str) -> Result<Self, FlagsParseError> {
+        let mut result = FontSyntheticStyle::default();
+        parse_packed_flags(value, |tok| match tok {
+            FlagToken::All(b) => {
+                result.bold = b;
+                result.italic = b;
+                result.bold_italic = b;
+                true
+            }
+            FlagToken::One("bold", on) => {
+                result.bold = on;
+                true
+            }
+            FlagToken::One("italic", on) => {
+                result.italic = on;
+                true
+            }
+            FlagToken::One("bold-italic", on) => {
+                result.bold_italic = on;
+                true
+            }
+            FlagToken::One(_, _) => false,
+        })?;
+        Ok(result)
+    }
+}
+
 /// Parse a `bool` field (upstream `parseIntoField`'s `bool => parseBool(value
 /// orelse "t")`): a missing value is a bare flag, which is `true`; otherwise
 /// `parse_bool` of the value, with `InvalidValue` for an unrecognized value.
@@ -2330,6 +2554,14 @@ fn parse_i16_base0(buf: &str) -> Result<i16, IntParseError> {
 pub(crate) enum RepeatableStringParseError {
     /// No value was supplied (upstream `error.ValueRequired`).
     ValueRequired,
+}
+
+impl From<RepeatableStringParseError> for ConfigSetError {
+    fn from(error: RepeatableStringParseError) -> Self {
+        match error {
+            RepeatableStringParseError::ValueRequired => ConfigSetError::ValueRequired,
+        }
+    }
 }
 
 /// An accumulating string-list config (upstream `Config.RepeatableString`): each
@@ -4178,17 +4410,18 @@ mod tests {
         Config, ConfigDiagnostic, ConfigFilePath, ConfigRecursiveFileErrorKind, ConfigSetError,
         ConfirmCloseSurface, CopyOnSelect, CustomShaderAnimation, DefaultConfigPaths, Duration,
         DurationParseError, FlagsParseError, FontShapingBreak, FontStyle, FontStyleParseError,
-        Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon,
-        MacTitlebarStyle, MacWindowButtons, MagicParseError, MiddleClickAction, MouseShiftCapture,
-        NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
-        OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
-        RepeatableClipboardCodepointMap, RepeatableConfigPath, RepeatableConfigPathParseError,
-        RepeatableString, RepeatableStringParseError, RightClickAction, ScrollToBottom,
-        SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
-        ShellIntegrationFeatures, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
-        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowPadding,
-        WindowPaddingColor, WindowPaddingParseError, WindowSaveState, WindowSubtitle, WindowTheme,
-        WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
+        FontSyntheticStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden,
+        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError,
+        MiddleClickAction, MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish,
+        NotifyOnCommandFinishAction, OptionalFileAction, OscColorReportFormat, Palette,
+        PaletteParseError, RepeatableClipboardCodepointMap, RepeatableCodepointMap,
+        RepeatableConfigPath, RepeatableConfigPathParseError, RepeatableString,
+        RepeatableStringParseError, RightClickAction, ScrollToBottom, SelectionWordChars,
+        SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
+        TerminalBoldColor, TerminalColor, Theme, ThemeParseError, WindowColorspace,
+        WindowDecoration, WindowDecorationParseError, WindowPadding, WindowPaddingColor,
+        WindowPaddingParseError, WindowSaveState, WindowSubtitle, WindowTheme, WorkingDirectory,
+        WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
@@ -4402,6 +4635,21 @@ mod tests {
         assert_eq!(d.bg_image_position, BackgroundImagePosition::Center);
         assert_eq!(d.bg_image_fit, BackgroundImageFit::Contain);
         assert!(!d.bg_image_repeat);
+        // Font config surface (Issue 802 Experiment 54).
+        assert!(d.font_family.list.is_empty());
+        assert!(d.font_family_bold.list.is_empty());
+        assert!(d.font_family_italic.list.is_empty());
+        assert!(d.font_family_bold_italic.list.is_empty());
+        assert_eq!(d.font_synthetic_style, FontSyntheticStyle::default());
+        assert_eq!(
+            d.font_size,
+            if cfg!(target_os = "macos") {
+                13.0
+            } else {
+                12.0
+            }
+        );
+        assert!(d.font_codepoint_map.map.is_empty());
         // Font-thicken group (Experiment 845): upstream defaults false / 255.
         assert!(!d.font_thicken);
         assert_eq!(d.font_thicken_strength, 255);
@@ -7986,6 +8234,155 @@ mod tests {
     }
 
     #[test]
+    fn config_font_family_repeats_clears_and_cli_overwrites_files() {
+        let mut cfg = Config::default();
+        cfg.set("font-family", Some("A")).unwrap();
+        cfg.set("font-family", Some("B")).unwrap();
+        assert_eq!(cfg.font_family.list, vec!["A", "B"]);
+
+        cfg.set("font-family", Some("")).unwrap();
+        assert!(cfg.font_family.list.is_empty());
+        cfg.set("font-family", Some("C")).unwrap();
+        assert_eq!(cfg.font_family.list, vec!["C"]);
+
+        let mut cfg = Config::default();
+        cfg.set("font-family", Some("File A")).unwrap();
+        cfg.set("font-family", Some("File B")).unwrap();
+        let diagnostics = cfg.set_cli_args([
+            "--font-family=CLI A",
+            "--font-family=CLI B",
+            "--font-family-bold=Bold A",
+            "--font-family-bold=Bold B",
+        ]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.font_family.list, vec!["CLI A", "CLI B"]);
+        assert_eq!(cfg.font_family_bold.list, vec!["Bold A", "Bold B"]);
+
+        let mut cfg = Config::default();
+        cfg.set("font-family", Some("File")).unwrap();
+        let diagnostics = cfg.set_cli_args(["--font-family=", "--font-family=CLI"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.font_family.list, vec!["CLI"]);
+    }
+
+    #[test]
+    fn config_font_family_finalize_inherits_regular_family() {
+        let mut cfg = Config::default();
+        cfg.set("font-family", Some("Regular A")).unwrap();
+        cfg.set("font-family", Some("Regular B")).unwrap();
+        cfg.set("font-family-bold", Some("Bold")).unwrap();
+        cfg.finalize();
+
+        assert_eq!(cfg.font_family_bold.list, vec!["Bold"]);
+        assert_eq!(cfg.font_family_italic.list, vec!["Regular A", "Regular B"]);
+        assert_eq!(
+            cfg.font_family_bold_italic.list,
+            vec!["Regular A", "Regular B"]
+        );
+    }
+
+    #[test]
+    fn config_font_synthetic_style_and_size_parse_and_format() {
+        let mut cfg = Config::default();
+        cfg.set("font-synthetic-style", Some("no-bold,no-italic"))
+            .unwrap();
+        assert_eq!(
+            cfg.font_synthetic_style,
+            FontSyntheticStyle {
+                bold: false,
+                italic: false,
+                bold_italic: true,
+            }
+        );
+        cfg.set("font-synthetic-style", Some("false")).unwrap();
+        assert_eq!(
+            cfg.font_synthetic_style,
+            FontSyntheticStyle {
+                bold: false,
+                italic: false,
+                bold_italic: false,
+            }
+        );
+        cfg.set("font-synthetic-style", Some("")).unwrap();
+        assert_eq!(cfg.font_synthetic_style, FontSyntheticStyle::default());
+        assert_eq!(
+            cfg.set("font-synthetic-style", Some("boldish")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("font-size", Some("13.5")).unwrap();
+        assert_eq!(cfg.font_size, 13.5);
+        assert_eq!(
+            cfg.set("font-size", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("font-size", Some("large")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.contains("font-synthetic-style = bold,italic,bold-italic"));
+        assert!(out.contains("font-size = 13.5"));
+    }
+
+    #[test]
+    fn config_codepoint_map_parses_ranges_and_formats_entries() {
+        let mut cfg = Config::default();
+        cfg.set("font-codepoint-map", Some("U+ABCD = Symbols"))
+            .unwrap();
+        cfg.set("font-codepoint-map", Some("U+0001-U+0003, U+0005 = Emoji"))
+            .unwrap();
+
+        assert_eq!(cfg.font_codepoint_map.map.len(), 3);
+        assert_eq!(
+            cfg.font_codepoint_map
+                .map
+                .get(0xABCD)
+                .unwrap()
+                .family
+                .as_deref(),
+            Some("Symbols")
+        );
+        assert_eq!(
+            cfg.font_codepoint_map
+                .map
+                .get(0x0002)
+                .unwrap()
+                .family
+                .as_deref(),
+            Some("Emoji")
+        );
+
+        let mut out = String::new();
+        cfg.font_codepoint_map
+            .format_entry(&mut EntryFormatter::new("font-codepoint-map", &mut out));
+        assert_eq!(
+            out,
+            "font-codepoint-map = U+ABCD=Symbols\nfont-codepoint-map = U+0001-U+0003=Emoji\nfont-codepoint-map = U+0005=Emoji\n"
+        );
+
+        assert_eq!(
+            cfg.set("font-codepoint-map", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("font-codepoint-map", Some("U+ABCD")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("font-codepoint-map", Some("U+0003-U+0001=Bad")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let mut out = String::new();
+        RepeatableCodepointMap::default()
+            .format_entry(&mut EntryFormatter::new("font-codepoint-map", &mut out));
+        assert_eq!(out, "font-codepoint-map = \n");
+    }
+
+    #[test]
     fn config_format_config_emits_fields_in_upstream_order() {
         let cfg = Config::default();
         let mut out = String::new();
@@ -8002,10 +8399,17 @@ mod tests {
             vec![
                 "initial-window",
                 "quit-after-last-window-closed",
+                "font-family",
+                "font-family-bold",
+                "font-family-italic",
+                "font-family-bold-italic",
                 "font-style",
                 "font-style-bold",
                 "font-style-italic",
                 "font-style-bold-italic",
+                "font-synthetic-style",
+                "font-size",
+                "font-codepoint-map",
                 "font-thicken",
                 "font-thicken-strength",
                 "font-shaping-break",

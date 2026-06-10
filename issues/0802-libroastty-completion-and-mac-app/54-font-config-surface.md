@@ -97,3 +97,64 @@ confirmed the plan is consistent with upstream for CLI overwrite behavior for
 font-family, finalize inheritance, macOS `font-size = 13`, packed
 `font-synthetic-style`, and repeatable `font-codepoint-map` feeding
 `CodepointMap`.
+
+## Result
+
+**Result:** Pass
+
+Roastty now represents and round-trips the initial Phase F font config surface:
+
+- `roastty/src/config/mod.rs`
+  - Added `font-family`, `font-family-bold`, `font-family-italic`,
+    `font-family-bold-italic`, `font-size`, `font-synthetic-style`, and
+    `font-codepoint-map` to `Config`.
+  - Wired defaults, parser routing, formatter output, and upstream-order config
+    formatting for the new fields.
+  - Reused the existing `RepeatableString` implementation for font-family
+    fields, including upstream's `overwrite_next` CLI behavior.
+  - Added `Config::finalize` inheritance so styled family lists clone the
+    regular `font-family` list when they are otherwise unset.
+  - Added `RepeatableCodepointMap` using the existing Unicode range parser and
+    `font::CodepointMap`.
+  - Added tests for font-family accumulation/clearing/CLI overwrite, finalize
+    inheritance, synthetic-style flags, font-size parsing, codepoint-map
+    parsing/formatting, defaults, and config output order.
+- `roastty/src/font/codepoint_map.rs`
+  - Added `Debug`, `Clone`, and `PartialEq` derives plus `len`, `is_empty`, and
+    insertion-order iteration helpers for config assertions and future derived
+    font-key construction.
+
+Verification passed:
+
+- `cargo fmt -- roastty/src/config/mod.rs roastty/src/font/codepoint_map.rs`
+- `cargo test -p roastty config_font`
+- `cargo test -p roastty config_codepoint_map`
+- `cargo test -p roastty codepoint_map`
+- `cargo test -p roastty`
+  - Unit tests: 4451 passed
+  - ABI harness: 1 passed
+  - Doctests: 0 tests
+- `git diff --check`
+- `git status --short`
+
+The ABI harness still emits pre-existing C enum-conversion warnings during
+compilation; the harness linked and passed.
+
+## Conclusion
+
+The initial font config surface is durable enough for the next Phase F step. The
+next experiment should build `font::SharedGridSet`'s derived key from these
+represented config fields instead of hardcoded Menlo-style defaults, while
+leaving the remaining font variation/metrics/freetype options for later focused
+slices.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent Planck
+(`multi_agent_v1.spawn_agent`, fresh context, read-only). **Verdict: APPROVED.**
+
+The reviewer returned no findings. It was instructed to inspect the completed
+experiment file, README status, working-tree diff, changed source files, and
+upstream Ghostty sources; to check scope, upstream fidelity, verification
+quality, and the no-result-commit-before-review gate; and to independently
+verify claimed commands where feasible.

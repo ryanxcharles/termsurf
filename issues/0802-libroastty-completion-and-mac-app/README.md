@@ -721,7 +721,7 @@ stays unaltered except for the rename).
 - [Experiment 53: Phase E — Unicode table and grapheme parity](53-unicode-table-parity.md)
   — **Pass**
 - [Experiment 54: Phase F — font config surface](54-font-config-surface.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 
