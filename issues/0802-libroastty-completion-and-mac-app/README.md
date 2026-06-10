@@ -696,6 +696,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 51: Phase E — Unicode width properties](51-unicode-width-properties.md)
   — **Pass**
+- [Experiment 52: Phase E — Terminal print Unicode width](52-terminal-print-unicode-width.md)
+  — **Designed**
 
 ## Process
 
