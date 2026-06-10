@@ -580,9 +580,10 @@ stays unaltered except for the rename).
   monitor move; headless change-detection test + 4418 green; live re-sharpen
   pending — screen locked) · Claude
 - [Experiment 36: Phase C — report color-scheme changes live (DECSET 2031)](36-color-scheme-change-report.md)
-  — **Designed** (the query half of mode 2031 exists, but `set_color_scheme`
-  never emits the proactive `997` report on an OS theme change; wire the change
-  path, gated on 2031, change-only; fully headless) · Claude
+  — **Pass** (mode 2031 now reports OS theme changes live — `set_color_scheme`
+  emits `997;1n`/`997;2n` on a change via the new
+  `Terminal::report_color_scheme_change`, gated on 2031, change-only;
+  deterministic terminal-level test + 4419 green, fully headless) · Claude
 
 ## Process
 

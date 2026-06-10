@@ -14417,7 +14417,19 @@ pub extern "C" fn roastty_surface_tty_name(surface: RoasttySurface) -> RoasttySt
 #[no_mangle]
 pub extern "C" fn roastty_surface_set_color_scheme(surface: RoasttySurface, color_scheme: c_int) {
     if let Some(surface) = surface_from_handle(surface) {
+        let changed = surface.color_scheme != color_scheme;
         surface.color_scheme = color_scheme;
+        if changed {
+            // OS appearance changed: if the program enabled mode 2031, notify it live (Issue 802 /
+            // Exp 36, upstream `Surface.colorSchemeCallback` → `Termio.colorSchemeReportLocked`).
+            if let Some(worker) = surface.termio_worker.as_ref() {
+                worker.with_termio_mut(|termio| {
+                    termio
+                        .terminal_mut()
+                        .report_color_scheme_change(color_scheme);
+                });
+            }
+        }
     }
 }
 

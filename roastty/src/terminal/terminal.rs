@@ -911,6 +911,18 @@ pub(crate) struct TerminalFormatterExtra {
     screen: ScreenFormatterExtra,
 }
 
+/// The `CSI ? 997` color-scheme report bytes for `scheme` (0 = light → `;2n`, 1 = dark → `;1n`),
+/// or `None` for an unknown scheme. Shared by the DSR query path
+/// (`TerminalStreamHandler::write_color_scheme_report`) and the live change report
+/// (`Terminal::report_color_scheme_change`) — Issue 802 / Exp 36.
+fn color_scheme_report_bytes(scheme: i32) -> Option<&'static [u8]> {
+    match scheme {
+        1 => Some(b"\x1b[?997;1n"), // dark
+        0 => Some(b"\x1b[?997;2n"), // light
+        _ => None,
+    }
+}
+
 impl Terminal {
     /// Whether the renderer marked the viewport/active area dirty (upstream
     /// `Terminal.flags.search_viewport_dirty`). Raw-pointer read for the search thread's `feed`,
@@ -2453,6 +2465,31 @@ impl Terminal {
         self.flags.mouse_shift_capture
     }
 
+    /// Report a color-scheme CHANGE to the program (write `CSI ? 997 ; 1 n` dark / `; 2 n` light),
+    /// but only when mode 2031 (`report_color_scheme`) is enabled — the live-notification (force=false)
+    /// path of upstream `Termio.colorSchemeReportLocked` (Issue 802 / Exp 36). The DSR query path
+    /// (`TerminalStreamHandler::color_scheme`) always reports (force=true). `scheme`: 0 = light,
+    /// 1 = dark.
+    pub(crate) fn report_color_scheme_change(&mut self, scheme: i32) {
+        if !self.modes.get(modes::Mode::ReportColorScheme) {
+            return;
+        }
+        let Some(bytes) = color_scheme_report_bytes(scheme) else {
+            return;
+        };
+        self.pty_response.extend_from_slice(bytes);
+        if let Some(callback) = self.effects.write_pty {
+            unsafe {
+                callback(
+                    self.effects.handle,
+                    self.effects.userdata,
+                    bytes.as_ptr(),
+                    bytes.len(),
+                );
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn mouse_shift_capture_for_tests(&self) -> Option<bool> {
         self.flags.mouse_shift_capture
@@ -3485,22 +3522,22 @@ impl TerminalStreamHandler<'_> {
     }
 
     fn color_scheme(&mut self) {
-        const LIGHT: i32 = 0;
-        const DARK: i32 = 1;
-
         let Some(callback) = self.effects.color_scheme else {
             return;
         };
-        let mut scheme = LIGHT;
+        let mut scheme = 0;
         let ok = unsafe { callback(self.effects.handle, self.effects.userdata, &mut scheme) };
         if !ok {
             return;
         }
+        self.write_color_scheme_report(scheme);
+    }
 
-        match scheme {
-            DARK => self.write_pty_response("\x1b[?997;1n"),
-            LIGHT => self.write_pty_response("\x1b[?997;2n"),
-            _ => {}
+    /// Emit the `CSI ? 997` color-scheme report for `scheme` (0 = light, 1 = dark). Shared by the DSR
+    /// query (`color_scheme`) and the live change report (Issue 802 / Exp 36).
+    fn write_color_scheme_report(&mut self, scheme: i32) {
+        if let Some(bytes) = color_scheme_report_bytes(scheme) {
+            self.write_pty_response_bytes(bytes);
         }
     }
 
@@ -6237,6 +6274,31 @@ mod tests {
 
         assert!(!terminal.get_mode_for_tests(Mode::MouseFormatSgr));
         assert_eq!(terminal.mouse_format_for_tests(), mouse::MouseFormat::X10);
+    }
+
+    #[test]
+    fn report_color_scheme_change_gated_on_mode_2031() {
+        let mut term = Terminal::init(80, 24, None).unwrap();
+        // Mode 2031 off by default → a change reports nothing.
+        term.report_color_scheme_change(1);
+        assert!(
+            term.pty_response().is_empty(),
+            "no report when mode 2031 is disabled"
+        );
+
+        // Enable mode 2031, then a dark change → `997;1n`, a light change → `997;2n`.
+        term.next_slice(b"\x1b[?2031h").unwrap();
+        term.clear_pty_response();
+        term.report_color_scheme_change(1); // dark
+        assert_eq!(term.pty_response(), b"\x1b[?997;1n");
+        term.clear_pty_response();
+        term.report_color_scheme_change(0); // light
+        assert_eq!(term.pty_response(), b"\x1b[?997;2n");
+
+        // An out-of-range scheme is a graceful no-op.
+        term.clear_pty_response();
+        term.report_color_scheme_change(99);
+        assert!(term.pty_response().is_empty(), "unknown scheme is a no-op");
     }
 
     #[test]

@@ -114,8 +114,74 @@ no-op superset.
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — an OS color-scheme change now emits the live `CSI ? 997`
+report under mode 2031 (fully headless; no live needed).
+
+### Change (only `libroastty`)
+
+- `terminal.rs`: extracted `write_color_scheme_report(scheme)` (shared by the
+  DSR query path, unchanged); added
+  **`Terminal::report_color_scheme_change(scheme)`** — the force=false path:
+  `if !modes.get(Mode::ReportColorScheme) { return; }` then emit
+  `997;1n`(dark)/`997;2n`(light) directly to `pty_response` + the `write_pty`
+  callback (Terminal owns `modes`/`pty_response`/`effects`, so it doesn't need
+  the parse-time `TerminalStreamHandler`).
+- `lib.rs`: `roastty_surface_set_color_scheme` detects
+  `changed = surface.color_scheme != color_scheme`, stores, and on a change
+  calls `report_color_scheme_change` via the worker (mirrors upstream
+  `colorSchemeCallback` change-only → `colorSchemeReportLocked` mode-gating).
+
+### Verification
+
+- **Deterministic terminal-level test**
+  `report_color_scheme_change_gated_on_mode_2031` (`terminal.rs`): mode 2031
+  **off** (default) → no report; **on** → dark `997;1n`, light `997;2n`; an
+  out-of-range scheme → no-op. Fails pre-fix (the method didn't exist), passes
+  after.
+- **Surface wiring** verified end-to-end manually during implementation (a
+  `set_color_scheme(DARK)` with 2031 enabled produced `[?997;1n` through the
+  worker's terminal). A _surface_-level pty assert is **not** deterministic —
+  `with_termio` lets the worker drain `pty_response` (flush to the pty) between
+  the write and the read — so the report logic is proven at the terminal level
+  (no worker) and the lib.rs change is the thin reviewed change-detect +
+  delegate.
+- **Full `cargo test -p roastty`:** lib **4419 passed**, 0 failures — the
+  existing DSR-query color-scheme test (`?996n` → `997`, force=true) still
+  passes (the refactor only extracted the shared emit).
+- **No live confirmation needed** — a pty protocol emission, observable in the
+  model. **Completes fully while the screen is locked.**
 
 ## Conclusion
 
-_(to be added after the run.)_
+A real conformance gap is closed: roastty now implements **both** halves of mode
+2031 — the DSR query (already present) **and** the proactive change notification
+(new), so a program that opted in is told live when the OS flips light/dark.
+Faithful to upstream `Surface.colorSchemeCallback` /
+`Termio.colorSchemeReportLocked` (change-only, mode-gated). A clean
+fully-headless Pass. The live re-confirmations (Exp 29 CJK, 30 shift-click, 33
+shift-drag, 35 DPI) + closing 802 + the all-live CVDisplayLink vsync follow-up
+await the screen unlock.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** Independently verified: the terminal-level
+test is **load-bearing across all arms** (mode-off→empty, dark(1)→`997;1n`,
+light(0)→`997;2n` exact-byte, out-of-range→no-op; fails if the gate is dropped
+or the mapping inverted); **no regression** (full lib **4419 passed, 0 failed**;
+the DSR-query test drives `?996n` with 2031 off and still expects `997` —
+proving the refactor kept force=true/always-emit); the **terminal method is
+faithful** (gates on DEC 2031; `1=dark→997;1n`, `0=light→997;2n` byte-for-byte
+upstream `Termio.zig:716-717`; writes both `pty_response` + the `write_pty`
+callback like `write_pty_response_bytes`); the **lib.rs wiring is correct**
+(change-detect- before-store; surface default `color_scheme=0` light so the
+first dark flip is detected; clean borrow; mirrors `Surface.zig:4688-4696`); the
+**dropped-surface-test rationale is legitimate** (confirmed the worker drains
+`pty_response` on a background thread via `collect_terminal_response` behind the
+shared mutex — a surface assert races the drain after `with_termio_mut`
+releases; no synchronous-worker seam, so no clean deterministic surface test
+exists); honest Pass; scope/hygiene clean (`fmt` 0, no new "ghostty" literals).
+Optional folded in: the `997;1n`/`997;2n` mapping was duplicated across the two
+structs — **factored into a shared `color_scheme_report_bytes(scheme)` free fn**
+that both the query path (`write_color_scheme_report`) and the change path
+(`report_color_scheme_change`) call (suite still 4419 green).
