@@ -688,6 +688,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 50: Phase E — Unicode-width live A/B recipe](50-live-ab-unicode-width-recipe.md)
   — **Pass**
+- [Experiment 51: Phase E — Unicode width properties](51-unicode-width-properties.md)
+  — **Designed**
 
 ## Process
 
