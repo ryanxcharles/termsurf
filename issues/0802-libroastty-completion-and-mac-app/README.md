@@ -418,6 +418,11 @@ before re-reading experiments.
 - **Class config (Exp 68):** `class` and `x11-instance-name` now parse/format as
   faithful optional string surfaces. Runtime GTK/X11/Wayland identity behavior
   remains later app-runtime wiring work.
+- **Working-directory config (Exp 69):** `working-directory` now parse/formats
+  as a faithful optional `WorkingDirectory` surface. Config-file
+  `working-directory =` is the empty-reset path; a missing value line
+  `working-directory` reports `ValueRequired`. Finalize-time probable-CLI/home
+  defaulting remains later config-finalize work.
 
 ### Where things live
 
@@ -786,7 +791,7 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 68: Phase F — class config](68-class-config.md) — **Pass**
 - [Experiment 69: Phase F — working-directory config](69-working-directory-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

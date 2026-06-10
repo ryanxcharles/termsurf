@@ -98,3 +98,59 @@ upstream's `?WorkingDirectory = null`, optional empty-reset behavior, parser
 behavior, formatter ordering, and deferred finalize/launcher inheritance, and
 the verification plan includes the required formatting, targeted tests, full
 `cargo test -p roastty`, `git diff --check`, and clean-status checks.
+
+## Result
+
+**Result:** Pass
+
+Experiment 69 added the config-only `working-directory` surface to
+`roastty/src/config/mod.rs`. `Config` now carries
+`working_directory: Option<WorkingDirectory>` with the upstream default unset,
+routes `working-directory` through `Config::set`, and emits it in
+`format_config` after `x11-instance-name`.
+
+The field reuses the existing `WorkingDirectory` parser and formatter. It
+accepts `home`, `inherit`, plain paths, quoted paths, and `~/` paths. Empty
+values reset to unset. Missing values and whitespace-only direct setter values
+report `ValueRequired`; in config-file syntax, `working-directory =` is the
+empty-reset path, while a missing-value line `working-directory` records a
+`ValueRequired` diagnostic. `Config::load_str` keeps valid neighboring lines.
+
+Finalize-time probable-CLI/home defaults, home-directory lookup, inheritance
+booleans, and runtime surface/app launch inheritance remain out of scope.
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test -p roastty working_directory_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+- `cargo fmt --check`
+- `git diff --check`
+- `git status --short`
+
+`cargo test -p roastty` passed with 4,504 unit tests, the C ABI harness, and doc
+tests. The C ABI harness still emits existing enum-conversion warnings unrelated
+to this config change.
+
+## Conclusion
+
+`working-directory` now has a faithful parser/formatter config surface with
+defaults, reset behavior, diagnostics, formatter-order coverage, and
+clone/equality coverage. The next adjacent upstream fields are the
+inherit-working-directory booleans and other window/runtime options, while the
+probable-CLI/home defaulting should remain part of the broader config
+`finalize()` workstream.
+
+## Completion Review
+
+Codex-native adversarial reviewer `019eb3f0-493d-78e0-8ab9-4eebf1641b79`
+returned **Approved** with no findings.
+
+The reviewer checked the completed experiment with fresh context, including the
+workflow contract, issue README, experiment file, implementation diff since the
+plan commit, `roastty/src/config/mod.rs`, and upstream
+`vendor/ghostty/src/config/Config.zig`. The reviewer independently verified
+`cargo fmt --check`, `git diff --check`, both targeted test commands, and full
+`cargo test -p roastty`, which passed with 4,504 unit tests, the C ABI harness,
+and doc tests.

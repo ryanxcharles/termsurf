@@ -188,6 +188,8 @@ pub(crate) struct Config {
     pub class: Option<String>,
     /// `x11-instance-name`.
     pub x11_instance_name: Option<String>,
+    /// `working-directory`.
+    pub working_directory: Option<WorkingDirectory>,
     /// `macos-non-native-fullscreen`.
     pub macos_non_native_fullscreen: NonNativeFullscreen,
     /// `macos-titlebar-style`.
@@ -335,6 +337,7 @@ impl Default for Config {
             title: None,
             class: None,
             x11_instance_name: None,
+            working_directory: None,
             macos_non_native_fullscreen: NonNativeFullscreen::False,
             macos_titlebar_style: MacTitlebarStyle::Transparent,
             macos_titlebar_proxy_icon: MacTitlebarProxyIcon::Visible,
@@ -513,6 +516,8 @@ impl Config {
             .entry_optional(self.class.clone(), |v, f| f.entry_str(&v));
         EntryFormatter::new("x11-instance-name", out)
             .entry_optional(self.x11_instance_name.clone(), |v, f| f.entry_str(&v));
+        EntryFormatter::new("working-directory", out)
+            .entry_optional(self.working_directory.clone(), |v, f| v.format_entry(f));
         self.window_padding_color
             .format_entry(&mut EntryFormatter::new("window-padding-color", out));
         self.window_subtitle
@@ -807,6 +812,13 @@ impl Config {
             "x11-instance-name" => {
                 self.x11_instance_name =
                     set_optional_value_field(value, default.x11_instance_name, parse_string_field)?
+            }
+            "working-directory" => {
+                self.working_directory = set_optional_value_field(
+                    value,
+                    default.working_directory,
+                    parse_working_directory_field,
+                )?
             }
             "macos-non-native-fullscreen" => {
                 self.macos_non_native_fullscreen = set_enum_field(
@@ -1808,6 +1820,14 @@ impl From<RepeatableStringMapParseError> for ConfigSetError {
     }
 }
 
+impl From<WorkingDirectoryParseError> for ConfigSetError {
+    fn from(e: WorkingDirectoryParseError) -> Self {
+        match e {
+            WorkingDirectoryParseError::ValueRequired => ConfigSetError::ValueRequired,
+        }
+    }
+}
+
 impl From<WindowDecorationParseError> for ConfigSetError {
     fn from(e: WindowDecorationParseError) -> Self {
         match e {
@@ -2604,6 +2624,14 @@ impl WorkingDirectory {
             WorkingDirectory::Path(path) => formatter.entry_str(path),
         }
     }
+}
+
+fn parse_working_directory_field(
+    value: Option<&str>,
+) -> Result<WorkingDirectory, WorkingDirectoryParseError> {
+    let mut working_directory = WorkingDirectory::Inherit;
+    working_directory.parse_cli(value)?;
+    Ok(working_directory)
 }
 
 /// An error parsing `WindowPadding` (upstream `WindowPadding.parseCLI`).
@@ -5454,6 +5482,7 @@ mod tests {
         assert_eq!(d.title, None);
         assert_eq!(d.class, None);
         assert_eq!(d.x11_instance_name, None);
+        assert_eq!(d.working_directory, None);
         assert_eq!(d.macos_non_native_fullscreen, NonNativeFullscreen::False);
         assert_eq!(d.macos_titlebar_style, MacTitlebarStyle::Transparent);
         assert_eq!(d.macos_titlebar_proxy_icon, MacTitlebarProxyIcon::Visible);
@@ -9301,6 +9330,7 @@ mod tests {
                 "title",
                 "class",
                 "x11-instance-name",
+                "working-directory",
                 "window-padding-color",
                 "window-subtitle",
                 "window-decoration",
@@ -11231,6 +11261,84 @@ mod tests {
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.class.as_deref(), Some("com.example.Valid"));
         assert_eq!(cloned.x11_instance_name.as_deref(), Some("roastty"));
+    }
+
+    #[test]
+    fn working_directory_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("working-directory = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.working_directory, None);
+        assert_eq!(line(&cfg), "working-directory = ");
+
+        cfg.set("working-directory", Some("home")).unwrap();
+        assert_eq!(cfg.working_directory, Some(WorkingDirectory::Home));
+        assert_eq!(line(&cfg), "working-directory = home");
+
+        cfg.set("working-directory", Some("inherit")).unwrap();
+        assert_eq!(cfg.working_directory, Some(WorkingDirectory::Inherit));
+        assert_eq!(line(&cfg), "working-directory = inherit");
+
+        cfg.set("working-directory", Some("/tmp/app")).unwrap();
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path("/tmp/app".to_string()))
+        );
+        assert_eq!(line(&cfg), "working-directory = /tmp/app");
+
+        cfg.set("working-directory", Some("\"/tmp path\"")).unwrap();
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path("/tmp path".to_string()))
+        );
+        assert_eq!(line(&cfg), "working-directory = /tmp path");
+
+        cfg.set("working-directory", Some("~/projects/app"))
+            .unwrap();
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path("~/projects/app".to_string()))
+        );
+        assert_eq!(line(&cfg), "working-directory = ~/projects/app");
+
+        cfg.set("working-directory", Some("")).unwrap();
+        assert_eq!(cfg.working_directory, None);
+        assert_eq!(line(&cfg), "working-directory = ");
+
+        assert_eq!(
+            cfg.set("working-directory", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("working-directory", Some("   ")),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        let diagnostics = cfg.load_str("working-directory = home\nworking-directory\n");
+        assert_eq!(cfg.working_directory, Some(WorkingDirectory::Home));
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "working-directory".to_string(),
+                error: ConfigSetError::ValueRequired,
+            }]
+        );
+
+        cfg.set("working-directory", Some("/clone")).unwrap();
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(
+            cloned.working_directory,
+            Some(WorkingDirectory::Path("/clone".to_string()))
+        );
     }
 
     #[test]
