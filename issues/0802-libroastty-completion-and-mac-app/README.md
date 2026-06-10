@@ -574,6 +574,11 @@ stays unaltered except for the rename).
   `capture_shift`) into the full `mouseShiftCapture` logic;
   Never/Always/flag/default all honored; 4417 green, fully headless — closes
   Exp-33's config sub-deferral) · Claude
+- [Experiment 35: Phase C — rebuild the renderer on a DPI (content-scale) change](35-dpi-change-rebuild.md)
+  — **Designed** (`set_content_scale` never drops the renderer → stale-DPI
+  glyphs after a monitor move; drop it on a scale change so present_live
+  rebuilds at the new scale; headless change-detection test, visual
+  live-pending) · Claude
 
 ## Process
 
