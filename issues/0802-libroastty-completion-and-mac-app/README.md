@@ -765,6 +765,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 60: Phase F — cursor default config](60-cursor-default-config.md)
   — **Pass**
+- [Experiment 61: Phase F — split visual config surface](61-split-visual-config-surface.md)
+  — **Designed**
 
 ## Process
 
