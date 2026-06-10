@@ -16696,6 +16696,57 @@ mod tests {
         roastty_app_free(app);
     }
 
+    /// Issue 802 / Exp 26: end-to-end — a mouse-drag selection copied via the `copy_to_clipboard`
+    /// binding action lands the dragged text on the clipboard. (The binding→copy mechanics + the
+    /// no-selection case are covered elsewhere; this joins the drag GESTURE to copy.)
+    #[test]
+    fn mouse_drag_then_copy_to_clipboard() {
+        let _guard = pty_command_lock();
+        let app = new_test_app_with_clipboard_write(0xC0DE);
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 5"));
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(b"SELECTME_TARGET_0123")
+                    .unwrap();
+            });
+
+        // Drag-select "TARGET" (cols 9..=14, the Exp-25 path).
+        let s = surface_from_handle(surface).unwrap();
+        s.mouse_pos(92.0, 10.0, 0);
+        s.mouse_button(1, 1, 0); // Press Left
+        s.mouse_pos(149.0, 10.0, 0);
+        s.mouse_button(0, 1, 0); // Release Left
+
+        // Copy via the real binding-action path (default = Mixed → text/plain + text/html).
+        reset_clipboard_write_records();
+        assert!(
+            binding_action(surface, "copy_to_clipboard"),
+            "copy binding action"
+        );
+        let records = clipboard_write_records();
+        let plain = records
+            .iter()
+            .flat_map(|r| r.contents.iter())
+            .find(|(mime, _)| mime == "text/plain")
+            .map(|(_, text)| text.clone());
+        assert_eq!(
+            plain.as_deref(),
+            Some("TARGET"),
+            "drag-selected text must be copied to the clipboard; records={records:?}"
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
     /// Issue 802 / Exp 23: the mouse wheel must navigate scrollback in a plain (non-mouse-
     /// reporting) shell. Two bugs were fixed:  never touched the viewport (only
     /// emitted mouse reports), and the render read-path read the active bottom, not the viewport.

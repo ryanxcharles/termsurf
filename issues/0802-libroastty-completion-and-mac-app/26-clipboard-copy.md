@@ -134,8 +134,66 @@ text.
 
 ## Result
 
-_(to be added after the run.)_
+**Result:** Pass — copy of a drag-selection reaches the system clipboard. **No
+`libroastty` code change** (copy was already wired + unit-tested); this
+experiment adds the missing _integration_ test and the live system-clipboard
+proof.
+
+### Verification
+
+- **Headless integration test** `mouse_drag_then_copy_to_clipboard` (`lib.rs`):
+  a **drag-gesture** selection (the Exp-25 `mouse_pos`/`mouse_button` path) of
+  "TARGET", then `roastty_surface_binding_action(surface, "copy_to_clipboard")`,
+  records a `("text/plain", "TARGET")` entry (Mixed default — plain + html) on
+  the test clipboard. This joins the drag gesture to copy — the one seam the
+  existing copy tests (which set the selection programmatically) didn't cover.
+  Fails if the gesture-selection doesn't reach copy; passes.
+- **Full `cargo test -p roastty`:** lib **4409 passed**, 0 failures.
+- **Live confirmation** (screen unlocked; app + descendant tree killed, 0
+  dangling): pasteboard pre-set to a stale sentinel (`CLIPBOARD_PROBE_STALE`);
+  launched with `echo DRAGSELECTME_TARGET_HERE`; drag-selected a span
+  (`drag.swift`), then **Edit ▸ Copy** (AX menu via `osascript`, driving the
+  real `copy(_:)` IBAction → `roastty_surface_binding_action`) — **`pbpaste`
+  returned `SELECTME_`** (the highlighted span), replacing the sentinel. So the
+  full path drag→select→copy→`write_clipboard_cb`→`NSPasteboard` works end to
+  end. (CGEvent ⌘C did **not** land — keyboard events are focus-dependent, the
+  Exp-19/20 caveat; the Edit▸Copy menu is what ⌘C triggers when focused, so this
+  proves the copy path; the ⌘C focus issue is a harness limitation, not an app
+  bug.)
 
 ## Conclusion
 
-_(to be added after the run.)_
+Clipboard copy of a selection works end to end (headless integration + live
+`pbpaste`), faithful to the `Mixed` (plain+html) default with `selection_format`
+trim. **Both halves of the last Exp-20-deferred probe — mouse selection (Exp 25)
+and clipboard copy (Exp 26) — are now done.** The remaining work is refinements
+(selection word/line double/triple-click + drag-autoscroll +
+shift-while-reporting; the reporting clear+reset widening; CJK ideographic
+wide-pitch; CVDisplayLink vsync; DPI-change rebuild) and the `shape_run_options`
+cursor-shaping-hint viewport-gating — none a core conformance gap. Issue 802's
+core goal (a faithful, feature-conformant renamed-Ghostty app on libroastty) is
+essentially met; the next step is to weigh closing the issue vs. continuing the
+refinements.
+
+## Result Review
+
+**Reviewer:** `adversarial-reviewer` subagent (Claude Opus, fresh context,
+read-only). **Verdict: APPROVED.** It tried to break the result on vacuity,
+path, suite, and Pass-honesty; all held. The test **passes + is load-bearing**
+(the selection comes from the real gesture; if the drag selected nothing/a wider
+span the exact `text/plain == "TARGET"` assertion fails;
+`reset_clipboard_write_records` + `supports_selection_clipboard=false` mean the
+recorded entry can only come from the copy — the genuinely novel drag→copy
+seam). Full lib **4409 passed, 0 failed**. **Pass is honest re: ⌘C** — verified
+in source that the Edit▸Copy menu item's action is `#selector(copy(_:))` and ⌘C
+drives the same first-responder `copy:` selector, so the copy _path_
+(drag→select→IBAction→`binding_action`→`write_clipboard`→`NSPasteboard`) is
+proven live; only the generic AppKit keystroke→selector binding was unexercised
+(disclosed), and the design pre-sanctioned the AX Copy-menu route. Live evidence
+sound (stale sentinel **replaced** by "SELECTME\_" — stronger than a bare
+clear). Scope clean (test-only diff, one hunk inside `mod tests`). Nits:
+Pass-bullet wording (fixed → "⌘C or the equivalent Edit▸Copy action");
+`keychord.swift` unused-but-harmless (kept as a documented probe artifact,
+parallel to `drag.swift`). Informational (pre-existing, NOT this diff):
+`lib.rs:4506,4531` + comments `14399/14420` carry `ghostty` literals predating
+this work — a separate cleanup, out of scope for Exp 26.

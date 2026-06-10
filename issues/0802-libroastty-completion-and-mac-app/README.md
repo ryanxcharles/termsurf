@@ -533,9 +533,9 @@ stays unaltered except for the rename).
   into the core `mouse_button`/`mouse_pos`, viewport-pin-anchored so it works in
   scrollback; headless 2-case test + 4408 green + live highlight) · Claude
 - [Experiment 26: Phase C — clipboard copy of a selection (deferred Exp-20 probe)](26-clipboard-copy.md)
-  — **Designed** (copy is wired: ⌘C→binding
-  `copy_to_clipboard`→`write_clipboard_cb`→NSPasteboard; probe it — headless
-  recording-cb test + live ⌘C/pbpaste) · Claude
+  — **Pass** (copy was already wired + unit-tested; added the missing
+  drag-gesture→copy integration test + live proof — drag-select then Edit▸Copy
+  lands the text on NSPasteboard, `pbpaste` confirms; 4409 green) · Claude
 
 ## Process
 
