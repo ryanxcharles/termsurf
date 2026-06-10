@@ -596,6 +596,8 @@ stays unaltered except for the rename).
   green, fully headless) · Claude
 - [Experiment 38: Phase D — screenshot diff metric for live A/B checks](38-screenshot-diff-metric.md)
   — **Pass** · Codex/Codex/Codex
+- [Experiment 39: Phase D — live A/B smoke harness](39-live-ab-smoke-harness.md)
+  — **Designed**
 
 ## Process
 
