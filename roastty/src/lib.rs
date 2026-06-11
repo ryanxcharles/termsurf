@@ -4672,9 +4672,18 @@ impl Surface {
 
     fn dispatch_configured_binding(&mut self, binding: ConfiguredBindingMatch) -> Option<bool> {
         let parsed = parse_binding_action(self, &binding.action)?;
-        let _performed = perform_parsed_binding_action(self, parsed);
-        self.last_consumed_default_binding = Some(binding.release_identity);
-        Some(true)
+        let performed = perform_parsed_binding_action(self, parsed);
+        let global_or_all =
+            binding.flags & (ROASTTY_KEYBIND_FLAG_GLOBAL | ROASTTY_KEYBIND_FLAG_ALL) != 0;
+        let consumed = binding.flags & ROASTTY_KEYBIND_FLAG_CONSUMED != 0 || global_or_all;
+        if binding.flags & ROASTTY_KEYBIND_FLAG_PERFORMABLE != 0 && !performed && !global_or_all {
+            return None;
+        }
+        if consumed {
+            self.last_consumed_default_binding = Some(binding.release_identity);
+            return Some(true);
+        }
+        None
     }
 
     fn key(&mut self, event: &KeyEvent) -> bool {
@@ -17863,6 +17872,179 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_configured_unconsumed_performs_and_encodes() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_key_remap_and_keybind(None, Some(b"unconsumed:x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "stty raw -echo; printf ready; byte=$(dd bs=1 count=1 2>/dev/null); printf out:%s \"$byte\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_NONE)
+        ));
+
+        wait_for_surface_plain_screen(app, surface, "out:x");
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_configured_default_consumes_encoded_key() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_key_remap_and_keybind(None, Some(b"x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "stty raw -echo; printf ready; byte=$(dd bs=1 count=1 2>/dev/null); printf out:%s \"$byte\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_NONE)
+        ));
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyY, b"y", u32::from(b'y'), ROASTTY_MODS_NONE)
+        ));
+
+        wait_for_surface_plain_screen(app, surface, "out:y");
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_configured_performable_unperformed_encodes() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_key_remap_and_keybind(
+            None,
+            Some(b"performable:x=copy_to_clipboard"),
+        );
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "stty raw -echo; printf ready; byte=$(dd bs=1 count=1 2>/dev/null); printf out:%s \"$byte\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_NONE)
+        ));
+
+        wait_for_surface_plain_screen(app, surface, "out:x");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_configured_performable_performed_consumes() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_key_remap_and_keybind(None, Some(b"performable:x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "stty raw -echo; printf ready; byte=$(dd bs=1 count=1 2>/dev/null); printf out:%s \"$byte\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_NONE)
+        ));
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyY, b"y", u32::from(b'y'), ROASTTY_MODS_NONE)
+        ));
+
+        wait_for_surface_plain_screen(app, surface, "out:y");
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_configured_global_all_consume_even_when_unconsumed() {
+        for keybind in [
+            b"global:unconsumed:x=quit".as_slice(),
+            b"all:unconsumed:x=quit".as_slice(),
+        ] {
+            let _guard = pty_command_lock();
+            let config = new_test_config_with_key_remap_and_keybind(None, Some(keybind));
+            let app = new_test_app_with_action_config(true, config);
+            let surface = new_test_surface(app);
+            surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+                "stty raw -echo; printf ready; byte=$(dd bs=1 count=1 2>/dev/null); printf out:%s \"$byte\"; sleep 1",
+            ));
+            wait_for_surface_plain_screen(app, surface, "ready");
+
+            assert!(send_key(
+                surface,
+                key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_NONE)
+            ));
+            assert!(send_key(
+                surface,
+                key_press(key::Key::KeyY, b"y", u32::from(b'y'), ROASTTY_MODS_NONE)
+            ));
+
+            wait_for_surface_plain_screen(app, surface, "out:y");
+            let records = action_records();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        }
+    }
+
+    #[test]
+    fn surface_key_configured_global_all_consume_even_when_performable_unperformed() {
+        for keybind in [
+            b"global:performable:unconsumed:x=copy_to_clipboard".as_slice(),
+            b"all:performable:unconsumed:x=copy_to_clipboard".as_slice(),
+        ] {
+            let _guard = pty_command_lock();
+            let config = new_test_config_with_key_remap_and_keybind(None, Some(keybind));
+            let app = new_test_app_with_action_config(true, config);
+            let surface = new_test_surface(app);
+            surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+                "stty raw -echo; printf ready; byte=$(dd bs=1 count=1 2>/dev/null); printf out:%s \"$byte\"; sleep 1",
+            ));
+            wait_for_surface_plain_screen(app, surface, "ready");
+
+            assert!(send_key(
+                surface,
+                key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_NONE)
+            ));
+            assert!(send_key(
+                surface,
+                key_press(key::Key::KeyY, b"y", u32::from(b'y'), ROASTTY_MODS_NONE)
+            ));
+
+            wait_for_surface_plain_screen(app, surface, "out:y");
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        }
     }
 
     #[test]

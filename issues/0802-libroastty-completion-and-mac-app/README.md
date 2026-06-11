@@ -346,6 +346,13 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   all-surface routing, unconsumed pass-through, performable configured-action
   gating, sequences/chords, native keymaps, and `roastty_app_key` dispatch
   remain later work.
+- **Configured binding consumption is wired for surfaces.** Exp 111 applies the
+  configured-keybind flag byte in `Surface::key`: `unconsumed:` actions now
+  perform and still encode the key, `performable:` actions only consume when
+  performed, and global/all bindings remain consumed in the current surface
+  path. Runtime global shortcut registration, all-surface action routing,
+  app-scoped `roastty_app_key`, sequences/chords, key tables, native keymaps,
+  and the full upstream binding table remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -718,8 +725,9 @@ the live app, verified by a Phase-D UI test.)
 
 - [ ] Multi-key sequences / chords (the trie), leader keys, key tables
 - [ ] Trigger-prefix flags (`global:` / `all:` / `unconsumed:` / `performable:`)
-      — parser/storage/query metadata is wired (Exp 110), but runtime
-      global/all/unconsumed/performable semantics remain later work
+      — parser/storage/query metadata and surface unconsumed/performable
+      consumption are wired (Exp 110–111), but runtime global/all app routing
+      remains later work
 - [ ] The full action set + the default-bindings data table + reverse
       action→trigger mapping
 - [ ] Command-palette catalog (`command.zig`)
@@ -1060,7 +1068,7 @@ stays unaltered except for the rename).
 - [Experiment 110: Phase G — keybind trigger prefix flags](110-keybind-trigger-prefix-flags.md)
   — **Pass**
 - [Experiment 111: Phase G — configured binding consumption](111-configured-binding-consumption.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
