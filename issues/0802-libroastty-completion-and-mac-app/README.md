@@ -1047,6 +1047,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 109: Phase G — key-remap runtime application](109-key-remap-runtime-application.md)
   — **Pass**
+- [Experiment 110: Phase G — keybind trigger prefix flags](110-keybind-trigger-prefix-flags.md)
+  — **Designed**
 
 ## Process
 
