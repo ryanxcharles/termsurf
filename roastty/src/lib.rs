@@ -1695,6 +1695,7 @@ struct Config {
     confirm_close_surface: config::ConfirmCloseSurface,
     has_global_keybinds: bool,
     keybind_triggers: Vec<ConfigKeybind>,
+    keybind_tables: Vec<ConfigKeybindTable>,
     cached_title: Option<CString>,
     cached_bell_audio_path: Option<CachedConfigPath>,
     diagnostics: Vec<CString>,
@@ -1710,6 +1711,12 @@ struct ConfigKeybind {
     action: Vec<u8>,
     flags: u8,
     trigger: RoasttyInputTrigger,
+}
+
+#[derive(Clone)]
+struct ConfigKeybindTable {
+    name: Vec<u8>,
+    bindings: Vec<ConfigKeybind>,
 }
 
 impl Config {
@@ -1818,6 +1825,40 @@ impl Config {
         self.keybind_triggers.push(binding);
     }
 
+    fn store_keybind_entry(&mut self, entry: ParsedConfigKeybind) {
+        match entry {
+            ParsedConfigKeybind::Root(binding) => self.store_keybind(binding),
+            ParsedConfigKeybind::Table { name, binding } => {
+                if let Some(table) = self
+                    .keybind_tables
+                    .iter_mut()
+                    .find(|table| table.name == name)
+                {
+                    table.bindings.push(binding);
+                } else {
+                    self.keybind_tables.push(ConfigKeybindTable {
+                        name,
+                        bindings: vec![binding],
+                    });
+                }
+            }
+            ParsedConfigKeybind::TableClear { name } => {
+                if let Some(table) = self
+                    .keybind_tables
+                    .iter_mut()
+                    .find(|table| table.name == name)
+                {
+                    table.bindings.clear();
+                } else {
+                    self.keybind_tables.push(ConfigKeybindTable {
+                        name,
+                        bindings: Vec::new(),
+                    });
+                }
+            }
+        }
+    }
+
     fn key_event_is_binding(&self, event: &key::KeyEvent) -> bool {
         configured_key_event_exact_binding(&self.keybind_triggers, event).is_some()
             || default_key_event_is_binding(event)
@@ -1847,6 +1888,7 @@ struct App {
     mouse_shift_capture: config::MouseShiftCapture,
     has_global_keybinds: bool,
     keybind_triggers: Vec<ConfigKeybind>,
+    keybind_tables: Vec<ConfigKeybindTable>,
     surfaces: Vec<NonNull<Surface>>,
 }
 
@@ -7006,6 +7048,46 @@ impl ConfigKeybindParseError {
     }
 }
 
+#[derive(Clone)]
+enum ParsedConfigKeybind {
+    Root(ConfigKeybind),
+    Table {
+        name: Vec<u8>,
+        binding: ConfigKeybind,
+    },
+    TableClear {
+        name: Vec<u8>,
+    },
+}
+
+fn parse_config_keybind_entry(
+    value: &[u8],
+) -> Result<ParsedConfigKeybind, ConfigKeybindParseError> {
+    if let Some((name, binding)) = config_keybind_table_parts(value) {
+        let name = name.to_vec();
+        if binding.is_empty() {
+            return Ok(ParsedConfigKeybind::TableClear { name });
+        }
+        return parse_config_keybind(binding)
+            .map(|binding| ParsedConfigKeybind::Table { name, binding });
+    }
+
+    parse_config_keybind(value).map(ParsedConfigKeybind::Root)
+}
+
+fn config_keybind_table_parts(value: &[u8]) -> Option<(&[u8], &[u8])> {
+    let eq_index = value
+        .iter()
+        .position(|byte| *byte == b'=')
+        .unwrap_or(value.len());
+    let slash_index = value[..eq_index].iter().position(|byte| *byte == b'/')?;
+    let table_name = &value[..slash_index];
+    if table_name.is_empty() || table_name.iter().any(|byte| matches!(*byte, b'+' | b'>')) {
+        return None;
+    }
+    Some((table_name, &value[slash_index + 1..]))
+}
+
 fn parse_config_keybind(value: &[u8]) -> Result<ConfigKeybind, ConfigKeybindParseError> {
     let separator = value
         .iter()
@@ -11136,6 +11218,7 @@ pub extern "C" fn roastty_config_new() -> RoasttyConfig {
         confirm_close_surface: config::ConfirmCloseSurface::True,
         has_global_keybinds: false,
         keybind_triggers: Vec::new(),
+        keybind_tables: Vec::new(),
         cached_title: None,
         cached_bell_audio_path: None,
         diagnostics: Vec::new(),
@@ -11162,6 +11245,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
         confirm_close_surface,
         has_global_keybinds,
         keybind_triggers,
+        keybind_tables,
         diagnostics,
     ) = config_from_handle(config)
         .map(|config| {
@@ -11173,6 +11257,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
                 config.confirm_close_surface,
                 config.has_global_keybinds,
                 config.keybind_triggers.clone(),
+                config.keybind_tables.clone(),
                 config.diagnostics.clone(),
             )
         })
@@ -11185,6 +11270,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
             false,
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         ));
     let mut cloned = Config {
         parsed,
@@ -11194,6 +11280,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
         confirm_close_surface,
         has_global_keybinds,
         keybind_triggers,
+        keybind_tables,
         cached_title: None,
         cached_bell_audio_path: None,
         diagnostics,
@@ -11215,8 +11302,8 @@ pub extern "C" fn roastty_config_load_cli_args(config: RoasttyConfig) {
     while index < argv.len() {
         let arg = &argv[index];
         if let Some(value) = arg.strip_prefix(b"--keybind=") {
-            match parse_config_keybind(value) {
-                Ok(binding) => config.store_keybind(binding),
+            match parse_config_keybind_entry(value) {
+                Ok(entry) => config.store_keybind_entry(entry),
                 Err(error) => config.push_keybind_diagnostic(value, error),
             }
             index += 1;
@@ -11227,8 +11314,8 @@ pub extern "C" fn roastty_config_load_cli_args(config: RoasttyConfig) {
                 .get(index + 1)
                 .filter(|value| !value.starts_with(b"--"))
             {
-                match parse_config_keybind(value) {
-                    Ok(binding) => config.store_keybind(binding),
+                match parse_config_keybind_entry(value) {
+                    Ok(entry) => config.store_keybind_entry(entry),
                     Err(error) => config.push_keybind_diagnostic(value, error),
                 }
                 index += 2;
@@ -11579,6 +11666,7 @@ pub extern "C" fn roastty_app_new(
         mouse_shift_capture,
         has_global_keybinds,
         keybind_triggers,
+        keybind_tables,
         parsed_config,
     ) = config_from_handle(config)
         .map(|config| {
@@ -11590,6 +11678,7 @@ pub extern "C" fn roastty_app_new(
                 parsed.mouse_shift_capture,
                 config.has_global_keybinds,
                 config.keybind_triggers.clone(),
+                config.keybind_tables.clone(),
                 parsed,
             )
         })
@@ -11599,6 +11688,7 @@ pub extern "C" fn roastty_app_new(
             config::ClipboardAccess::Allow,
             config::MouseShiftCapture::False,
             false,
+            Vec::new(),
             Vec::new(),
             default_finalized_config(),
         ));
@@ -11614,6 +11704,7 @@ pub extern "C" fn roastty_app_new(
         mouse_shift_capture,
         has_global_keybinds,
         keybind_triggers,
+        keybind_tables,
         surfaces: Vec::new(),
     }))
     .cast()
@@ -11675,6 +11766,7 @@ pub extern "C" fn roastty_app_update_config(app: RoasttyApp, config: RoasttyConf
     app.mouse_shift_capture = app.parsed_config.mouse_shift_capture;
     app.has_global_keybinds = config.has_global_keybinds;
     app.keybind_triggers = config.keybind_triggers.clone();
+    app.keybind_tables = config.keybind_tables.clone();
     for mut surface in app.surfaces.clone() {
         let surface = unsafe { surface.as_mut() };
         if surface.app == app as *mut App as RoasttyApp {
@@ -18091,6 +18183,125 @@ mod tests {
                 ConfigKeybindParseError::InvalidTrigger
             );
         }
+    }
+
+    #[test]
+    fn parse_config_keybind_key_table_binding_stores_outside_root() {
+        let entry = parse_config_keybind_entry(b"foo/a=quit").unwrap();
+        let ParsedConfigKeybind::Table { name, binding } = entry else {
+            panic!("expected table binding");
+        };
+        assert_eq!(name, b"foo");
+        assert_eq!(binding.action, b"quit");
+        assert_eq!(binding.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { binding.trigger.key.unicode }, b'a' as u32);
+
+        let config = roastty_config_new();
+        let config_ref = config_from_handle(config).unwrap();
+        config_ref.store_keybind_entry(ParsedConfigKeybind::Table { name, binding });
+
+        assert!(config_ref.keybind_triggers.is_empty());
+        assert_eq!(config_ref.keybind_tables.len(), 1);
+        assert_eq!(config_ref.keybind_tables[0].name, b"foo");
+        assert_eq!(config_ref.keybind_tables[0].bindings.len(), 1);
+
+        let event = key_press(key::Key::KeyA, b"a", b'a' as u32, ROASTTY_MODS_NONE);
+        assert!(!config_ref.key_event_is_binding(&event.event));
+
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn parse_config_keybind_key_table_multiple_and_clear() {
+        let config = roastty_config_new();
+        let config_ref = config_from_handle(config).unwrap();
+        for value in [
+            b"foo/a=quit".as_slice(),
+            b"foo/b=new_window".as_slice(),
+            b"bar/c=toggle_fullscreen".as_slice(),
+        ] {
+            config_ref.store_keybind_entry(parse_config_keybind_entry(value).unwrap());
+        }
+
+        assert_eq!(config_ref.keybind_tables.len(), 2);
+        assert_eq!(
+            config_ref
+                .keybind_tables
+                .iter()
+                .find(|table| table.name == b"foo")
+                .unwrap()
+                .bindings
+                .len(),
+            2
+        );
+        assert_eq!(
+            config_ref
+                .keybind_tables
+                .iter()
+                .find(|table| table.name == b"bar")
+                .unwrap()
+                .bindings
+                .len(),
+            1
+        );
+
+        config_ref.store_keybind_entry(parse_config_keybind_entry(b"foo/").unwrap());
+        assert_eq!(
+            config_ref
+                .keybind_tables
+                .iter()
+                .find(|table| table.name == b"foo")
+                .unwrap()
+                .bindings
+                .len(),
+            0
+        );
+
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn parse_config_keybind_key_table_preserves_slash_disambiguation() {
+        let ParsedConfigKeybind::Root(root_slash) =
+            parse_config_keybind_entry(b"/=text:foo").unwrap()
+        else {
+            panic!("bare slash should remain a root binding");
+        };
+        assert_eq!(root_slash.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { root_slash.trigger.key.unicode }, b'/' as u32);
+
+        let ParsedConfigKeybind::Root(ctrl_slash) =
+            parse_config_keybind_entry(b"ctrl+/=text:foo").unwrap()
+        else {
+            panic!("modified slash should remain a root binding");
+        };
+        assert_eq!(ctrl_slash.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { ctrl_slash.trigger.key.unicode }, b'/' as u32);
+        assert_eq!(ctrl_slash.trigger.mods, ROASTTY_MODS_CTRL);
+
+        let ParsedConfigKeybind::Root(action_slash) =
+            parse_config_keybind_entry(b"x=text:/hello").unwrap()
+        else {
+            panic!("slash after action separator should remain a root binding");
+        };
+        assert_eq!(action_slash.action, b"text:/hello");
+
+        let ParsedConfigKeybind::Table { name, binding } =
+            parse_config_keybind_entry(b"mytable//=text:foo").unwrap()
+        else {
+            panic!("named table slash key should store in the table");
+        };
+        assert_eq!(name, b"mytable");
+        assert_eq!(binding.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { binding.trigger.key.unicode }, b'/' as u32);
+    }
+
+    #[test]
+    fn parse_config_keybind_key_table_rejects_invalid_trigger() {
+        assert_eq!(
+            parse_config_keybind_entry(b"foo/a+b=quit").err().unwrap(),
+            ConfigKeybindParseError::InvalidTrigger
+        );
     }
 
     #[test]

@@ -92,3 +92,64 @@ the slash-key binding is stored in `mytable` without adding a root binding.
 
 Final verdict after re-review: **Approved.** The reviewer confirmed the prior
 finding was resolved and reported no new required findings.
+
+## Completion Review
+
+Codex-native adversarial review ran in a fresh-context subagent
+(`multi_agent_v1.spawn_agent`, agent `019eb741-402c-7352-9145-f6479ef5d1fd`).
+
+Verdict: **Approved.** The reviewer reported no required findings. It confirmed
+that table entries are parsed and stored separately from root bindings, runtime
+lookup remains scoped to root bindings, clone/app/update propagation is present,
+and the Rust plus C ABI tests cover the intended storage and inert-runtime
+behavior.
+
+## Result
+
+**Result:** Pass
+
+Roastty now parses upstream-style key-table syntax in the configured keybinding
+CLI path and stores named-table bindings separately from the root configured
+binding vector. `Config` owns `keybind_tables`, `App` keeps a cloned copy, and
+the storage is preserved through `roastty_config_clone`, `roastty_app_new`, and
+`roastty_app_update_config`.
+
+Root keybinding behavior remains unchanged. Table bindings are intentionally
+inert for `roastty_config_trigger`, `roastty_config_key_is_binding_handle`, app
+key lookup, and surface key lookup until a later experiment implements runtime
+table activation.
+
+Implemented coverage:
+
+- `foo/a=quit` stores a table binding under `foo` without adding a root binding.
+- Multiple named tables store independent bindings.
+- `foo/` clears the `foo` table without affecting other tables.
+- `/=text:foo`, `ctrl+/=text:foo`, and `x=text:/hello` remain root bindings.
+- `mytable//=text:foo` stores a slash-key binding under `mytable`.
+- Invalid table triggers use the existing keybind diagnostic path.
+- The C ABI harness loads table keybinds from CLI args without diagnostics,
+  proves they do not affect root config/surface binding checks, and exercises
+  config clone/app/surface copy paths.
+
+Verification run:
+
+- `cargo test -p roastty key_table` — pass
+- `cargo test -p roastty parse_config_keybind` — pass
+- `cargo test -p roastty config_cli_keybind` — pass
+- `cargo test -p roastty surface_key` — pass
+- `cargo test -p roastty --test abi_harness` — pass
+- `cargo test -p roastty -- --test-threads=1` — pass
+  - 4,644 unit tests passed.
+  - ABI harness passed.
+  - Doc tests passed.
+- `cargo fmt --check` — pass
+- `git diff --check` — pass
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/116-key-table-syntax-storage.md issues/0802-libroastty-completion-and-mac-app/README.md`
+  — pass
+
+## Conclusion
+
+The key-table parser/storage foundation is in place and covered at both Rust
+unit-test and C ABI levels. The next key-table experiment can build on this by
+adding runtime table activation and lookup semantics without changing the root
+binding parser again.
