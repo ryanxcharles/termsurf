@@ -218,6 +218,8 @@ pub(crate) struct Config {
     pub resize_overlay_position: ResizeOverlayPosition,
     /// `resize-overlay-duration`.
     pub resize_overlay_duration: Duration,
+    /// `focus-follows-mouse`.
+    pub focus_follows_mouse: bool,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `title`.
@@ -398,6 +400,7 @@ impl Default for Config {
             resize_overlay_duration: Duration {
                 duration: 750 * NS_PER_MS,
             },
+            focus_follows_mouse: false,
             fullscreen: Fullscreen::False,
             title: None,
             class: None,
@@ -635,6 +638,7 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("resize-overlay-position", out));
         self.resize_overlay_duration
             .format_entry(&mut EntryFormatter::new("resize-overlay-duration", out));
+        EntryFormatter::new("focus-follows-mouse", out).entry_bool(self.focus_follows_mouse);
         self.clipboard_read
             .format_entry(&mut EntryFormatter::new("clipboard-read", out));
         self.clipboard_write
@@ -984,6 +988,9 @@ impl Config {
             "resize-overlay-duration" => {
                 self.resize_overlay_duration =
                     set_value_field(value, default.resize_overlay_duration, Duration::parse_cli)?
+            }
+            "focus-follows-mouse" => {
+                self.focus_follows_mouse = set_bool_field(value, default.focus_follows_mouse)?
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -9854,6 +9861,7 @@ mod tests {
                 "resize-overlay",
                 "resize-overlay-position",
                 "resize-overlay-duration",
+                "focus-follows-mouse",
                 "clipboard-read",
                 "clipboard-write",
                 "clipboard-trim-trailing-spaces",
@@ -12559,6 +12567,57 @@ mod tests {
                 duration: 45 * NS_PER_S,
             }
         );
+    }
+
+    #[test]
+    fn focus_follows_mouse_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("focus-follows-mouse = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert!(!cfg.focus_follows_mouse);
+        assert_eq!(line(&cfg), "focus-follows-mouse = false");
+
+        cfg.set("focus-follows-mouse", Some("true")).unwrap();
+        assert!(cfg.focus_follows_mouse);
+        assert_eq!(line(&cfg), "focus-follows-mouse = true");
+
+        cfg.set("focus-follows-mouse", Some("false")).unwrap();
+        assert!(!cfg.focus_follows_mouse);
+        cfg.set("focus-follows-mouse", None).unwrap();
+        assert!(cfg.focus_follows_mouse);
+        cfg.set("focus-follows-mouse", Some("")).unwrap();
+        assert!(!cfg.focus_follows_mouse);
+        assert_eq!(
+            cfg.set("focus-follows-mouse", Some("maybe")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "focus-follows-mouse = true\n\
+             focus-follows-mouse = maybe\n\
+             clipboard-read = deny\n",
+        );
+        assert!(cfg.focus_follows_mouse);
+        assert_eq!(cfg.clipboard_read, ClipboardAccess::Deny);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "focus-follows-mouse".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert!(cloned.focus_follows_mouse);
     }
 
     #[test]

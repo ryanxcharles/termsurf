@@ -85,3 +85,46 @@ confirmed the verification plan covers defaults, bool parser/reset semantics,
 diagnostics, formatter order, clone/equality, targeted tests, full
 `cargo test -p roastty`, `cargo fmt --check`, `git diff --check`, and status
 inspection.
+
+## Result
+
+**Result:** Pass
+
+Implemented `focus-follows-mouse` in `roastty/src/config/mod.rs` as a bool
+config field with upstream default `false`. The field now routes through
+`Config::set`, formats in upstream order after `resize-overlay-duration` and
+before `clipboard-read`, and has focused coverage for bool parsing, bare values,
+empty reset, invalid diagnostics, and clone/equality.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty focus_follows_mouse_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+  - 4513 unit tests passed
+  - ABI harness passed with the existing enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The `focus-follows-mouse` config surface now matches the upstream default,
+parser behavior, diagnostics, formatter order, and clone/equality expectations.
+The next config fields in upstream order are the clipboard access/behavior
+fields, which are already represented in Roastty, so the next experiment should
+inspect the following unported field after the clipboard group.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb444-b79d-7f62-87d7-a5a667a05ad2` returned
+**Approved** with no required findings. The reviewer confirmed that the
+implementation is scoped to the `focus-follows-mouse` config surface only,
+matches the upstream default and order, uses the existing bool parsing/reset
+semantics, updates diagnostics and clone/equality coverage, and that the docs
+and README status match the current uncommitted state.
+
+The reviewer independently verified targeted tests, full
+`cargo test -p roastty`, `cargo fmt --check`, `git diff --check`, and the
+Prettier check.
