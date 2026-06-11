@@ -798,6 +798,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 70: Phase F — window padding config](70-window-padding-config.md)
   — **Pass**
+- [Experiment 71: Phase F — window padding balance config](71-window-padding-balance-config.md)
+  — **Designed**
 
 ## Process
 
