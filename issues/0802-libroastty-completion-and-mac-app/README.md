@@ -177,6 +177,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
 - **Window size config is parser/formatter/finalize-only.** Exp 73 wires
   `window-height`, `window-width`, and `window-step-resize`; nonzero sizes clamp
   in `Config::finalize`, but runtime window sizing remains later work.
+- **Quit-delay config is parser/formatter-only.** Exp 78 wires
+  `quit-after-last-window-closed-delay` as an optional `Duration`; delayed app
+  shutdown, CLI `-e` side effects, and short-duration warning logs remain later
+  work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -820,7 +824,7 @@ stays unaltered except for the rename).
 - [Experiment 77: Phase F — title report and image limit config](77-title-report-image-limit-config.md)
   — **Pass**
 - [Experiment 78: Phase F — quit delay config](78-quit-delay-config.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 

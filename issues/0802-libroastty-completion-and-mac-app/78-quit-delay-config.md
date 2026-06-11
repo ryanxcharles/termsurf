@@ -102,3 +102,55 @@ upstream `quit-after-last-window-closed-delay`, the existing local formatter
 ordering choice is explicit, and the verification plan includes formatting,
 targeted tests, full `cargo test -p roastty`, `cargo fmt --check`,
 `git diff --check`, and status inspection.
+
+## Result
+
+**Result:** Pass
+
+Implemented `quit-after-last-window-closed-delay` in `roastty/src/config/mod.rs`
+as an optional `Duration` with upstream default `None`. The field now routes
+through `Config::set`, config loading diagnostics, clone/equality, and
+`format_config`. Non-empty values use the existing `Duration::parse_cli` parser,
+empty values reset to `None`, missing values return `ValueRequired`, and invalid
+duration strings return `InvalidValue`.
+
+The formatter emits the key in the existing local app-lifecycle block,
+immediately after `quit-after-last-window-closed`. `None` and an explicitly set
+zero duration both format with an empty payload, matching the shared duration
+formatter's `0` representation while preserving the stored
+`Some(Duration { duration: 0 })` value internally.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty quit_after_last_window_closed_delay_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+  - 4515 unit tests passed
+  - ABI harness passed with the existing 10 enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The quit-after-last-window-closed delay config surface now matches upstream's
+optional-duration default and parser/formatter behavior for this slice. Runtime
+delayed shutdown, CLI `-e` implied settings, and warning-only finalize logging
+remain later work. The next upstream config field after `initial-window` is
+`undo-timeout`.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb45d-ac47-7782-bb1b-6041050299ef` returned
+**Approved** with no findings. The reviewer confirmed that the implementation
+matches the approved scope, preserves the documented local formatter ordering
+choice, matches upstream default and optional-duration parser/formatter
+behavior, records README status and result docs correctly, and has no result
+commit after the plan commit yet.
+
+The reviewer independently verified `cargo fmt --check`, `git diff --check`,
+`cargo test -p roastty quit_after_last_window_closed_delay_config`,
+`cargo test -p roastty config_format_config`, and full `cargo test -p roastty`
+with 4515 unit tests passing, the ABI harness passing with the existing 10
+enum-conversion warnings, and 0 doc tests.

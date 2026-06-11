@@ -42,6 +42,8 @@ pub(crate) struct Config {
     pub initial_window: bool,
     /// `quit-after-last-window-closed`.
     pub quit_after_last_window_closed: bool,
+    /// `quit-after-last-window-closed-delay`.
+    pub quit_after_last_window_closed_delay: Option<Duration>,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
     /// `selection-clear-on-typing`.
@@ -298,6 +300,7 @@ impl Default for Config {
         Self {
             initial_window: true,
             quit_after_last_window_closed: false,
+            quit_after_last_window_closed_delay: None,
             copy_on_select: CopyOnSelect::True,
             selection_clear_on_typing: true,
             selection_clear_on_copy: false,
@@ -463,6 +466,10 @@ impl Config {
         EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
         EntryFormatter::new("quit-after-last-window-closed", out)
             .entry_bool(self.quit_after_last_window_closed);
+        EntryFormatter::new("quit-after-last-window-closed-delay", out)
+            .entry_optional(self.quit_after_last_window_closed_delay, |v, f| {
+                v.format_entry(f)
+            });
         self.font_family
             .format_entry(&mut EntryFormatter::new("font-family", out));
         self.font_family_bold
@@ -720,6 +727,13 @@ impl Config {
             "quit-after-last-window-closed" => {
                 self.quit_after_last_window_closed =
                     set_bool_field(value, default.quit_after_last_window_closed)?
+            }
+            "quit-after-last-window-closed-delay" => {
+                self.quit_after_last_window_closed_delay = set_optional_value_field(
+                    value,
+                    default.quit_after_last_window_closed_delay,
+                    Duration::parse_cli,
+                )?
             }
             "copy-on-select" => {
                 self.copy_on_select =
@@ -9778,6 +9792,7 @@ mod tests {
             vec![
                 "initial-window",
                 "quit-after-last-window-closed",
+                "quit-after-last-window-closed-delay",
                 "font-family",
                 "font-family-bold",
                 "font-family-italic",
@@ -10555,6 +10570,86 @@ mod tests {
         assert_eq!(
             line(&cfg, "scroll-to-bottom"),
             "scroll-to-bottom = keystroke,no-output"
+        );
+    }
+
+    #[test]
+    fn quit_after_last_window_closed_delay_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("quit-after-last-window-closed-delay = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.quit_after_last_window_closed_delay, None);
+        assert_eq!(line(&cfg), "quit-after-last-window-closed-delay = ");
+
+        cfg.set("quit-after-last-window-closed-delay", Some("1s 250ms"))
+            .unwrap();
+        assert_eq!(
+            cfg.quit_after_last_window_closed_delay,
+            Some(Duration {
+                duration: NS_PER_S + 250 * NS_PER_MS,
+            })
+        );
+        assert_eq!(line(&cfg), "quit-after-last-window-closed-delay = 1s 250ms");
+
+        cfg.set("quit-after-last-window-closed-delay", Some("0"))
+            .unwrap();
+        assert_eq!(
+            cfg.quit_after_last_window_closed_delay,
+            Some(Duration { duration: 0 })
+        );
+        assert_eq!(line(&cfg), "quit-after-last-window-closed-delay = ");
+
+        cfg.set("quit-after-last-window-closed-delay", Some(""))
+            .unwrap();
+        assert_eq!(cfg.quit_after_last_window_closed_delay, None);
+        assert_eq!(
+            cfg.set("quit-after-last-window-closed-delay", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("quit-after-last-window-closed-delay", Some("1")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("quit-after-last-window-closed-delay", Some("forever")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "quit-after-last-window-closed-delay = 2s\n\
+             quit-after-last-window-closed-delay = forever\n\
+             quit-after-last-window-closed = true\n",
+        );
+        assert_eq!(
+            cfg.quit_after_last_window_closed_delay,
+            Some(Duration {
+                duration: 2 * NS_PER_S,
+            })
+        );
+        assert!(cfg.quit_after_last_window_closed);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "quit-after-last-window-closed-delay".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(
+            cloned.quit_after_last_window_closed_delay,
+            Some(Duration {
+                duration: 2 * NS_PER_S,
+            })
         );
     }
 
