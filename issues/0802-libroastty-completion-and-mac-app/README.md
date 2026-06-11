@@ -1059,6 +1059,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 110: Phase G — keybind trigger prefix flags](110-keybind-trigger-prefix-flags.md)
   — **Pass**
+- [Experiment 111: Phase G — configured binding consumption](111-configured-binding-consumption.md)
+  — **Designed**
 
 ## Process
 
