@@ -858,6 +858,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 84: Phase F — quick terminal space and keyboard config](84-quick-terminal-space-keyboard-config.md)
   — **Pass**
+- [Experiment 85: Phase F — command palette entry config](85-command-palette-entry-config.md)
+  — **Designed**
 
 ## Process
 
