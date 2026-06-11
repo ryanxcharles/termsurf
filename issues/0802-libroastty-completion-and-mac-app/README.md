@@ -412,6 +412,15 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   the ABI harness and doc tests. Remaining Phase G keybinding gaps include
   native keymaps/global shortcuts, app-key sequence/table handling, broader
   global/all routing, and the full upstream binding catalog.
+- **Configured direct chained keybinding actions are wired for the app-key
+  path.** Exp 123 extends `roastty_app_key` so focused app-scoped chains and
+  `global:` chains dispatch in order, with upstream app-scope fidelity for
+  `ignore`, `new_window`, `undo`, and `redo`; surface-scoped global chain
+  actions fan out to live surfaces. The Exp 123 full run passed 4709 unit tests
+  and failed only the unrelated foreground-PID test, which passed on exact
+  rerun. Remaining Phase G gaps include native keymaps/global shortcuts, app-key
+  sequence/table handling, broader global/all routing, and the full upstream
+  binding catalog.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -785,9 +794,10 @@ the live app, verified by a Phase-D UI test.)
 - [ ] Multi-key sequences / chords (the trie), leader keys, key tables —
       configured root and active-table surface sequences plus `ignore` /
       `end_key_sequence` are wired (Exp 118–121), and configured `chain=` leaves
-      are wired on the surface path (Exp 122), but native keymaps/global
-      shortcuts, app-key sequence/table handling, broader global/all routing,
-      and the full upstream binding catalog remain later work
+      are wired on the surface path (Exp 122) and direct app-key path (Exp 123),
+      but native keymaps/global shortcuts, app-key sequence/table handling,
+      broader global/all routing, and the full upstream binding catalog remain
+      later work
 - [ ] Trigger-prefix flags (`global:` / `all:` / `unconsumed:` / `performable:`)
       — parser/storage/query metadata and surface unconsumed/performable
       consumption are wired (Exp 110–111), and configured `global:` app-key
@@ -1163,7 +1173,7 @@ stays unaltered except for the rename).
 - [Experiment 122: Phase G — chained keybinding actions](122-chained-keybind-actions.md)
   — **Pass**
 - [Experiment 123: Phase G — app-key chained actions](123-app-key-chained-actions.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

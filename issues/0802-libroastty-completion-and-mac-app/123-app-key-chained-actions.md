@@ -101,3 +101,57 @@ covering `new_window`, `undo`, and `redo`.
 **Final verdict:** Approved
 
 **Final findings:** None.
+
+## Result
+
+**Result:** Pass
+
+`roastty_app_key` now accepts configured direct chained leaves. The app path
+parses every configured action before dispatch, rejects unsupported or invalid
+actions without callbacks, and then dispatches matched actions in the same order
+as the configured chain.
+
+Focused non-global app-key bindings only dispatch when every action is app
+scoped. `quit`, `new_window`, `undo`, and `redo` dispatch once against the app
+target, and `ignore` consumes as an app-scoped no-op without stopping later
+actions. Focused non-global chains containing a surface-scoped action return
+`false` without dispatching anything.
+
+`global:` app-key bindings dispatch app-scoped actions once and surface-scoped
+actions once per live surface, in chain order. Detached surfaces are skipped.
+Unsupported app-key paths remain unchanged: key-table actions,
+`end_key_sequence`, sequence leaders, active key tables, native keymaps, and
+native global shortcut registration stay out of scope.
+
+Verification:
+
+- `cargo fmt -- roastty/src/lib.rs` passed.
+- `cargo test -p roastty app_key` passed 20 tests.
+- `cargo test -p roastty chain` passed 23 tests.
+- `cargo test -p roastty surface_key` passed 89 tests.
+- `cargo test -p roastty parse_config_keybind` passed 23 tests.
+- `cargo test -p roastty --test abi_harness` passed 1 test, with existing
+  enum-conversion warnings from the C harness.
+- `cargo test -p roastty -- --test-threads=1` passed 4709 tests and failed only
+  `tests::surface_foreground_pid_reports_worker_foreground_pid_after_start` with
+  a foreground-PID mismatch (`79660` vs `79656`), outside this app-key change.
+  The exact failed test then passed when rerun with
+  `cargo test -p roastty --lib tests::surface_foreground_pid_reports_worker_foreground_pid_after_start -- --exact --test-threads=1`.
+- `cargo fmt --check` passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+Direct configured chained leaves are now wired on both surface and app-key
+paths. The remaining Phase G keybinding gaps are narrower: native keymaps and
+native global shortcut registration, app-key sequence/table handling, broader
+global/all routing, and the full upstream binding catalog.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial reviewer, fresh context
+(`multi_agent_v1.spawn_agent`, agent `019eb7f1-08d5-7492-aee4-6d7791104abe`)
+
+**Verdict:** Approved
+
+**Findings:** None.

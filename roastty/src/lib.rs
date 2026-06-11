@@ -1882,6 +1882,18 @@ enum SurfaceKeySequenceResult {
     EncodeCurrent,
 }
 
+enum AppKeyConfiguredAction {
+    App(ParsedBindingAction),
+    Surface(Vec<u8>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppKeyActionScope {
+    App,
+    Surface,
+    Unsupported,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ActiveKeyTable {
     name: Vec<u8>,
@@ -2385,41 +2397,95 @@ impl App {
             .collect()
     }
 
-    fn key(&mut self, app_handle: RoasttyApp, event: &key::KeyEvent) -> bool {
-        let Some(binding) = self.key_event_binding(event) else {
-            return false;
-        };
-        if binding.is_chained() {
-            return false;
-        }
-        let Some(action) = binding.first_action() else {
-            return false;
-        };
-        let Some(parsed) = parse_config_binding_action(action) else {
-            return false;
-        };
-        let global = binding.flags & ROASTTY_KEYBIND_FLAG_GLOBAL != 0;
-
-        if let ParsedBindingAction::AppRuntimeAction(tag, storage) = parsed {
-            if global || self.focused {
-                let _ = self.perform_app_runtime_action_result(app_handle, tag, storage);
-                return true;
+    fn app_key_action_scope(action: &ParsedBindingAction) -> AppKeyActionScope {
+        match action {
+            ParsedBindingAction::AppRuntimeAction(_, _) | ParsedBindingAction::Ignore => {
+                AppKeyActionScope::App
             }
-            return false;
+            ParsedBindingAction::RuntimeAction(
+                ROASTTY_ACTION_NEW_WINDOW | ROASTTY_ACTION_UNDO | ROASTTY_ACTION_REDO,
+                _,
+            ) => AppKeyActionScope::App,
+            action if action.is_key_table_action() => AppKeyActionScope::Unsupported,
+            ParsedBindingAction::EndKeySequence => AppKeyActionScope::Unsupported,
+            _ => AppKeyActionScope::Surface,
         }
+    }
 
-        if parsed.is_key_table_action() || parsed.is_sequence_control_action() {
-            return false;
+    fn app_key_configured_action(action: Vec<u8>) -> Option<AppKeyConfiguredAction> {
+        let parsed = parse_config_binding_action(&action)?;
+        match Self::app_key_action_scope(&parsed) {
+            AppKeyActionScope::App => Some(AppKeyConfiguredAction::App(parsed)),
+            AppKeyActionScope::Surface => Some(AppKeyConfiguredAction::Surface(action)),
+            AppKeyActionScope::Unsupported => None,
         }
+    }
 
-        if !global {
-            return false;
+    fn perform_app_key_app_action(
+        &self,
+        app_handle: RoasttyApp,
+        action: ParsedBindingAction,
+    ) -> bool {
+        match action {
+            ParsedBindingAction::AppRuntimeAction(tag, storage)
+            | ParsedBindingAction::RuntimeAction(
+                tag @ (ROASTTY_ACTION_NEW_WINDOW | ROASTTY_ACTION_UNDO | ROASTTY_ACTION_REDO),
+                storage,
+            ) => self.perform_app_runtime_action_result(app_handle, tag, storage),
+            ParsedBindingAction::Ignore => true,
+            _ => false,
         }
+    }
 
+    fn perform_app_key_surface_action(&self, app_handle: RoasttyApp, action: &[u8]) {
         for mut surface in self.live_surfaces(app_handle) {
             let surface = unsafe { surface.as_mut() };
             if let Some(parsed) = parse_binding_action(surface, action) {
                 let _ = perform_parsed_binding_action(surface, parsed);
+            }
+        }
+    }
+
+    fn key(&mut self, app_handle: RoasttyApp, event: &key::KeyEvent) -> bool {
+        let Some(binding) = self.key_event_binding(event) else {
+            return false;
+        };
+        let actions = binding
+            .actions
+            .into_iter()
+            .map(Self::app_key_configured_action)
+            .collect::<Option<Vec<_>>>();
+        let Some(actions) = actions else {
+            return false;
+        };
+        let global = binding.flags & ROASTTY_KEYBIND_FLAG_GLOBAL != 0;
+        if !global && !self.focused {
+            return false;
+        }
+
+        if global {
+            for action in actions {
+                match action {
+                    AppKeyConfiguredAction::App(action) => {
+                        let _ = self.perform_app_key_app_action(app_handle, action);
+                    }
+                    AppKeyConfiguredAction::Surface(action) => {
+                        self.perform_app_key_surface_action(app_handle, &action);
+                    }
+                }
+            }
+            return true;
+        }
+
+        if actions
+            .iter()
+            .any(|action| !matches!(action, AppKeyConfiguredAction::App(_)))
+        {
+            return false;
+        }
+        for action in actions {
+            if let AppKeyConfiguredAction::App(action) = action {
+                let _ = self.perform_app_key_app_action(app_handle, action);
             }
         }
         true
@@ -2701,12 +2767,9 @@ struct ConfiguredBindingMatch {
 }
 
 impl ConfiguredBindingMatch {
+    #[cfg(test)]
     fn first_action(&self) -> Option<&[u8]> {
         self.actions.first().map(Vec::as_slice)
-    }
-
-    fn is_chained(&self) -> bool {
-        self.actions.len() > 1
     }
 }
 
@@ -6132,13 +6195,6 @@ impl ParsedBindingAction {
             ParsedBindingAction::ActivateKeyTable(_, _)
                 | ParsedBindingAction::DeactivateKeyTable
                 | ParsedBindingAction::DeactivateAllKeyTables
-        )
-    }
-
-    fn is_sequence_control_action(&self) -> bool {
-        matches!(
-            self,
-            ParsedBindingAction::Ignore | ParsedBindingAction::EndKeySequence
         )
     }
 
@@ -16630,9 +16686,9 @@ pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyInp
     surface.key(&ev)
 }
 
-/// Embedded by-value `app_key`. Handles configured global keybinds and focused
-/// app-scoped keybinds; native keymaps, key tables, and sequences remain later
-/// feature-completion items.
+/// Embedded by-value `app_key`. Handles configured global keybinds, direct
+/// chained leaves, and focused app-scoped keybinds; native keymaps, key tables,
+/// and sequences remain later feature-completion items.
 #[no_mangle]
 pub extern "C" fn roastty_app_key(app: RoasttyApp, event: RoasttyInputKey) -> bool {
     let Some(app_ref) = app_from_handle(app) else {
@@ -21447,7 +21503,7 @@ mod tests {
 
     #[test]
     fn app_key_ignores_sequence_control_actions_for_now() {
-        let config = new_test_config_with_keybind_entries(&[b"global:x=ignore"]);
+        let config = new_test_config_with_keybind_entries(&[b"global:x=end_key_sequence"]);
         let app = new_test_app_with_action_config(true, config);
         let surface = new_test_surface(app);
 
@@ -21464,15 +21520,160 @@ mod tests {
     }
 
     #[test]
-    fn app_key_ignores_chained_actions_for_now() {
-        let config = new_test_config_with_keybind_entries(&[b"global:x=quit", b"chain=new_tab"]);
+    fn app_key_focused_chained_app_actions_dispatch_in_order() {
+        let config =
+            new_test_config_with_keybind_entries(&[b"x=new_window", b"chain=undo", b"chain=redo"]);
+        let app = new_test_app_with_action_config(true, config);
+        roastty_app_set_focus(app, true);
+
+        assert!(roastty_app_key(app, input_key_press_x(ROASTTY_MODS_NONE)));
+
+        let records = action_records();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_NEW_WINDOW);
+        assert_eq!(records[1].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_UNDO);
+        assert_eq!(records[2].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[2].action_tag, ROASTTY_ACTION_REDO);
+
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn app_key_focused_chained_surface_action_returns_false_without_dispatch() {
+        let config = new_test_config_with_keybind_entries(&[b"x=quit", b"chain=toggle_fullscreen"]);
         let app = new_test_app_with_action_config(true, config);
         let surface = new_test_surface(app);
+        roastty_app_set_focus(app, true);
 
         assert!(!roastty_app_key(app, input_key_press_x(ROASTTY_MODS_NONE)));
         assert!(action_records().is_empty());
 
         roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn app_key_unfocused_chained_non_global_returns_false() {
+        let config = new_test_config_with_keybind_entries(&[b"x=quit", b"chain=new_window"]);
+        let app = new_test_app_with_action_config(true, config);
+
+        assert!(!roastty_app_key(app, input_key_press_x(ROASTTY_MODS_NONE)));
+        assert!(action_records().is_empty());
+
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn app_key_global_chained_app_actions_dispatch_in_order() {
+        let config = new_test_config_with_keybind_entries(&[b"global:x=quit", b"chain=new_window"]);
+        let app = new_test_app_with_action_config(true, config);
+
+        assert!(roastty_app_key(app, input_key_press_x(ROASTTY_MODS_NONE)));
+
+        let records = action_records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        assert_eq!(records[1].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_NEW_WINDOW);
+
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn app_key_global_chained_mixed_actions_dispatch_in_order() {
+        let config = new_test_config_with_keybind_entries(&[
+            b"global:x=quit",
+            b"chain=toggle_fullscreen",
+            b"chain=undo",
+        ]);
+        let app = new_test_app_with_action_config(true, config);
+        let first = new_test_surface(app);
+        let second = new_test_surface(app);
+
+        assert!(roastty_app_key(app, input_key_press_x(ROASTTY_MODS_NONE)));
+
+        let records = action_records();
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        assert_eq!(records[1].target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(records[1].surface, first);
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_TOGGLE_FULLSCREEN);
+        assert_eq!(records[2].target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(records[2].surface, second);
+        assert_eq!(records[2].action_tag, ROASTTY_ACTION_TOGGLE_FULLSCREEN);
+        assert_eq!(records[3].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[3].action_tag, ROASTTY_ACTION_UNDO);
+
+        roastty_surface_free(first);
+        roastty_surface_free(second);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn app_key_chained_ignore_is_app_noop_and_continues() {
+        let focused = new_test_config_with_keybind_entries(&[b"x=ignore", b"chain=quit"]);
+        let focused_app = new_test_app_with_action_config(true, focused);
+        roastty_app_set_focus(focused_app, true);
+
+        assert!(roastty_app_key(
+            focused_app,
+            input_key_press_x(ROASTTY_MODS_NONE)
+        ));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+
+        let global = new_test_config_with_keybind_entries(&[b"global:x=ignore", b"chain=quit"]);
+        let global_app = new_test_app_with_action_config(true, global);
+        reset_action_records(true);
+
+        assert!(roastty_app_key(
+            global_app,
+            input_key_press_x(ROASTTY_MODS_NONE)
+        ));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+
+        roastty_app_free(global_app);
+        roastty_config_free(global);
+        roastty_app_free(focused_app);
+        roastty_config_free(focused);
+    }
+
+    #[test]
+    fn app_key_global_chained_surface_action_skips_detached_surfaces() {
+        let config = new_test_config_with_keybind_entries(&[
+            b"global:x=toggle_fullscreen",
+            b"chain=new_window",
+        ]);
+        let app = new_test_app_with_action_config(true, config);
+        let live = new_test_surface(app);
+        let detached = new_test_surface(app);
+        surface_from_handle(detached).unwrap().app = ptr::null_mut();
+
+        assert!(roastty_app_key(app, input_key_press_x(ROASTTY_MODS_NONE)));
+
+        let records = action_records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(records[0].surface, live);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_TOGGLE_FULLSCREEN);
+        assert_eq!(records[1].target_tag, ROASTTY_TARGET_APP);
+        assert_eq!(records[1].action_tag, ROASTTY_ACTION_NEW_WINDOW);
+
+        surface_from_handle(detached).unwrap().app = app;
+        roastty_surface_free(live);
+        roastty_surface_free(detached);
         roastty_app_free(app);
         roastty_config_free(config);
     }
