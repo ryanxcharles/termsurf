@@ -44,6 +44,8 @@ pub(crate) struct Config {
     pub quit_after_last_window_closed: bool,
     /// `quit-after-last-window-closed-delay`.
     pub quit_after_last_window_closed_delay: Option<Duration>,
+    /// `undo-timeout`.
+    pub undo_timeout: Duration,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
     /// `selection-clear-on-typing`.
@@ -301,6 +303,9 @@ impl Default for Config {
             initial_window: true,
             quit_after_last_window_closed: false,
             quit_after_last_window_closed_delay: None,
+            undo_timeout: Duration {
+                duration: 5 * NS_PER_S,
+            },
             copy_on_select: CopyOnSelect::True,
             selection_clear_on_typing: true,
             selection_clear_on_copy: false,
@@ -470,6 +475,8 @@ impl Config {
             .entry_optional(self.quit_after_last_window_closed_delay, |v, f| {
                 v.format_entry(f)
             });
+        self.undo_timeout
+            .format_entry(&mut EntryFormatter::new("undo-timeout", out));
         self.font_family
             .format_entry(&mut EntryFormatter::new("font-family", out));
         self.font_family_bold
@@ -734,6 +741,10 @@ impl Config {
                     default.quit_after_last_window_closed_delay,
                     Duration::parse_cli,
                 )?
+            }
+            "undo-timeout" => {
+                self.undo_timeout =
+                    set_value_field(value, default.undo_timeout, Duration::parse_cli)?
             }
             "copy-on-select" => {
                 self.copy_on_select =
@@ -9793,6 +9804,7 @@ mod tests {
                 "initial-window",
                 "quit-after-last-window-closed",
                 "quit-after-last-window-closed-delay",
+                "undo-timeout",
                 "font-family",
                 "font-family-bold",
                 "font-family-italic",
@@ -10650,6 +10662,91 @@ mod tests {
             Some(Duration {
                 duration: 2 * NS_PER_S,
             })
+        );
+    }
+
+    #[test]
+    fn undo_timeout_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("undo-timeout = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.undo_timeout,
+            Duration {
+                duration: 5 * NS_PER_S,
+            }
+        );
+        assert_eq!(line(&cfg), "undo-timeout = 5s");
+
+        cfg.set("undo-timeout", Some("1m 30s")).unwrap();
+        assert_eq!(
+            cfg.undo_timeout,
+            Duration {
+                duration: 90 * NS_PER_S,
+            }
+        );
+        assert_eq!(line(&cfg), "undo-timeout = 1m 30s");
+
+        cfg.set("undo-timeout", Some("0")).unwrap();
+        assert_eq!(cfg.undo_timeout, Duration { duration: 0 });
+        assert_eq!(line(&cfg), "undo-timeout = ");
+
+        cfg.set("undo-timeout", Some("")).unwrap();
+        assert_eq!(
+            cfg.undo_timeout,
+            Duration {
+                duration: 5 * NS_PER_S,
+            }
+        );
+        assert_eq!(line(&cfg), "undo-timeout = 5s");
+        assert_eq!(
+            cfg.set("undo-timeout", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("undo-timeout", Some("1")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("undo-timeout", Some("forever")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "undo-timeout = 2s\n\
+             undo-timeout = forever\n\
+             quit-after-last-window-closed = true\n",
+        );
+        assert_eq!(
+            cfg.undo_timeout,
+            Duration {
+                duration: 2 * NS_PER_S,
+            }
+        );
+        assert!(cfg.quit_after_last_window_closed);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "undo-timeout".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(
+            cloned.undo_timeout,
+            Duration {
+                duration: 2 * NS_PER_S,
+            }
         );
     }
 

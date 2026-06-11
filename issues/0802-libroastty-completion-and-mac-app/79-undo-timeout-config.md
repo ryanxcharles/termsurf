@@ -91,3 +91,53 @@ scope is narrow and limited to `undo-timeout`, the plan matches upstream
 default/parser/formatter behavior, the local formatter-order choice is explicit,
 and the verification plan includes the required formatting, targeted test, full
 test, hygiene, and status checks.
+
+## Result
+
+**Result:** Pass
+
+Implemented `undo-timeout` in `roastty/src/config/mod.rs` as a `Duration` with
+upstream default `5s`. The field now routes through `Config::set`, config
+loading diagnostics, clone/equality, and `format_config`. Values use the
+existing `Duration::parse_cli` parser, empty values reset to the default `5s`,
+missing values return `ValueRequired`, and invalid duration strings return
+`InvalidValue`.
+
+The formatter emits the key in the existing local app-lifecycle block,
+immediately after `quit-after-last-window-closed-delay`. An explicitly set zero
+duration formats with an empty payload, matching the shared duration formatter's
+`0` representation while preserving the stored zero-duration value internally.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty undo_timeout_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+  - 4516 unit tests passed
+  - ABI harness passed with the existing 10 enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The undo-timeout config surface now matches upstream's default and duration
+parser/formatter behavior for this slice. Runtime undo stack expiration and the
+binding/action behavior that consumes the timeout remain later work. The next
+upstream config field is `quick-terminal-position`.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb467-da43-7013-9977-1d8426b37f62` returned
+**Approved** with no findings. The reviewer confirmed that the implementation is
+limited to the `undo-timeout` parser/formatter config surface, matches
+upstream's `5s` default and existing duration parser path, preserves the
+documented formatter ordering after `quit-after-last-window-closed-delay`, and
+has result docs and README status in place before the result commit.
+
+The reviewer independently verified `cargo fmt --check`, `git diff --check`,
+`cargo test -p roastty undo_timeout_config`,
+`cargo test -p roastty config_format_config`, and full `cargo test -p roastty`
+with 4516 unit tests passing, the ABI harness passing with the existing 10
+enum-conversion warnings, and doc tests passing.

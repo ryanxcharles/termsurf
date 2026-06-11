@@ -181,6 +181,9 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   `quit-after-last-window-closed-delay` as an optional `Duration`; delayed app
   shutdown, CLI `-e` side effects, and short-duration warning logs remain later
   work.
+- **Undo-timeout config is parser/formatter-only.** Exp 79 wires `undo-timeout`
+  as a `Duration` with upstream default `5s`; runtime undo stack expiration and
+  binding behavior remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -826,7 +829,7 @@ stays unaltered except for the rename).
 - [Experiment 78: Phase F — quit delay config](78-quit-delay-config.md) —
   **Pass**
 - [Experiment 79: Phase F — undo timeout config](79-undo-timeout-config.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 
