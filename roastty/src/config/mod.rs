@@ -269,6 +269,16 @@ pub(crate) struct Config {
     pub macos_window_buttons: MacWindowButtons,
     /// `macos-hidden`.
     pub macos_hidden: MacHidden,
+    /// `macos-icon`.
+    pub macos_icon: MacAppIcon,
+    /// `macos-custom-icon`.
+    pub macos_custom_icon: Option<String>,
+    /// `macos-icon-frame`.
+    pub macos_icon_frame: MacAppIconFrame,
+    /// `macos-icon-ghost-color`.
+    pub macos_icon_ghost_color: Option<Color>,
+    /// `macos-icon-screen-color`.
+    pub macos_icon_screen_color: Option<ColorList>,
     /// `font-family`.
     pub font_family: RepeatableString,
     /// `font-family-bold`.
@@ -464,6 +474,11 @@ impl Default for Config {
             macos_titlebar_proxy_icon: MacTitlebarProxyIcon::Visible,
             macos_window_buttons: MacWindowButtons::Visible,
             macos_hidden: MacHidden::Never,
+            macos_icon: MacAppIcon::Official,
+            macos_custom_icon: None,
+            macos_icon_frame: MacAppIconFrame::Aluminum,
+            macos_icon_ghost_color: None,
+            macos_icon_screen_color: None,
             font_family: RepeatableString::default(),
             font_family_bold: RepeatableString::default(),
             font_family_italic: RepeatableString::default(),
@@ -779,6 +794,18 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("macos-titlebar-proxy-icon", out));
         self.macos_hidden
             .format_entry(&mut EntryFormatter::new("macos-hidden", out));
+        self.macos_icon
+            .format_entry(&mut EntryFormatter::new("macos-icon", out));
+        EntryFormatter::new("macos-custom-icon", out)
+            .entry_optional(self.macos_custom_icon.clone(), |v, f| f.entry_str(&v));
+        self.macos_icon_frame
+            .format_entry(&mut EntryFormatter::new("macos-icon-frame", out));
+        EntryFormatter::new("macos-icon-ghost-color", out)
+            .entry_optional(self.macos_icon_ghost_color, |v, f| v.format_entry(f));
+        EntryFormatter::new("macos-icon-screen-color", out)
+            .entry_optional(self.macos_icon_screen_color.clone(), |v, f| {
+                v.format_entry(f)
+            });
         EntryFormatter::new("bold-color", out)
             .entry_optional(self.bold_color, |v, f| v.format_entry(f));
         EntryFormatter::new("faint-opacity", out).entry_float(self.faint_opacity);
@@ -1231,6 +1258,35 @@ impl Config {
             "macos-hidden" => {
                 self.macos_hidden =
                     set_enum_field(value, default.macos_hidden, MacHidden::from_keyword)?
+            }
+            "macos-icon" => {
+                self.macos_icon =
+                    set_enum_field(value, default.macos_icon, MacAppIcon::from_keyword)?
+            }
+            "macos-custom-icon" => {
+                self.macos_custom_icon =
+                    set_optional_value_field(value, default.macos_custom_icon, parse_string_field)?
+            }
+            "macos-icon-frame" => {
+                self.macos_icon_frame = set_enum_field(
+                    value,
+                    default.macos_icon_frame,
+                    MacAppIconFrame::from_keyword,
+                )?
+            }
+            "macos-icon-ghost-color" => {
+                self.macos_icon_ghost_color = set_optional_value_field(
+                    value,
+                    default.macos_icon_ghost_color,
+                    Color::parse_cli,
+                )?
+            }
+            "macos-icon-screen-color" => {
+                self.macos_icon_screen_color = set_optional_value_field(
+                    value,
+                    default.macos_icon_screen_color,
+                    parse_color_list_field,
+                )?
             }
             "grapheme-width-method" => {
                 self.grapheme_width_method = set_enum_field(
@@ -2646,6 +2702,12 @@ impl ColorList {
             .join(",");
         formatter.entry_str(&joined);
     }
+}
+
+fn parse_color_list_field(value: Option<&str>) -> Result<ColorList, ColorParseError> {
+    let mut list = ColorList::default();
+    list.parse_cli(value)?;
+    Ok(list)
 }
 
 /// An error parsing a `Duration` config value (upstream `Duration.parseCLI`).
@@ -4951,6 +5013,105 @@ impl MacHidden {
     }
 }
 
+/// The `macos-icon` config (upstream `MacAppIcon`): which app icon variant to
+/// request. Runtime icon loading and rendering are ported later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacAppIcon {
+    Official,
+    Blueprint,
+    Chalkboard,
+    Microchip,
+    Glass,
+    Holographic,
+    Paper,
+    Retro,
+    Xray,
+    Custom,
+    CustomStyle,
+}
+
+impl MacAppIcon {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacAppIcon::Official => "official",
+            MacAppIcon::Blueprint => "blueprint",
+            MacAppIcon::Chalkboard => "chalkboard",
+            MacAppIcon::Microchip => "microchip",
+            MacAppIcon::Glass => "glass",
+            MacAppIcon::Holographic => "holographic",
+            MacAppIcon::Paper => "paper",
+            MacAppIcon::Retro => "retro",
+            MacAppIcon::Xray => "xray",
+            MacAppIcon::Custom => "custom",
+            MacAppIcon::CustomStyle => "custom-style",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "official" => Some(MacAppIcon::Official),
+            "blueprint" => Some(MacAppIcon::Blueprint),
+            "chalkboard" => Some(MacAppIcon::Chalkboard),
+            "microchip" => Some(MacAppIcon::Microchip),
+            "glass" => Some(MacAppIcon::Glass),
+            "holographic" => Some(MacAppIcon::Holographic),
+            "paper" => Some(MacAppIcon::Paper),
+            "retro" => Some(MacAppIcon::Retro),
+            "xray" => Some(MacAppIcon::Xray),
+            "custom" => Some(MacAppIcon::Custom),
+            "custom-style" => Some(MacAppIcon::CustomStyle),
+            _ => None,
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `macos-icon-frame` config (upstream `MacAppIconFrame`): the frame style
+/// used by the later runtime custom-style renderer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacAppIconFrame {
+    Aluminum,
+    Beige,
+    Plastic,
+    Chrome,
+}
+
+impl MacAppIconFrame {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacAppIconFrame::Aluminum => "aluminum",
+            MacAppIconFrame::Beige => "beige",
+            MacAppIconFrame::Plastic => "plastic",
+            MacAppIconFrame::Chrome => "chrome",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "aluminum" => Some(MacAppIconFrame::Aluminum),
+            "beige" => Some(MacAppIconFrame::Beige),
+            "plastic" => Some(MacAppIconFrame::Plastic),
+            "chrome" => Some(MacAppIconFrame::Chrome),
+            _ => None,
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// An error parsing a `Theme` (upstream `parseAutoStruct` / `Theme.parseCLI`
 /// `error.InvalidValue`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6610,9 +6771,9 @@ mod tests {
         ConfigFilePath, ConfigRecursiveFileErrorKind, ConfigSetError, ConfirmCloseSurface,
         CopyOnSelect, CursorStyle, CustomShaderAnimation, DefaultConfigPaths, Duration,
         DurationParseError, FlagsParseError, FontShapingBreak, FontStyle, FontStyleParseError,
-        FontSyntheticStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden,
-        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError,
-        MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
+        FontSyntheticStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacAppIcon,
+        MacAppIconFrame, MacHidden, MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons,
+        MagicParseError, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
         QuickTerminalDimensions, QuickTerminalKeyboardInteractivity, QuickTerminalLayer,
@@ -6968,6 +7129,11 @@ mod tests {
         assert_eq!(d.macos_titlebar_proxy_icon, MacTitlebarProxyIcon::Visible);
         assert_eq!(d.macos_window_buttons, MacWindowButtons::Visible);
         assert_eq!(d.macos_hidden, MacHidden::Never);
+        assert_eq!(d.macos_icon, MacAppIcon::Official);
+        assert_eq!(d.macos_custom_icon, None);
+        assert_eq!(d.macos_icon_frame, MacAppIconFrame::Aluminum);
+        assert_eq!(d.macos_icon_ghost_color, None);
+        assert_eq!(d.macos_icon_screen_color, None);
         // Font group (Experiment 470).
         assert_eq!(d.font_style, FontStyle::Default);
         assert_eq!(d.font_style_bold, FontStyle::Default);
@@ -8645,6 +8811,186 @@ mod tests {
             cfg.set("app-notifications", Some("clipboard-copy,toast")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+    }
+
+    #[test]
+    fn macos_icon_config_parse_format_reset_and_diagnose() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.macos_icon, MacAppIcon::Official);
+        assert_eq!(cfg.macos_custom_icon, None);
+        assert_eq!(cfg.macos_icon_frame, MacAppIconFrame::Aluminum);
+        assert_eq!(cfg.macos_icon_ghost_color, None);
+        assert_eq!(cfg.macos_icon_screen_color, None);
+
+        let lines = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            [
+                "macos-icon",
+                "macos-custom-icon",
+                "macos-icon-frame",
+                "macos-icon-ghost-color",
+                "macos-icon-screen-color",
+            ]
+            .into_iter()
+            .map(|key| {
+                out.lines()
+                    .find(|line| line.starts_with(&format!("{key} = ")))
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "macos-icon = official",
+                "macos-custom-icon = ",
+                "macos-icon-frame = aluminum",
+                "macos-icon-ghost-color = ",
+                "macos-icon-screen-color = ",
+            ]
+        );
+
+        for (variant, keyword) in [
+            (MacAppIcon::Official, "official"),
+            (MacAppIcon::Blueprint, "blueprint"),
+            (MacAppIcon::Chalkboard, "chalkboard"),
+            (MacAppIcon::Microchip, "microchip"),
+            (MacAppIcon::Glass, "glass"),
+            (MacAppIcon::Holographic, "holographic"),
+            (MacAppIcon::Paper, "paper"),
+            (MacAppIcon::Retro, "retro"),
+            (MacAppIcon::Xray, "xray"),
+            (MacAppIcon::Custom, "custom"),
+            (MacAppIcon::CustomStyle, "custom-style"),
+        ] {
+            cfg.set("macos-icon", Some(keyword)).unwrap();
+            assert_eq!(cfg.macos_icon, variant);
+        }
+        assert_eq!(lines(&cfg)[0], "macos-icon = custom-style");
+        cfg.set("macos-icon", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon, MacAppIcon::Official);
+        assert_eq!(
+            cfg.set("macos-icon", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("macos-icon", Some("custom_style")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        for (variant, keyword) in [
+            (MacAppIconFrame::Aluminum, "aluminum"),
+            (MacAppIconFrame::Beige, "beige"),
+            (MacAppIconFrame::Plastic, "plastic"),
+            (MacAppIconFrame::Chrome, "chrome"),
+        ] {
+            cfg.set("macos-icon-frame", Some(keyword)).unwrap();
+            assert_eq!(cfg.macos_icon_frame, variant);
+        }
+        assert_eq!(lines(&cfg)[2], "macos-icon-frame = chrome");
+        cfg.set("macos-icon-frame", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon_frame, MacAppIconFrame::Aluminum);
+        assert_eq!(
+            cfg.set("macos-icon-frame", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("macos-icon-frame", Some("steel")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("macos-custom-icon", Some("/tmp/Ghostty.icns"))
+            .unwrap();
+        assert_eq!(cfg.macos_custom_icon, Some("/tmp/Ghostty.icns".to_string()));
+        assert_eq!(lines(&cfg)[1], "macos-custom-icon = /tmp/Ghostty.icns");
+        cfg.set("macos-custom-icon", Some("")).unwrap();
+        assert_eq!(cfg.macos_custom_icon, None);
+        assert_eq!(
+            cfg.set("macos-custom-icon", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("macos-custom-icon", Some("bad\0path")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("macos-icon-ghost-color", Some("ForestGreen"))
+            .unwrap();
+        assert_eq!(
+            cfg.macos_icon_ghost_color,
+            Some(Color {
+                r: 0x22,
+                g: 0x8b,
+                b: 0x22,
+            })
+        );
+        assert_eq!(lines(&cfg)[3], "macos-icon-ghost-color = #228b22");
+        cfg.set("macos-icon-ghost-color", Some("#0A0B0C")).unwrap();
+        assert_eq!(lines(&cfg)[3], "macos-icon-ghost-color = #0a0b0c");
+        cfg.set("macos-icon-ghost-color", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon_ghost_color, None);
+        assert_eq!(
+            cfg.set("macos-icon-ghost-color", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("macos-icon-ghost-color", Some("no-such-color")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("macos-icon-screen-color", Some("black,#0A0B0C"))
+            .unwrap();
+        assert_eq!(
+            cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![
+                    Color { r: 0, g: 0, b: 0 },
+                    Color {
+                        r: 0x0a,
+                        g: 0x0b,
+                        b: 0x0c,
+                    },
+                ],
+            })
+        );
+        assert_eq!(lines(&cfg)[4], "macos-icon-screen-color = #000000,#0a0b0c");
+        cfg.set("macos-icon-screen-color", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon_screen_color, None);
+        assert_eq!(
+            cfg.set("macos-icon-screen-color", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("macos-icon-screen-color", Some(",")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "macos-icon = custom-style\n\
+             macos-icon-frame = steel\n\
+             macos-icon-screen-color = notacolor\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "macos-icon-frame".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "macos-icon-screen-color".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+        assert_eq!(cfg.macos_icon, MacAppIcon::CustomStyle);
 
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
@@ -11279,6 +11625,11 @@ mod tests {
             "macos-titlebar-style",
             "macos-titlebar-proxy-icon",
             "macos-hidden",
+            "macos-icon",
+            "macos-custom-icon",
+            "macos-icon-frame",
+            "macos-icon-ghost-color",
+            "macos-icon-screen-color",
             "bold-color",
             "faint-opacity",
         ]);
@@ -12237,6 +12588,8 @@ mod tests {
             ("macos-titlebar-proxy-icon", "hidden"),
             ("macos-window-buttons", "hidden"),
             ("macos-hidden", "always"),
+            ("macos-icon", "custom-style"),
+            ("macos-icon-frame", "chrome"),
             ("grapheme-width-method", "legacy"),
             ("osc-color-report-format", "8-bit"),
             ("custom-shader-animation", "always"),
@@ -15756,6 +16109,34 @@ mod tests {
             assert_eq!(MacHidden::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(MacHidden::from_keyword("nope"), None);
+
+        for v in [
+            MacAppIcon::Official,
+            MacAppIcon::Blueprint,
+            MacAppIcon::Chalkboard,
+            MacAppIcon::Microchip,
+            MacAppIcon::Glass,
+            MacAppIcon::Holographic,
+            MacAppIcon::Paper,
+            MacAppIcon::Retro,
+            MacAppIcon::Xray,
+            MacAppIcon::Custom,
+            MacAppIcon::CustomStyle,
+        ] {
+            assert_eq!(MacAppIcon::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacAppIcon::from_keyword("custom_style"), None);
+        assert_eq!(MacAppIcon::from_keyword("nope"), None);
+
+        for v in [
+            MacAppIconFrame::Aluminum,
+            MacAppIconFrame::Beige,
+            MacAppIconFrame::Plastic,
+            MacAppIconFrame::Chrome,
+        ] {
+            assert_eq!(MacAppIconFrame::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacAppIconFrame::from_keyword("nope"), None);
 
         for v in [
             BackgroundImageFit::Contain,

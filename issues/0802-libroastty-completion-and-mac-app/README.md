@@ -231,6 +231,13 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   `[no-]flag` lists, empty reset, missing-value diagnostics, and canonical
   formatter output; runtime toast delivery and app C ABI exposure remain later
   work.
+- **macOS icon config is parser/formatter-only.** Exp 90 wires `macos-icon`,
+  `macos-custom-icon`, `macos-icon-frame`, `macos-icon-ghost-color`, and
+  `macos-icon-screen-color` with upstream defaults, enum keywords, optional
+  string/color/color-list parsing, empty reset, diagnostics, and canonical
+  formatter output; runtime dock icon selection, custom icon loading,
+  custom-style validation/rendering, app C ABI exposure, and macOS app
+  integration remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -898,7 +905,7 @@ stays unaltered except for the rename).
 - [Experiment 89: Phase F — app notifications config](89-app-notifications-config.md)
   — **Pass**
 - [Experiment 90: Phase F — macOS icon config](90-macos-icon-config.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 

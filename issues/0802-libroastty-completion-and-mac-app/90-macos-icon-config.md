@@ -106,3 +106,48 @@ fields between `macos-hidden` and the icon subgroup. The design text was
 corrected to make that gap explicit and to describe the planned placement as the
 current local macOS formatter region, not a claim that the intervening upstream
 fields are already ported.
+
+## Result
+
+**Result:** Pass
+
+Implemented the parser/formatter-only macOS icon config group in
+`roastty/src/config/mod.rs`:
+
+- added `Config` storage/defaults for `macos-icon`, `macos-custom-icon`,
+  `macos-icon-frame`, `macos-icon-ghost-color`, and `macos-icon-screen-color`;
+- added formatter output after `macos-hidden` and before `bold-color`,
+  preserving the current local macOS formatter gap while leaving upstream
+  secure-input / AppleScript fields unported;
+- routed `Config::set` for enum, optional string, optional color, and optional
+  color-list parsing;
+- added `MacAppIcon` and `MacAppIconFrame` enums with exact upstream keywords,
+  including `custom-style`;
+- added a `ColorList` parse wrapper for optional `macos-icon-screen-color`;
+- extended default audits, enum-route coverage, format-order coverage, enum
+  keyword round trips, and a focused `macos_icon` parse/format/reset/diagnostic
+  test.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p roastty macos_icon` — pass
+- `cargo test -p roastty config_format_config` — pass
+- `cargo test -p roastty` — pass: 4534 unit tests, C ABI harness pass, doc tests
+  pass; the ABI harness still emits the pre-existing 10 enum-conversion warnings
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The pinned upstream macOS icon config subgroup now exists in roastty's config
+parser and formatter with the expected defaults, keywords, optional value
+semantics, and diagnostics. This remains intentionally parser/formatter-only:
+runtime dock icon selection, custom icon file loading, custom-style validation
+and rendering, app C ABI exposure, and macOS app integration remain later work.
+
+## Completion Review
+
+Codex-native adversarial reviewer `019eb538-b661-7370-a8b4-3635fcf09b4b`
+reviewed the completed experiment with fresh context and returned **Approved**
+with no findings.
