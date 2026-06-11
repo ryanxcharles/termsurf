@@ -2294,6 +2294,10 @@ impl Config {
         diagnostics
     }
 
+    pub(crate) fn parse_config_line(line: &str) -> Option<(&str, Option<&str>)> {
+        loader::parse_config_line(line)
+    }
+
     /// Load config from a file (upstream `Config.loadFile` → `loadReader`): read the
     /// file, skip a leading UTF-8 byte-order mark, and drive `load_str`. Returns the
     /// per-line diagnostics; an open/read error propagates as `io::Error`.

@@ -489,6 +489,13 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   The old XCTest session hang is now a finalized xcodebuild result: full non-UI
   app tests run 201 tests and fail with 6 concrete assertions, all caused by
   file-loaded `keybind` entries still reporting `UnknownField`.
+- **File-loaded keybinds now use the app-facing keybind store.** Exp 134 routes
+  `keybind` lines from direct, default, and recursive config files through the
+  existing CLI keybind parser/storage path, filters only the duplicate
+  `UnknownField` diagnostics for handled keybind lines, and includes default
+  keybinds in the `--config-default-files=false` rollback snapshot. The full
+  Rust suite passes 4750 unit tests plus the C ABI harness and doc tests; the
+  full non-UI macOS app gate passes 201 tests across 18 suites.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -864,8 +871,8 @@ the live app, verified by a Phase-D UI test.)
       `end_key_sequence` are wired (Exp 118–121), and configured `chain=` leaves
       are wired on the surface path (Exp 122) and direct app-key path (Exp 123),
       with global app-key surface-control fanout for direct key-table and
-      `end_key_sequence` leaves (Exp 125), but file-loaded `keybind` config
-      entries (Exp 133's next concrete app-test failure) plus native
+      `end_key_sequence` leaves (Exp 125), and file-loaded `keybind` entries are
+      wired for direct/default/recursive config files (Exp 134), but native
       keymaps/global shortcuts remain later work
 - [ ] Trigger-prefix flags (`global:` / `all:` / `unconsumed:` / `performable:`)
       — parser/storage/query metadata and surface unconsumed/performable
@@ -1272,7 +1279,7 @@ stays unaltered except for the rename).
 - [Experiment 133: Phase G — XCTest host lifecycle](133-xctest-host-lifecycle.md)
   — **Partial**
 - [Experiment 134: Phase G — file keybind loading](134-file-keybind-loading.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

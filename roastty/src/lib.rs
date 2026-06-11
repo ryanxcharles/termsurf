@@ -1764,6 +1764,7 @@ struct Config {
     parsed: config::Config,
     before_default_files: Option<config::Config>,
     before_default_files_diagnostics_len: Option<usize>,
+    before_default_keybinds: Option<ConfigKeybindSnapshot>,
     finalized: bool,
     confirm_close_surface: config::ConfirmCloseSurface,
     has_global_keybinds: bool,
@@ -1782,6 +1783,20 @@ struct Config {
 struct CachedConfigPath {
     path: CString,
     optional: bool,
+}
+
+#[derive(Clone)]
+struct ConfigKeybindSnapshot {
+    has_global_keybinds: bool,
+    keybind_triggers: Vec<ConfigKeybind>,
+    keybind_sequences: ConfigKeybindSet,
+    keybind_tables: Vec<ConfigKeybindTable>,
+    keybind_chain_parent: Option<ConfigKeybindChainParent>,
+}
+
+#[derive(Default)]
+struct ConfigFileKeybindReport {
+    keybind_lines: Vec<usize>,
 }
 
 struct CachedCommand {
@@ -2001,6 +2016,25 @@ impl Config {
     fn snapshot_default_files_boundary(&mut self) {
         self.before_default_files = Some(self.parsed.clone());
         self.before_default_files_diagnostics_len = Some(self.diagnostics.len());
+        self.before_default_keybinds = Some(self.keybind_snapshot());
+    }
+
+    fn keybind_snapshot(&self) -> ConfigKeybindSnapshot {
+        ConfigKeybindSnapshot {
+            has_global_keybinds: self.has_global_keybinds,
+            keybind_triggers: self.keybind_triggers.clone(),
+            keybind_sequences: self.keybind_sequences.clone(),
+            keybind_tables: self.keybind_tables.clone(),
+            keybind_chain_parent: self.keybind_chain_parent.clone(),
+        }
+    }
+
+    fn restore_keybind_snapshot(&mut self, snapshot: ConfigKeybindSnapshot) {
+        self.has_global_keybinds = snapshot.has_global_keybinds;
+        self.keybind_triggers = snapshot.keybind_triggers;
+        self.keybind_sequences = snapshot.keybind_sequences;
+        self.keybind_tables = snapshot.keybind_tables;
+        self.keybind_chain_parent = snapshot.keybind_chain_parent;
     }
 
     fn apply_cli_config_args(
@@ -2016,6 +2050,7 @@ impl Config {
         if self.parsed.config_default_files {
             self.before_default_files = None;
             self.before_default_files_diagnostics_len = None;
+            self.before_default_keybinds = None;
             return diagnostics;
         }
 
@@ -2033,6 +2068,9 @@ impl Config {
         }
 
         self.parsed = snapshot;
+        if let Some(snapshot) = self.before_default_keybinds.take() {
+            self.restore_keybind_snapshot(snapshot);
+        }
         self.before_default_files = None;
         self.before_default_files_diagnostics_len = None;
         self.parsed.config_default_files = true;
@@ -2040,6 +2078,82 @@ impl Config {
             .parsed
             .set_cli_args(config_args.iter().map(String::as_str));
         diagnostics
+    }
+
+    fn load_file_keybinds(&mut self, path: &Path) -> std::io::Result<ConfigFileKeybindReport> {
+        let path = std::fs::canonicalize(path)?;
+        let text = std::fs::read_to_string(&path)?;
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
+        Ok(self.load_keybinds_from_config_text(path.display(), text))
+    }
+
+    fn load_keybinds_from_config_text(
+        &mut self,
+        source: impl std::fmt::Display,
+        text: &str,
+    ) -> ConfigFileKeybindReport {
+        let source = source.to_string();
+        let mut report = ConfigFileKeybindReport::default();
+        for (index, text_line) in text.split('\n').enumerate() {
+            let line = index + 1;
+            let Some((key, value)) = config::Config::parse_config_line(text_line) else {
+                continue;
+            };
+            if key != "keybind" {
+                continue;
+            }
+            report.keybind_lines.push(line);
+            let Some(value) = value else {
+                self.push_file_keybind_value_required(&source, line);
+                continue;
+            };
+            let value = value.as_bytes();
+            match parse_config_keybind_entry(value) {
+                Ok(entry) => {
+                    if let ConfigKeybindStoreResult::Err(error) = self.store_keybind_entry(entry) {
+                        self.push_file_keybind_diagnostic(&source, line, value, error);
+                    }
+                }
+                Err(error) => self.push_file_keybind_diagnostic(&source, line, value, error),
+            }
+        }
+        report
+    }
+
+    fn push_file_keybind_value_required(&mut self, source: impl std::fmt::Display, line: usize) {
+        self.push_diagnostic(format!("{source}:{line}: invalid keybind: value required"));
+    }
+
+    fn push_file_keybind_diagnostic(
+        &mut self,
+        source: impl std::fmt::Display,
+        line: usize,
+        value: &[u8],
+        error: ConfigKeybindParseError,
+    ) {
+        let value = String::from_utf8_lossy(value);
+        self.push_diagnostic(format!(
+            "{source}:{line}: invalid keybind `{value}`: {}",
+            error.message()
+        ));
+    }
+
+    fn push_config_load_diagnostics(
+        &mut self,
+        source: impl std::fmt::Display,
+        diagnostics: &[config::ConfigDiagnostic],
+        keybind_report: &ConfigFileKeybindReport,
+    ) {
+        let source = source.to_string();
+        for diagnostic in diagnostics {
+            if diagnostic.key == "keybind"
+                && keybind_report.keybind_lines.contains(&diagnostic.line)
+                && matches!(diagnostic.error, config::ConfigSetError::UnknownField)
+            {
+                continue;
+            }
+            self.push_config_diagnostic(&source, diagnostic);
+        }
     }
 
     fn push_config_diagnostic(
@@ -12462,6 +12576,7 @@ pub extern "C" fn roastty_config_new() -> RoasttyConfig {
         parsed: config::Config::default(),
         before_default_files: None,
         before_default_files_diagnostics_len: None,
+        before_default_keybinds: None,
         finalized: false,
         confirm_close_surface: config::ConfirmCloseSurface::True,
         has_global_keybinds: false,
@@ -12495,6 +12610,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
         parsed,
         before_default_files,
         before_default_files_diagnostics_len,
+        before_default_keybinds,
         finalized,
         confirm_close_surface,
         has_global_keybinds,
@@ -12508,6 +12624,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
                 config.parsed.clone(),
                 config.before_default_files.clone(),
                 config.before_default_files_diagnostics_len,
+                config.before_default_keybinds.clone(),
                 config.finalized,
                 config.confirm_close_surface,
                 config.has_global_keybinds,
@@ -12519,6 +12636,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
         })
         .unwrap_or((
             config::Config::default(),
+            None,
             None,
             None,
             false,
@@ -12533,6 +12651,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
         parsed,
         before_default_files,
         before_default_files_diagnostics_len,
+        before_default_keybinds,
         finalized,
         confirm_close_surface,
         has_global_keybinds,
@@ -12625,9 +12744,14 @@ pub extern "C" fn roastty_config_load_file(config: RoasttyConfig, path: *const c
     let path = Path::new(OsStr::from_bytes(path.to_bytes()));
     match config.parsed.load_file(path) {
         Ok(diagnostics) => {
-            for diagnostic in &diagnostics {
-                config.push_config_diagnostic(path.display(), diagnostic);
-            }
+            let keybind_report = match config.load_file_keybinds(path) {
+                Ok(report) => report,
+                Err(error) => {
+                    config.push_config_file_error(path.display(), &error);
+                    ConfigFileKeybindReport::default()
+                }
+            };
+            config.push_config_load_diagnostics(path.display(), &diagnostics, &keybind_report);
             config.sync_from_parsed_config();
         }
         Err(error) => config.push_config_file_error(path.display(), &error),
@@ -12643,9 +12767,18 @@ pub extern "C" fn roastty_config_load_default_files(config: RoasttyConfig) {
     config.snapshot_default_files_boundary();
     let report = config.parsed.load_default_files();
     for load in &report.loaded {
-        for diagnostic in &load.diagnostics {
-            config.push_config_diagnostic(load.path.display(), diagnostic);
-        }
+        let keybind_report = match config.load_file_keybinds(&load.path) {
+            Ok(report) => report,
+            Err(error) => {
+                config.push_config_file_error(load.path.display(), &error);
+                ConfigFileKeybindReport::default()
+            }
+        };
+        config.push_config_load_diagnostics(
+            load.path.display(),
+            &load.diagnostics,
+            &keybind_report,
+        );
     }
     for error in &report.errors {
         config.push_config_file_error(error.path.display(), &error.error);
@@ -12661,9 +12794,18 @@ pub extern "C" fn roastty_config_load_recursive_files(config: RoasttyConfig) {
 
     let report = config.parsed.load_recursive_files_from_config();
     for load in &report.loaded {
-        for diagnostic in &load.diagnostics {
-            config.push_config_diagnostic(load.path.display(), diagnostic);
-        }
+        let keybind_report = match config.load_file_keybinds(&load.path) {
+            Ok(report) => report,
+            Err(error) => {
+                config.push_config_file_error(load.path.display(), &error);
+                ConfigFileKeybindReport::default()
+            }
+        };
+        config.push_config_load_diagnostics(
+            load.path.display(),
+            &load.diagnostics,
+            &keybind_report,
+        );
     }
     for error in &report.errors {
         match &error.error {
@@ -18240,6 +18382,31 @@ mod tests {
         handle
     }
 
+    fn write_config_test_file(name: &str, body: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "roastty-config-file-keybind-{}-{name}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.roastty");
+        std::fs::write(&path, body).unwrap();
+        (dir, path)
+    }
+
+    fn load_test_config_file(config: RoasttyConfig, path: &Path) {
+        let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        roastty_config_load_file(config, path.as_ptr());
+    }
+
+    fn diagnostic_message(config: RoasttyConfig, index: u32) -> String {
+        let diagnostic = roastty_config_get_diagnostic(config, index);
+        unsafe { CStr::from_ptr(diagnostic.message) }
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
     fn new_test_config_with_macos_option_as_alt(
         option_as_alt: Option<key_mods::OptionAsAlt>,
     ) -> RoasttyConfig {
@@ -20511,6 +20678,153 @@ mod tests {
         ));
 
         roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_file_keybind_load_file_overrides_unbinds_and_filters_diagnostics() {
+        let (_dir, path) = write_config_test_file(
+            "load-file",
+            "keybind=super+h=goto_split:left\n\
+             keybind = super+d=unbind\n\
+             not-a-real-key = value\n",
+        );
+        let config = roastty_config_new();
+
+        load_test_config_file(config, &path);
+
+        let trigger = roastty_config_trigger(
+            config,
+            b"goto_split:left".as_ptr().cast::<c_char>(),
+            b"goto_split:left".len(),
+        );
+        assert_unicode_trigger(trigger, b'h' as u32, ROASTTY_MODS_SUPER);
+        assert_empty_trigger(roastty_config_trigger(
+            config,
+            b"new_split:right".as_ptr().cast::<c_char>(),
+            b"new_split:right".len(),
+        ));
+        assert_eq!(roastty_config_diagnostics_count(config), 1);
+        let diagnostic = diagnostic_message(config, 0);
+        assert!(diagnostic.contains("not-a-real-key"));
+        assert!(!diagnostic.contains("invalid config key `keybind`"));
+
+        roastty_config_free(config);
+        std::fs::remove_dir_all(_dir).ok();
+    }
+
+    #[test]
+    fn config_file_keybind_load_file_preserves_chain_order_and_reports_keybind_errors() {
+        let (_dir, path) = write_config_test_file(
+            "load-file-chain",
+            "keybind=x=text:parent\n\
+             keybind=chain=text:child\n\
+             keybind=chain=unbind\n",
+        );
+        let config = roastty_config_new();
+
+        load_test_config_file(config, &path);
+
+        let config_ref = config_from_handle(config).unwrap();
+        assert_eq!(config_ref.keybind_triggers.len(), 1);
+        assert_eq!(
+            config_ref.keybind_triggers[0].actions,
+            vec![b"text:parent".to_vec(), b"text:child".to_vec()]
+        );
+        assert_eq!(roastty_config_diagnostics_count(config), 1);
+        let diagnostic = diagnostic_message(config, 0);
+        assert!(diagnostic.contains(":3: invalid keybind `chain=unbind`"));
+        assert!(diagnostic.contains("invalid action"));
+        assert!(!diagnostic.contains("UnknownField"));
+
+        roastty_config_free(config);
+        std::fs::remove_dir_all(_dir).ok();
+    }
+
+    #[test]
+    fn config_file_keybind_default_files_load_and_rollback_with_cli_disable() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "roastty-config-file-keybind-default-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&root).ok();
+        let home = root.join("home");
+        let xdg = root.join("xdg");
+        let config_dir = xdg.join("roastty");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            config_dir.join("config.roastty"),
+            "keybind=super+h=goto_split:left\n",
+        )
+        .unwrap();
+        let _home = EnvGuard::set("HOME", &home);
+        let _xdg = EnvGuard::set("XDG_CONFIG_HOME", &xdg);
+        let config = roastty_config_new();
+
+        roastty_config_load_default_files(config);
+        let trigger = roastty_config_trigger(
+            config,
+            b"goto_split:left".as_ptr().cast::<c_char>(),
+            b"goto_split:left".len(),
+        );
+        assert_unicode_trigger(trigger, b'h' as u32, ROASTTY_MODS_SUPER);
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+
+        let _cli_lock = CLI_ARGS_LOCK.lock().unwrap();
+        *INIT_ARGV.lock().unwrap() = vec![
+            b"roastty".to_vec(),
+            b"--config-default-files=false".to_vec(),
+        ];
+        roastty_config_load_cli_args(config);
+        *INIT_ARGV.lock().unwrap() = Vec::new();
+        let trigger = roastty_config_trigger(
+            config,
+            b"goto_split:left".as_ptr().cast::<c_char>(),
+            b"goto_split:left".len(),
+        );
+        let default = default_config_trigger(b"goto_split:left");
+        assert_eq!(trigger.tag, default.tag);
+        assert_eq!(trigger.mods, default.mods);
+        assert_eq!(unsafe { trigger.key.physical }, unsafe {
+            default.key.physical
+        });
+
+        roastty_config_free(config);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn config_file_keybind_recursive_load_preserves_chain_order() {
+        let dir = std::env::temp_dir().join(format!(
+            "roastty-config-file-keybind-recursive-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let parent = dir.join("parent.conf");
+        let child = dir.join("child.conf");
+        std::fs::write(
+            &parent,
+            format!("keybind=x=text:parent\nconfig-file = {}\n", child.display()),
+        )
+        .unwrap();
+        std::fs::write(&child, "keybind=chain=text:child\n").unwrap();
+        let config = roastty_config_new();
+
+        load_test_config_file(config, &parent);
+        roastty_config_load_recursive_files(config);
+
+        let config_ref = config_from_handle(config).unwrap();
+        assert_eq!(config_ref.keybind_triggers.len(), 1);
+        assert_eq!(
+            config_ref.keybind_triggers[0].actions,
+            vec![b"text:parent".to_vec(), b"text:child".to_vec()]
+        );
+        assert_eq!(roastty_config_diagnostics_count(config), 0);
+
+        roastty_config_free(config);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

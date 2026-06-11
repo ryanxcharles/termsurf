@@ -97,3 +97,74 @@ requirements for default-file loading, recursive-file loading, duplicate
 diagnostic filtering, recursive chain ordering, and preservation of non-keybind
 unknown diagnostics. The re-review approved the design with no remaining
 required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented file-loaded keybind handling at the Rust ABI boundary without
+changing copied Swift app sources:
+
+- `roastty/src/config/mod.rs` exposes a narrow `Config::parse_config_line`
+  wrapper around the existing config loader line parser.
+- `roastty/src/lib.rs` now scans successfully loaded config files for `keybind`
+  entries and routes them through the existing `parse_config_keybind_entry` /
+  `Config::store_keybind_entry` path used by CLI `--keybind`.
+- `roastty_config_load_file`, `roastty_config_load_default_files`, and
+  `roastty_config_load_recursive_files` all apply keybinds from their loaded
+  files and filter only the matching parsed-loader `UnknownField` diagnostics.
+  Unrelated unknown config keys still report normally.
+- File keybind diagnostics now include the source path and line number, and
+  invalid keybinds report the specific keybind parser error instead of a generic
+  config `UnknownField`.
+- Default-file keybind state is included in the existing default-file rollback
+  snapshot, so later `--config-default-files=false` removes default-file
+  keybinds along with parsed default-file config.
+
+Verification passed:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/134-file-keybind-loading.md issues/0802-libroastty-completion-and-mac-app/README.md`
+- `cargo fmt`
+- `cargo fmt --check`
+- `cargo build -p roastty`
+- `cargo test -p roastty config_file_keybind_ -- --test-threads=1` — 4 unit
+  tests passed.
+- `cargo test -p roastty config_trigger_ -- --test-threads=1` — 12 unit tests
+  passed.
+- `cargo test -p roastty -- --test-threads=1` — 4750 unit tests passed; the C
+  ABI harness passed; doc tests passed. The ABI harness still emits the
+  pre-existing enum-conversion warnings.
+- `cd roastty && macos/build.nu --action test --only-testing RoasttyTests/ConfigTests`
+  — 38 tests in 1 suite passed.
+- `cd roastty && macos/build.nu --action test --only-testing RoasttyTests/MenuShortcutManagerTests`
+  — 2 tests in 1 suite passed.
+- `cd roastty && macos/build.nu --action test` — 201 tests in 18 suites passed.
+
+The six keybind assertions that remained after Experiment 133 are now green:
+file-loaded `keybind=cmd+L=goto_split:left`, `keybind=cmd+Ä=goto_split:left`,
+`keybind = super+d=unbind`, and `keybind=super+h=goto_split:left` all reach the
+app-facing shortcut lookup path.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent (`multi_agent_v1.spawn_agent`,
+fresh context, `Zeno`)
+
+**Verdict:** Approved after fixes
+
+The initial result review returned **Changes Required** because
+`push_config_load_diagnostics` filtered every parsed-loader diagnostic on a
+handled `keybind` line, rather than explicitly filtering only duplicate
+`UnknownField` diagnostics. I fixed the filter to require
+`diagnostic.key == "keybind"`, a handled keybind line, and
+`ConfigSetError::UnknownField`; any future non-`UnknownField` keybind diagnostic
+now falls through to the normal config diagnostic path. The re-review approved
+the completed result with no remaining required findings.
+
+## Conclusion
+
+File-loaded keybinds now share the CLI keybind parser/storage path across direct
+file, default-file, and recursive-file loads. The copied macOS non-UI test gate
+is fully green after the Exp133 runner fix, so the next Phase G work can move
+past file-loaded keybind plumbing to the remaining native keymap/global shortcut
+items.
