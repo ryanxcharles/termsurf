@@ -939,6 +939,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 94: Phase F — GTK CSS, notifications, and progress config](94-gtk-css-notifications-progress-config.md)
   — **Pass**
+- [Experiment 95: Phase F — TERM and enquiry-response config](95-term-enquiry-config.md)
+  — **Designed**
 
 ## Process
 
