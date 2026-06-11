@@ -271,6 +271,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   `async-backend`, `auto-update`, and `auto-update-channel` with exact upstream
   enum keywords and raw defaults; runtime async backend selection, Sparkle
   update behavior, and `auto-update-channel` finalization remain later work.
+- **Config finalize scalar tail is wired.** Exp 97 restores empty `term`, clamps
+  `minimum-contrast` and `faint-opacity`, and fills unset `auto-update-channel`
+  from the pinned `1.3.2-dev` build channel (`tip`); heavier finalize behavior
+  such as theme loading, conditional reload, working-directory/default-shell
+  resolution, GTK runtime defaults, link matcher mutation, and key-remap
+  finalization remains later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -953,6 +959,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 97: Phase F — config finalize scalar tail](97-config-finalize-scalar-tail.md)
   — **Pass**
+- [Experiment 98: Phase F — config replay foundation](98-config-replay-foundation.md)
+  — **Designed**
 
 ## Process
 
