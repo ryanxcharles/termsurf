@@ -100,3 +100,44 @@ scope is limited to the parser/formatter config surface, and the planned fields,
 defaults, enum variants, formatter order, reset/error behavior, diagnostics,
 clone/equality coverage, and tests match upstream and the surrounding Rust
 config patterns.
+
+## Result
+
+**Result:** Pass
+
+Implemented the three planned resize overlay config fields in
+`roastty/src/config/mod.rs`. `ResizeOverlay` and `ResizeOverlayPosition` now
+parse and format their upstream enum keywords, `resize-overlay-duration` uses
+the existing `Duration` parser/formatter path, and all three fields preserve the
+upstream defaults and formatter order.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty resize_overlay_config`
+- `cargo test -p roastty enum_from_keyword_round_trips`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+  - 4512 unit tests passed
+  - ABI harness passed with the existing enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The resize-overlay config surface now matches the upstream defaults, parser
+behavior, duration handling, formatter order, diagnostics, and clone/equality
+requirements for this slice. The next experiment can continue with
+`focus-follows-mouse`, the field that follows the resize-overlay block upstream.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb43c-7257-71d0-ae28-910ca1dbfcd8` returned
+**Approved** with no required findings. The reviewer confirmed that the
+implementation matches the approved scope and upstream defaults/keywords,
+`Duration` uses the existing parser/formatter path, `Config::set`
+reset/error/diagnostic paths are covered, formatter order is correct, docs and
+README status match the current Pass state, focused tests plus
+`cargo fmt --check` and `git diff --check` pass, and HEAD remains at the plan
+commit with only uncommitted result changes.

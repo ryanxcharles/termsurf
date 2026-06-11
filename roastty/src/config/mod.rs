@@ -212,6 +212,12 @@ pub(crate) struct Config {
     pub window_titlebar_background: Option<Color>,
     /// `window-titlebar-foreground`.
     pub window_titlebar_foreground: Option<Color>,
+    /// `resize-overlay`.
+    pub resize_overlay: ResizeOverlay,
+    /// `resize-overlay-position`.
+    pub resize_overlay_position: ResizeOverlayPosition,
+    /// `resize-overlay-duration`.
+    pub resize_overlay_duration: Duration,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `title`.
@@ -387,6 +393,11 @@ impl Default for Config {
             window_show_tab_bar: WindowShowTabBar::Auto,
             window_titlebar_background: None,
             window_titlebar_foreground: None,
+            resize_overlay: ResizeOverlay::AfterFirst,
+            resize_overlay_position: ResizeOverlayPosition::Center,
+            resize_overlay_duration: Duration {
+                duration: 750 * NS_PER_MS,
+            },
             fullscreen: Fullscreen::False,
             title: None,
             class: None,
@@ -618,6 +629,12 @@ impl Config {
             .entry_optional(self.window_titlebar_background, |v, f| v.format_entry(f));
         EntryFormatter::new("window-titlebar-foreground", out)
             .entry_optional(self.window_titlebar_foreground, |v, f| v.format_entry(f));
+        self.resize_overlay
+            .format_entry(&mut EntryFormatter::new("resize-overlay", out));
+        self.resize_overlay_position
+            .format_entry(&mut EntryFormatter::new("resize-overlay-position", out));
+        self.resize_overlay_duration
+            .format_entry(&mut EntryFormatter::new("resize-overlay-duration", out));
         self.clipboard_read
             .format_entry(&mut EntryFormatter::new("clipboard-read", out));
         self.clipboard_write
@@ -952,6 +969,21 @@ impl Config {
                 } else {
                     return Err(ConfigSetError::UnknownField);
                 }
+            }
+            "resize-overlay" => {
+                self.resize_overlay =
+                    set_enum_field(value, default.resize_overlay, ResizeOverlay::from_keyword)?
+            }
+            "resize-overlay-position" => {
+                self.resize_overlay_position = set_enum_field(
+                    value,
+                    default.resize_overlay_position,
+                    ResizeOverlayPosition::from_keyword,
+                )?
+            }
+            "resize-overlay-duration" => {
+                self.resize_overlay_duration =
+                    set_value_field(value, default.resize_overlay_duration, Duration::parse_cli)?
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -3095,6 +3127,88 @@ impl WindowShowTabBar {
             "always" => Some(WindowShowTabBar::Always),
             "auto" => Some(WindowShowTabBar::Auto),
             "never" => Some(WindowShowTabBar::Never),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `resize-overlay` config (upstream `ResizeOverlay`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResizeOverlay {
+    Always,
+    Never,
+    AfterFirst,
+}
+
+impl ResizeOverlay {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            ResizeOverlay::Always => "always",
+            ResizeOverlay::Never => "never",
+            ResizeOverlay::AfterFirst => "after-first",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "always" => Some(ResizeOverlay::Always),
+            "never" => Some(ResizeOverlay::Never),
+            "after-first" => Some(ResizeOverlay::AfterFirst),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `resize-overlay-position` config (upstream `ResizeOverlayPosition`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResizeOverlayPosition {
+    Center,
+    TopLeft,
+    TopCenter,
+    TopRight,
+    BottomLeft,
+    BottomCenter,
+    BottomRight,
+}
+
+impl ResizeOverlayPosition {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            ResizeOverlayPosition::Center => "center",
+            ResizeOverlayPosition::TopLeft => "top-left",
+            ResizeOverlayPosition::TopCenter => "top-center",
+            ResizeOverlayPosition::TopRight => "top-right",
+            ResizeOverlayPosition::BottomLeft => "bottom-left",
+            ResizeOverlayPosition::BottomCenter => "bottom-center",
+            ResizeOverlayPosition::BottomRight => "bottom-right",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "center" => Some(ResizeOverlayPosition::Center),
+            "top-left" => Some(ResizeOverlayPosition::TopLeft),
+            "top-center" => Some(ResizeOverlayPosition::TopCenter),
+            "top-right" => Some(ResizeOverlayPosition::TopRight),
+            "bottom-left" => Some(ResizeOverlayPosition::BottomLeft),
+            "bottom-center" => Some(ResizeOverlayPosition::BottomCenter),
+            "bottom-right" => Some(ResizeOverlayPosition::BottomRight),
             _ => None,
         }
     }
@@ -5455,13 +5569,13 @@ mod tests {
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
         RepeatableClipboardCodepointMap, RepeatableCodepointMap, RepeatableConfigPath,
         RepeatableConfigPathParseError, RepeatableString, RepeatableStringParseError,
-        RightClickAction, ScrollToBottom, Scrollbar, SelectionWordChars,
-        SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
-        SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
-        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowNewTabPosition,
-        WindowPadding, WindowPaddingBalance, WindowPaddingColor, WindowPaddingParseError,
-        WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme, WorkingDirectory,
-        WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
+        ResizeOverlay, ResizeOverlayPosition, RightClickAction, ScrollToBottom, Scrollbar,
+        SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
+        ShellIntegrationFeatures, SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme,
+        ThemeParseError, WindowColorspace, WindowDecoration, WindowDecorationParseError,
+        WindowNewTabPosition, WindowPadding, WindowPaddingBalance, WindowPaddingColor,
+        WindowPaddingParseError, WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme,
+        WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::cursor;
@@ -8693,6 +8807,42 @@ mod tests {
     }
 
     #[test]
+    fn resize_overlay_keywords_and_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (ResizeOverlay::Always, "always"),
+            (ResizeOverlay::Never, "never"),
+            (ResizeOverlay::AfterFirst, "after-first"),
+        ] {
+            assert_eq!(variant.keyword(), kw);
+            assert_eq!(ResizeOverlay::from_keyword(kw), Some(variant));
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        assert_eq!(ResizeOverlay::from_keyword("nope"), None);
+
+        for (variant, kw) in [
+            (ResizeOverlayPosition::Center, "center"),
+            (ResizeOverlayPosition::TopLeft, "top-left"),
+            (ResizeOverlayPosition::TopCenter, "top-center"),
+            (ResizeOverlayPosition::TopRight, "top-right"),
+            (ResizeOverlayPosition::BottomLeft, "bottom-left"),
+            (ResizeOverlayPosition::BottomCenter, "bottom-center"),
+            (ResizeOverlayPosition::BottomRight, "bottom-right"),
+        ] {
+            assert_eq!(variant.keyword(), kw);
+            assert_eq!(ResizeOverlayPosition::from_keyword(kw), Some(variant));
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        assert_eq!(ResizeOverlayPosition::from_keyword("nope"), None);
+    }
+
+    #[test]
     fn theme_format_entry() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
@@ -9701,6 +9851,9 @@ mod tests {
                 "window-show-tab-bar",
                 "window-titlebar-background",
                 "window-titlebar-foreground",
+                "resize-overlay",
+                "resize-overlay-position",
+                "resize-overlay-duration",
                 "clipboard-read",
                 "clipboard-write",
                 "clipboard-trim-trailing-spaces",
@@ -12270,6 +12423,145 @@ mod tests {
     }
 
     #[test]
+    fn resize_overlay_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.resize_overlay, ResizeOverlay::AfterFirst);
+        assert_eq!(cfg.resize_overlay_position, ResizeOverlayPosition::Center);
+        assert_eq!(
+            cfg.resize_overlay_duration,
+            Duration {
+                duration: 750 * NS_PER_MS,
+            }
+        );
+        assert_eq!(line(&cfg, "resize-overlay"), "resize-overlay = after-first");
+        assert_eq!(
+            line(&cfg, "resize-overlay-position"),
+            "resize-overlay-position = center"
+        );
+        assert_eq!(
+            line(&cfg, "resize-overlay-duration"),
+            "resize-overlay-duration = 750ms"
+        );
+
+        cfg.set("resize-overlay", Some("always")).unwrap();
+        cfg.set("resize-overlay-position", Some("bottom-right"))
+            .unwrap();
+        cfg.set("resize-overlay-duration", Some("1s 250ms"))
+            .unwrap();
+        assert_eq!(cfg.resize_overlay, ResizeOverlay::Always);
+        assert_eq!(
+            cfg.resize_overlay_position,
+            ResizeOverlayPosition::BottomRight
+        );
+        assert_eq!(
+            cfg.resize_overlay_duration,
+            Duration {
+                duration: NS_PER_S + 250 * NS_PER_MS,
+            }
+        );
+        assert_eq!(line(&cfg, "resize-overlay"), "resize-overlay = always");
+        assert_eq!(
+            line(&cfg, "resize-overlay-position"),
+            "resize-overlay-position = bottom-right"
+        );
+        assert_eq!(
+            line(&cfg, "resize-overlay-duration"),
+            "resize-overlay-duration = 1s 250ms"
+        );
+
+        cfg.set("resize-overlay", Some("")).unwrap();
+        cfg.set("resize-overlay-position", Some("")).unwrap();
+        cfg.set("resize-overlay-duration", Some("")).unwrap();
+        assert_eq!(cfg.resize_overlay, ResizeOverlay::AfterFirst);
+        assert_eq!(cfg.resize_overlay_position, ResizeOverlayPosition::Center);
+        assert_eq!(
+            cfg.resize_overlay_duration,
+            Duration {
+                duration: 750 * NS_PER_MS,
+            }
+        );
+
+        for key in ["resize-overlay", "resize-overlay-position"] {
+            assert_eq!(cfg.set(key, None), Err(ConfigSetError::ValueRequired));
+            assert_eq!(
+                cfg.set(key, Some("nope")),
+                Err(ConfigSetError::InvalidValue)
+            );
+        }
+        assert_eq!(
+            cfg.set("resize-overlay-duration", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for value in ["1", "250", "forever"] {
+            assert_eq!(
+                cfg.set("resize-overlay-duration", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "resize-overlay-duration accepted {value:?}"
+            );
+        }
+
+        let diagnostics = cfg.load_str(
+            "resize-overlay = never\n\
+             resize-overlay = maybe\n\
+             resize-overlay-position = top-left\n\
+             resize-overlay-position = middle\n\
+             resize-overlay-duration = 45s\n\
+             resize-overlay-duration = 45\n",
+        );
+        assert_eq!(cfg.resize_overlay, ResizeOverlay::Never);
+        assert_eq!(cfg.resize_overlay_position, ResizeOverlayPosition::TopLeft);
+        assert_eq!(
+            cfg.resize_overlay_duration,
+            Duration {
+                duration: 45 * NS_PER_S,
+            }
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "resize-overlay".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "resize-overlay-position".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 6,
+                    key: "resize-overlay-duration".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.resize_overlay, ResizeOverlay::Never);
+        assert_eq!(
+            cloned.resize_overlay_position,
+            ResizeOverlayPosition::TopLeft
+        );
+        assert_eq!(
+            cloned.resize_overlay_duration,
+            Duration {
+                duration: 45 * NS_PER_S,
+            }
+        );
+    }
+
+    #[test]
     fn config_window_position_routes_optional_i16_fields() {
         let line = |cfg: &Config, key: &str| -> String {
             let mut out = String::new();
@@ -12518,6 +12810,28 @@ mod tests {
             assert_eq!(WindowShowTabBar::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(WindowShowTabBar::from_keyword("nope"), None);
+
+        for v in [
+            ResizeOverlay::Always,
+            ResizeOverlay::Never,
+            ResizeOverlay::AfterFirst,
+        ] {
+            assert_eq!(ResizeOverlay::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(ResizeOverlay::from_keyword("nope"), None);
+
+        for v in [
+            ResizeOverlayPosition::Center,
+            ResizeOverlayPosition::TopLeft,
+            ResizeOverlayPosition::TopCenter,
+            ResizeOverlayPosition::TopRight,
+            ResizeOverlayPosition::BottomLeft,
+            ResizeOverlayPosition::BottomCenter,
+            ResizeOverlayPosition::BottomRight,
+        ] {
+            assert_eq!(ResizeOverlayPosition::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(ResizeOverlayPosition::from_keyword("nope"), None);
 
         for v in [
             Fullscreen::False,
