@@ -36,7 +36,7 @@ impl OsTag {
 }
 
 /// A static, typed snapshot of the world a conditional tests against (upstream `State`).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct State {
     pub(crate) theme: Theme,
     pub(crate) os: OsTag,

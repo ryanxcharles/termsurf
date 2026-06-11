@@ -96,3 +96,75 @@ Fix:
 Final verdict after re-review: **APPROVED**
 
 Findings: None remaining.
+
+## Result
+
+**Result:** Pass
+
+Implemented absolute-path theme loading in `roastty/src/config/mod.rs`, with the
+supporting `conditional::State` equality derive in
+`roastty/src/config/conditional.rs`.
+
+- Added private conditional theme state to `Config`.
+- Added `Config::finalize_with_report`, with existing `finalize()` delegating to
+  it.
+- Loaded existing absolute theme files into a fresh config before scalar
+  finalization.
+- Replayed the user's recorded file/CLI config entries on top of theme values so
+  explicit user config wins.
+- Preserved the user replay entries after the theme swap instead of keeping
+  theme-file replay entries.
+- Selected light/dark absolute theme paths from the current conditional theme
+  state.
+- Matched upstream's behavior that different light/dark theme names convert
+  `window-theme = auto` to `system`, including unsupported named theme pairs.
+- Reported missing, unreadable, non-regular, unsupported-name, and
+  replay-failure theme outcomes through a small internal finalization report.
+
+Verification passed:
+
+1. `cargo test -p roastty config_theme_loading`
+2. `cargo test -p roastty config_finalize_scalar_tail`
+3. `cargo test -p roastty config_replay`
+4. `cargo test -p roastty`
+5. `cargo fmt --check`
+6. `git diff --check`
+
+The focused theme-loading run passed 8 tests. An initial full
+`cargo test -p roastty` run hit a pre-existing flaky
+`surface_mouse_button_reporting_honors_readonly_gate` failure; that test passed
+when rerun directly, and a subsequent full `cargo test -p roastty` passed with
+4555 unit tests, the ABI harness, and doc tests. The ABI harness printed the
+existing 10 enum-conversion warnings.
+
+## Conclusion
+
+Roastty now performs the first real theme-loading step during config
+finalization for absolute theme-file paths. This proves the important priority
+ordering: theme values load first, then user file/CLI replay overrides them.
+Named theme lookup, user/resource `themes` directory discovery, diagnostic text
+parity, relative path-bearing theme entries, conditional replay entries, and
+`changeConditionalState` remain later work.
+
+## Completion Review
+
+Codex-native adversarial review ran in fresh context with subagent
+`019eb5ef-9463-7d70-b1e0-2a6c512664ed`.
+
+Initial verdict: **CHANGES REQUIRED**
+
+- Required: `window-theme = auto` was only changed to `system` after an absolute
+  theme loaded successfully, so unsupported named light/dark theme pairs kept
+  `auto`.
+
+Fix:
+
+- Applied the different-light/dark `window-theme` adjustment on unsupported
+  named themes, open/read failures, non-file paths, replay failures, and after
+  successful replay.
+- Added
+  `config_theme_loading_different_named_themes_switch_auto_window_theme_to_system`.
+
+Final verdict after re-review: **APPROVED**
+
+Findings: None remaining.

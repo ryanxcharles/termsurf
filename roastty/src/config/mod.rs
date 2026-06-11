@@ -377,6 +377,7 @@ pub(crate) struct Config {
     pub foreground: Color,
     /// `theme`.
     pub theme: Option<Theme>,
+    conditional_state: conditional::State,
     replay_entries: Vec<ConfigReplayEntry>,
 }
 
@@ -589,6 +590,7 @@ impl Default for Config {
                 b: 0xFF,
             },
             theme: None,
+            conditional_state: conditional::State::default(),
             replay_entries: Vec::new(),
         }
     }
@@ -1767,6 +1769,106 @@ impl Config {
 
     /// Finalize derived config defaults (upstream `Config.finalize`).
     pub(crate) fn finalize(&mut self) {
+        let _ = self.finalize_with_report();
+    }
+
+    pub(crate) fn finalize_with_report(&mut self) -> ConfigFinalizeReport {
+        let mut report = ConfigFinalizeReport::default();
+        self.finalize_theme(&mut report);
+        self.finalize_scalars();
+        report
+    }
+
+    fn finalize_theme(&mut self, report: &mut ConfigFinalizeReport) {
+        let Some(theme) = self.theme.clone() else {
+            return;
+        };
+        let different_light_dark = theme.light != theme.dark;
+        let selected = match self.conditional_state.theme {
+            conditional::Theme::Light => theme.light.clone(),
+            conditional::Theme::Dark => theme.dark.clone(),
+        };
+        let selected_path = PathBuf::from(&selected);
+        if !selected_path.is_absolute() {
+            self.finalize_theme_window_theme(different_light_dark);
+            report.theme = Some(ConfigThemeLoadReport::UnsupportedName { name: selected });
+            return;
+        }
+
+        let file = match std::fs::File::open(&selected_path) {
+            Ok(file) => file,
+            Err(error) => {
+                self.finalize_theme_window_theme(different_light_dark);
+                report.theme = Some(ConfigThemeLoadReport::Io {
+                    path: selected_path,
+                    kind: error.kind(),
+                });
+                return;
+            }
+        };
+
+        let metadata = match file.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                self.finalize_theme_window_theme(different_light_dark);
+                report.theme = Some(ConfigThemeLoadReport::Io {
+                    path: selected_path,
+                    kind: error.kind(),
+                });
+                return;
+            }
+        };
+        if !metadata.is_file() {
+            self.finalize_theme_window_theme(different_light_dark);
+            report.theme = Some(ConfigThemeLoadReport::NotFile {
+                path: selected_path,
+            });
+            return;
+        }
+
+        let text = match std::fs::read_to_string(&selected_path) {
+            Ok(text) => text,
+            Err(error) => {
+                self.finalize_theme_window_theme(different_light_dark);
+                report.theme = Some(ConfigThemeLoadReport::Io {
+                    path: selected_path,
+                    kind: error.kind(),
+                });
+                return;
+            }
+        };
+
+        let replay_entries = self.replay_entries.clone();
+        let conditional_state = self.conditional_state;
+        let mut theme_config = Config::default();
+        theme_config.conditional_state = conditional_state;
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
+        let diagnostics = theme_config.load_str(text);
+        if self.replay_into(&mut theme_config).is_err() {
+            self.finalize_theme_window_theme(different_light_dark);
+            report.theme = Some(ConfigThemeLoadReport::ReplayFailed {
+                path: selected_path,
+            });
+            return;
+        }
+
+        theme_config.replay_entries = replay_entries;
+        theme_config.conditional_state = conditional_state;
+        *self = theme_config;
+        self.finalize_theme_window_theme(different_light_dark);
+        report.theme = Some(ConfigThemeLoadReport::Loaded {
+            path: selected_path,
+            diagnostics,
+        });
+    }
+
+    fn finalize_theme_window_theme(&mut self, different_light_dark: bool) {
+        if different_light_dark && self.window_theme == WindowTheme::Auto {
+            self.window_theme = WindowTheme::System;
+        }
+    }
+
+    fn finalize_scalars(&mut self) {
         if self.term.is_empty() {
             self.term = "xterm-ghostty".to_string();
         }
@@ -2151,6 +2253,32 @@ pub(crate) struct ConfigDiagnostic {
     pub line: usize,
     pub key: String,
     pub error: ConfigSetError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct ConfigFinalizeReport {
+    pub theme: Option<ConfigThemeLoadReport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConfigThemeLoadReport {
+    Loaded {
+        path: PathBuf,
+        diagnostics: Vec<ConfigDiagnostic>,
+    },
+    UnsupportedName {
+        name: String,
+    },
+    Io {
+        path: PathBuf,
+        kind: std::io::ErrorKind,
+    },
+    NotFile {
+        path: PathBuf,
+    },
+    ReplayFailed {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7382,6 +7510,7 @@ impl OscColorReportFormat {
 
 #[cfg(test)]
 mod tests {
+    use super::conditional;
     use super::EntryFormatter;
     use super::{parse_bool_field, parse_i16_field, parse_string_field};
     use super::{
@@ -7389,10 +7518,11 @@ mod tests {
         BackgroundBlurParseError, BackgroundImageFit, BackgroundImagePosition, BellFeatures,
         BoldColor, ClipboardAccess, ClipboardCodepointMapEntry, ClipboardCodepointMapParseError,
         ClipboardReplacement, Color, ColorList, ColorParseError, Command, CommandPaletteEntry,
-        Config, ConfigDiagnostic, ConfigFilePath, ConfigRecursiveFileErrorKind, ConfigSetError,
-        ConfigSetSource, ConfirmCloseSurface, CopyOnSelect, CursorStyle, CustomShaderAnimation,
-        DefaultConfigPaths, Duration, DurationParseError, FlagsParseError, FontShapingBreak,
-        FontStyle, FontStyleParseError, FontSyntheticStyle, Fullscreen, GraphemeWidthMethod,
+        Config, ConfigDiagnostic, ConfigFilePath, ConfigFinalizeReport,
+        ConfigRecursiveFileErrorKind, ConfigSetError, ConfigSetSource, ConfigThemeLoadReport,
+        ConfirmCloseSurface, CopyOnSelect, CursorStyle, CustomShaderAnimation, DefaultConfigPaths,
+        Duration, DurationParseError, FlagsParseError, FontShapingBreak, FontStyle,
+        FontStyleParseError, FontSyntheticStyle, Fullscreen, GraphemeWidthMethod,
         GtkSingleInstance, GtkTabsLocation, GtkTitlebarStyle, GtkToolbarStyle, LinkPreviews,
         LinuxCgroup, MacAppIcon, MacAppIconFrame, MacHidden, MacShortcuts, MacTitlebarProxyIcon,
         MacTitlebarStyle, MacWindowButtons, MagicParseError, MiddleClickAction,
@@ -7417,6 +7547,7 @@ mod tests {
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
     use std::ffi::{OsStr, OsString};
     use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     #[test]
@@ -12550,6 +12681,287 @@ mod tests {
         assert_eq!(cfg.font_family.list, vec!["CLI B"]);
         assert_eq!(replayed.font_family.list, vec!["CLI B"]);
         assert!(replayed.replay_entries.is_empty());
+    }
+
+    #[test]
+    fn config_theme_loading_absolute_path_applies_during_finalize() {
+        let dir = unique_config_test_dir("theme-apply");
+        let theme_path = dir.join("theme");
+        write_config_file(&theme_path, "background = #123ABC\nforeground = #ABCDEF\n");
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!("theme = {}\n", theme_path.display()))
+            .is_empty());
+        let report = cfg.finalize_with_report();
+
+        assert_eq!(
+            cfg.background,
+            Color {
+                r: 0x12,
+                g: 0x3A,
+                b: 0xBC
+            }
+        );
+        assert_eq!(
+            cfg.foreground,
+            Color {
+                r: 0xAB,
+                g: 0xCD,
+                b: 0xEF
+            }
+        );
+        assert_eq!(
+            report.theme,
+            Some(ConfigThemeLoadReport::Loaded {
+                path: theme_path.clone(),
+                diagnostics: Vec::new(),
+            })
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_theme_loading_user_config_overrides_theme_after_replay() {
+        let dir = unique_config_test_dir("theme-priority");
+        let theme_path = dir.join("theme");
+        write_config_file(
+            &theme_path,
+            "background = #123ABC\nfont-family = Theme Font\n",
+        );
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!(
+                "background = #ABCDEF\n\
+                 font-family = User File Font\n\
+                 theme = {}\n",
+                theme_path.display()
+            ))
+            .is_empty());
+        assert!(cfg.set_cli_args(["--font-family=User CLI Font"]).is_empty());
+
+        let report = cfg.finalize_with_report();
+
+        assert!(matches!(
+            report.theme,
+            Some(ConfigThemeLoadReport::Loaded { .. })
+        ));
+        assert_eq!(
+            cfg.background,
+            Color {
+                r: 0xAB,
+                g: 0xCD,
+                b: 0xEF
+            }
+        );
+        assert_eq!(cfg.font_family.list, vec!["User CLI Font"]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_theme_loading_light_dark_uses_conditional_state() {
+        let dir = unique_config_test_dir("theme-light-dark");
+        let light_path = dir.join("theme_light");
+        let dark_path = dir.join("theme_dark");
+        write_config_file(&light_path, "background = #FFFFFF\n");
+        write_config_file(&dark_path, "background = #EEEEEE\n");
+
+        let mut light = Config::default();
+        assert!(light
+            .load_str(&format!(
+                "theme = light:{},dark:{}\n",
+                light_path.display(),
+                dark_path.display()
+            ))
+            .is_empty());
+        light.finalize();
+        assert_eq!(
+            light.background,
+            Color {
+                r: 0xFF,
+                g: 0xFF,
+                b: 0xFF
+            }
+        );
+
+        let mut dark = Config::default();
+        dark.conditional_state.theme = conditional::Theme::Dark;
+        assert!(dark
+            .load_str(&format!(
+                "theme = light:{},dark:{}\n",
+                light_path.display(),
+                dark_path.display()
+            ))
+            .is_empty());
+        dark.finalize();
+        assert_eq!(
+            dark.background,
+            Color {
+                r: 0xEE,
+                g: 0xEE,
+                b: 0xEE
+            }
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_theme_loading_different_light_dark_switches_auto_window_theme_to_system() {
+        let dir = unique_config_test_dir("theme-window-theme");
+        let light_path = dir.join("theme_light");
+        let dark_path = dir.join("theme_dark");
+        write_config_file(&light_path, "background = #FFFFFF\n");
+        write_config_file(&dark_path, "background = #EEEEEE\n");
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!(
+                "theme = light:{},dark:{}\n\
+                 window-theme = auto\n",
+                light_path.display(),
+                dark_path.display()
+            ))
+            .is_empty());
+        cfg.finalize();
+        assert_eq!(cfg.window_theme, WindowTheme::System);
+
+        let mut same = Config::default();
+        assert!(same
+            .load_str(&format!(
+                "theme = {}\n\
+                 window-theme = auto\n",
+                light_path.display()
+            ))
+            .is_empty());
+        same.finalize();
+        assert_eq!(same.window_theme, WindowTheme::Auto);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_theme_loading_different_named_themes_switch_auto_window_theme_to_system() {
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(
+                "theme = light:foo,dark:bar\n\
+                 window-theme = auto\n"
+            )
+            .is_empty());
+        let report = cfg.finalize_with_report();
+
+        assert_eq!(cfg.window_theme, WindowTheme::System);
+        assert_eq!(
+            report.theme,
+            Some(ConfigThemeLoadReport::UnsupportedName {
+                name: "foo".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn config_theme_loading_reports_absolute_path_failures_without_panicking() {
+        let dir = unique_config_test_dir("theme-errors");
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing");
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!("theme = {}\n", missing.display()))
+            .is_empty());
+        let report = cfg.finalize_with_report();
+        assert_eq!(
+            report.theme,
+            Some(ConfigThemeLoadReport::Io {
+                path: missing,
+                kind: std::io::ErrorKind::NotFound,
+            })
+        );
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!("theme = {}\n", dir.display()))
+            .is_empty());
+        let report = cfg.finalize_with_report();
+        assert_eq!(
+            report.theme,
+            Some(ConfigThemeLoadReport::NotFile { path: dir.clone() })
+        );
+
+        let unreadable = dir.join("unreadable");
+        write_config_file(&unreadable, "background = #123ABC\n");
+        let mut permissions = std::fs::metadata(&unreadable).unwrap().permissions();
+        let original_mode = permissions.mode();
+        permissions.set_mode(0o000);
+        std::fs::set_permissions(&unreadable, permissions).unwrap();
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!("theme = {}\n", unreadable.display()))
+            .is_empty());
+        let report = cfg.finalize_with_report();
+        if !matches!(
+            report.theme,
+            Some(ConfigThemeLoadReport::Io {
+                kind: std::io::ErrorKind::PermissionDenied,
+                ..
+            })
+        ) {
+            panic!("expected unreadable theme IO report, got {report:?}");
+        }
+
+        let mut permissions = std::fs::metadata(&unreadable).unwrap().permissions();
+        permissions.set_mode(original_mode);
+        std::fs::set_permissions(&unreadable, permissions).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_theme_loading_preserves_user_replay_entries() {
+        let dir = unique_config_test_dir("theme-replay-preserve");
+        let theme_path = dir.join("theme");
+        write_config_file(&theme_path, "background = #123ABC\nfont-family = Theme\n");
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!(
+                "term = xterm-user\n\
+                 theme = {}\n",
+                theme_path.display()
+            ))
+            .is_empty());
+        let before = cfg.replay_entries.clone();
+        cfg.finalize();
+
+        assert_eq!(cfg.replay_entries, before);
+        assert!(cfg.replay_entries.iter().any(|entry| entry.key == "theme"));
+        assert!(!cfg
+            .replay_entries
+            .iter()
+            .any(|entry| entry.key == "background"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn config_theme_loading_no_theme_keeps_scalar_finalize_behavior() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.finalize_with_report(), ConfigFinalizeReport::default());
+
+        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.auto_update_channel, Some(ReleaseChannel::Tip));
+
+        let mut cfg = Config::default();
+        cfg.set("term", Some("")).unwrap();
+        cfg.set("minimum-contrast", Some("100")).unwrap();
+        cfg.set("faint-opacity", Some("-1")).unwrap();
+        assert_eq!(cfg.finalize_with_report(), ConfigFinalizeReport::default());
+        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.minimum_contrast, 21.0);
+        assert_eq!(cfg.faint_opacity, 0.0);
     }
 
     #[test]

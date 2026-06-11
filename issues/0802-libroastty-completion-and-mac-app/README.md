@@ -277,6 +277,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   such as theme loading, conditional reload, working-directory/default-shell
   resolution, GTK runtime defaults, link matcher mutation, and key-remap
   finalization remains later work.
+- **Absolute-path theme loading is wired.** Exp 99 loads existing absolute theme
+  files during config finalization, then replays user file/CLI entries on top so
+  explicit user config wins; named theme lookup, user/resource theme
+  directories, full diagnostic parity, and conditional reload remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -962,7 +966,7 @@ stays unaltered except for the rename).
 - [Experiment 98: Phase F — config replay foundation](98-config-replay-foundation.md)
   — **Pass**
 - [Experiment 99: Phase F — absolute theme loading](99-absolute-theme-loading.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
