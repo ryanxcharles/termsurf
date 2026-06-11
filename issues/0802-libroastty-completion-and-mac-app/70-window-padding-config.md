@@ -103,3 +103,56 @@ has the required sections, the plan matches upstream defaults and ordering for
 existing `window-padding-color`, and the verification plan includes the required
 formatting, targeted tests, full `cargo test -p roastty`, `git diff --check`,
 and clean-status checks.
+
+## Result
+
+**Result:** Pass
+
+Implemented the `window-padding-x` and `window-padding-y` config fields on
+`Config` with upstream defaults of
+`WindowPadding { top_left: 2, bottom_right: 2 }`. Both keys now parse through
+the existing `WindowPadding::parse_cli` helper, reset to defaults on empty
+config values, format in the upstream window-padding order before
+`window-padding-color`, and surface `ValueRequired` / `InvalidValue` diagnostics
+through `ConfigSetError`.
+
+Added focused coverage for defaults, single-value and comma-separated parsing,
+spacing around comma-separated values, zero padding values, empty reset,
+missing-value errors, invalid-value errors, `load_str` diagnostics that preserve
+valid neighboring values, formatter ordering, and clone/equality preservation.
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test -p roastty window_padding_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty` — 4,505 unit tests passed; C ABI harness passed with
+  the existing enum-conversion warnings; doc tests passed.
+- `cargo fmt --check`
+- `git diff --check`
+- `git status --short`
+
+At result-recording time, the only intended tracked changes were
+`roastty/src/config/mod.rs`,
+`issues/0802-libroastty-completion-and-mac-app/README.md`, and this experiment
+file.
+
+## Conclusion
+
+`window-padding-x` and `window-padding-y` are now faithful config-level
+surfaces. Runtime viewport padding behavior and `window-padding-balance` stay
+out of this slice and should be handled by a later experiment after the
+remaining small config fields are assessed.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb3fb-81b8-7d22-bbe0-0df18c2882fc` returned
+**Approved** with no findings.
+
+The reviewer independently verified `cargo fmt --check`, `git diff --check`,
+`cargo test -p roastty window_padding_config`,
+`cargo test -p roastty config_format_config`, full `cargo test -p roastty`, and
+`prettier --check` for the edited Markdown files. The reviewer also confirmed
+that the working tree contained only the three expected modified files and that
+`HEAD` was still the Exp70 plan commit, so the result commit had not been made
+before the review.

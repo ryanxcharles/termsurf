@@ -166,6 +166,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   DEC mode 12 (`cursor_blinking`) to default true so formatter/mode reports do
   not emit `?12h` for a fresh terminal; configured `cursor-style-blink = true`
   or `false` still gates later in-band DEC mode 12 mutations.
+- **Window padding config is now a parser/formatter surface only.** Exp 70 wires
+  `window-padding-x` and `window-padding-y` through `Config` with upstream
+  `WindowPadding` defaults and diagnostics; renderer geometry and
+  `window-padding-balance` remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -793,7 +797,7 @@ stays unaltered except for the rename).
 - [Experiment 69: Phase F — working-directory config](69-working-directory-config.md)
   — **Pass**
 - [Experiment 70: Phase F — window padding config](70-window-padding-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

@@ -126,6 +126,10 @@ pub(crate) struct Config {
     pub command: Option<Command>,
     /// `initial-command`.
     pub initial_command: Option<Command>,
+    /// `window-padding-x`.
+    pub window_padding_x: WindowPadding,
+    /// `window-padding-y`.
+    pub window_padding_y: WindowPadding,
     /// `window-padding-color`.
     pub window_padding_color: WindowPaddingColor,
     /// `background-opacity`.
@@ -306,6 +310,14 @@ impl Default for Config {
             }),
             command: None,
             initial_command: None,
+            window_padding_x: WindowPadding {
+                top_left: 2,
+                bottom_right: 2,
+            },
+            window_padding_y: WindowPadding {
+                top_left: 2,
+                bottom_right: 2,
+            },
             window_padding_color: WindowPaddingColor::Background,
             background_opacity: 1.0,
             background_opacity_cells: false,
@@ -518,6 +530,10 @@ impl Config {
             .entry_optional(self.x11_instance_name.clone(), |v, f| f.entry_str(&v));
         EntryFormatter::new("working-directory", out)
             .entry_optional(self.working_directory.clone(), |v, f| v.format_entry(f));
+        self.window_padding_x
+            .format_entry(&mut EntryFormatter::new("window-padding-x", out));
+        self.window_padding_y
+            .format_entry(&mut EntryFormatter::new("window-padding-y", out));
         self.window_padding_color
             .format_entry(&mut EntryFormatter::new("window-padding-color", out));
         self.window_subtitle
@@ -819,6 +835,14 @@ impl Config {
                     default.working_directory,
                     parse_working_directory_field,
                 )?
+            }
+            "window-padding-x" => {
+                self.window_padding_x =
+                    set_value_field(value, default.window_padding_x, WindowPadding::parse_cli)?
+            }
+            "window-padding-y" => {
+                self.window_padding_y =
+                    set_value_field(value, default.window_padding_y, WindowPadding::parse_cli)?
             }
             "macos-non-native-fullscreen" => {
                 self.macos_non_native_fullscreen = set_enum_field(
@@ -1824,6 +1848,15 @@ impl From<WorkingDirectoryParseError> for ConfigSetError {
     fn from(e: WorkingDirectoryParseError) -> Self {
         match e {
             WorkingDirectoryParseError::ValueRequired => ConfigSetError::ValueRequired,
+        }
+    }
+}
+
+impl From<WindowPaddingParseError> for ConfigSetError {
+    fn from(e: WindowPaddingParseError) -> Self {
+        match e {
+            WindowPaddingParseError::ValueRequired => ConfigSetError::ValueRequired,
+            WindowPaddingParseError::InvalidValue => ConfigSetError::InvalidValue,
         }
     }
 }
@@ -5423,6 +5456,20 @@ mod tests {
         );
         assert_eq!(d.command, None);
         assert_eq!(d.initial_command, None);
+        assert_eq!(
+            d.window_padding_x,
+            WindowPadding {
+                top_left: 2,
+                bottom_right: 2
+            }
+        );
+        assert_eq!(
+            d.window_padding_y,
+            WindowPadding {
+                top_left: 2,
+                bottom_right: 2
+            }
+        );
         assert_eq!(d.window_padding_color, WindowPaddingColor::Background);
         assert_eq!(d.background_opacity, 1.0);
         // Opacity options (Experiment 848): upstream defaults false / 0.5.
@@ -9331,6 +9378,8 @@ mod tests {
                 "class",
                 "x11-instance-name",
                 "working-directory",
+                "window-padding-x",
+                "window-padding-y",
                 "window-padding-color",
                 "window-subtitle",
                 "window-decoration",
@@ -11339,6 +11388,89 @@ mod tests {
             cloned.working_directory,
             Some(WorkingDirectory::Path("/clone".to_string()))
         );
+    }
+
+    #[test]
+    fn window_padding_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+        let pad = |top_left, bottom_right| WindowPadding {
+            top_left,
+            bottom_right,
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_padding_x, pad(2, 2));
+        assert_eq!(cfg.window_padding_y, pad(2, 2));
+        assert_eq!(line(&cfg, "window-padding-x"), "window-padding-x = 2");
+        assert_eq!(line(&cfg, "window-padding-y"), "window-padding-y = 2");
+
+        cfg.set("window-padding-x", Some("4")).unwrap();
+        cfg.set("window-padding-y", Some("6,8")).unwrap();
+        assert_eq!(cfg.window_padding_x, pad(4, 4));
+        assert_eq!(cfg.window_padding_y, pad(6, 8));
+        assert_eq!(line(&cfg, "window-padding-x"), "window-padding-x = 4");
+        assert_eq!(line(&cfg, "window-padding-y"), "window-padding-y = 6,8");
+
+        cfg.set("window-padding-x", Some(" 10 , 12 ")).unwrap();
+        cfg.set("window-padding-y", Some("0")).unwrap();
+        assert_eq!(cfg.window_padding_x, pad(10, 12));
+        assert_eq!(cfg.window_padding_y, pad(0, 0));
+        assert_eq!(line(&cfg, "window-padding-x"), "window-padding-x = 10,12");
+        assert_eq!(line(&cfg, "window-padding-y"), "window-padding-y = 0");
+
+        cfg.set("window-padding-x", Some("")).unwrap();
+        cfg.set("window-padding-y", Some("")).unwrap();
+        assert_eq!(cfg.window_padding_x, pad(2, 2));
+        assert_eq!(cfg.window_padding_y, pad(2, 2));
+
+        assert_eq!(
+            cfg.set("window-padding-x", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-padding-y", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-padding-x", Some("left")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("window-padding-y", Some("1,right")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics =
+            cfg.load_str("window-padding-x = 4\nwindow-padding-x = left\nwindow-padding-y = 6,8\nwindow-padding-y = 1,right\n");
+        assert_eq!(cfg.window_padding_x, pad(4, 4));
+        assert_eq!(cfg.window_padding_y, pad(6, 8));
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "window-padding-x".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "window-padding-y".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.window_padding_x, pad(4, 4));
+        assert_eq!(cloned.window_padding_y, pad(6, 8));
     }
 
     #[test]
