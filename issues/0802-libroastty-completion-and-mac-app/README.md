@@ -1030,6 +1030,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 107: Phase G — key-remap set foundation](107-key-remap-set-foundation.md)
   — **Pass**
+- [Experiment 108: Phase G — key-remap config field](108-key-remap-config-field.md)
+  — **Designed**
 
 ## Process
 
