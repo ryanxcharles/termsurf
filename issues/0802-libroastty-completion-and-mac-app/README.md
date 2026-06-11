@@ -982,6 +982,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 101: Phase F — conditional theme reload](101-conditional-theme-reload.md)
   — **Pass**
+- [Experiment 102: Phase F — working-directory finalize](102-working-directory-finalize.md)
+  — **Designed**
 
 ## Process
 
