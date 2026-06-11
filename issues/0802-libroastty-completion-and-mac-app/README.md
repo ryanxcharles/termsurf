@@ -990,6 +990,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 102: Phase F — working-directory finalize](102-working-directory-finalize.md)
   — **Pass**
+- [Experiment 103: Phase F — command and home finalize](103-command-home-finalize.md)
+  — **Designed**
 
 ## Process
 
