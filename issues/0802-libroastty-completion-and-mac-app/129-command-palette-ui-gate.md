@@ -105,3 +105,70 @@ experiment.
 
 **Fail** = command-palette UI verification cannot run from CLI tooling without a
 larger macOS test harness or permission redesign.
+
+## Result
+
+**Result:** Partial
+
+The implementation added the explicit CLI UI-test gate and mandatory observable
+command execution coverage:
+
+- `roastty/macos/build.nu` now accepts `--ui-tests` and `--only-testing`. The
+  default `macos/build.nu --action test` path still passes
+  `-skip-testing RoasttyUITests`. Focused UI-test runs set
+  `IDE_DISABLED_OS_ACTIVITY_DT_MODE=1` so `RoasttyCustomConfigCase` enables UI
+  tests, and a focused `RoasttyUITests/...` selector also skips `RoasttyTests`
+  execution.
+- `RoasttyCommandPaletteTests` now includes a keyboard-submitted "Close All
+  Windows" path with the same observable postcondition as the existing mouse
+  path: the window must close. This fails if the command palette only dismisses
+  without executing the selected action through the Roastty action path.
+- `BenchmarkTests` now guards the dormant benchmark-only `roastty_benchmark_cli`
+  call behind `ROASTTY_ENABLE_BENCHMARKS`, because the disabled benchmark suite
+  was still compiling a symbol that is not present in the copied RoasttyKit
+  library and blocked all macOS test builds before any command-palette UI test
+  could run.
+
+Verification:
+
+- `nu --ide-check 0 roastty/macos/build.nu` passed.
+- `swiftlint lint roastty/macos/RoasttyUITests/RoasttyCommandPaletteTests.swift roastty/macos/Tests/BenchmarkTests.swift`
+  passed with 0 violations.
+- `cd roastty && macos/build.nu --action build` passed. The build still reports
+  an existing SwiftLint warning in
+  `Sources/Roastty/Surface View/SurfaceView_AppKit.swift`, outside this
+  experiment's edits.
+- `cd roastty && macos/build.nu --action test` now compiles and runs tests, but
+  still fails on existing config/menu-shortcut expectation failures unrelated to
+  this experiment.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyCommandPaletteTests`
+  builds and starts `RoasttyUITests-Runner`, but the runner fails before any
+  test body executes: `Timed out while enabling automation mode.`
+
+## Conclusion
+
+The command-palette UI gate is now explicit in project tooling and the test
+suite contains an observable keyboard execution check, but the gate could not be
+completed in this environment because XCTest UI automation could not initialize.
+Issue 802 should keep command-palette UI behavior listed as remaining Phase G
+work until the focused UI test can run on a machine/session with UI automation
+enabled and the existing macOS config/menu-shortcut test failures are resolved
+or triaged separately.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent, fresh context.
+
+**Verdict:** Approved.
+
+**Findings:** No required findings. The reviewer confirmed that the result is
+honestly marked Partial, the README status matches, command-palette UI behavior
+remains listed as Phase G work, and the result commit had not been made before
+review.
+
+**Optional finding:** A `build.nu` comment overstated what
+`-skip-testing RoasttyTests` proves by saying focused UI-test runs should not
+compile the unit-test target.
+
+**Fix:** Reworded the comment to say focused UI-test runs skip unit-test
+execution.

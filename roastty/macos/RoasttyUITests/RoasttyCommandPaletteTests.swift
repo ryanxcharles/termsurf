@@ -76,5 +76,24 @@ final class RoasttyCommandPaletteTests: RoasttyCustomConfigCase {
 
         XCTAssertTrue(app.windows.firstMatch.waitForNonExistence(timeout: 2), "All windows should be closed")
     }
-}
 
+    @MainActor func testSelectCommandWithKeyboard() async throws {
+        let app = try roasttyApplication()
+        app.activate()
+
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5), "New window should appear")
+
+        app.menuItems["Command Palette"].firstMatch.click()
+
+        let closeAllWindowsButton = app.buttons
+            .containing(NSPredicate(format: "label CONTAINS[c] 'Close All Windows'"))
+            .firstMatch
+
+        XCTAssertTrue(closeAllWindowsButton.waitForExistence(timeout: 5), "Command Palette should appear")
+
+        app.typeText("Close All Windows")
+        app.typeKey(.enter, modifierFlags: [])
+
+        XCTAssertTrue(app.windows.firstMatch.waitForNonExistence(timeout: 2), "All windows should be closed")
+    }
+}

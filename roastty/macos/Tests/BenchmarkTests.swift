@@ -25,8 +25,10 @@ extension Tag {
 )
 struct BenchmarkTests {
     @Test func example() async throws {
+        #if ROASTTY_ENABLE_BENCHMARKS
         roastty_benchmark_cli(
             "terminal-stream",
             "--data=/Users/mitchellh/Documents/roastty/bug.osc.txt")
+        #endif
     }
 }
