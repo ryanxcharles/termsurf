@@ -1185,6 +1185,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 124: Phase G — command palette config ABI](124-command-palette-config-abi.md)
   — **Pass**
+- [Experiment 125: Phase G — app-key surface control actions](125-app-key-surface-control-actions.md)
+  — **Designed**
 
 ## Process
 
