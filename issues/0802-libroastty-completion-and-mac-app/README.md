@@ -1131,6 +1131,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 119: Phase G — sequence runtime activation](119-sequence-runtime-activation.md)
   — **Pass**
+- [Experiment 120: Phase G — key-table sequence runtime](120-key-table-sequence-runtime.md)
+  — **Designed**
 
 ## Process
 
