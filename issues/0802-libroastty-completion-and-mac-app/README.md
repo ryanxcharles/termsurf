@@ -999,6 +999,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 103: Phase F — command and home finalize](103-command-home-finalize.md)
   — **Pass**
+- [Experiment 104: Phase F — GTK single-instance finalize](104-gtk-single-instance-finalize.md)
+  — **Designed**
 
 ## Process
 
