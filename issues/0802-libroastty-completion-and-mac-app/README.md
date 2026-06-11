@@ -1219,6 +1219,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 127: Phase G — surface all-key routing](127-surface-all-key-routing.md)
   — **Pass**
+- [Experiment 128: Phase G — binding catalog parity](128-binding-catalog-parity.md)
+  — **Designed**
 
 ## Process
 
