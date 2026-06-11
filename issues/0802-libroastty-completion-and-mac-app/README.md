@@ -238,6 +238,11 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   formatter output; runtime dock icon selection, custom icon loading,
   custom-style validation/rendering, app C ABI exposure, and macOS app
   integration remain later work.
+- **macOS Shortcuts config is parser/formatter-only.** Exp 91 wires
+  `macos-shortcuts` with upstream default `ask`, enum keywords `allow`/`deny`/
+  `ask`, empty reset, missing/invalid diagnostics, and canonical formatter
+  output; runtime Shortcuts authorization, action dispatch, app C ABI exposure,
+  and macOS app integration remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -907,7 +912,7 @@ stays unaltered except for the rename).
 - [Experiment 90: Phase F — macOS icon config](90-macos-icon-config.md) —
   **Pass**
 - [Experiment 91: Phase F — macOS Shortcuts config](91-macos-shortcuts-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

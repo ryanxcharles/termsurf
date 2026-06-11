@@ -279,6 +279,8 @@ pub(crate) struct Config {
     pub macos_icon_ghost_color: Option<Color>,
     /// `macos-icon-screen-color`.
     pub macos_icon_screen_color: Option<ColorList>,
+    /// `macos-shortcuts`.
+    pub macos_shortcuts: MacShortcuts,
     /// `font-family`.
     pub font_family: RepeatableString,
     /// `font-family-bold`.
@@ -479,6 +481,7 @@ impl Default for Config {
             macos_icon_frame: MacAppIconFrame::Aluminum,
             macos_icon_ghost_color: None,
             macos_icon_screen_color: None,
+            macos_shortcuts: MacShortcuts::Ask,
             font_family: RepeatableString::default(),
             font_family_bold: RepeatableString::default(),
             font_family_italic: RepeatableString::default(),
@@ -806,6 +809,8 @@ impl Config {
             .entry_optional(self.macos_icon_screen_color.clone(), |v, f| {
                 v.format_entry(f)
             });
+        self.macos_shortcuts
+            .format_entry(&mut EntryFormatter::new("macos-shortcuts", out));
         EntryFormatter::new("bold-color", out)
             .entry_optional(self.bold_color, |v, f| v.format_entry(f));
         EntryFormatter::new("faint-opacity", out).entry_float(self.faint_opacity);
@@ -1287,6 +1292,10 @@ impl Config {
                     default.macos_icon_screen_color,
                     parse_color_list_field,
                 )?
+            }
+            "macos-shortcuts" => {
+                self.macos_shortcuts =
+                    set_enum_field(value, default.macos_shortcuts, MacShortcuts::from_keyword)?
             }
             "grapheme-width-method" => {
                 self.grapheme_width_method = set_enum_field(
@@ -5112,6 +5121,43 @@ impl MacAppIconFrame {
     }
 }
 
+/// The `macos-shortcuts` config (upstream `MacShortcuts`): whether macOS
+/// Shortcuts may control the app. Runtime authorization and dispatch are ported
+/// later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacShortcuts {
+    Allow,
+    Deny,
+    Ask,
+}
+
+impl MacShortcuts {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            MacShortcuts::Allow => "allow",
+            MacShortcuts::Deny => "deny",
+            MacShortcuts::Ask => "ask",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "allow" => Some(MacShortcuts::Allow),
+            "deny" => Some(MacShortcuts::Deny),
+            "ask" => Some(MacShortcuts::Ask),
+            _ => None,
+        }
+    }
+
+    /// Format as a config entry (upstream's enum branch): the keyword.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// An error parsing a `Theme` (upstream `parseAutoStruct` / `Theme.parseCLI`
 /// `error.InvalidValue`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6772,12 +6818,13 @@ mod tests {
         CopyOnSelect, CursorStyle, CustomShaderAnimation, DefaultConfigPaths, Duration,
         DurationParseError, FlagsParseError, FontShapingBreak, FontStyle, FontStyleParseError,
         FontSyntheticStyle, Fullscreen, GraphemeWidthMethod, LinkPreviews, MacAppIcon,
-        MacAppIconFrame, MacHidden, MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons,
-        MagicParseError, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
-        MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
-        OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
-        QuickTerminalDimensions, QuickTerminalKeyboardInteractivity, QuickTerminalLayer,
-        QuickTerminalPosition, QuickTerminalScreen, QuickTerminalSize, QuickTerminalSizeParseError,
+        MacAppIconFrame, MacHidden, MacShortcuts, MacTitlebarProxyIcon, MacTitlebarStyle,
+        MacWindowButtons, MagicParseError, MiddleClickAction, MouseScrollMultiplier,
+        MouseScrollMultiplierParseError, MouseShiftCapture, NonNativeFullscreen,
+        NotifyOnCommandFinish, NotifyOnCommandFinishAction, OptionalFileAction,
+        OscColorReportFormat, Palette, PaletteParseError, QuickTerminalDimensions,
+        QuickTerminalKeyboardInteractivity, QuickTerminalLayer, QuickTerminalPosition,
+        QuickTerminalScreen, QuickTerminalSize, QuickTerminalSizeParseError,
         QuickTerminalSizeValue, QuickTerminalSpaceBehavior, RepeatableClipboardCodepointMap,
         RepeatableCodepointMap, RepeatableConfigPath, RepeatableConfigPathParseError,
         RepeatableString, RepeatableStringParseError, ResizeOverlay, ResizeOverlayPosition,
@@ -7134,6 +7181,7 @@ mod tests {
         assert_eq!(d.macos_icon_frame, MacAppIconFrame::Aluminum);
         assert_eq!(d.macos_icon_ghost_color, None);
         assert_eq!(d.macos_icon_screen_color, None);
+        assert_eq!(d.macos_shortcuts, MacShortcuts::Ask);
         // Font group (Experiment 470).
         assert_eq!(d.font_style, FontStyle::Default);
         assert_eq!(d.font_style_bold, FontStyle::Default);
@@ -8991,6 +9039,62 @@ mod tests {
             ]
         );
         assert_eq!(cfg.macos_icon, MacAppIcon::CustomStyle);
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+    }
+
+    #[test]
+    fn macos_shortcuts_config_parse_format_reset_and_diagnose() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.macos_shortcuts, MacShortcuts::Ask);
+
+        let line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("macos-shortcuts = "))
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(line(&cfg), "macos-shortcuts = ask");
+
+        for (variant, keyword) in [
+            (MacShortcuts::Allow, "allow"),
+            (MacShortcuts::Deny, "deny"),
+            (MacShortcuts::Ask, "ask"),
+        ] {
+            cfg.set("macos-shortcuts", Some(keyword)).unwrap();
+            assert_eq!(cfg.macos_shortcuts, variant);
+            assert_eq!(line(&cfg), format!("macos-shortcuts = {keyword}"));
+        }
+
+        cfg.set("macos-shortcuts", Some("")).unwrap();
+        assert_eq!(cfg.macos_shortcuts, MacShortcuts::Ask);
+        assert_eq!(line(&cfg), "macos-shortcuts = ask");
+        assert_eq!(
+            cfg.set("macos-shortcuts", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("macos-shortcuts", Some("prompt")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "macos-shortcuts = allow\n\
+             macos-shortcuts = prompt\n\
+             macos-shortcuts = deny\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "macos-shortcuts".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(cfg.macos_shortcuts, MacShortcuts::Deny);
 
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
@@ -11630,6 +11734,7 @@ mod tests {
             "macos-icon-frame",
             "macos-icon-ghost-color",
             "macos-icon-screen-color",
+            "macos-shortcuts",
             "bold-color",
             "faint-opacity",
         ]);
@@ -12590,6 +12695,7 @@ mod tests {
             ("macos-hidden", "always"),
             ("macos-icon", "custom-style"),
             ("macos-icon-frame", "chrome"),
+            ("macos-shortcuts", "deny"),
             ("grapheme-width-method", "legacy"),
             ("osc-color-report-format", "8-bit"),
             ("custom-shader-animation", "always"),
@@ -16137,6 +16243,12 @@ mod tests {
             assert_eq!(MacAppIconFrame::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(MacAppIconFrame::from_keyword("nope"), None);
+
+        for v in [MacShortcuts::Allow, MacShortcuts::Deny, MacShortcuts::Ask] {
+            assert_eq!(MacShortcuts::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(MacShortcuts::from_keyword("prompt"), None);
+        assert_eq!(MacShortcuts::from_keyword("nope"), None);
 
         for v in [
             BackgroundImageFit::Contain,
