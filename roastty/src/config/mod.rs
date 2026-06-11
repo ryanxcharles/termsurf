@@ -313,6 +313,8 @@ pub(crate) struct Config {
     pub custom_shader_animation: CustomShaderAnimation,
     /// `bell-features`.
     pub bell_features: BellFeatures,
+    /// `app-notifications`.
+    pub app_notifications: AppNotifications,
     /// `background`.
     pub background: Color,
     /// `foreground`.
@@ -488,6 +490,7 @@ impl Default for Config {
             scroll_to_bottom: ScrollToBottom::default(),
             custom_shader_animation: CustomShaderAnimation::True,
             bell_features: BellFeatures::default(),
+            app_notifications: AppNotifications::default(),
             background: Color {
                 r: 0x28,
                 g: 0x2C,
@@ -764,6 +767,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("custom-shader-animation", out));
         self.bell_features
             .format_entry(&mut EntryFormatter::new("bell-features", out));
+        self.app_notifications
+            .format_entry(&mut EntryFormatter::new("app-notifications", out));
         self.macos_non_native_fullscreen
             .format_entry(&mut EntryFormatter::new("macos-non-native-fullscreen", out));
         self.macos_window_buttons
@@ -1255,6 +1260,13 @@ impl Config {
             "bell-features" => {
                 self.bell_features =
                     set_packed_field(value, default.bell_features, BellFeatures::parse_cli)?
+            }
+            "app-notifications" => {
+                self.app_notifications = set_packed_field(
+                    value,
+                    default.app_notifications,
+                    AppNotifications::parse_cli,
+                )?
             }
             "font-shaping-break" => {
                 self.font_shaping_break = set_packed_field(
@@ -6152,6 +6164,61 @@ impl Default for BellFeatures {
     }
 }
 
+/// The `app-notifications` config (upstream `AppNotifications`): which in-app
+/// notification toasts are enabled. This is config-only here; toast delivery is
+/// runtime work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AppNotifications {
+    /// Show a notification after copying text to the clipboard.
+    pub clipboard_copy: bool,
+    /// Show a notification after reloading configuration.
+    pub config_reload: bool,
+}
+
+impl AppNotifications {
+    /// Format as a packed-struct config entry.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_flags(&[
+            ("clipboard-copy", self.clipboard_copy),
+            ("config-reload", self.config_reload),
+        ]);
+    }
+
+    /// Parse a standalone bool or `[no-]clipboard-copy,[no-]config-reload`
+    /// packed-flag list.
+    pub(crate) fn parse_cli(value: &str) -> Result<Self, FlagsParseError> {
+        let mut result = AppNotifications::default();
+        parse_packed_flags(value, |tok| match tok {
+            FlagToken::All(b) => {
+                result.clipboard_copy = b;
+                result.config_reload = b;
+                true
+            }
+            FlagToken::One("clipboard-copy", on) => {
+                result.clipboard_copy = on;
+                true
+            }
+            FlagToken::One("config-reload", on) => {
+                result.config_reload = on;
+                true
+            }
+            FlagToken::One(_, _) => false,
+        })?;
+        Ok(result)
+    }
+}
+
+impl Default for AppNotifications {
+    /// Upstream's field defaults `clipboard-copy = true`,
+    /// `config-reload = true`.
+    fn default() -> Self {
+        Self {
+            clipboard_copy: true,
+            config_reload: true,
+        }
+    }
+}
+
 /// An error parsing a `FontStyle` (upstream `error.ValueRequired`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FontStyleParseError {
@@ -6536,8 +6603,8 @@ mod tests {
     use super::EntryFormatter;
     use super::{parse_bool_field, parse_i16_field, parse_string_field};
     use super::{
-        AlphaBlending, BackgroundBlur, BackgroundBlurParseError, BackgroundImageFit,
-        BackgroundImagePosition, BellFeatures, BoldColor, ClipboardAccess,
+        AlphaBlending, AppNotifications, BackgroundBlur, BackgroundBlurParseError,
+        BackgroundImageFit, BackgroundImagePosition, BellFeatures, BoldColor, ClipboardAccess,
         ClipboardCodepointMapEntry, ClipboardCodepointMapParseError, ClipboardReplacement, Color,
         ColorList, ColorParseError, Command, CommandPaletteEntry, Config, ConfigDiagnostic,
         ConfigFilePath, ConfigRecursiveFileErrorKind, ConfigSetError, ConfirmCloseSurface,
@@ -6915,6 +6982,7 @@ mod tests {
         assert_eq!(d.scroll_to_bottom, ScrollToBottom::default());
         assert_eq!(d.custom_shader_animation, CustomShaderAnimation::True);
         assert_eq!(d.bell_features, BellFeatures::default());
+        assert_eq!(d.app_notifications, AppNotifications::default());
         // Base-colors group (Experiment 472).
         assert_eq!(
             d.background,
@@ -8482,6 +8550,99 @@ mod tests {
         );
         assert_eq!(
             cfg.set("bell-features", Some("system,flash")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+    }
+
+    #[test]
+    fn app_notifications_config_parse_format_reset_and_diagnose() {
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.app_notifications,
+            AppNotifications {
+                clipboard_copy: true,
+                config_reload: true,
+            }
+        );
+
+        let line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("app-notifications = "))
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(
+            line(&cfg),
+            "app-notifications = clipboard-copy,config-reload"
+        );
+
+        cfg.set("app-notifications", Some("no-clipboard-copy"))
+            .unwrap();
+        assert_eq!(
+            cfg.app_notifications,
+            AppNotifications {
+                clipboard_copy: false,
+                config_reload: true,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "app-notifications = no-clipboard-copy,config-reload"
+        );
+
+        cfg.set("app-notifications", Some("clipboard-copy,no-config-reload"))
+            .unwrap();
+        assert_eq!(
+            cfg.app_notifications,
+            AppNotifications {
+                clipboard_copy: true,
+                config_reload: false,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "app-notifications = clipboard-copy,no-config-reload"
+        );
+
+        cfg.set("app-notifications", Some("false")).unwrap();
+        assert_eq!(
+            cfg.app_notifications,
+            AppNotifications {
+                clipboard_copy: false,
+                config_reload: false,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "app-notifications = no-clipboard-copy,no-config-reload"
+        );
+
+        cfg.set("app-notifications", Some("true")).unwrap();
+        assert_eq!(
+            cfg.app_notifications,
+            AppNotifications {
+                clipboard_copy: true,
+                config_reload: true,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "app-notifications = clipboard-copy,config-reload"
+        );
+
+        cfg.set("app-notifications", Some("")).unwrap();
+        assert_eq!(cfg.app_notifications, AppNotifications::default());
+        assert_eq!(
+            cfg.set("app-notifications", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("app-notifications", Some("clipboard-copy,toast")),
             Err(ConfigSetError::InvalidValue)
         );
 
@@ -11112,6 +11273,7 @@ mod tests {
             "custom-shader",
             "custom-shader-animation",
             "bell-features",
+            "app-notifications",
             "macos-non-native-fullscreen",
             "macos-window-buttons",
             "macos-titlebar-style",
@@ -12196,6 +12358,14 @@ mod tests {
         assert_eq!(
             line(&cfg, "bell-features"),
             "bell-features = system,no-audio,attention,no-title,border"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("app-notifications", Some("no-clipboard-copy"))
+            .unwrap();
+        assert_eq!(
+            line(&cfg, "app-notifications"),
+            "app-notifications = no-clipboard-copy,config-reload"
         );
 
         // bool field: an explicit value, and a bare flag (None ⇒ true).

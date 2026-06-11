@@ -225,6 +225,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   bool-all parsing, `[no-]flag` lists, empty reset, missing-value diagnostics,
   and canonical formatter output; runtime bell delivery and app attention/title/
   border/audio effects remain later work.
+- **App notifications config is parser/formatter-only.** Exp 89 wires
+  `app-notifications` as upstream's packed bool flags (`clipboard-copy`,
+  `config-reload`) with both enabled by default, standalone bool-all parsing,
+  `[no-]flag` lists, empty reset, missing-value diagnostics, and canonical
+  formatter output; runtime toast delivery and app C ABI exposure remain later
+  work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -890,7 +896,7 @@ stays unaltered except for the rename).
 - [Experiment 88: Phase F — bell features config](88-bell-features-config.md) —
   **Pass**
 - [Experiment 89: Phase F — app notifications config](89-app-notifications-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
