@@ -198,6 +198,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   wires `quick-terminal-screen`, `quick-terminal-animation-duration`, and
   `quick-terminal-autohide` with macOS upstream defaults; runtime screen
   selection, animation timing, and focus-loss autohide remain later work.
+- **Quick-terminal space/keyboard config is parser/formatter-only.** Exp 84
+  wires `quick-terminal-space-behavior` and
+  `quick-terminal-keyboard-interactivity`; runtime macOS Spaces behavior and
+  Wayland keyboard interactivity remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -853,7 +857,7 @@ stays unaltered except for the rename).
 - [Experiment 83: Phase F — quick terminal screen and animation config](83-quick-terminal-screen-animation-config.md)
   — **Pass**
 - [Experiment 84: Phase F — quick terminal space and keyboard config](84-quick-terminal-space-keyboard-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

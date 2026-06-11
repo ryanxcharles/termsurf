@@ -60,6 +60,10 @@ pub(crate) struct Config {
     pub quick_terminal_animation_duration: f64,
     /// `quick-terminal-autohide`.
     pub quick_terminal_autohide: bool,
+    /// `quick-terminal-space-behavior`.
+    pub quick_terminal_space_behavior: QuickTerminalSpaceBehavior,
+    /// `quick-terminal-keyboard-interactivity`.
+    pub quick_terminal_keyboard_interactivity: QuickTerminalKeyboardInteractivity,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
     /// `selection-clear-on-typing`.
@@ -327,6 +331,8 @@ impl Default for Config {
             quick_terminal_screen: QuickTerminalScreen::Main,
             quick_terminal_animation_duration: 0.2,
             quick_terminal_autohide: true,
+            quick_terminal_space_behavior: QuickTerminalSpaceBehavior::Move,
+            quick_terminal_keyboard_interactivity: QuickTerminalKeyboardInteractivity::OnDemand,
             copy_on_select: CopyOnSelect::True,
             selection_clear_on_typing: true,
             selection_clear_on_copy: false,
@@ -512,6 +518,16 @@ impl Config {
             .entry_float(self.quick_terminal_animation_duration);
         EntryFormatter::new("quick-terminal-autohide", out)
             .entry_bool(self.quick_terminal_autohide);
+        self.quick_terminal_space_behavior
+            .format_entry(&mut EntryFormatter::new(
+                "quick-terminal-space-behavior",
+                out,
+            ));
+        self.quick_terminal_keyboard_interactivity
+            .format_entry(&mut EntryFormatter::new(
+                "quick-terminal-keyboard-interactivity",
+                out,
+            ));
         self.font_family
             .format_entry(&mut EntryFormatter::new("font-family", out));
         self.font_family_bold
@@ -823,6 +839,20 @@ impl Config {
             "quick-terminal-autohide" => {
                 self.quick_terminal_autohide =
                     set_bool_field(value, default.quick_terminal_autohide)?
+            }
+            "quick-terminal-space-behavior" => {
+                self.quick_terminal_space_behavior = set_enum_field(
+                    value,
+                    default.quick_terminal_space_behavior,
+                    QuickTerminalSpaceBehavior::from_keyword,
+                )?
+            }
+            "quick-terminal-keyboard-interactivity" => {
+                self.quick_terminal_keyboard_interactivity = set_enum_field(
+                    value,
+                    default.quick_terminal_keyboard_interactivity,
+                    QuickTerminalKeyboardInteractivity::from_keyword,
+                )?
             }
             "copy-on-select" => {
                 self.copy_on_select =
@@ -3552,6 +3582,75 @@ impl QuickTerminalScreen {
     }
 }
 
+/// The `quick-terminal-space-behavior` config (upstream
+/// `QuickTerminalSpaceBehavior`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuickTerminalSpaceBehavior {
+    Remain,
+    Move,
+}
+
+impl QuickTerminalSpaceBehavior {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            QuickTerminalSpaceBehavior::Remain => "remain",
+            QuickTerminalSpaceBehavior::Move => "move",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "remain" => Some(QuickTerminalSpaceBehavior::Remain),
+            "move" => Some(QuickTerminalSpaceBehavior::Move),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `quick-terminal-keyboard-interactivity` config (upstream
+/// `QuickTerminalKeyboardInteractivity`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuickTerminalKeyboardInteractivity {
+    None,
+    OnDemand,
+    Exclusive,
+}
+
+impl QuickTerminalKeyboardInteractivity {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            QuickTerminalKeyboardInteractivity::None => "none",
+            QuickTerminalKeyboardInteractivity::OnDemand => "on-demand",
+            QuickTerminalKeyboardInteractivity::Exclusive => "exclusive",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(QuickTerminalKeyboardInteractivity::None),
+            "on-demand" => Some(QuickTerminalKeyboardInteractivity::OnDemand),
+            "exclusive" => Some(QuickTerminalKeyboardInteractivity::Exclusive),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `resize-overlay` config (upstream `ResizeOverlay`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResizeOverlay {
@@ -5982,17 +6081,18 @@ mod tests {
         MagicParseError, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
-        QuickTerminalDimensions, QuickTerminalLayer, QuickTerminalPosition, QuickTerminalScreen,
-        QuickTerminalSize, QuickTerminalSizeParseError, QuickTerminalSizeValue,
-        RepeatableClipboardCodepointMap, RepeatableCodepointMap, RepeatableConfigPath,
-        RepeatableConfigPathParseError, RepeatableString, RepeatableStringParseError,
-        ResizeOverlay, ResizeOverlayPosition, RightClickAction, ScrollToBottom, Scrollbar,
-        SelectionWordChars, SelectionWordCharsParseError, ShellIntegration,
-        ShellIntegrationFeatures, SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme,
-        ThemeParseError, WindowColorspace, WindowDecoration, WindowDecorationParseError,
-        WindowNewTabPosition, WindowPadding, WindowPaddingBalance, WindowPaddingColor,
-        WindowPaddingParseError, WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme,
-        WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
+        QuickTerminalDimensions, QuickTerminalKeyboardInteractivity, QuickTerminalLayer,
+        QuickTerminalPosition, QuickTerminalScreen, QuickTerminalSize, QuickTerminalSizeParseError,
+        QuickTerminalSizeValue, QuickTerminalSpaceBehavior, RepeatableClipboardCodepointMap,
+        RepeatableCodepointMap, RepeatableConfigPath, RepeatableConfigPathParseError,
+        RepeatableString, RepeatableStringParseError, ResizeOverlay, ResizeOverlayPosition,
+        RightClickAction, ScrollToBottom, Scrollbar, SelectionWordChars,
+        SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
+        SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
+        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowNewTabPosition,
+        WindowPadding, WindowPaddingBalance, WindowPaddingColor, WindowPaddingParseError,
+        WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme, WorkingDirectory,
+        WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::cursor;
@@ -10183,6 +10283,8 @@ mod tests {
                 "quick-terminal-screen",
                 "quick-terminal-animation-duration",
                 "quick-terminal-autohide",
+                "quick-terminal-space-behavior",
+                "quick-terminal-keyboard-interactivity",
                 "font-family",
                 "font-family-bold",
                 "font-family-italic",
@@ -11412,7 +11514,12 @@ mod tests {
             "quick-terminal-animation-duration"
         );
         assert_eq!(keys[position_index + 6], "quick-terminal-autohide");
-        assert_eq!(keys[position_index + 7], "font-family");
+        assert_eq!(keys[position_index + 7], "quick-terminal-space-behavior");
+        assert_eq!(
+            keys[position_index + 8],
+            "quick-terminal-keyboard-interactivity"
+        );
+        assert_eq!(keys[position_index + 9], "font-family");
 
         cfg.set("quick-terminal-size", Some("")).unwrap();
         assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
@@ -11557,7 +11664,12 @@ mod tests {
         assert_eq!(keys[size_index + 3], "quick-terminal-screen");
         assert_eq!(keys[size_index + 4], "quick-terminal-animation-duration");
         assert_eq!(keys[size_index + 5], "quick-terminal-autohide");
-        assert_eq!(keys[size_index + 6], "font-family");
+        assert_eq!(keys[size_index + 6], "quick-terminal-space-behavior");
+        assert_eq!(
+            keys[size_index + 7],
+            "quick-terminal-keyboard-interactivity"
+        );
+        assert_eq!(keys[size_index + 8], "font-family");
 
         let diagnostics = cfg.load_str(
             "gtk-quick-terminal-layer = bottom\n\
@@ -11712,7 +11824,12 @@ mod tests {
             "quick-terminal-animation-duration"
         );
         assert_eq!(keys[namespace_index + 3], "quick-terminal-autohide");
-        assert_eq!(keys[namespace_index + 4], "font-family");
+        assert_eq!(keys[namespace_index + 4], "quick-terminal-space-behavior");
+        assert_eq!(
+            keys[namespace_index + 5],
+            "quick-terminal-keyboard-interactivity"
+        );
+        assert_eq!(keys[namespace_index + 6], "font-family");
 
         let diagnostics = cfg.load_str(
             "quick-terminal-screen = mouse\n\
@@ -11753,6 +11870,160 @@ mod tests {
         assert_eq!(cloned.quick_terminal_screen, QuickTerminalScreen::Mouse);
         assert_eq!(cloned.quick_terminal_animation_duration, 0.75);
         assert!(!cloned.quick_terminal_autohide);
+    }
+
+    #[test]
+    fn quick_terminal_space_keyboard_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.quick_terminal_space_behavior,
+            QuickTerminalSpaceBehavior::Move
+        );
+        assert_eq!(
+            cfg.quick_terminal_keyboard_interactivity,
+            QuickTerminalKeyboardInteractivity::OnDemand
+        );
+        assert_eq!(
+            line(&cfg, "quick-terminal-space-behavior"),
+            "quick-terminal-space-behavior = move"
+        );
+        assert_eq!(
+            line(&cfg, "quick-terminal-keyboard-interactivity"),
+            "quick-terminal-keyboard-interactivity = on-demand"
+        );
+
+        for (keyword, expected) in [
+            ("remain", QuickTerminalSpaceBehavior::Remain),
+            ("move", QuickTerminalSpaceBehavior::Move),
+        ] {
+            cfg.set("quick-terminal-space-behavior", Some(keyword))
+                .unwrap();
+            assert_eq!(cfg.quick_terminal_space_behavior, expected);
+            assert_eq!(
+                line(&cfg, "quick-terminal-space-behavior"),
+                format!("quick-terminal-space-behavior = {keyword}")
+            );
+        }
+
+        cfg.set("quick-terminal-space-behavior", Some("")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_space_behavior,
+            QuickTerminalSpaceBehavior::Move
+        );
+        assert_eq!(
+            line(&cfg, "quick-terminal-space-behavior"),
+            "quick-terminal-space-behavior = move"
+        );
+        assert_eq!(
+            cfg.set("quick-terminal-space-behavior", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("quick-terminal-space-behavior", Some("follow")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        for (keyword, expected) in [
+            ("none", QuickTerminalKeyboardInteractivity::None),
+            ("on-demand", QuickTerminalKeyboardInteractivity::OnDemand),
+            ("exclusive", QuickTerminalKeyboardInteractivity::Exclusive),
+        ] {
+            cfg.set("quick-terminal-keyboard-interactivity", Some(keyword))
+                .unwrap();
+            assert_eq!(cfg.quick_terminal_keyboard_interactivity, expected);
+            assert_eq!(
+                line(&cfg, "quick-terminal-keyboard-interactivity"),
+                format!("quick-terminal-keyboard-interactivity = {keyword}")
+            );
+        }
+
+        cfg.set("quick-terminal-keyboard-interactivity", Some(""))
+            .unwrap();
+        assert_eq!(
+            cfg.quick_terminal_keyboard_interactivity,
+            QuickTerminalKeyboardInteractivity::OnDemand
+        );
+        assert_eq!(
+            line(&cfg, "quick-terminal-keyboard-interactivity"),
+            "quick-terminal-keyboard-interactivity = on-demand"
+        );
+        assert_eq!(
+            cfg.set("quick-terminal-keyboard-interactivity", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("quick-terminal-keyboard-interactivity", Some("focused")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let keys: Vec<&str> = out
+            .lines()
+            .map(|l| l.split(" = ").next().unwrap())
+            .collect();
+        let autohide_index = keys
+            .iter()
+            .position(|key| *key == "quick-terminal-autohide")
+            .unwrap();
+        assert_eq!(keys[autohide_index + 1], "quick-terminal-space-behavior");
+        assert_eq!(
+            keys[autohide_index + 2],
+            "quick-terminal-keyboard-interactivity"
+        );
+        assert_eq!(keys[autohide_index + 3], "font-family");
+
+        let diagnostics = cfg.load_str(
+            "quick-terminal-space-behavior = remain\n\
+             quick-terminal-space-behavior = follow\n\
+             quick-terminal-keyboard-interactivity = exclusive\n\
+             quick-terminal-keyboard-interactivity = focused\n\
+             quick-terminal-autohide = false\n",
+        );
+        assert_eq!(
+            cfg.quick_terminal_space_behavior,
+            QuickTerminalSpaceBehavior::Remain
+        );
+        assert_eq!(
+            cfg.quick_terminal_keyboard_interactivity,
+            QuickTerminalKeyboardInteractivity::Exclusive
+        );
+        assert!(!cfg.quick_terminal_autohide);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "quick-terminal-space-behavior".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "quick-terminal-keyboard-interactivity".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(
+            cloned.quick_terminal_space_behavior,
+            QuickTerminalSpaceBehavior::Remain
+        );
+        assert_eq!(
+            cloned.quick_terminal_keyboard_interactivity,
+            QuickTerminalKeyboardInteractivity::Exclusive
+        );
     }
 
     #[test]
@@ -14191,6 +14462,32 @@ mod tests {
             assert_eq!(QuickTerminalScreen::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(QuickTerminalScreen::from_keyword("primary"), None);
+
+        for v in [
+            QuickTerminalSpaceBehavior::Remain,
+            QuickTerminalSpaceBehavior::Move,
+        ] {
+            assert_eq!(
+                QuickTerminalSpaceBehavior::from_keyword(v.keyword()),
+                Some(v)
+            );
+        }
+        assert_eq!(QuickTerminalSpaceBehavior::from_keyword("follow"), None);
+
+        for v in [
+            QuickTerminalKeyboardInteractivity::None,
+            QuickTerminalKeyboardInteractivity::OnDemand,
+            QuickTerminalKeyboardInteractivity::Exclusive,
+        ] {
+            assert_eq!(
+                QuickTerminalKeyboardInteractivity::from_keyword(v.keyword()),
+                Some(v)
+            );
+        }
+        assert_eq!(
+            QuickTerminalKeyboardInteractivity::from_keyword("focused"),
+            None
+        );
 
         for v in [
             ResizeOverlay::Always,
