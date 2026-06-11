@@ -5114,6 +5114,142 @@ enum ParsedBindingAction {
     ToggleReadonly,
 }
 
+impl ParsedBindingAction {
+    fn canonical_config_string(&self) -> String {
+        match self {
+            ParsedBindingAction::RuntimeAction(tag, storage)
+            | ParsedBindingAction::AppRuntimeAction(tag, storage) => {
+                canonical_runtime_action(*tag, storage)
+            }
+            ParsedBindingAction::StartSearch => "start_search".to_string(),
+            ParsedBindingAction::SearchSelection => "search_selection".to_string(),
+            ParsedBindingAction::CopyUrlToClipboard => "copy_url_to_clipboard".to_string(),
+            ParsedBindingAction::WriteFile(target, action, format) => format!(
+                "{}:{},{}",
+                write_file_target_keyword(*target),
+                write_file_action_keyword(*action),
+                write_file_format_keyword(*format)
+            ),
+            ParsedBindingAction::CloseSurface => "close_surface".to_string(),
+            ParsedBindingAction::Text(text) => format!("text:{}", zig_escape_action_bytes(text)),
+            ParsedBindingAction::Csi(data) => format!("csi:{}", zig_escape_action_bytes(data)),
+            ParsedBindingAction::Esc(data) => format!("esc:{}", zig_escape_action_bytes(data)),
+            ParsedBindingAction::PromptTitle(ROASTTY_PROMPT_TITLE_SURFACE) => {
+                "prompt_surface_title".to_string()
+            }
+            ParsedBindingAction::PromptTitle(ROASTTY_PROMPT_TITLE_TAB) => {
+                "prompt_tab_title".to_string()
+            }
+            ParsedBindingAction::PromptTitle(prompt) => format!("prompt_title:{prompt}"),
+            ParsedBindingAction::SetTitle(ROASTTY_ACTION_SET_TITLE, title) => {
+                format!("set_surface_title:{}", zig_escape_action_bytes(title))
+            }
+            ParsedBindingAction::SetTitle(ROASTTY_ACTION_SET_TAB_TITLE, title) => {
+                format!("set_tab_title:{}", zig_escape_action_bytes(title))
+            }
+            ParsedBindingAction::SetTitle(tag, title) => {
+                format!("{tag}:{}", zig_escape_action_bytes(title))
+            }
+            ParsedBindingAction::Reset => "reset".to_string(),
+            ParsedBindingAction::ClearScreen => "clear_screen".to_string(),
+            ParsedBindingAction::SelectAll => "select_all".to_string(),
+            ParsedBindingAction::AdjustSelection(adjustment) => {
+                format!(
+                    "adjust_selection:{}",
+                    selection_adjustment_keyword(*adjustment)
+                )
+            }
+            ParsedBindingAction::CopyToClipboard(format) => {
+                format!(
+                    "copy_to_clipboard:{}",
+                    copy_to_clipboard_format_keyword(*format)
+                )
+            }
+            ParsedBindingAction::PasteFromClipboard(ROASTTY_CLIPBOARD_STANDARD) => {
+                "paste_from_clipboard".to_string()
+            }
+            ParsedBindingAction::PasteFromClipboard(ROASTTY_CLIPBOARD_SELECTION) => {
+                "paste_from_selection".to_string()
+            }
+            ParsedBindingAction::PasteFromClipboard(clipboard) => format!("paste:{clipboard}"),
+            ParsedBindingAction::IncreaseFontSize(delta) => format!("increase_font_size:{delta}"),
+            ParsedBindingAction::DecreaseFontSize(delta) => format!("decrease_font_size:{delta}"),
+            ParsedBindingAction::ResetFontSize => "reset_font_size".to_string(),
+            ParsedBindingAction::SetFontSize(points) => format!("set_font_size:{points}"),
+            ParsedBindingAction::ScrollToTop => "scroll_to_top".to_string(),
+            ParsedBindingAction::ScrollToBottom => "scroll_to_bottom".to_string(),
+            ParsedBindingAction::ScrollToRow(row) => format!("scroll_to_row:{row}"),
+            ParsedBindingAction::ScrollToSelection => "scroll_to_selection".to_string(),
+            ParsedBindingAction::ScrollPageUp => "scroll_page_up".to_string(),
+            ParsedBindingAction::ScrollPageDown => "scroll_page_down".to_string(),
+            ParsedBindingAction::ScrollPageLines(lines) => format!("scroll_page_lines:{lines}"),
+            ParsedBindingAction::ScrollPageFractional(fraction) => {
+                format!("scroll_page_fractional:{fraction}")
+            }
+            ParsedBindingAction::JumpToPrompt(delta) => format!("jump_to_prompt:{delta}"),
+            ParsedBindingAction::ToggleMouseReporting => "toggle_mouse_reporting".to_string(),
+            ParsedBindingAction::ToggleReadonly => "toggle_readonly".to_string(),
+        }
+    }
+}
+
+fn canonical_runtime_action(tag: c_int, storage: &[usize; 8]) -> String {
+    match tag {
+        ROASTTY_ACTION_QUIT => "quit".to_string(),
+        ROASTTY_ACTION_CLOSE_ALL_WINDOWS => "close_all_windows".to_string(),
+        ROASTTY_ACTION_TOGGLE_QUICK_TERMINAL => "toggle_quick_terminal".to_string(),
+        ROASTTY_ACTION_TOGGLE_VISIBILITY => "toggle_visibility".to_string(),
+        ROASTTY_ACTION_SHOW_GTK_INSPECTOR => "show_gtk_inspector".to_string(),
+        ROASTTY_ACTION_OPEN_CONFIG => "open_config".to_string(),
+        ROASTTY_ACTION_RELOAD_CONFIG => "reload_config".to_string(),
+        ROASTTY_ACTION_CHECK_FOR_UPDATES => "check_for_updates".to_string(),
+        ROASTTY_ACTION_NEW_WINDOW => "new_window".to_string(),
+        ROASTTY_ACTION_NEW_TAB => "new_tab".to_string(),
+        ROASTTY_ACTION_CLOSE_TAB => format!("close_tab:{}", close_tab_keyword(storage[0] as c_int)),
+        ROASTTY_ACTION_GOTO_TAB => format!("goto_tab:{}", storage[0] as isize),
+        ROASTTY_ACTION_MOVE_TAB => format!("move_tab:{}", storage[0] as isize),
+        ROASTTY_ACTION_TOGGLE_TAB_OVERVIEW => "toggle_tab_overview".to_string(),
+        ROASTTY_ACTION_TOGGLE_WINDOW_DECORATIONS => "toggle_window_decorations".to_string(),
+        ROASTTY_ACTION_TOGGLE_COMMAND_PALETTE => "toggle_command_palette".to_string(),
+        ROASTTY_ACTION_TOGGLE_BACKGROUND_OPACITY => "toggle_background_opacity".to_string(),
+        ROASTTY_ACTION_SHOW_ON_SCREEN_KEYBOARD => "show_on_screen_keyboard".to_string(),
+        ROASTTY_ACTION_END_SEARCH => "end_search".to_string(),
+        ROASTTY_ACTION_NAVIGATE_SEARCH => {
+            format!(
+                "navigate_search:{}",
+                navigate_search_keyword(storage[0] as c_int)
+            )
+        }
+        ROASTTY_ACTION_FLOAT_WINDOW => "toggle_window_float_on_top".to_string(),
+        ROASTTY_ACTION_SECURE_INPUT => "toggle_secure_input".to_string(),
+        ROASTTY_ACTION_INSPECTOR => format!("inspector:{}", inspector_keyword(storage[0] as c_int)),
+        ROASTTY_ACTION_CLOSE_WINDOW => "close_window".to_string(),
+        ROASTTY_ACTION_UNDO => "undo".to_string(),
+        ROASTTY_ACTION_REDO => "redo".to_string(),
+        ROASTTY_ACTION_NEW_SPLIT => {
+            format!("new_split:{}", split_direction_keyword(storage[0] as c_int))
+        }
+        ROASTTY_ACTION_GOTO_SPLIT => {
+            format!("goto_split:{}", goto_split_keyword(storage[0] as c_int))
+        }
+        ROASTTY_ACTION_GOTO_WINDOW => {
+            format!("goto_window:{}", goto_window_keyword(storage[0] as c_int))
+        }
+        ROASTTY_ACTION_RESIZE_SPLIT => format!(
+            "resize_split:{},{}",
+            resize_split_keyword(storage[1] as c_int),
+            storage[0]
+        ),
+        ROASTTY_ACTION_EQUALIZE_SPLITS => "equalize_splits".to_string(),
+        ROASTTY_ACTION_TOGGLE_SPLIT_ZOOM => "toggle_split_zoom".to_string(),
+        ROASTTY_ACTION_RESET_WINDOW_SIZE => "reset_window_size".to_string(),
+        ROASTTY_ACTION_TOGGLE_MAXIMIZE => "toggle_maximize".to_string(),
+        ROASTTY_ACTION_TOGGLE_FULLSCREEN => "toggle_fullscreen".to_string(),
+        ROASTTY_ACTION_COPY_TITLE_TO_CLIPBOARD => "copy_title_to_clipboard".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn parameterless_app_action(parameter: Option<&[u8]>, tag: c_int) -> Option<ParsedBindingAction> {
     if parameter.is_some() {
         return None;
@@ -5222,12 +5358,139 @@ fn copy_to_clipboard_format_from_str(parameter: Option<&[u8]>) -> Option<CopyToC
     }
 }
 
+fn zig_escape_action_bytes(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for &byte in bytes {
+        match byte {
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            0x20..=0x7e => out.push(byte as char),
+            other => out.push_str(&format!("\\x{other:02x}")),
+        }
+    }
+    out
+}
+
+fn copy_to_clipboard_format_keyword(format: CopyToClipboardFormat) -> &'static str {
+    match format {
+        CopyToClipboardFormat::Plain => "plain",
+        CopyToClipboardFormat::Vt => "vt",
+        CopyToClipboardFormat::Html => "html",
+        CopyToClipboardFormat::Mixed => "mixed",
+    }
+}
+
+fn write_file_target_keyword(target: WriteFileTarget) -> &'static str {
+    match target {
+        WriteFileTarget::Selection => "write_selection_file",
+        WriteFileTarget::Screen => "write_screen_file",
+        WriteFileTarget::Scrollback => "write_scrollback_file",
+    }
+}
+
+fn write_file_action_keyword(action: WriteFileAction) -> &'static str {
+    match action {
+        WriteFileAction::Copy => "copy",
+        WriteFileAction::Paste => "paste",
+        WriteFileAction::Open => "open",
+    }
+}
+
+fn write_file_format_keyword(format: WriteFileFormat) -> &'static str {
+    match format {
+        WriteFileFormat::Plain => "plain",
+        WriteFileFormat::Vt => "vt",
+        WriteFileFormat::Html => "html",
+    }
+}
+
+fn close_tab_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_CLOSE_TAB_OTHER => "other",
+        ROASTTY_CLOSE_TAB_RIGHT => "right",
+        _ => "this",
+    }
+}
+
+fn navigate_search_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_NAVIGATE_SEARCH_PREVIOUS => "previous",
+        _ => "next",
+    }
+}
+
+fn inspector_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_INSPECTOR_SHOW => "show",
+        ROASTTY_INSPECTOR_HIDE => "hide",
+        _ => "toggle",
+    }
+}
+
+fn split_direction_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_SPLIT_DIRECTION_DOWN => "down",
+        ROASTTY_SPLIT_DIRECTION_LEFT => "left",
+        ROASTTY_SPLIT_DIRECTION_UP => "up",
+        _ => "right",
+    }
+}
+
+fn goto_split_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_GOTO_SPLIT_PREVIOUS => "previous",
+        ROASTTY_GOTO_SPLIT_NEXT => "next",
+        ROASTTY_GOTO_SPLIT_UP => "up",
+        ROASTTY_GOTO_SPLIT_LEFT => "left",
+        ROASTTY_GOTO_SPLIT_DOWN => "down",
+        _ => "right",
+    }
+}
+
+fn resize_split_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_RESIZE_SPLIT_DOWN => "down",
+        ROASTTY_RESIZE_SPLIT_LEFT => "left",
+        ROASTTY_RESIZE_SPLIT_RIGHT => "right",
+        _ => "up",
+    }
+}
+
+fn goto_window_keyword(value: c_int) -> &'static str {
+    match value {
+        ROASTTY_GOTO_WINDOW_NEXT => "next",
+        _ => "previous",
+    }
+}
+
+fn selection_adjustment_keyword(value: TerminalSelectionAdjustment) -> &'static str {
+    match value {
+        TerminalSelectionAdjustment::Left => "left",
+        TerminalSelectionAdjustment::Right => "right",
+        TerminalSelectionAdjustment::Up => "up",
+        TerminalSelectionAdjustment::Down => "down",
+        TerminalSelectionAdjustment::PageUp => "page_up",
+        TerminalSelectionAdjustment::PageDown => "page_down",
+        TerminalSelectionAdjustment::Home => "home",
+        TerminalSelectionAdjustment::End => "end",
+        TerminalSelectionAdjustment::BeginningOfLine => "beginning_of_line",
+        TerminalSelectionAdjustment::EndOfLine => "end_of_line",
+    }
+}
+
 fn parse_binding_action(surface: &Surface, action: &[u8]) -> Option<ParsedBindingAction> {
     parse_binding_action_with_auto_split(action, auto_split_direction(surface))
 }
 
 fn parse_config_binding_action(action: &[u8]) -> Option<ParsedBindingAction> {
     parse_binding_action_with_auto_split(action, ROASTTY_SPLIT_DIRECTION_RIGHT)
+}
+
+pub(crate) fn canonical_config_binding_action(action: &[u8]) -> Option<String> {
+    parse_config_binding_action(action).map(|action| action.canonical_config_string())
 }
 
 fn parse_binding_action_with_auto_split(

@@ -202,6 +202,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   wires `quick-terminal-space-behavior` and
   `quick-terminal-keyboard-interactivity`; runtime macOS Spaces behavior and
   Wayland keyboard interactivity remain later work.
+- **Command-palette entry config is parser/formatter-only.** Exp 85 wires
+  `command-palette-entry` with the pinned upstream 88-entry default list,
+  repeatable append, `clear`, empty/missing-value default restore, duplicate
+  last-wins fields, quoted-string decoding, and canonical action validation /
+  formatting through Roastty's keybinding action parser; runtime command-palette
+  UI and app C ABI exposure remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -859,7 +865,7 @@ stays unaltered except for the rename).
 - [Experiment 84: Phase F — quick terminal space and keyboard config](84-quick-terminal-space-keyboard-config.md)
   — **Pass**
 - [Experiment 85: Phase F — command palette entry config](85-command-palette-entry-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

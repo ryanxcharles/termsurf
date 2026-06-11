@@ -30,6 +30,7 @@ use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
 use crate::terminal::style::BoldColor as TerminalBoldColor;
 use std::collections::HashSet;
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 /// The aggregating config struct (upstream `config.Config`) — the home of the
@@ -104,6 +105,8 @@ pub(crate) struct Config {
     pub shell_integration: ShellIntegration,
     /// `shell-integration-features`.
     pub shell_integration_features: ShellIntegrationFeatures,
+    /// `command-palette-entry`.
+    pub command_palette_entry: RepeatableCommand,
     /// `notify-on-command-finish`.
     pub notify_on_command_finish: NotifyOnCommandFinish,
     /// `notify-on-command-finish-action`.
@@ -353,6 +356,7 @@ impl Default for Config {
             config_default_files: true,
             shell_integration: ShellIntegration::Detect,
             shell_integration_features: ShellIntegrationFeatures::default(),
+            command_palette_entry: RepeatableCommand::default(),
             notify_on_command_finish: NotifyOnCommandFinish::Never,
             notify_on_command_finish_action: NotifyOnCommandFinishAction::default(),
             bell_audio_volume: 0.5,
@@ -740,6 +744,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("shell-integration", out));
         self.shell_integration_features
             .format_entry(&mut EntryFormatter::new("shell-integration-features", out));
+        self.command_palette_entry
+            .format_entry(&mut EntryFormatter::new("command-palette-entry", out));
         self.osc_color_report_format
             .format_entry(&mut EntryFormatter::new("osc-color-report-format", out));
         self.custom_shader_animation
@@ -937,6 +943,7 @@ impl Config {
                     ShellIntegration::from_keyword,
                 )?
             }
+            "command-palette-entry" => self.command_palette_entry.parse_cli(value)?,
             "notify-on-command-finish" => {
                 self.notify_on_command_finish = set_enum_field(
                     value,
@@ -5009,6 +5016,360 @@ impl From<ThemeParseError> for ConfigSetError {
     }
 }
 
+/// A single `command-palette-entry` value (upstream `input.Command`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommandPaletteEntry {
+    pub title: String,
+    pub description: String,
+    pub action: String,
+}
+
+impl CommandPaletteEntry {
+    fn new(title: &str, description: &str, action: &str) -> Self {
+        CommandPaletteEntry {
+            title: title.to_string(),
+            description: description.to_string(),
+            action: action.to_string(),
+        }
+    }
+
+    fn parse_auto_struct(input: &str) -> Result<Self, CommandPaletteEntryParseError> {
+        let ws = |c: char| c == ' ' || c == '\t';
+        let mut title: Option<String> = None;
+        let mut description: Option<String> = None;
+        let mut action: Option<String> = None;
+
+        let mut splitter = CommaSplitter::new(input);
+        while let Some(entry) = splitter.next().map_err(|_| CommandPaletteEntryParseError)? {
+            let idx = entry.find(':').ok_or(CommandPaletteEntryParseError)?;
+            let key = entry[..idx].trim_matches(ws);
+            let value = parse_command_palette_value(entry[idx + 1..].trim_matches(ws))?;
+            match key {
+                "title" => title = Some(value),
+                "description" => description = Some(value),
+                "action" => action = Some(value),
+                _ => return Err(CommandPaletteEntryParseError),
+            }
+        }
+
+        let title = title.ok_or(CommandPaletteEntryParseError)?;
+        let action = action
+            .and_then(|action| crate::canonical_config_binding_action(action.as_bytes()))
+            .ok_or(CommandPaletteEntryParseError)?;
+
+        Ok(CommandPaletteEntry {
+            title,
+            description: description.unwrap_or_default(),
+            action,
+        })
+    }
+}
+
+fn parse_command_palette_value(raw: &str) -> Result<String, CommandPaletteEntryParseError> {
+    if raw.starts_with('"') || raw.ends_with('"') {
+        let bytes = parse_quoted_string(raw.as_bytes()).ok_or(CommandPaletteEntryParseError)?;
+        return String::from_utf8(bytes).map_err(|_| CommandPaletteEntryParseError);
+    }
+    Ok(raw.to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CommandPaletteEntryParseError;
+
+impl From<CommandPaletteEntryParseError> for ConfigSetError {
+    fn from(_: CommandPaletteEntryParseError) -> Self {
+        ConfigSetError::InvalidValue
+    }
+}
+
+/// The `command-palette-entry` config (upstream `RepeatableCommand`): custom
+/// command-palette entries plus Ghostty's default command list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepeatableCommand {
+    pub entries: Vec<CommandPaletteEntry>,
+}
+
+impl Default for RepeatableCommand {
+    fn default() -> Self {
+        RepeatableCommand {
+            entries: default_command_palette_entries(),
+        }
+    }
+}
+
+impl RepeatableCommand {
+    pub(crate) fn parse_cli(&mut self, value: Option<&str>) -> Result<(), ConfigSetError> {
+        let input = value.unwrap_or("");
+        if input.is_empty() {
+            *self = RepeatableCommand::default();
+            return Ok(());
+        }
+        if input == "clear" {
+            self.entries.clear();
+            return Ok(());
+        }
+
+        self.entries
+            .push(CommandPaletteEntry::parse_auto_struct(input)?);
+        Ok(())
+    }
+
+    pub(crate) fn format_entry(&self, formatter: &mut EntryFormatter) {
+        if self.entries.is_empty() {
+            formatter.entry_void();
+            return;
+        }
+        for entry in &self.entries {
+            let mut line = format!("title:\"{}\"", zig_escape_string(&entry.title));
+            if !entry.description.is_empty() {
+                let _ = write!(
+                    line,
+                    ",description:\"{}\"",
+                    zig_escape_string(&entry.description)
+                );
+            }
+            let _ = write!(line, ",action:\"{}\"", zig_escape_string(&entry.action));
+            formatter.entry_str(&line);
+        }
+    }
+}
+
+fn zig_escape_string(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            0x20..=0x7e => out.push(byte as char),
+            other => {
+                let _ = write!(out, "\\x{other:02x}");
+            }
+        }
+    }
+    out
+}
+
+fn default_command_palette_entries() -> Vec<CommandPaletteEntry> {
+    DEFAULT_COMMAND_PALETTE_ENTRIES
+        .iter()
+        .map(|(title, description, action)| CommandPaletteEntry::new(title, description, action))
+        .collect()
+}
+
+const DEFAULT_COMMAND_PALETTE_ENTRIES: &[(&str, &str, &str)] = &[
+    (
+        "Change Tab Title…",
+        "Prompt for a new title for the current tab.",
+        "prompt_tab_title",
+    ),
+    (
+        "Change Terminal Title…",
+        "Prompt for a new title for the current terminal.",
+        "prompt_surface_title",
+    ),
+    ("Check for Updates", "Check for updates to the application.", "check_for_updates"),
+    ("Clear Screen", "Clear the screen and scrollback.", "clear_screen"),
+    ("Close All Windows", "Close all windows.", "close_all_windows"),
+    (
+        "Close Other Tabs",
+        "Close all tabs in this window except the current one.",
+        "close_tab:other",
+    ),
+    ("Close Tab", "Close the current tab.", "close_tab:this"),
+    (
+        "Close Tabs to the Right",
+        "Close all tabs to the right of the current one.",
+        "close_tab:right",
+    ),
+    ("Close Terminal", "Close the current terminal.", "close_surface"),
+    ("Close Window", "Close the current window.", "close_window"),
+    (
+        "Copy Screen as ANSI Sequences to Temporary File and Copy Path",
+        "Copy the screen contents as ANSI escape sequences to a temporary file and copy the path to the clipboard.",
+        "write_screen_file:copy,vt",
+    ),
+    (
+        "Copy Screen as ANSI Sequences to Temporary File and Open",
+        "Copy the screen contents as ANSI escape sequences to a temporary file and open it.",
+        "write_screen_file:open,vt",
+    ),
+    (
+        "Copy Screen as ANSI Sequences to Temporary File and Paste Path",
+        "Copy the screen contents as ANSI escape sequences to a temporary file and paste the path to the file.",
+        "write_screen_file:paste,vt",
+    ),
+    (
+        "Copy Screen as HTML to Temporary File and Copy Path",
+        "Copy the screen contents as HTML to a temporary file and copy the path to the clipboard.",
+        "write_screen_file:copy,html",
+    ),
+    (
+        "Copy Screen as HTML to Temporary File and Open",
+        "Copy the screen contents as HTML to a temporary file and open it.",
+        "write_screen_file:open,html",
+    ),
+    (
+        "Copy Screen as HTML to Temporary File and Paste Path",
+        "Copy the screen contents as HTML to a temporary file and paste the path to the file.",
+        "write_screen_file:paste,html",
+    ),
+    (
+        "Copy Screen to Temporary File and Copy Path",
+        "Copy the screen contents to a temporary file and copy the path to the clipboard.",
+        "write_screen_file:copy,plain",
+    ),
+    (
+        "Copy Screen to Temporary File and Open",
+        "Copy the screen contents to a temporary file and open it.",
+        "write_screen_file:open,plain",
+    ),
+    (
+        "Copy Screen to Temporary File and Paste Path",
+        "Copy the screen contents to a temporary file and paste the path to the file.",
+        "write_screen_file:paste,plain",
+    ),
+    (
+        "Copy Selection as ANSI Sequences to Clipboard",
+        "Copy the selected text as ANSI escape sequences to the clipboard.",
+        "copy_to_clipboard:vt",
+    ),
+    (
+        "Copy Selection as ANSI Sequences to Temporary File and Copy Path",
+        "Copy the selection contents as ANSI escape sequences to a temporary file and copy the path to the clipboard.",
+        "write_selection_file:copy,vt",
+    ),
+    (
+        "Copy Selection as ANSI Sequences to Temporary File and Open",
+        "Copy the selection contents as ANSI escape sequences to a temporary file and open it.",
+        "write_selection_file:open,vt",
+    ),
+    (
+        "Copy Selection as ANSI Sequences to Temporary File and Paste Path",
+        "Copy the selection contents as ANSI escape sequences to a temporary file and paste the path to the file.",
+        "write_selection_file:paste,vt",
+    ),
+    (
+        "Copy Selection as HTML to Clipboard",
+        "Copy the selected text as HTML to the clipboard.",
+        "copy_to_clipboard:html",
+    ),
+    (
+        "Copy Selection as HTML to Temporary File and Copy Path",
+        "Copy the selection contents as HTML to a temporary file and copy the path to the clipboard.",
+        "write_selection_file:copy,html",
+    ),
+    (
+        "Copy Selection as HTML to Temporary File and Open",
+        "Copy the selection contents as HTML to a temporary file and open it.",
+        "write_selection_file:open,html",
+    ),
+    (
+        "Copy Selection as HTML to Temporary File and Paste Path",
+        "Copy the selection contents as HTML to a temporary file and paste the path to the file.",
+        "write_selection_file:paste,html",
+    ),
+    (
+        "Copy Selection as Plain Text to Clipboard",
+        "Copy the selected text as plain text to the clipboard.",
+        "copy_to_clipboard:plain",
+    ),
+    (
+        "Copy Selection to Temporary File and Copy Path",
+        "Copy the selection contents to a temporary file and copy the path to the clipboard.",
+        "write_selection_file:copy,plain",
+    ),
+    (
+        "Copy Selection to Temporary File and Open",
+        "Copy the selection contents to a temporary file and open it.",
+        "write_selection_file:open,plain",
+    ),
+    (
+        "Copy Selection to Temporary File and Paste Path",
+        "Copy the selection contents to a temporary file and paste the path to the file.",
+        "write_selection_file:paste,plain",
+    ),
+    (
+        "Copy Terminal Title to Clipboard",
+        "Copy the terminal title to the clipboard. If the terminal title is not set this has no effect.",
+        "copy_title_to_clipboard",
+    ),
+    (
+        "Copy to Clipboard",
+        "Copy the selected text to the clipboard in both plain and styled formats.",
+        "copy_to_clipboard:mixed",
+    ),
+    ("Copy URL to Clipboard", "Copy the URL under the cursor to the clipboard.", "copy_url_to_clipboard"),
+    ("Decrease Font Size", "Decrease the font size by 1 point.", "decrease_font_size:1"),
+    ("End Search", "End the current search if any and hide any GUI elements.", "end_search"),
+    ("Equalize Splits", "Equalize the size of all splits.", "equalize_splits"),
+    ("Focus Split: Down", "Focus the split below, if it exists.", "goto_split:down"),
+    ("Focus Split: Left", "Focus the split to the left, if it exists.", "goto_split:left"),
+    ("Focus Split: Next", "Focus the next split, if any.", "goto_split:next"),
+    ("Focus Split: Previous", "Focus the previous split, if any.", "goto_split:previous"),
+    ("Focus Split: Right", "Focus the split to the right, if it exists.", "goto_split:right"),
+    ("Focus Split: Up", "Focus the split above, if it exists.", "goto_split:up"),
+    ("Focus Window: Next", "Focus the next window, if any.", "goto_window:next"),
+    ("Focus Window: Previous", "Focus the previous window, if any.", "goto_window:previous"),
+    ("Ghostty", "Put a little Ghostty in your terminal.", "text:\\xf0\\x9f\\x91\\xbb"),
+    ("Increase Font Size", "Increase the font size by 1 point.", "increase_font_size:1"),
+    ("Move Tab Left", "Move the current tab to the left.", "move_tab:-1"),
+    ("Move Tab Right", "Move the current tab to the right.", "move_tab:1"),
+    ("New Tab", "Open a new tab.", "new_tab"),
+    ("New Window", "Open a new window.", "new_window"),
+    ("Next Search Result", "Navigate to the next search result, if any.", "navigate_search:next"),
+    ("Open Config", "Open the config file.", "open_config"),
+    ("Paste from Clipboard", "Paste the contents of the main clipboard.", "paste_from_clipboard"),
+    ("Paste from Selection", "Paste the contents of the selection clipboard.", "paste_from_selection"),
+    ("Previous Search Result", "Navigate to the previous search result, if any.", "navigate_search:previous"),
+    ("Quit", "Quit the application.", "quit"),
+    ("Redo", "Redo the last undone action.", "redo"),
+    ("Reload Config", "Reload the config file.", "reload_config"),
+    ("Reset Font Size", "Reset the font size to the default.", "reset_font_size"),
+    ("Reset Terminal", "Reset the terminal to a clean state.", "reset"),
+    ("Reset Window Size", "Reset the window size to the default.", "reset_window_size"),
+    ("Scroll Page Down", "Scroll the screen down by a page.", "scroll_page_down"),
+    ("Scroll Page Up", "Scroll the screen up by a page.", "scroll_page_up"),
+    ("Scroll to Bottom", "Scroll to the bottom of the screen.", "scroll_to_bottom"),
+    ("Scroll to Selection", "Scroll to the selected text.", "scroll_to_selection"),
+    ("Scroll to Top", "Scroll to the top of the screen.", "scroll_to_top"),
+    ("Search Selection", "Start a search for the current text selection.", "search_selection"),
+    ("Select All", "Select all text on the screen.", "select_all"),
+    ("Show On-Screen Keyboard", "Show the on-screen keyboard if present.", "show_on_screen_keyboard"),
+    ("Show the GTK Inspector", "Show the GTK inspector.", "show_gtk_inspector"),
+    ("Split Down", "Split the terminal down.", "new_split:down"),
+    ("Split Left", "Split the terminal to the left.", "new_split:left"),
+    ("Split Right", "Split the terminal to the right.", "new_split:right"),
+    ("Split Up", "Split the terminal up.", "new_split:up"),
+    ("Start Search", "Start a search if one isn't already active.", "start_search"),
+    (
+        "Toggle Background Opacity",
+        "Toggle the background opacity of a window that started transparent.",
+        "toggle_background_opacity",
+    ),
+    (
+        "Toggle Float on Top",
+        "Toggle the float on top state of the current window.",
+        "toggle_window_float_on_top",
+    ),
+    ("Toggle Fullscreen", "Toggle the fullscreen state of the current window.", "toggle_fullscreen"),
+    ("Toggle Inspector", "Toggle the inspector.", "inspector:toggle"),
+    ("Toggle Maximize", "Toggle the maximized state of the current window.", "toggle_maximize"),
+    (
+        "Toggle Mouse Reporting",
+        "Toggle whether mouse events are reported to terminal applications.",
+        "toggle_mouse_reporting",
+    ),
+    ("Toggle Read-Only Mode", "Toggle read-only mode for the current surface.", "toggle_readonly"),
+    ("Toggle Secure Input", "Toggle secure input mode.", "toggle_secure_input"),
+    ("Toggle Split Zoom", "Toggle the zoom state of the current split.", "toggle_split_zoom"),
+    ("Toggle Tab Overview", "Toggle the tab overview.", "toggle_tab_overview"),
+    ("Toggle Window Decorations", "Toggle the window decorations.", "toggle_window_decorations"),
+    ("Undo", "Undo the last action.", "undo"),
+];
+
 /// The `clipboard-read` / `clipboard-write` config (upstream `ClipboardAccess`):
 /// whether a clipboard operation is allowed, denied, or confirmed. The `Config`
 /// defaults are `Ask` for read and `Allow` for write.
@@ -6073,13 +6434,14 @@ mod tests {
         AlphaBlending, BackgroundBlur, BackgroundBlurParseError, BackgroundImageFit,
         BackgroundImagePosition, BoldColor, ClipboardAccess, ClipboardCodepointMapEntry,
         ClipboardCodepointMapParseError, ClipboardReplacement, Color, ColorList, ColorParseError,
-        Command, Config, ConfigDiagnostic, ConfigFilePath, ConfigRecursiveFileErrorKind,
-        ConfigSetError, ConfirmCloseSurface, CopyOnSelect, CursorStyle, CustomShaderAnimation,
-        DefaultConfigPaths, Duration, DurationParseError, FlagsParseError, FontShapingBreak,
-        FontStyle, FontStyleParseError, FontSyntheticStyle, Fullscreen, GraphemeWidthMethod,
-        LinkPreviews, MacHidden, MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons,
-        MagicParseError, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
-        MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
+        Command, CommandPaletteEntry, Config, ConfigDiagnostic, ConfigFilePath,
+        ConfigRecursiveFileErrorKind, ConfigSetError, ConfirmCloseSurface, CopyOnSelect,
+        CursorStyle, CustomShaderAnimation, DefaultConfigPaths, Duration, DurationParseError,
+        FlagsParseError, FontShapingBreak, FontStyle, FontStyleParseError, FontSyntheticStyle,
+        Fullscreen, GraphemeWidthMethod, LinkPreviews, MacHidden, MacTitlebarProxyIcon,
+        MacTitlebarStyle, MacWindowButtons, MagicParseError, MiddleClickAction,
+        MouseScrollMultiplier, MouseScrollMultiplierParseError, MouseShiftCapture,
+        NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
         QuickTerminalDimensions, QuickTerminalKeyboardInteractivity, QuickTerminalLayer,
         QuickTerminalPosition, QuickTerminalScreen, QuickTerminalSize, QuickTerminalSizeParseError,
@@ -10270,146 +10632,150 @@ mod tests {
             .lines()
             .map(|l| l.split(" = ").next().unwrap())
             .collect();
-        assert_eq!(
-            keys,
-            vec![
-                "initial-window",
-                "quit-after-last-window-closed",
-                "quit-after-last-window-closed-delay",
-                "undo-timeout",
-                "quick-terminal-position",
-                "gtk-quick-terminal-layer",
-                "gtk-quick-terminal-namespace",
-                "quick-terminal-screen",
-                "quick-terminal-animation-duration",
-                "quick-terminal-autohide",
-                "quick-terminal-space-behavior",
-                "quick-terminal-keyboard-interactivity",
-                "font-family",
-                "font-family-bold",
-                "font-family-italic",
-                "font-family-bold-italic",
-                "font-style",
-                "font-style-bold",
-                "font-style-italic",
-                "font-style-bold-italic",
-                "font-synthetic-style",
-                "font-size",
-                "font-codepoint-map",
-                "clipboard-codepoint-map",
-                "font-thicken",
-                "font-thicken-strength",
-                "font-shaping-break",
-                "alpha-blending",
-                "grapheme-width-method",
-                "theme",
-                "background",
-                "foreground",
-                "background-image-opacity",
-                "background-image-position",
-                "background-image-fit",
-                "background-image-repeat",
-                "selection-foreground",
-                "selection-background",
-                "selection-clear-on-typing",
-                "selection-word-chars",
-                "minimum-contrast",
-                "cursor-color",
-                "cursor-opacity",
-                "cursor-style",
-                "cursor-style-blink",
-                "cursor-text",
-                "scroll-to-bottom",
-                "mouse-shift-capture",
-                "mouse-reporting",
-                "mouse-scroll-multiplier",
-                "background-blur",
-                "unfocused-split-opacity",
-                "unfocused-split-fill",
-                "split-divider-color",
-                "split-preserve-zoom",
-                "search-foreground",
-                "search-background",
-                "search-selected-foreground",
-                "search-selected-background",
-                "command",
-                "initial-command",
-                "background-opacity",
-                "background-opacity-cells",
-                "bell-audio-path",
-                "bell-audio-volume",
-                "notify-on-command-finish-after",
-                "notify-on-command-finish",
-                "notify-on-command-finish-action",
-                "env",
-                "wait-after-command",
-                "abnormal-command-exit-runtime",
-                "scrollback-limit",
-                "scrollbar",
-                "link-url",
-                "link-previews",
-                "maximize",
-                "fullscreen",
-                "title",
-                "class",
-                "x11-instance-name",
-                "working-directory",
-                "window-padding-x",
-                "window-padding-y",
-                "window-padding-balance",
-                "window-padding-color",
-                "window-vsync",
-                "window-inherit-working-directory",
-                "tab-inherit-working-directory",
-                "split-inherit-working-directory",
-                "window-inherit-font-size",
-                "window-decoration",
-                "window-title-font-family",
-                "window-subtitle",
-                "window-theme",
-                "window-colorspace",
-                "window-height",
-                "window-width",
-                "window-position-x",
-                "window-position-y",
-                "window-save-state",
-                "window-step-resize",
-                "window-new-tab-position",
-                "window-show-tab-bar",
-                "window-titlebar-background",
-                "window-titlebar-foreground",
-                "resize-overlay",
-                "resize-overlay-position",
-                "resize-overlay-duration",
-                "focus-follows-mouse",
-                "clipboard-read",
-                "clipboard-write",
-                "clipboard-trim-trailing-spaces",
-                "clipboard-paste-protection",
-                "clipboard-paste-bracketed-safe",
-                "title-report",
-                "image-storage-limit",
-                "copy-on-select",
-                "selection-clear-on-copy",
-                "right-click-action",
-                "middle-click-action",
-                "click-repeat-interval",
-                "config-file",
-                "config-default-files",
-                "confirm-close-surface",
-                "shell-integration",
-                "shell-integration-features",
-                "osc-color-report-format",
-                "custom-shader-animation",
-                "macos-non-native-fullscreen",
-                "macos-window-buttons",
-                "macos-titlebar-style",
-                "macos-titlebar-proxy-icon",
-                "macos-hidden",
-                "bold-color",
-                "faint-opacity",
-            ]
+        let mut expected = vec![
+            "initial-window",
+            "quit-after-last-window-closed",
+            "quit-after-last-window-closed-delay",
+            "undo-timeout",
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "gtk-quick-terminal-namespace",
+            "quick-terminal-screen",
+            "quick-terminal-animation-duration",
+            "quick-terminal-autohide",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
+            "font-family",
+            "font-family-bold",
+            "font-family-italic",
+            "font-family-bold-italic",
+            "font-style",
+            "font-style-bold",
+            "font-style-italic",
+            "font-style-bold-italic",
+            "font-synthetic-style",
+            "font-size",
+            "font-codepoint-map",
+            "clipboard-codepoint-map",
+            "font-thicken",
+            "font-thicken-strength",
+            "font-shaping-break",
+            "alpha-blending",
+            "grapheme-width-method",
+            "theme",
+            "background",
+            "foreground",
+            "background-image-opacity",
+            "background-image-position",
+            "background-image-fit",
+            "background-image-repeat",
+            "selection-foreground",
+            "selection-background",
+            "selection-clear-on-typing",
+            "selection-word-chars",
+            "minimum-contrast",
+            "cursor-color",
+            "cursor-opacity",
+            "cursor-style",
+            "cursor-style-blink",
+            "cursor-text",
+            "scroll-to-bottom",
+            "mouse-shift-capture",
+            "mouse-reporting",
+            "mouse-scroll-multiplier",
+            "background-blur",
+            "unfocused-split-opacity",
+            "unfocused-split-fill",
+            "split-divider-color",
+            "split-preserve-zoom",
+            "search-foreground",
+            "search-background",
+            "search-selected-foreground",
+            "search-selected-background",
+            "command",
+            "initial-command",
+            "background-opacity",
+            "background-opacity-cells",
+            "bell-audio-path",
+            "bell-audio-volume",
+            "notify-on-command-finish-after",
+            "notify-on-command-finish",
+            "notify-on-command-finish-action",
+            "env",
+            "wait-after-command",
+            "abnormal-command-exit-runtime",
+            "scrollback-limit",
+            "scrollbar",
+            "link-url",
+            "link-previews",
+            "maximize",
+            "fullscreen",
+            "title",
+            "class",
+            "x11-instance-name",
+            "working-directory",
+            "window-padding-x",
+            "window-padding-y",
+            "window-padding-balance",
+            "window-padding-color",
+            "window-vsync",
+            "window-inherit-working-directory",
+            "tab-inherit-working-directory",
+            "split-inherit-working-directory",
+            "window-inherit-font-size",
+            "window-decoration",
+            "window-title-font-family",
+            "window-subtitle",
+            "window-theme",
+            "window-colorspace",
+            "window-height",
+            "window-width",
+            "window-position-x",
+            "window-position-y",
+            "window-save-state",
+            "window-step-resize",
+            "window-new-tab-position",
+            "window-show-tab-bar",
+            "window-titlebar-background",
+            "window-titlebar-foreground",
+            "resize-overlay",
+            "resize-overlay-position",
+            "resize-overlay-duration",
+            "focus-follows-mouse",
+            "clipboard-read",
+            "clipboard-write",
+            "clipboard-trim-trailing-spaces",
+            "clipboard-paste-protection",
+            "clipboard-paste-bracketed-safe",
+            "title-report",
+            "image-storage-limit",
+            "copy-on-select",
+            "selection-clear-on-copy",
+            "right-click-action",
+            "middle-click-action",
+            "click-repeat-interval",
+            "config-file",
+            "config-default-files",
+            "confirm-close-surface",
+            "shell-integration",
+            "shell-integration-features",
+        ];
+        expected.extend(
+            std::iter::repeat("command-palette-entry")
+                .take(cfg.command_palette_entry.entries.len()),
         );
+        expected.extend([
+            "osc-color-report-format",
+            "custom-shader-animation",
+            "macos-non-native-fullscreen",
+            "macos-window-buttons",
+            "macos-titlebar-style",
+            "macos-titlebar-proxy-icon",
+            "macos-hidden",
+            "bold-color",
+            "faint-opacity",
+        ]);
+        assert_eq!(keys, expected);
 
         // The float field formats as its shortest-decimal default (`1.0` → `1`).
         assert!(out.contains("background-image-opacity = 1\n"));
@@ -10434,6 +10800,486 @@ mod tests {
         assert!(out.contains("title = \n"));
         assert!(out.contains("window-position-x = \n"));
         assert!(out.contains("window-position-y = \n"));
+    }
+
+    #[test]
+    fn command_palette_entry_config_parse_format_reset_and_diagnose() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+        for entry in &cfg.command_palette_entry.entries {
+            assert!(
+                crate::canonical_config_binding_action(entry.action.as_bytes()).is_some(),
+                "{}",
+                entry.title
+            );
+        }
+        macro_rules! entry {
+            ($title:expr, $description:expr, $action:expr) => {
+                CommandPaletteEntry::new($title, $description, $action)
+            };
+        }
+        assert_eq!(
+            cfg.command_palette_entry.entries,
+            vec![
+                entry!(
+                    "Change Tab Title…",
+                    "Prompt for a new title for the current tab.",
+                    "prompt_tab_title"
+                ),
+                entry!(
+                    "Change Terminal Title…",
+                    "Prompt for a new title for the current terminal.",
+                    "prompt_surface_title"
+                ),
+                entry!(
+                    "Check for Updates",
+                    "Check for updates to the application.",
+                    "check_for_updates"
+                ),
+                entry!("Clear Screen", "Clear the screen and scrollback.", "clear_screen"),
+                entry!("Close All Windows", "Close all windows.", "close_all_windows"),
+                entry!(
+                    "Close Other Tabs",
+                    "Close all tabs in this window except the current one.",
+                    "close_tab:other"
+                ),
+                entry!("Close Tab", "Close the current tab.", "close_tab:this"),
+                entry!(
+                    "Close Tabs to the Right",
+                    "Close all tabs to the right of the current one.",
+                    "close_tab:right"
+                ),
+                entry!("Close Terminal", "Close the current terminal.", "close_surface"),
+                entry!("Close Window", "Close the current window.", "close_window"),
+                entry!(
+                    "Copy Screen as ANSI Sequences to Temporary File and Copy Path",
+                    "Copy the screen contents as ANSI escape sequences to a temporary file and copy the path to the clipboard.",
+                    "write_screen_file:copy,vt"
+                ),
+                entry!(
+                    "Copy Screen as ANSI Sequences to Temporary File and Open",
+                    "Copy the screen contents as ANSI escape sequences to a temporary file and open it.",
+                    "write_screen_file:open,vt"
+                ),
+                entry!(
+                    "Copy Screen as ANSI Sequences to Temporary File and Paste Path",
+                    "Copy the screen contents as ANSI escape sequences to a temporary file and paste the path to the file.",
+                    "write_screen_file:paste,vt"
+                ),
+                entry!(
+                    "Copy Screen as HTML to Temporary File and Copy Path",
+                    "Copy the screen contents as HTML to a temporary file and copy the path to the clipboard.",
+                    "write_screen_file:copy,html"
+                ),
+                entry!(
+                    "Copy Screen as HTML to Temporary File and Open",
+                    "Copy the screen contents as HTML to a temporary file and open it.",
+                    "write_screen_file:open,html"
+                ),
+                entry!(
+                    "Copy Screen as HTML to Temporary File and Paste Path",
+                    "Copy the screen contents as HTML to a temporary file and paste the path to the file.",
+                    "write_screen_file:paste,html"
+                ),
+                entry!(
+                    "Copy Screen to Temporary File and Copy Path",
+                    "Copy the screen contents to a temporary file and copy the path to the clipboard.",
+                    "write_screen_file:copy,plain"
+                ),
+                entry!(
+                    "Copy Screen to Temporary File and Open",
+                    "Copy the screen contents to a temporary file and open it.",
+                    "write_screen_file:open,plain"
+                ),
+                entry!(
+                    "Copy Screen to Temporary File and Paste Path",
+                    "Copy the screen contents to a temporary file and paste the path to the file.",
+                    "write_screen_file:paste,plain"
+                ),
+                entry!(
+                    "Copy Selection as ANSI Sequences to Clipboard",
+                    "Copy the selected text as ANSI escape sequences to the clipboard.",
+                    "copy_to_clipboard:vt"
+                ),
+                entry!(
+                    "Copy Selection as ANSI Sequences to Temporary File and Copy Path",
+                    "Copy the selection contents as ANSI escape sequences to a temporary file and copy the path to the clipboard.",
+                    "write_selection_file:copy,vt"
+                ),
+                entry!(
+                    "Copy Selection as ANSI Sequences to Temporary File and Open",
+                    "Copy the selection contents as ANSI escape sequences to a temporary file and open it.",
+                    "write_selection_file:open,vt"
+                ),
+                entry!(
+                    "Copy Selection as ANSI Sequences to Temporary File and Paste Path",
+                    "Copy the selection contents as ANSI escape sequences to a temporary file and paste the path to the file.",
+                    "write_selection_file:paste,vt"
+                ),
+                entry!(
+                    "Copy Selection as HTML to Clipboard",
+                    "Copy the selected text as HTML to the clipboard.",
+                    "copy_to_clipboard:html"
+                ),
+                entry!(
+                    "Copy Selection as HTML to Temporary File and Copy Path",
+                    "Copy the selection contents as HTML to a temporary file and copy the path to the clipboard.",
+                    "write_selection_file:copy,html"
+                ),
+                entry!(
+                    "Copy Selection as HTML to Temporary File and Open",
+                    "Copy the selection contents as HTML to a temporary file and open it.",
+                    "write_selection_file:open,html"
+                ),
+                entry!(
+                    "Copy Selection as HTML to Temporary File and Paste Path",
+                    "Copy the selection contents as HTML to a temporary file and paste the path to the file.",
+                    "write_selection_file:paste,html"
+                ),
+                entry!(
+                    "Copy Selection as Plain Text to Clipboard",
+                    "Copy the selected text as plain text to the clipboard.",
+                    "copy_to_clipboard:plain"
+                ),
+                entry!(
+                    "Copy Selection to Temporary File and Copy Path",
+                    "Copy the selection contents to a temporary file and copy the path to the clipboard.",
+                    "write_selection_file:copy,plain"
+                ),
+                entry!(
+                    "Copy Selection to Temporary File and Open",
+                    "Copy the selection contents to a temporary file and open it.",
+                    "write_selection_file:open,plain"
+                ),
+                entry!(
+                    "Copy Selection to Temporary File and Paste Path",
+                    "Copy the selection contents to a temporary file and paste the path to the file.",
+                    "write_selection_file:paste,plain"
+                ),
+                entry!(
+                    "Copy Terminal Title to Clipboard",
+                    "Copy the terminal title to the clipboard. If the terminal title is not set this has no effect.",
+                    "copy_title_to_clipboard"
+                ),
+                entry!(
+                    "Copy to Clipboard",
+                    "Copy the selected text to the clipboard in both plain and styled formats.",
+                    "copy_to_clipboard:mixed"
+                ),
+                entry!(
+                    "Copy URL to Clipboard",
+                    "Copy the URL under the cursor to the clipboard.",
+                    "copy_url_to_clipboard"
+                ),
+                entry!(
+                    "Decrease Font Size",
+                    "Decrease the font size by 1 point.",
+                    "decrease_font_size:1"
+                ),
+                entry!(
+                    "End Search",
+                    "End the current search if any and hide any GUI elements.",
+                    "end_search"
+                ),
+                entry!("Equalize Splits", "Equalize the size of all splits.", "equalize_splits"),
+                entry!(
+                    "Focus Split: Down",
+                    "Focus the split below, if it exists.",
+                    "goto_split:down"
+                ),
+                entry!(
+                    "Focus Split: Left",
+                    "Focus the split to the left, if it exists.",
+                    "goto_split:left"
+                ),
+                entry!("Focus Split: Next", "Focus the next split, if any.", "goto_split:next"),
+                entry!(
+                    "Focus Split: Previous",
+                    "Focus the previous split, if any.",
+                    "goto_split:previous"
+                ),
+                entry!(
+                    "Focus Split: Right",
+                    "Focus the split to the right, if it exists.",
+                    "goto_split:right"
+                ),
+                entry!("Focus Split: Up", "Focus the split above, if it exists.", "goto_split:up"),
+                entry!("Focus Window: Next", "Focus the next window, if any.", "goto_window:next"),
+                entry!(
+                    "Focus Window: Previous",
+                    "Focus the previous window, if any.",
+                    "goto_window:previous"
+                ),
+                entry!(
+                    "Ghostty",
+                    "Put a little Ghostty in your terminal.",
+                    "text:\\xf0\\x9f\\x91\\xbb"
+                ),
+                entry!(
+                    "Increase Font Size",
+                    "Increase the font size by 1 point.",
+                    "increase_font_size:1"
+                ),
+                entry!("Move Tab Left", "Move the current tab to the left.", "move_tab:-1"),
+                entry!("Move Tab Right", "Move the current tab to the right.", "move_tab:1"),
+                entry!("New Tab", "Open a new tab.", "new_tab"),
+                entry!("New Window", "Open a new window.", "new_window"),
+                entry!(
+                    "Next Search Result",
+                    "Navigate to the next search result, if any.",
+                    "navigate_search:next"
+                ),
+                entry!("Open Config", "Open the config file.", "open_config"),
+                entry!(
+                    "Paste from Clipboard",
+                    "Paste the contents of the main clipboard.",
+                    "paste_from_clipboard"
+                ),
+                entry!(
+                    "Paste from Selection",
+                    "Paste the contents of the selection clipboard.",
+                    "paste_from_selection"
+                ),
+                entry!(
+                    "Previous Search Result",
+                    "Navigate to the previous search result, if any.",
+                    "navigate_search:previous"
+                ),
+                entry!("Quit", "Quit the application.", "quit"),
+                entry!("Redo", "Redo the last undone action.", "redo"),
+                entry!("Reload Config", "Reload the config file.", "reload_config"),
+                entry!("Reset Font Size", "Reset the font size to the default.", "reset_font_size"),
+                entry!("Reset Terminal", "Reset the terminal to a clean state.", "reset"),
+                entry!("Reset Window Size", "Reset the window size to the default.", "reset_window_size"),
+                entry!("Scroll Page Down", "Scroll the screen down by a page.", "scroll_page_down"),
+                entry!("Scroll Page Up", "Scroll the screen up by a page.", "scroll_page_up"),
+                entry!("Scroll to Bottom", "Scroll to the bottom of the screen.", "scroll_to_bottom"),
+                entry!(
+                    "Scroll to Selection",
+                    "Scroll to the selected text.",
+                    "scroll_to_selection"
+                ),
+                entry!("Scroll to Top", "Scroll to the top of the screen.", "scroll_to_top"),
+                entry!(
+                    "Search Selection",
+                    "Start a search for the current text selection.",
+                    "search_selection"
+                ),
+                entry!("Select All", "Select all text on the screen.", "select_all"),
+                entry!(
+                    "Show On-Screen Keyboard",
+                    "Show the on-screen keyboard if present.",
+                    "show_on_screen_keyboard"
+                ),
+                entry!(
+                    "Show the GTK Inspector",
+                    "Show the GTK inspector.",
+                    "show_gtk_inspector"
+                ),
+                entry!("Split Down", "Split the terminal down.", "new_split:down"),
+                entry!("Split Left", "Split the terminal to the left.", "new_split:left"),
+                entry!("Split Right", "Split the terminal to the right.", "new_split:right"),
+                entry!("Split Up", "Split the terminal up.", "new_split:up"),
+                entry!(
+                    "Start Search",
+                    "Start a search if one isn't already active.",
+                    "start_search"
+                ),
+                entry!(
+                    "Toggle Background Opacity",
+                    "Toggle the background opacity of a window that started transparent.",
+                    "toggle_background_opacity"
+                ),
+                entry!(
+                    "Toggle Float on Top",
+                    "Toggle the float on top state of the current window.",
+                    "toggle_window_float_on_top"
+                ),
+                entry!(
+                    "Toggle Fullscreen",
+                    "Toggle the fullscreen state of the current window.",
+                    "toggle_fullscreen"
+                ),
+                entry!("Toggle Inspector", "Toggle the inspector.", "inspector:toggle"),
+                entry!(
+                    "Toggle Maximize",
+                    "Toggle the maximized state of the current window.",
+                    "toggle_maximize"
+                ),
+                entry!(
+                    "Toggle Mouse Reporting",
+                    "Toggle whether mouse events are reported to terminal applications.",
+                    "toggle_mouse_reporting"
+                ),
+                entry!(
+                    "Toggle Read-Only Mode",
+                    "Toggle read-only mode for the current surface.",
+                    "toggle_readonly"
+                ),
+                entry!("Toggle Secure Input", "Toggle secure input mode.", "toggle_secure_input"),
+                entry!(
+                    "Toggle Split Zoom",
+                    "Toggle the zoom state of the current split.",
+                    "toggle_split_zoom"
+                ),
+                entry!("Toggle Tab Overview", "Toggle the tab overview.", "toggle_tab_overview"),
+                entry!(
+                    "Toggle Window Decorations",
+                    "Toggle the window decorations.",
+                    "toggle_window_decorations"
+                ),
+                entry!("Undo", "Undo the last action.", "undo"),
+            ]
+        );
+        assert_eq!(
+            cfg.command_palette_entry.entries.first(),
+            Some(&CommandPaletteEntry::new(
+                "Change Tab Title…",
+                "Prompt for a new title for the current tab.",
+                "prompt_tab_title",
+            ))
+        );
+        assert_eq!(
+            cfg.command_palette_entry.entries.last(),
+            Some(&CommandPaletteEntry::new(
+                "Undo",
+                "Undo the last action.",
+                "undo",
+            ))
+        );
+        assert!(cfg
+            .command_palette_entry
+            .entries
+            .contains(&CommandPaletteEntry::new(
+                "Ghostty",
+                "Put a little Ghostty in your terminal.",
+                "text:\\xf0\\x9f\\x91\\xbb",
+            )));
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let lines: Vec<&str> = out
+            .lines()
+            .filter(|line| line.starts_with("command-palette-entry = "))
+            .collect();
+        assert_eq!(lines.len(), 88);
+        assert_eq!(
+            lines[0],
+            "command-palette-entry = title:\"Change Tab Title\\xe2\\x80\\xa6\",description:\"Prompt for a new title for the current tab.\",action:\"prompt_tab_title\""
+        );
+        assert!(lines.contains(&"command-palette-entry = title:\"Ghostty\",description:\"Put a little Ghostty in your terminal.\",action:\"text:\\\\xf0\\\\x9f\\\\x91\\\\xbb\""));
+
+        cfg.set("command-palette-entry", Some("clear")).unwrap();
+        assert!(cfg.command_palette_entry.entries.is_empty());
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|line| line == "command-palette-entry = "));
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Reset Font Style, action:csi:0m"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:\"Focus, Split\",description:\"Go, right\",action:goto_split:right"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:first,title:second,description:old,description:new,action:ignore,action:text:hello"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Shorthand,action:copy_to_clipboard"),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Reset Font Style", "", "csi:0m"),
+                CommandPaletteEntry::new("Focus, Split", "Go, right", "goto_split:right"),
+                CommandPaletteEntry::new("second", "new", "text:hello"),
+                CommandPaletteEntry::new("Shorthand", "", "copy_to_clipboard:mixed"),
+            ]
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let lines: Vec<&str> = out
+            .lines()
+            .filter(|line| line.starts_with("command-palette-entry = "))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                "command-palette-entry = title:\"Reset Font Style\",action:\"csi:0m\"",
+                "command-palette-entry = title:\"Focus, Split\",description:\"Go, right\",action:\"goto_split:right\"",
+                "command-palette-entry = title:\"second\",description:\"new\",action:\"text:hello\"",
+                "command-palette-entry = title:\"Shorthand\",action:\"copy_to_clipboard:mixed\"",
+            ]
+        );
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:\"A\\nB\",description:\"tab\\tq\",action:\"text:\\xf0\\x9f\\x91\\xbb\""),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries.last(),
+            Some(&CommandPaletteEntry::new(
+                "A\nB",
+                "tab\tq",
+                "text:\\xf0\\x9f\\x91\\xbb",
+            ))
+        );
+
+        cfg.set("command-palette-entry", Some("")).unwrap();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+        cfg.set("command-palette-entry", None).unwrap();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+
+        for bad in [
+            "title:Only Title",
+            "action:ignore",
+            "title:x,action:no_such_action",
+            "title:x,unknown:y,action:ignore",
+            "title:\"unterminated,action:ignore",
+            "title:\"bad\\q\",action:ignore",
+        ] {
+            assert_eq!(
+                cfg.set("command-palette-entry", Some(bad)),
+                Err(ConfigSetError::InvalidValue),
+                "{bad}"
+            );
+        }
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str(
+            "command-palette-entry = clear\n\
+             command-palette-entry = title:Valid,action:reset\n\
+             command-palette-entry = title:Invalid,action:nope\n\
+             command-palette-entry = title:Also Valid,action:goto_split:right\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 3,
+                key: "command-palette-entry".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(
+            cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Valid", "", "reset"),
+                CommandPaletteEntry::new("Also Valid", "", "goto_split:right"),
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
     }
 
     #[test]
