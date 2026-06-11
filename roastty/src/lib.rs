@@ -1897,6 +1897,7 @@ struct Surface {
     selection_clear_on_typing: bool,
     selection_word_chars: Vec<u32>,
     vt_kam_allowed: bool,
+    key_remaps: key_mods::RemapSet,
     mouse_scroll_multiplier: config::MouseScrollMultiplier,
     click_repeat_interval_ns: u64,
     preedit: Option<String>,
@@ -2243,6 +2244,7 @@ impl Surface {
         self.selection_clear_on_typing = parsed.selection_clear_on_typing;
         self.selection_word_chars = parsed.selection_word_chars.codepoints.clone();
         self.vt_kam_allowed = parsed.vt_kam_allowed;
+        self.key_remaps = parsed.key_remap.clone();
         self.mouse_reporting = parsed.mouse_reporting;
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
         self.click_repeat_interval_ns = click_repeat_interval_ns(&parsed);
@@ -4656,6 +4658,14 @@ impl Surface {
         app_from_handle(self.app).and_then(|app| app.key_event_binding(event))
     }
 
+    fn remapped_key_event(&self, event: &key::KeyEvent) -> key::KeyEvent {
+        let mut event = event.clone();
+        if self.key_remaps.is_remapped(event.mods) {
+            event.mods = self.key_remaps.apply(event.mods);
+        }
+        event
+    }
+
     fn dispatch_configured_binding(&mut self, binding: ConfiguredBindingMatch) -> Option<bool> {
         let parsed = parse_binding_action(self, &binding.action)?;
         let _performed = perform_parsed_binding_action(self, parsed);
@@ -4667,34 +4677,35 @@ impl Surface {
         if self.app.is_null() {
             return false;
         }
-        self.last_key_event = Some(event.event.clone());
-        if self.consume_default_binding_release(&event.event) {
+        let event = self.remapped_key_event(&event.event);
+        self.last_key_event = Some(event.clone());
+        if self.consume_default_binding_release(&event) {
             return true;
         }
-        if let Some(binding) = self.configured_binding(&event.event) {
+        if let Some(binding) = self.configured_binding(&event) {
             if let Some(consumed) = self.dispatch_configured_binding(binding) {
                 return consumed;
             }
-            if event.event.action != key::KeyAction::Release {
+            if event.action != key::KeyAction::Release {
                 self.last_consumed_default_binding = None;
             }
             if self.vt_kam_allowed && self.terminal_kam_enabled() {
                 return true;
             }
-            return self.write_encoded_key_event(&event.event);
+            return self.write_encoded_key_event(&event);
         }
-        if let Some(binding) = default_key_event_binding(&event.event) {
+        if let Some(binding) = default_key_event_binding(&event) {
             if let Some(consumed) = self.dispatch_default_binding(binding) {
                 return consumed;
             }
         }
-        if event.event.action != key::KeyAction::Release {
+        if event.action != key::KeyAction::Release {
             self.last_consumed_default_binding = None;
         }
         if self.vt_kam_allowed && self.terminal_kam_enabled() {
             return true;
         }
-        self.write_encoded_key_event(&event.event)
+        self.write_encoded_key_event(&event)
     }
 
     fn terminal_kam_enabled(&self) -> bool {
@@ -4737,15 +4748,15 @@ impl Surface {
             return false;
         }
         let event = event.unwrap();
-        let flags_value = if app_from_handle(self.app)
-            .is_some_and(|app| app.key_event_is_binding(&event.event))
-        {
-            ROASTTY_KEYBIND_FLAGS_DEFAULT
-        } else if let Some(flags) = default_key_event_binding_flags(&event.event) {
-            flags
-        } else {
-            return false;
-        };
+        let event = self.remapped_key_event(&event.event);
+        let flags_value =
+            if app_from_handle(self.app).is_some_and(|app| app.key_event_is_binding(&event)) {
+                ROASTTY_KEYBIND_FLAGS_DEFAULT
+            } else if let Some(flags) = default_key_event_binding_flags(&event) {
+                flags
+            } else {
+                return false;
+            };
         if !flags.is_null() {
             unsafe {
                 flags.write(flags_value);
@@ -14636,6 +14647,9 @@ pub extern "C" fn roastty_surface_new(
     let vt_kam_allowed = app_from_handle(app)
         .map(|app| app.parsed_config.vt_kam_allowed)
         .unwrap_or(false);
+    let key_remaps = app_from_handle(app)
+        .map(|app| app.parsed_config.key_remap.clone())
+        .unwrap_or_default();
     let mouse_reporting = app_from_handle(app)
         .map(|app| app.parsed_config.mouse_reporting)
         .unwrap_or(true);
@@ -14681,6 +14695,7 @@ pub extern "C" fn roastty_surface_new(
         selection_clear_on_typing,
         selection_word_chars,
         vt_kam_allowed,
+        key_remaps,
         mouse_scroll_multiplier,
         click_repeat_interval_ns,
         preedit: None,
@@ -16292,6 +16307,21 @@ mod tests {
         handle
     }
 
+    fn new_test_config_with_key_remap_and_keybind(
+        remap: Option<&str>,
+        keybind: Option<&[u8]>,
+    ) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        let config = config_from_handle(handle).unwrap();
+        if let Some(remap) = remap {
+            config.parsed.key_remap.parse_cli(Some(remap)).unwrap();
+        }
+        if let Some(keybind) = keybind {
+            config.store_keybind(parse_config_keybind(keybind).unwrap());
+        }
+        handle
+    }
+
     fn new_test_config_with_mouse_behavior(
         mouse_reporting: bool,
         precision: f64,
@@ -17595,6 +17625,173 @@ mod tests {
         let records = action_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_remap_triggers_configured_binding() {
+        let config =
+            new_test_config_with_key_remap_and_keybind(Some("ctrl=super"), Some(b"super+x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL)
+        ));
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        assert_eq!(
+            key_mods_to_raw(
+                surface_from_handle(surface)
+                    .unwrap()
+                    .last_key_event
+                    .as_ref()
+                    .unwrap()
+                    .mods
+                    .binding()
+            ),
+            ROASTTY_MODS_SUPER
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_is_binding_uses_remapped_configured_binding() {
+        let config =
+            new_test_config_with_key_remap_and_keybind(Some("ctrl=super"), Some(b"super+x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        let event = key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL);
+        let mut flags = 0;
+
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .key_is_binding(Some(&event), &mut flags));
+        assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_remap_affects_default_binding_detection() {
+        let config = new_test_config_with_key_remap_and_keybind(Some("ctrl=super"), None);
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        let event = key_press(key::Key::KeyQ, b"q", u32::from(b'q'), ROASTTY_MODS_CTRL);
+        let mut flags = 0;
+
+        assert!(surface_from_handle(surface)
+            .unwrap()
+            .key_is_binding(Some(&event), &mut flags));
+        assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+        assert!(send_key(surface, event));
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_remap_encoded_input_uses_remapped_mods() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_key_remap_and_keybind(Some("ctrl=alt"), None);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "stty raw -echo; printf ready; bytes=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf out:%s \"$bytes\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL)
+        ));
+
+        surface_snapshot_text_until(app, surface, "out:78");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_remap_app_update_refreshes_existing_surface() {
+        let config = new_test_config_with_key_remap_and_keybind(None, Some(b"super+x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert!(!send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL)
+        ));
+        assert!(action_records().is_empty());
+
+        let updated =
+            new_test_config_with_key_remap_and_keybind(Some("ctrl=super"), Some(b"super+x=quit"));
+        roastty_app_update_config(app, updated);
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL)
+        ));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(updated);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_remap_surface_update_refreshes_existing_surface() {
+        let config = new_test_config_with_key_remap_and_keybind(None, Some(b"super+x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        let surface_config =
+            new_test_config_with_key_remap_and_keybind(Some("ctrl=super"), Some(b"super+x=quit"));
+
+        roastty_surface_update_config(surface, surface_config);
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL)
+        ));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(surface_config);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_remap_does_not_mutate_original_key_event_handle() {
+        let config =
+            new_test_config_with_key_remap_and_keybind(Some("ctrl=super"), Some(b"super+x=quit"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        let event = key_press(key::Key::KeyX, b"x", u32::from(b'x'), ROASTTY_MODS_CTRL);
+
+        assert!(surface_from_handle(surface).unwrap().key(&event));
+        assert_eq!(
+            key_mods_to_raw(event.event.mods.binding()),
+            ROASTTY_MODS_CTRL
+        );
+
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);

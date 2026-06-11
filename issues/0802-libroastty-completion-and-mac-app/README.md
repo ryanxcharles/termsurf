@@ -332,6 +332,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   parsing/formatting/finalization using Exp 107's `RemapSet`; app ABI exposure,
   surface cloning, runtime key-event application before keybind/input encoding,
   native keymaps, and byte-faithful config string storage remain later work.
+- **Key-remap runtime application is wired for surfaces.** Exp 109 clones the
+  finalized `key-remap` set into each `Surface`, refreshes it on app/surface
+  config updates, and applies it before configured/default binding lookup and
+  terminal key encoding; native keymaps, app-scoped `roastty_app_key`, full
+  upstream keybinding tables, app ABI config-string exposure, and keyboard
+  layout-change handling remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -707,9 +713,11 @@ the live app, verified by a Phase-D UI test.)
 - [ ] The full action set + the default-bindings data table + reverse
       action→trigger mapping
 - [ ] Command-palette catalog (`command.zig`)
-- [ ] Native keymaps (`keycodes`, `KeymapDarwin`) + runtime key-remap
-      application — `RemapSet`/`Mask` and the `key-remap` config field are wired
-      (Exp 107–108), but surface/app key-event remapping remains later work
+- [ ] Native keymaps (`keycodes`, `KeymapDarwin`) + app-level key handling —
+      `RemapSet`/`Mask`, the `key-remap` config field, and surface runtime
+      key-remap application are wired (Exp 107–109), but native keymaps,
+      app-scoped `roastty_app_key`, and full upstream keybinding tables remain
+      later work
 
 **Phase H — Renderer feature-completion (in the live pass)**
 
@@ -1038,7 +1046,7 @@ stays unaltered except for the rename).
 - [Experiment 108: Phase G — key-remap config field](108-key-remap-config-field.md)
   — **Pass**
 - [Experiment 109: Phase G — key-remap runtime application](109-key-remap-runtime-application.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

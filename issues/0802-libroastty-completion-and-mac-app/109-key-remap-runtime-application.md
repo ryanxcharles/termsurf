@@ -75,3 +75,72 @@ Findings and fixes:
 - Nit: the initial design said `roastty_surface_new` should default to an empty
   remap set when no app exists, but the constructor already returns null for a
   null app. Removed the unreachable fallback phrase.
+
+## Result
+
+**Result:** Pass
+
+Implemented surface-local runtime key remapping in `roastty/src/lib.rs`:
+
+- added `Surface::key_remaps: RemapSet`;
+- initialized each surface from the app's finalized `Config::key_remap`;
+- refreshed surface remaps through both `roastty_surface_update_config` and
+  `roastty_app_update_config`;
+- applied remaps before configured binding lookup, default binding lookup,
+  release suppression, `last_key_event` storage, VT KAM fallback behavior, and
+  terminal input encoding;
+- applied the same remap helper in `Surface::key_is_binding`, keeping
+  by-value/handle binding detection consistent with `Surface::key`;
+- added focused tests for configured bindings, default bindings, terminal
+  encoding, app/surface config updates, and non-mutating event handling.
+
+The implementation deliberately leaves native keymaps, app-scoped
+`roastty_app_key`, full upstream `input.Binding.Set` tables, app C ABI config
+string exposure, and keyboard-layout change handling for later Phase G work.
+
+Verification:
+
+1. `cargo test -p roastty key_remap` — pass: 18 unit tests passed; filtered ABI
+   harness passed.
+2. `cargo test -p roastty surface_key` — pass: 41 unit tests passed; filtered
+   ABI harness passed.
+3. `cargo test -p roastty -- --test-threads=1` — failed twice on the
+   pre-existing
+   `tests::surface_foreground_pid_reports_worker_foreground_pid_after_start`
+   race after 4608 unit tests passed. The failures were PID mismatches (`52820`
+   vs `52801`, then `7690` vs `7687`), matching the known foreground
+   process-group race and not touching key-remap code.
+4. `cargo test -p roastty surface_foreground_pid_reports_worker_foreground_pid_after_start -- --test-threads=1 --nocapture`
+   — pass: the foreground-PID test passed isolated; filtered ABI harness passed.
+5. `cargo test -p roastty -- --test-threads=1 --skip surface_foreground_pid_reports_worker_foreground_pid_after_start`
+   — pass: 4608 unit tests passed; ABI harness passed with the known 10
+   enum-conversion warnings; doc tests passed.
+6. `cargo fmt --check` — pass.
+7. `git diff --check` — pass.
+8. `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/109-key-remap-runtime-application.md issues/0802-libroastty-completion-and-mac-app/README.md`
+   — pass.
+
+## Conclusion
+
+`key-remap` now affects the surface runtime path, matching upstream
+`Surface.zig`'s early remap behavior for `keyCallback` and `keyEventIsBinding`
+within Roastty's current app/config model. The next Phase G slices can build on
+this by adding native keymaps, app-scoped key handling, full keybinding tables,
+and keyboard-layout reload behavior.
+
+## Completion Review
+
+Codex-native adversarial review ran in fresh context with subagent
+`019eb6aa-c45e-7ce3-b82a-05de4d060a5e`.
+
+Verdict: **APPROVED**
+
+Findings and fixes:
+
+- Optional: the initial result verification list omitted the Prettier check even
+  though it was a pass criterion and had been run. Added the missing Prettier
+  verification line.
+
+The reviewer independently verified the key-remap and surface-key focused tests,
+the serial suite with the known foreground-PID race skipped,
+`cargo fmt --check`, `git diff --check`, and the Prettier check.
