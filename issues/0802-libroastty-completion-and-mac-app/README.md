@@ -1209,6 +1209,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 126: Phase G — crash binding action](126-crash-binding-action.md)
   — **Pass**
+- [Experiment 127: Phase G — surface all-key routing](127-surface-all-key-routing.md)
+  — **Designed**
 
 ## Process
 
