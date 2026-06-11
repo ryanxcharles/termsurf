@@ -1819,9 +1819,9 @@ impl Config {
     }
 
     fn key_event_is_binding(&self, event: &key::KeyEvent) -> bool {
-        self.keybind_triggers
-            .iter()
-            .any(|binding| config_trigger_matches_key_event(binding.trigger, event))
+        configured_key_event_exact_binding(&self.keybind_triggers, event).is_some()
+            || default_key_event_is_binding(event)
+            || configured_key_event_catch_all_binding(&self.keybind_triggers, event).is_some()
     }
 
     fn push_diagnostic(&mut self, message: impl Into<Vec<u8>>) {
@@ -1852,16 +1852,7 @@ struct App {
 
 impl App {
     fn key_event_binding(&self, event: &key::KeyEvent) -> Option<ConfiguredBindingMatch> {
-        let release_identity = Surface::default_binding_release_identity(event);
-        self.keybind_triggers
-            .iter()
-            .rev()
-            .find(|binding| config_trigger_matches_key_event(binding.trigger, event))
-            .map(|binding| ConfiguredBindingMatch {
-                action: binding.action.clone(),
-                flags: binding.flags,
-                release_identity,
-            })
+        configured_key_event_binding(&self.keybind_triggers, event)
     }
 
     fn perform_app_runtime_action_result(
@@ -4715,11 +4706,23 @@ impl Surface {
         None
     }
 
-    fn configured_binding(&self, event: &key::KeyEvent) -> Option<ConfiguredBindingMatch> {
+    fn configured_exact_binding(&self, event: &key::KeyEvent) -> Option<ConfiguredBindingMatch> {
         if self.app.is_null() {
             return None;
         }
-        app_from_handle(self.app).and_then(|app| app.key_event_binding(event))
+        app_from_handle(self.app)
+            .and_then(|app| configured_key_event_exact_binding(&app.keybind_triggers, event))
+    }
+
+    fn configured_catch_all_binding(
+        &self,
+        event: &key::KeyEvent,
+    ) -> Option<ConfiguredBindingMatch> {
+        if self.app.is_null() {
+            return None;
+        }
+        app_from_handle(self.app)
+            .and_then(|app| configured_key_event_catch_all_binding(&app.keybind_triggers, event))
     }
 
     fn remapped_key_event(&self, event: &key::KeyEvent) -> key::KeyEvent {
@@ -4755,7 +4758,7 @@ impl Surface {
         if self.consume_default_binding_release(&event) {
             return true;
         }
-        if let Some(binding) = self.configured_binding(&event) {
+        if let Some(binding) = self.configured_exact_binding(&event) {
             if let Some(consumed) = self.dispatch_configured_binding(binding) {
                 return consumed;
             }
@@ -4771,6 +4774,25 @@ impl Surface {
             if let Some(consumed) = self.dispatch_default_binding(binding) {
                 return consumed;
             }
+            if event.action != key::KeyAction::Release {
+                self.last_consumed_default_binding = None;
+            }
+            if self.vt_kam_allowed && self.terminal_kam_enabled() {
+                return true;
+            }
+            return self.write_encoded_key_event(&event);
+        }
+        if let Some(binding) = self.configured_catch_all_binding(&event) {
+            if let Some(consumed) = self.dispatch_configured_binding(binding) {
+                return consumed;
+            }
+            if event.action != key::KeyAction::Release {
+                self.last_consumed_default_binding = None;
+            }
+            if self.vt_kam_allowed && self.terminal_kam_enabled() {
+                return true;
+            }
+            return self.write_encoded_key_event(&event);
         }
         if event.action != key::KeyAction::Release {
             self.last_consumed_default_binding = None;
@@ -4822,12 +4844,16 @@ impl Surface {
         }
         let event = event.unwrap();
         let event = self.remapped_key_event(&event.event);
-        let flags_value = if let Some(binding) =
-            app_from_handle(self.app).and_then(|app| app.key_event_binding(&event))
+        let flags_value = if let Some(binding) = app_from_handle(self.app)
+            .and_then(|app| configured_key_event_exact_binding(&app.keybind_triggers, &event))
         {
             binding.flags
         } else if let Some(flags) = default_key_event_binding_flags(&event) {
             flags
+        } else if let Some(binding) = app_from_handle(self.app)
+            .and_then(|app| configured_key_event_catch_all_binding(&app.keybind_triggers, &event))
+        {
+            binding.flags
         } else {
             return false;
         };
@@ -6949,6 +6975,14 @@ fn unicode_trigger(codepoint: u32, mods: c_int) -> RoasttyInputTrigger {
     }
 }
 
+fn catch_all_trigger(mods: c_int) -> RoasttyInputTrigger {
+    RoasttyInputTrigger {
+        tag: ROASTTY_TRIGGER_CATCH_ALL,
+        key: RoasttyInputTriggerKey { unicode: 0 },
+        mods,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ConfigKeybindParseError {
     MissingSeparator,
@@ -7056,12 +7090,14 @@ fn parse_config_keybind_trigger(trigger: &[u8]) -> Option<RoasttyInputTrigger> {
     Some(match key {
         ConfigKeybindKey::Physical(key) => physical_trigger(key, mods),
         ConfigKeybindKey::Unicode(codepoint) => unicode_trigger(codepoint, mods),
+        ConfigKeybindKey::CatchAll => catch_all_trigger(mods),
     })
 }
 
 enum ConfigKeybindKey {
     Physical(key::Key),
     Unicode(u32),
+    CatchAll,
 }
 
 fn config_keybind_modifier(part: &[u8]) -> Option<c_int> {
@@ -7075,6 +7111,10 @@ fn config_keybind_modifier(part: &[u8]) -> Option<c_int> {
 }
 
 fn config_keybind_key(part: &[u8]) -> Option<ConfigKeybindKey> {
+    if part == b"catch_all" {
+        return Some(ConfigKeybindKey::CatchAll);
+    }
+
     if let Ok(name) = std::str::from_utf8(part) {
         if let Some(key) = key::Key::from_w3c(name) {
             if config_keybind_physical_key_supported(key) {
@@ -7785,32 +7825,118 @@ fn default_key_event_binding(event: &key::KeyEvent) -> Option<DefaultBindingMatc
         })
 }
 
-fn config_trigger_matches_key_event(trigger: RoasttyInputTrigger, event: &key::KeyEvent) -> bool {
-    if event.action == key::KeyAction::Release {
-        return false;
-    }
-
-    if trigger.mods != key_mods_to_raw(event.mods.binding()) {
+fn config_trigger_matches_candidate(
+    trigger: RoasttyInputTrigger,
+    candidate: RoasttyInputTrigger,
+) -> bool {
+    if trigger.tag != candidate.tag || trigger.mods != candidate.mods {
         return false;
     }
 
     match trigger.tag {
-        ROASTTY_TRIGGER_PHYSICAL => (unsafe { trigger.key.physical }) == event.key as c_int,
-        ROASTTY_TRIGGER_UNICODE => {
-            let codepoint = unsafe { trigger.key.unicode };
-            if let Ok(text) = std::str::from_utf8(&event.utf8) {
-                let mut chars = text.chars();
-                if let Some(ch) = chars.next() {
-                    if chars.next().is_none() && ch as u32 == codepoint {
-                        return true;
-                    }
-                }
-            }
-
-            event.unshifted_codepoint > 0 && event.unshifted_codepoint == codepoint
+        ROASTTY_TRIGGER_PHYSICAL => {
+            (unsafe { trigger.key.physical }) == (unsafe { candidate.key.physical })
         }
+        ROASTTY_TRIGGER_UNICODE => {
+            (unsafe { trigger.key.unicode }) == (unsafe { candidate.key.unicode })
+        }
+        ROASTTY_TRIGGER_CATCH_ALL => true,
         _ => false,
     }
+}
+
+fn configured_key_event_candidate_binding(
+    bindings: &[ConfigKeybind],
+    event: &key::KeyEvent,
+    candidate: RoasttyInputTrigger,
+) -> Option<ConfiguredBindingMatch> {
+    let release_identity = Surface::default_binding_release_identity(event);
+    bindings
+        .iter()
+        .rev()
+        .find(|binding| config_trigger_matches_candidate(binding.trigger, candidate))
+        .map(|binding| ConfiguredBindingMatch {
+            action: binding.action.clone(),
+            flags: binding.flags,
+            release_identity,
+        })
+}
+
+fn configured_key_event_exact_binding(
+    bindings: &[ConfigKeybind],
+    event: &key::KeyEvent,
+) -> Option<ConfiguredBindingMatch> {
+    if event.action == key::KeyAction::Release {
+        return None;
+    }
+
+    let mods = key_mods_to_raw(event.mods.binding());
+    if let Some(binding) =
+        configured_key_event_candidate_binding(bindings, event, physical_trigger(event.key, mods))
+    {
+        return Some(binding);
+    }
+
+    if let Ok(text) = std::str::from_utf8(&event.utf8) {
+        let mut chars = text.chars();
+        if let Some(ch) = chars.next() {
+            if chars.next().is_none() {
+                if let Some(binding) = configured_key_event_candidate_binding(
+                    bindings,
+                    event,
+                    unicode_trigger(ch as u32, mods),
+                ) {
+                    return Some(binding);
+                }
+            }
+        }
+    }
+
+    if event.unshifted_codepoint > 0 {
+        if let Some(binding) = configured_key_event_candidate_binding(
+            bindings,
+            event,
+            unicode_trigger(event.unshifted_codepoint, mods),
+        ) {
+            return Some(binding);
+        }
+    }
+
+    None
+}
+
+fn configured_key_event_catch_all_binding(
+    bindings: &[ConfigKeybind],
+    event: &key::KeyEvent,
+) -> Option<ConfiguredBindingMatch> {
+    if event.action == key::KeyAction::Release {
+        return None;
+    }
+
+    let mods = key_mods_to_raw(event.mods.binding());
+    if let Some(binding) =
+        configured_key_event_candidate_binding(bindings, event, catch_all_trigger(mods))
+    {
+        return Some(binding);
+    }
+
+    if mods != ROASTTY_MODS_NONE {
+        return configured_key_event_candidate_binding(
+            bindings,
+            event,
+            catch_all_trigger(ROASTTY_MODS_NONE),
+        );
+    }
+
+    None
+}
+
+fn configured_key_event_binding(
+    bindings: &[ConfigKeybind],
+    event: &key::KeyEvent,
+) -> Option<ConfiguredBindingMatch> {
+    configured_key_event_exact_binding(bindings, event)
+        .or_else(|| configured_key_event_catch_all_binding(bindings, event))
 }
 
 fn default_key_event_binding_flags(event: &key::KeyEvent) -> Option<u8> {
@@ -17939,6 +18065,80 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_keybind_catch_all_triggers() {
+        let binding = parse_config_keybind(b"catch_all=quit").unwrap();
+        assert_eq!(binding.trigger.tag, ROASTTY_TRIGGER_CATCH_ALL);
+        assert_eq!(binding.trigger.mods, ROASTTY_MODS_NONE);
+
+        let binding = parse_config_keybind(b"ctrl+catch_all=quit").unwrap();
+        assert_eq!(binding.trigger.tag, ROASTTY_TRIGGER_CATCH_ALL);
+        assert_eq!(binding.trigger.mods, ROASTTY_MODS_CTRL);
+
+        let binding = parse_config_keybind(b"command+catch_all=quit").unwrap();
+        assert_eq!(binding.trigger.tag, ROASTTY_TRIGGER_CATCH_ALL);
+        assert_eq!(binding.trigger.mods, ROASTTY_MODS_SUPER);
+    }
+
+    #[test]
+    fn parse_config_keybind_catch_all_rejects_multiple_keys() {
+        for value in [
+            b"catch_all+catch_all=quit".as_slice(),
+            b"catch_all+a=quit".as_slice(),
+            b"a+catch_all=quit".as_slice(),
+        ] {
+            assert_eq!(
+                parse_config_keybind(value).err().unwrap(),
+                ConfigKeybindParseError::InvalidTrigger
+            );
+        }
+    }
+
+    #[test]
+    fn configured_catch_all_binding_order_matches_upstream() {
+        let bindings = vec![
+            parse_config_keybind(b"catch_all=quit").unwrap(),
+            parse_config_keybind(b"ctrl+catch_all=toggle_fullscreen").unwrap(),
+            parse_config_keybind(b"ctrl+a=new_window").unwrap(),
+        ];
+
+        let ctrl_a = key_press(key::Key::KeyA, b"a", b'a' as u32, ROASTTY_MODS_CTRL);
+        assert_eq!(
+            configured_key_event_binding(&bindings, &ctrl_a.event)
+                .unwrap()
+                .action,
+            b"new_window"
+        );
+
+        let ctrl_b = key_press(key::Key::KeyB, b"b", b'b' as u32, ROASTTY_MODS_CTRL);
+        assert_eq!(
+            configured_key_event_binding(&bindings, &ctrl_b.event)
+                .unwrap()
+                .action,
+            b"toggle_fullscreen"
+        );
+
+        let alt_b = key_press(key::Key::KeyB, b"b", b'b' as u32, ROASTTY_MODS_ALT);
+        assert_eq!(
+            configured_key_event_binding(&bindings, &alt_b.event)
+                .unwrap()
+                .action,
+            b"quit"
+        );
+
+        let plain_b = key_press(key::Key::KeyB, b"b", b'b' as u32, ROASTTY_MODS_NONE);
+        assert_eq!(
+            configured_key_event_binding(&bindings, &plain_b.event)
+                .unwrap()
+                .action,
+            b"quit"
+        );
+
+        let mut release = plain_b.event.clone();
+        release.action = key::KeyAction::Release;
+        assert!(configured_key_event_binding(&bindings, &release).is_none());
+    }
+
+    #[test]
     fn app_has_global_keybinds_tracks_config_prefix_flags() {
         let non_global = roastty_config_new();
         config_from_handle(non_global)
@@ -18239,6 +18439,46 @@ mod tests {
             .unwrap()
             .key_is_binding(Some(&event), &mut flags));
         assert_eq!(flags, ROASTTY_KEYBIND_FLAGS_DEFAULT);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_default_exact_precedes_configured_catch_all() {
+        let config =
+            new_test_config_with_key_remap_and_keybind(None, Some(b"catch_all=toggle_fullscreen"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyQ, b"q", b'q' as u32, ROASTTY_MODS_SUPER)
+        ));
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_key_unperformed_default_exact_precedes_configured_catch_all() {
+        let config =
+            new_test_config_with_key_remap_and_keybind(None, Some(b"catch_all=toggle_fullscreen"));
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        let _ = send_key(
+            surface,
+            key_press(key::Key::KeyC, b"c", b'c' as u32, ROASTTY_MODS_SUPER),
+        );
+
+        assert!(action_records().is_empty());
 
         roastty_surface_free(surface);
         roastty_app_free(app);

@@ -374,6 +374,16 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   surface-scoped bindings return false for the app-key path. Native keymaps,
   keyboard-layout reload, sequences/chords, key tables, default global bindings,
   and full action catalog coverage remain later work.
+- **Configured `catch_all` triggers are wired for single-key bindings.** Exp 115
+  parses `catch_all` and modifier-specific forms, returns
+  `ROASTTY_TRIGGER_CATCH_ALL` through reverse trigger lookup, and applies
+  upstream fallback order for config/app/surface binding queries. Because
+  Roastty stores built-in defaults separately from configured bindings, surface
+  dispatch explicitly checks configured exact bindings, built-in exact defaults,
+  then configured `catch_all`; this keeps `catch_all` from shadowing exact
+  default bindings, including unperformed `performable:` defaults. Sequences,
+  key tables, native keymaps, native global shortcuts, broader global/all
+  routing, and the full upstream binding catalog remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -751,6 +761,8 @@ the live app, verified by a Phase-D UI test.)
       dispatch plus focused app-scoped app-key dispatch are wired (Exp 113–114),
       but native global shortcut registration and broader global/all routing
       remain later work
+- [x] `catch_all` trigger parsing and fallback lookup for configured single-key
+      bindings (Exp 115)
 - [ ] The full action set + the default-bindings data table + reverse
       action→trigger mapping — the macOS single-key table foundation and reverse
       lookup are wired for currently supported actions (Exp 112), but the full
@@ -1102,7 +1114,7 @@ stays unaltered except for the rename).
 - [Experiment 114: Phase G — focused app key app actions](114-focused-app-key-app-actions.md)
   — **Pass**
 - [Experiment 115: Phase G — catch-all keybind triggers](115-catch-all-keybind-triggers.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

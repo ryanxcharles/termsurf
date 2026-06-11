@@ -102,3 +102,62 @@ catch-all fallback.
 
 Final verdict after re-review: **Approved.** The reviewer confirmed the prior
 finding was resolved and reported no new required findings.
+
+## Result
+
+**Result:** Pass.
+
+Implemented configured `catch_all` trigger support for Roastty's single-trigger
+keybinding path. `catch_all` now parses through the existing keybind parser,
+round-trips through the C-facing trigger tag, and participates in config,
+app-key, and surface-key lookup.
+
+The lookup order now follows upstream's trigger order for configured bindings:
+physical key, UTF-8 single codepoint, unshifted codepoint, modifier-specific
+`catch_all`, then bare `catch_all`. Because Roastty still stores built-in
+defaults outside the configured binding vector, surface/config queries merge the
+priority explicitly: configured exact bindings, built-in exact defaults, then
+configured `catch_all`. That preserves upstream's "`catch_all` matches
+otherwise-unbound keys" behavior, including the case where an exact default
+binding is present but its `performable:` action does not perform.
+
+Verification:
+
+- `cargo test -p roastty catch_all` — passed: 5 unit tests, ABI harness filtered
+  out.
+- `cargo test -p roastty parse_config_keybind` — passed: 4 unit tests, ABI
+  harness filtered out.
+- `cargo test -p roastty app_key` — passed: 10 unit tests, ABI harness filtered
+  out.
+- `cargo test -p roastty surface_key` — passed: 52 unit tests, ABI harness
+  filtered out.
+- `cargo test -p roastty --test abi_harness` — passed with the existing 10
+  enum-conversion warnings from the C harness.
+- `cargo test -p roastty -- --test-threads=1` — passed: 4,640 unit tests, the
+  ABI harness, and doc tests.
+- `cargo fmt` — passed.
+- `cargo fmt --check` — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Configured single-trigger bindings now support upstream-compatible `catch_all`
+fallbacks without letting those fallbacks shadow exact configured or built-in
+default bindings. Remaining Phase G work still includes multi-key
+sequences/chords, leader keys, key tables, native keymaps, keyboard-layout
+reload, native global shortcut registration, broader global/all routing, and the
+full upstream action/default binding catalog.
+
+## Completion Review
+
+Codex-native adversarial review ran in a fresh-context subagent
+(`multi_agent_v1.spawn_agent`, agent `019eb72c-1402-7d50-9769-2a0b2fe6c14e`).
+
+Verdict: **Approved.** The reviewer reported no required findings.
+
+Optional finding: the reviewer saw the known
+`surface_foreground_pid_reports_worker_foreground_pid_after_start` race during
+its independent full serial verification; isolated rerun passed. No code change
+was made for that unrelated race because the experiment verification plan
+already documents the retry exception, and the final local full serial gate
+passed.

@@ -4582,6 +4582,59 @@ int main(int argc, char **argv) {
   roastty_app_free(cli_app);
   roastty_key_event_free(cli_binding_event);
 
+  char catch_all_keybind1[] = "--keybind=catch_all=toggle_fullscreen";
+  char catch_all_keybind2[] = "--keybind=ctrl+catch_all=quit";
+  char *catch_all_argv[] = {cli_arg0, catch_all_keybind1, catch_all_keybind2};
+  assert(roastty_init(3, catch_all_argv) == ROASTTY_SUCCESS);
+  roastty_config_t catch_all_config = roastty_config_new();
+  assert(catch_all_config != NULL);
+  roastty_config_load_cli_args(catch_all_config);
+  trigger = roastty_config_trigger(catch_all_config, "toggle_fullscreen",
+                                   strlen("toggle_fullscreen"));
+  assert(trigger.tag == ROASTTY_TRIGGER_CATCH_ALL);
+  assert(trigger.mods == ROASTTY_MODS_NONE);
+  trigger = roastty_config_trigger(catch_all_config, "quit", strlen("quit"));
+  assert(trigger.tag == ROASTTY_TRIGGER_CATCH_ALL);
+  assert(trigger.mods == ROASTTY_MODS_CTRL);
+
+  assert(roastty_key_event_new(&cli_binding_event) == ROASTTY_SUCCESS);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_NONE, NULL, 0);
+  assert(roastty_config_key_is_binding_handle(catch_all_config,
+                                              cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_CTRL, NULL, 0);
+  assert(roastty_config_key_is_binding_handle(catch_all_config,
+                                              cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_ALT, NULL, 0);
+  assert(roastty_config_key_is_binding_handle(catch_all_config,
+                                              cli_binding_event));
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_RELEASE,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_CTRL, NULL, 0);
+  assert(!roastty_config_key_is_binding_handle(catch_all_config,
+                                               cli_binding_event));
+
+  cli_app = roastty_app_new(NULL, catch_all_config);
+  cli_surface = roastty_surface_new(cli_app, &cli_surface_config);
+  assert(cli_surface != NULL);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_ALT, NULL, 0);
+  cli_binding_flags = 0xff;
+  assert(roastty_surface_key_is_binding_handle(cli_surface, cli_binding_event,
+                                               &cli_binding_flags));
+  assert(cli_binding_flags == 0x01);
+  set_config_binding_event(cli_binding_event, ROASTTY_KEY_ACTION_PRESS,
+                           ROASTTY_KEY_F1, ROASTTY_MODS_CTRL, NULL, 0);
+  cli_binding_flags = 0xff;
+  assert(roastty_surface_key_is_binding_handle(cli_surface, cli_binding_event,
+                                               &cli_binding_flags));
+  assert(cli_binding_flags == 0x01);
+  roastty_surface_free(cli_surface);
+  roastty_app_free(cli_app);
+  roastty_key_event_free(cli_binding_event);
+  roastty_config_free(catch_all_config);
+
   char malformed_flag[] = "--keybind";
   char next_option[] = "--window-theme=dark";
   char empty_keybind[] = "--keybind=";
