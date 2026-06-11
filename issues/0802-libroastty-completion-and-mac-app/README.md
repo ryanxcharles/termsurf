@@ -873,6 +873,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 86: Phase F — VT KAM config and key gate](86-vt-kam-config-key-gate.md)
   — **Pass**
+- [Experiment 87: Phase F — custom shader config](87-custom-shader-config.md) —
+  **Designed**
 
 ## Process
 
