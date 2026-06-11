@@ -192,12 +192,18 @@ pub(crate) struct Config {
     pub window_title_font_family: Option<String>,
     /// `window-theme`.
     pub window_theme: WindowTheme,
+    /// `window-height`.
+    pub window_height: u32,
+    /// `window-width`.
+    pub window_width: u32,
     /// `window-position-x`.
     pub window_position_x: Option<i16>,
     /// `window-position-y`.
     pub window_position_y: Option<i16>,
     /// `window-save-state`.
     pub window_save_state: WindowSaveState,
+    /// `window-step-resize`.
+    pub window_step_resize: bool,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `title`.
@@ -363,9 +369,12 @@ impl Default for Config {
             window_decoration: WindowDecoration::Auto,
             window_title_font_family: None,
             window_theme: WindowTheme::Auto,
+            window_height: 0,
+            window_width: 0,
             window_position_x: None,
             window_position_y: None,
             window_save_state: WindowSaveState::Default,
+            window_step_resize: false,
             fullscreen: Fullscreen::False,
             title: None,
             class: None,
@@ -578,14 +587,17 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("window-subtitle", out));
         self.window_theme
             .format_entry(&mut EntryFormatter::new("window-theme", out));
+        self.window_colorspace
+            .format_entry(&mut EntryFormatter::new("window-colorspace", out));
+        EntryFormatter::new("window-height", out).entry_int(self.window_height);
+        EntryFormatter::new("window-width", out).entry_int(self.window_width);
         EntryFormatter::new("window-position-x", out)
             .entry_optional(self.window_position_x, |v, f| f.entry_int(v));
         EntryFormatter::new("window-position-y", out)
             .entry_optional(self.window_position_y, |v, f| f.entry_int(v));
         self.window_save_state
             .format_entry(&mut EntryFormatter::new("window-save-state", out));
-        self.window_colorspace
-            .format_entry(&mut EntryFormatter::new("window-colorspace", out));
+        EntryFormatter::new("window-step-resize", out).entry_bool(self.window_step_resize);
         self.clipboard_read
             .format_entry(&mut EntryFormatter::new("clipboard-read", out));
         self.clipboard_write
@@ -860,6 +872,14 @@ impl Config {
                 self.window_theme =
                     set_enum_field(value, default.window_theme, WindowTheme::from_keyword)?
             }
+            "window-height" => {
+                self.window_height =
+                    set_value_field(value, default.window_height, parse_u32_scalar_field)?
+            }
+            "window-width" => {
+                self.window_width =
+                    set_value_field(value, default.window_width, parse_u32_scalar_field)?
+            }
             "window-position-x" => {
                 self.window_position_x =
                     set_optional_value_field(value, default.window_position_x, parse_i16_field)?
@@ -874,6 +894,9 @@ impl Config {
                     default.window_save_state,
                     WindowSaveState::from_keyword,
                 )?
+            }
+            "window-step-resize" => {
+                self.window_step_resize = set_bool_field(value, default.window_step_resize)?
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -1168,6 +1191,12 @@ impl Config {
         self.mouse_scroll_multiplier.discrete =
             self.mouse_scroll_multiplier.discrete.clamp(0.01, 10_000.0);
         self.unfocused_split_opacity = self.unfocused_split_opacity.clamp(0.15, 1.0);
+        if self.window_width > 0 {
+            self.window_width = self.window_width.max(10);
+        }
+        if self.window_height > 0 {
+            self.window_height = self.window_height.max(4);
+        }
     }
 
     /// Load config from a source string (upstream's config-file `parse` driving
@@ -5635,9 +5664,12 @@ mod tests {
         assert_eq!(d.window_decoration, WindowDecoration::Auto);
         assert_eq!(d.window_title_font_family, None);
         assert_eq!(d.window_theme, WindowTheme::Auto);
+        assert_eq!(d.window_height, 0);
+        assert_eq!(d.window_width, 0);
         assert_eq!(d.window_position_x, None);
         assert_eq!(d.window_position_y, None);
         assert_eq!(d.window_save_state, WindowSaveState::Default);
+        assert!(!d.window_step_resize);
         // macOS-window group (Experiment 469).
         assert_eq!(d.fullscreen, Fullscreen::False);
         assert_eq!(d.title, None);
@@ -9505,10 +9537,13 @@ mod tests {
                 "window-title-font-family",
                 "window-subtitle",
                 "window-theme",
+                "window-colorspace",
+                "window-height",
+                "window-width",
                 "window-position-x",
                 "window-position-y",
                 "window-save-state",
-                "window-colorspace",
+                "window-step-resize",
                 "clipboard-read",
                 "clipboard-write",
                 "clipboard-trim-trailing-spaces",
@@ -11769,6 +11804,131 @@ mod tests {
             Some("System Font")
         );
         assert!(!cloned.tab_inherit_working_directory);
+    }
+
+    #[test]
+    fn window_size_step_config_parse_format_reset_finalize_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_height, 0);
+        assert_eq!(cfg.window_width, 0);
+        assert!(!cfg.window_step_resize);
+        assert_eq!(line(&cfg, "window-height"), "window-height = 0");
+        assert_eq!(line(&cfg, "window-width"), "window-width = 0");
+        assert_eq!(
+            line(&cfg, "window-step-resize"),
+            "window-step-resize = false"
+        );
+
+        cfg.set("window-height", Some("24")).unwrap();
+        cfg.set("window-width", Some("0x50")).unwrap();
+        assert_eq!(cfg.window_height, 24);
+        assert_eq!(cfg.window_width, 80);
+        assert_eq!(line(&cfg, "window-height"), "window-height = 24");
+        assert_eq!(line(&cfg, "window-width"), "window-width = 80");
+
+        cfg.set("window-height", Some("0o10")).unwrap();
+        cfg.set("window-width", Some("0b1010")).unwrap();
+        assert_eq!(cfg.window_height, 8);
+        assert_eq!(cfg.window_width, 10);
+
+        cfg.set("window-height", Some("")).unwrap();
+        cfg.set("window-width", Some("")).unwrap();
+        assert_eq!(cfg.window_height, 0);
+        assert_eq!(cfg.window_width, 0);
+
+        for key in ["window-height", "window-width"] {
+            assert_eq!(cfg.set(key, None), Err(ConfigSetError::ValueRequired));
+            for value in ["nope", "-1", "4294967296", "0x", "_1", "1_"] {
+                assert_eq!(
+                    cfg.set(key, Some(value)),
+                    Err(ConfigSetError::InvalidValue),
+                    "{key} accepted {value:?}"
+                );
+            }
+        }
+
+        cfg.set("window-step-resize", Some("true")).unwrap();
+        assert!(cfg.window_step_resize);
+        assert_eq!(
+            line(&cfg, "window-step-resize"),
+            "window-step-resize = true"
+        );
+        cfg.set("window-step-resize", Some("false")).unwrap();
+        assert!(!cfg.window_step_resize);
+        cfg.set("window-step-resize", None).unwrap();
+        assert!(cfg.window_step_resize);
+        cfg.set("window-step-resize", Some("")).unwrap();
+        assert!(!cfg.window_step_resize);
+        assert_eq!(
+            cfg.set("window-step-resize", Some("maybe")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let mut finalized = Config::default();
+        finalized.window_width = 0;
+        finalized.window_height = 0;
+        finalized.finalize();
+        assert_eq!(finalized.window_width, 0);
+        assert_eq!(finalized.window_height, 0);
+
+        finalized.window_width = 1;
+        finalized.window_height = 1;
+        finalized.finalize();
+        assert_eq!(finalized.window_width, 10);
+        assert_eq!(finalized.window_height, 4);
+
+        finalized.window_width = 80;
+        finalized.window_height = 24;
+        finalized.finalize();
+        assert_eq!(finalized.window_width, 80);
+        assert_eq!(finalized.window_height, 24);
+
+        let diagnostics = cfg.load_str(
+            "window-height = 3\n\
+             window-height = nope\n\
+             window-width = 12\n\
+             window-width = -1\n\
+             window-step-resize = true\n\
+             window-step-resize = maybe\n",
+        );
+        assert_eq!(cfg.window_height, 3);
+        assert_eq!(cfg.window_width, 12);
+        assert!(cfg.window_step_resize);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "window-height".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "window-width".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 6,
+                    key: "window-step-resize".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.window_height, 3);
+        assert_eq!(cloned.window_width, 12);
+        assert!(cloned.window_step_resize);
     }
 
     #[test]

@@ -174,6 +174,9 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   wires `window-vsync`, window/tab/split working-directory inheritance,
   `window-inherit-font-size`, and `window-title-font-family`; runtime behavior
   remains later work.
+- **Window size config is parser/formatter/finalize-only.** Exp 73 wires
+  `window-height`, `window-width`, and `window-step-resize`; nonzero sizes clamp
+  in `Config::finalize`, but runtime window sizing remains later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -807,7 +810,7 @@ stays unaltered except for the rename).
 - [Experiment 72: Phase F — window scalar config](72-window-scalar-config.md) —
   **Pass**
 - [Experiment 73: Phase F — window size and step resize config](73-window-size-step-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

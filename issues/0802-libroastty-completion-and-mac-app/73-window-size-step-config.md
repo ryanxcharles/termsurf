@@ -105,3 +105,59 @@ parser/formatter/finalize surface, upstream defaults/order/clamp match
 `Config.zig`, runtime sizing deferral is justified, and verification includes
 targeted tests, full `cargo test -p roastty`, formatting, markdown prettier,
 `cargo fmt --check`, `git diff --check`, and the intended status check.
+
+## Result
+
+**Result:** Pass
+
+Implemented `window-height`, `window-width`, and `window-step-resize` on
+`Config`. The size fields default to `0`, parse through the existing upstream
+base-0 unsigned integer helper, reset on empty values, and report
+`ValueRequired` / `InvalidValue` through `ConfigSetError`. `window-step-resize`
+defaults to `false`, parses explicit booleans and bare CLI `None` as `true`, and
+resets on empty values.
+
+`Config::finalize` now matches upstream's config-level minimum window size
+clamp: nonzero `window-width` is clamped to at least `10`, and nonzero
+`window-height` is clamped to at least `4`. Zero keeps its unset meaning.
+Formatter order now matches the upstream sequence from `window-colorspace`
+through `window-step-resize`.
+
+Added focused coverage for defaults, formatting, base-prefixed unsigned integer
+parsing, empty resets, missing and invalid size values, step-resize
+bool/bare/reset/invalid behavior, finalize clamps, `load_str` diagnostics that
+preserve valid neighboring values, formatter order, and clone/equality
+preservation.
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test -p roastty window_size_step_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty` — 4,508 unit tests passed; C ABI harness passed with
+  the existing enum-conversion warnings; doc tests passed.
+- `cargo fmt --check`
+- `git diff --check`
+- `git status --short`
+
+At result-recording time, the intended tracked changes were
+`roastty/src/config/mod.rs`,
+`issues/0802-libroastty-completion-and-mac-app/README.md`, and this experiment
+file.
+
+## Conclusion
+
+Window size and step-resize settings are now faithful config-level surfaces,
+including upstream finalize clamps. Applying initial window size and step-resize
+behavior in the app runtime remains separate work.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb422-365a-7a70-8b61-b56f73b35a6d` returned
+**Approved** with no findings.
+
+The reviewer independently verified `cargo fmt --check`, `git diff --check`,
+`prettier --check`, `cargo test -p roastty window_size_step_config`,
+`cargo test -p roastty config_format_config`, and full `cargo test -p roastty`.
+The reviewer also confirmed that `HEAD` was still the Exp73 plan commit and that
+only the three expected files were modified.
