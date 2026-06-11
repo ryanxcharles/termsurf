@@ -48,6 +48,8 @@ pub(crate) struct Config {
     pub undo_timeout: Duration,
     /// `quick-terminal-position`.
     pub quick_terminal_position: QuickTerminalPosition,
+    /// `quick-terminal-size`.
+    pub quick_terminal_size: QuickTerminalSize,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
     /// `selection-clear-on-typing`.
@@ -309,6 +311,7 @@ impl Default for Config {
                 duration: 5 * NS_PER_S,
             },
             quick_terminal_position: QuickTerminalPosition::Top,
+            quick_terminal_size: QuickTerminalSize::default(),
             copy_on_select: CopyOnSelect::True,
             selection_clear_on_typing: true,
             selection_clear_on_copy: false,
@@ -482,6 +485,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("undo-timeout", out));
         self.quick_terminal_position
             .format_entry(&mut EntryFormatter::new("quick-terminal-position", out));
+        self.quick_terminal_size
+            .format_entry(&mut EntryFormatter::new("quick-terminal-size", out));
         self.font_family
             .format_entry(&mut EntryFormatter::new("font-family", out));
         self.font_family_bold
@@ -756,6 +761,13 @@ impl Config {
                     value,
                     default.quick_terminal_position,
                     QuickTerminalPosition::from_keyword,
+                )?
+            }
+            "quick-terminal-size" => {
+                self.quick_terminal_size = set_value_field(
+                    value,
+                    default.quick_terminal_size,
+                    QuickTerminalSize::parse_cli,
                 )?
             }
             "copy-on-select" => {
@@ -3235,6 +3247,184 @@ impl QuickTerminalPosition {
     }
 }
 
+/// The size of the quick terminal (upstream `QuickTerminalSize.Size`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum QuickTerminalSizeValue {
+    Percentage(f32),
+    Pixels(u32),
+}
+
+impl QuickTerminalSizeValue {
+    fn parse(input: &str) -> Result<Self, QuickTerminalSizeParseError> {
+        if input.is_empty() {
+            return Err(QuickTerminalSizeParseError::ValueRequired);
+        }
+
+        if let Some(value) = input.strip_suffix("px") {
+            return value
+                .parse::<u32>()
+                .map(QuickTerminalSizeValue::Pixels)
+                .map_err(|_| QuickTerminalSizeParseError::InvalidValue);
+        }
+
+        if let Some(value) = input.strip_suffix('%') {
+            let percentage = value
+                .parse::<f32>()
+                .map_err(|_| QuickTerminalSizeParseError::InvalidValue)?;
+            if percentage < 0.0 {
+                return Err(QuickTerminalSizeParseError::InvalidValue);
+            }
+            return Ok(QuickTerminalSizeValue::Percentage(percentage));
+        }
+
+        Err(QuickTerminalSizeParseError::MissingUnit)
+    }
+
+    fn to_pixels(self, parent_dimensions: u32) -> u32 {
+        match self {
+            QuickTerminalSizeValue::Percentage(value) => {
+                (value / 100.0 * parent_dimensions as f32) as u32
+            }
+            QuickTerminalSizeValue::Pixels(value) => value,
+        }
+    }
+
+    fn format_value(self) -> String {
+        match self {
+            QuickTerminalSizeValue::Percentage(value) => format!("{}%", value),
+            QuickTerminalSizeValue::Pixels(value) => format!("{}px", value),
+        }
+    }
+}
+
+/// The `quick-terminal-size` config (upstream `QuickTerminalSize`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct QuickTerminalSize {
+    pub primary: Option<QuickTerminalSizeValue>,
+    pub secondary: Option<QuickTerminalSizeValue>,
+}
+
+/// Dimensions used by `QuickTerminalSize::calculate` (upstream
+/// `QuickTerminalSize.Dimensions`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct QuickTerminalDimensions {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// An error parsing `QuickTerminalSize` (upstream
+/// `error.{ValueRequired,TooManyArguments,MissingUnit,InvalidValue}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuickTerminalSizeParseError {
+    ValueRequired,
+    TooManyArguments,
+    MissingUnit,
+    InvalidValue,
+}
+
+impl From<QuickTerminalSizeParseError> for ConfigSetError {
+    fn from(error: QuickTerminalSizeParseError) -> Self {
+        match error {
+            QuickTerminalSizeParseError::ValueRequired => ConfigSetError::ValueRequired,
+            QuickTerminalSizeParseError::TooManyArguments
+            | QuickTerminalSizeParseError::MissingUnit
+            | QuickTerminalSizeParseError::InvalidValue => ConfigSetError::InvalidValue,
+        }
+    }
+}
+
+impl QuickTerminalSize {
+    /// Parse quick terminal size (upstream `QuickTerminalSize.parseCLI`): one or
+    /// two comma-separated values, each trimmed with CLI whitespace.
+    pub(crate) fn parse_cli(
+        input: Option<&str>,
+    ) -> Result<QuickTerminalSize, QuickTerminalSizeParseError> {
+        let input = input.ok_or(QuickTerminalSizeParseError::ValueRequired)?;
+        let mut parts = input.split(',');
+        let primary = trim_ascii_ws_zig(
+            parts
+                .next()
+                .ok_or(QuickTerminalSizeParseError::ValueRequired)?,
+        );
+        let primary = QuickTerminalSizeValue::parse(primary)?;
+
+        let secondary = if let Some(value) = parts.next() {
+            Some(QuickTerminalSizeValue::parse(trim_ascii_ws_zig(value))?)
+        } else {
+            None
+        };
+
+        if parts.next().is_some() {
+            return Err(QuickTerminalSizeParseError::TooManyArguments);
+        }
+
+        Ok(QuickTerminalSize {
+            primary: Some(primary),
+            secondary,
+        })
+    }
+
+    /// Format as a config entry (upstream `QuickTerminalSize.formatEntry`): no
+    /// entry when primary is unset; otherwise `primary[,secondary]`.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        let Some(primary) = self.primary else {
+            return;
+        };
+
+        let mut value = primary.format_value();
+        if let Some(secondary) = self.secondary {
+            value.push(',');
+            value.push_str(&secondary.format_value());
+        }
+        formatter.entry_str(&value);
+    }
+
+    /// Calculate quick terminal dimensions from the configured size and position
+    /// (upstream `QuickTerminalSize.calculate`).
+    pub(crate) fn calculate(
+        self,
+        position: QuickTerminalPosition,
+        dims: QuickTerminalDimensions,
+    ) -> QuickTerminalDimensions {
+        match position {
+            QuickTerminalPosition::Left | QuickTerminalPosition::Right => QuickTerminalDimensions {
+                width: self.primary.map(|v| v.to_pixels(dims.width)).unwrap_or(400),
+                height: self
+                    .secondary
+                    .map(|v| v.to_pixels(dims.height))
+                    .unwrap_or(dims.height),
+            },
+            QuickTerminalPosition::Top | QuickTerminalPosition::Bottom => QuickTerminalDimensions {
+                width: self
+                    .secondary
+                    .map(|v| v.to_pixels(dims.width))
+                    .unwrap_or(dims.width),
+                height: self
+                    .primary
+                    .map(|v| v.to_pixels(dims.height))
+                    .unwrap_or(400),
+            },
+            QuickTerminalPosition::Center if dims.width >= dims.height => QuickTerminalDimensions {
+                width: self.primary.map(|v| v.to_pixels(dims.width)).unwrap_or(800),
+                height: self
+                    .secondary
+                    .map(|v| v.to_pixels(dims.height))
+                    .unwrap_or(400),
+            },
+            QuickTerminalPosition::Center => QuickTerminalDimensions {
+                width: self
+                    .secondary
+                    .map(|v| v.to_pixels(dims.width))
+                    .unwrap_or(400),
+                height: self
+                    .primary
+                    .map(|v| v.to_pixels(dims.height))
+                    .unwrap_or(800),
+            },
+        }
+    }
+}
+
 /// The `resize-overlay` config (upstream `ResizeOverlay`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResizeOverlay {
@@ -5665,16 +5855,17 @@ mod tests {
         MagicParseError, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
-        QuickTerminalPosition, RepeatableClipboardCodepointMap, RepeatableCodepointMap,
-        RepeatableConfigPath, RepeatableConfigPathParseError, RepeatableString,
-        RepeatableStringParseError, ResizeOverlay, ResizeOverlayPosition, RightClickAction,
-        ScrollToBottom, Scrollbar, SelectionWordChars, SelectionWordCharsParseError,
-        ShellIntegration, ShellIntegrationFeatures, SplitPreserveZoom, TerminalBoldColor,
-        TerminalColor, Theme, ThemeParseError, WindowColorspace, WindowDecoration,
-        WindowDecorationParseError, WindowNewTabPosition, WindowPadding, WindowPaddingBalance,
-        WindowPaddingColor, WindowPaddingParseError, WindowSaveState, WindowShowTabBar,
-        WindowSubtitle, WindowTheme, WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS,
-        NS_PER_S,
+        QuickTerminalDimensions, QuickTerminalPosition, QuickTerminalSize,
+        QuickTerminalSizeParseError, QuickTerminalSizeValue, RepeatableClipboardCodepointMap,
+        RepeatableCodepointMap, RepeatableConfigPath, RepeatableConfigPathParseError,
+        RepeatableString, RepeatableStringParseError, ResizeOverlay, ResizeOverlayPosition,
+        RightClickAction, ScrollToBottom, Scrollbar, SelectionWordChars,
+        SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
+        SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
+        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowNewTabPosition,
+        WindowPadding, WindowPaddingBalance, WindowPaddingColor, WindowPaddingParseError,
+        WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme, WorkingDirectory,
+        WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::cursor;
@@ -10868,6 +11059,271 @@ mod tests {
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.quick_terminal_position, QuickTerminalPosition::Left);
+    }
+
+    #[test]
+    fn quick_terminal_size_parse_format_and_calculate() {
+        let mut formatted = String::new();
+        QuickTerminalSize::default().format_entry(&mut EntryFormatter::new(
+            "quick-terminal-size",
+            &mut formatted,
+        ));
+        assert!(formatted.is_empty());
+
+        let percent = QuickTerminalSize::parse_cli(Some("50%")).unwrap();
+        assert_eq!(
+            percent,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: None,
+            }
+        );
+        formatted.clear();
+        percent.format_entry(&mut EntryFormatter::new(
+            "quick-terminal-size",
+            &mut formatted,
+        ));
+        assert_eq!(formatted, "quick-terminal-size = 50%\n");
+
+        let pixels = QuickTerminalSize::parse_cli(Some("200px")).unwrap();
+        assert_eq!(
+            pixels,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
+
+        let mixed = QuickTerminalSize::parse_cli(Some(" 50% , 200px ")).unwrap();
+        assert_eq!(
+            mixed,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(200)),
+            }
+        );
+        formatted.clear();
+        mixed.format_entry(&mut EntryFormatter::new(
+            "quick-terminal-size",
+            &mut formatted,
+        ));
+        assert_eq!(formatted, "quick-terminal-size = 50%,200px\n");
+
+        assert_eq!(
+            QuickTerminalSize::parse_cli(None),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("")),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("69px,")),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("69px,42%,69px")),
+            Err(QuickTerminalSizeParseError::TooManyArguments)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("420")),
+            Err(QuickTerminalSizeParseError::MissingUnit)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("bobr")),
+            Err(QuickTerminalSizeParseError::MissingUnit)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("bobr%")),
+            Err(QuickTerminalSizeParseError::InvalidValue)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("-32%")),
+            Err(QuickTerminalSizeParseError::InvalidValue)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("-69px")),
+            Err(QuickTerminalSizeParseError::InvalidValue)
+        );
+
+        let landscape = QuickTerminalDimensions {
+            width: 2560,
+            height: 1600,
+        };
+        let portrait = QuickTerminalDimensions {
+            width: 1600,
+            height: 2560,
+        };
+
+        let default_size = QuickTerminalSize::default();
+        assert_eq!(
+            default_size.calculate(QuickTerminalPosition::Top, landscape),
+            QuickTerminalDimensions {
+                width: 2560,
+                height: 400,
+            }
+        );
+        assert_eq!(
+            default_size.calculate(QuickTerminalPosition::Left, landscape),
+            QuickTerminalDimensions {
+                width: 400,
+                height: 1600,
+            }
+        );
+        assert_eq!(
+            default_size.calculate(QuickTerminalPosition::Center, landscape),
+            QuickTerminalDimensions {
+                width: 800,
+                height: 400,
+            }
+        );
+        assert_eq!(
+            default_size.calculate(QuickTerminalPosition::Center, portrait),
+            QuickTerminalDimensions {
+                width: 400,
+                height: 800,
+            }
+        );
+
+        assert_eq!(
+            percent.calculate(QuickTerminalPosition::Top, landscape),
+            QuickTerminalDimensions {
+                width: 2560,
+                height: 800,
+            }
+        );
+        assert_eq!(
+            pixels.calculate(QuickTerminalPosition::Left, landscape),
+            QuickTerminalDimensions {
+                width: 200,
+                height: 1600,
+            }
+        );
+
+        let size = QuickTerminalSize {
+            primary: Some(QuickTerminalSizeValue::Percentage(69.0)),
+            secondary: Some(QuickTerminalSizeValue::Pixels(420)),
+        };
+        assert_eq!(
+            size.calculate(QuickTerminalPosition::Top, landscape),
+            QuickTerminalDimensions {
+                width: 420,
+                height: 1104,
+            }
+        );
+        assert_eq!(
+            size.calculate(QuickTerminalPosition::Left, landscape),
+            QuickTerminalDimensions {
+                width: 1766,
+                height: 420,
+            }
+        );
+        assert_eq!(
+            size.calculate(QuickTerminalPosition::Center, landscape),
+            QuickTerminalDimensions {
+                width: 1766,
+                height: 420,
+            }
+        );
+        assert_eq!(
+            size.calculate(QuickTerminalPosition::Center, portrait),
+            QuickTerminalDimensions {
+                width: 420,
+                height: 1766,
+            }
+        );
+    }
+
+    #[test]
+    fn quick_terminal_size_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> Option<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("quick-terminal-size = "))
+                .map(ToOwned::to_owned)
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
+        assert_eq!(line(&cfg), None);
+
+        cfg.set("quick-terminal-size", Some("50%,200px")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(200)),
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            Some("quick-terminal-size = 50%,200px".to_string())
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let keys: Vec<&str> = out
+            .lines()
+            .map(|l| l.split(" = ").next().unwrap())
+            .collect();
+        let position_index = keys
+            .iter()
+            .position(|key| *key == "quick-terminal-position")
+            .unwrap();
+        assert_eq!(keys[position_index + 1], "quick-terminal-size");
+        assert_eq!(keys[position_index + 2], "font-family");
+
+        cfg.set("quick-terminal-size", Some("")).unwrap();
+        assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
+        assert_eq!(line(&cfg), None);
+        assert_eq!(
+            cfg.set("quick-terminal-size", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("quick-terminal-size", Some("69px,")),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for value in ["69px,42%,69px", "420", "bobr", "bobr%", "-32%", "-69px"] {
+            assert_eq!(
+                cfg.set("quick-terminal-size", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "quick-terminal-size accepted {value:?}"
+            );
+        }
+
+        let diagnostics = cfg.load_str(
+            "quick-terminal-size = 200px\n\
+             quick-terminal-size = bobr\n\
+             quick-terminal-position = right\n",
+        );
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
+        assert_eq!(cfg.quick_terminal_position, QuickTerminalPosition::Right);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "quick-terminal-size".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(
+            cloned.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
     }
 
     #[test]

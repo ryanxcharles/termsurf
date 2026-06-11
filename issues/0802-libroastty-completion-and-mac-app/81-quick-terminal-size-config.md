@@ -123,3 +123,57 @@ Codex re-reviewer `019eb479-fce2-7252-ad81-44bca7624393` returned **Approved**
 with no findings. The reviewer confirmed the prior finding is resolved, the
 verification now checks omission rather than an empty entry, and the behavior
 matches `vendor/ghostty/src/config/Config.zig`.
+
+## Result
+
+**Result:** Pass
+
+Implemented `quick-terminal-size` in `roastty/src/config/mod.rs` as
+`QuickTerminalSize` with optional `primary` and `secondary` values, plus
+`QuickTerminalSizeValue::{Percentage(f32), Pixels(u32)}`. The parser now accepts
+one or two comma-separated percentage/pixel values, trims Zig CLI whitespace,
+preserves upstream internal error distinctions, and maps config-facing errors
+through `ConfigSetError`.
+
+The formatter matches upstream by emitting no entry when `primary` is unset and
+emitting `primary[,secondary]` without spaces when present. The standalone
+`calculate` helper matches upstream quick-terminal fallback dimensions for top,
+left, and center positions across landscape and portrait dimensions.
+
+The first targeted test run caught an assertion mismatch: `69px,` correctly
+propagates `ValueRequired` through `Config::set`, rather than
+`ConfigSetError::InvalidValue`. The test was fixed and the targeted checks were
+rerun.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty quick_terminal_size`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+  - 4519 unit tests passed
+  - ABI harness passed with the existing 10 enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The quick-terminal-size config surface now matches upstream's default,
+parser/formatter behavior, internal parser error distinctions, formatter
+omission behavior, and calculation helper for this slice. Runtime quick-terminal
+sizing and the app C ABI accessor remain later work. The next upstream config
+fields are the GTK quick-terminal layer and namespace fields.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb481-f564-74c1-a3a2-2382945e6e61` returned
+**Approved** with no findings.
+
+The reviewer performed read-only verification that the latest commit was still
+the plan commit, only the expected three files were modified, `git diff --check`
+passed, `cargo fmt --check` passed, `cargo test -p roastty quick_terminal_size`
+passed, `cargo test -p roastty config_format_config` passed, and
+`cargo test -p roastty` passed with 4519 unit tests plus the ABI harness and doc
+tests. The reviewer found no evidence of unrequested runtime or C ABI behavior,
+and confirmed the implementation and test coverage match the experiment scope.

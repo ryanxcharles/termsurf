@@ -187,6 +187,9 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
 - **Quick-terminal position config is parser/formatter-only.** Exp 80 wires
   `quick-terminal-position` as an enum with upstream default `top`; quick
   terminal sizing, window behavior, and toggle actions remain later work.
+- **Quick-terminal size config is parser/formatter/calculation-only.** Exp 81
+  wires `quick-terminal-size` as the upstream percentage/pixel struct; runtime
+  window sizing and the app C ABI accessor remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -836,7 +839,7 @@ stays unaltered except for the rename).
 - [Experiment 80: Phase F — quick terminal position config](80-quick-terminal-position-config.md)
   — **Pass**
 - [Experiment 81: Phase F — quick terminal size config](81-quick-terminal-size-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
