@@ -99,3 +99,56 @@ Re-review verdict: **APPROVED**
 
 The reviewer confirmed the prior required finding was resolved and found no new
 required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented config-internal working-directory finalization.
+
+- Added a private finalize context carrying the probable-CLI decision and an
+  optional home directory for explicit `~/...` expansion.
+- Added an upstream-shaped `probable_cli_environment()` helper: Windows is never
+  probable CLI, macOS desktop launches are not probable CLI, non-empty
+  `TERM_PROGRAM` is probable CLI, and extra process args are probable CLI.
+- Reordered `finalize_scalars()` to match upstream's relevant sequence:
+  font-family inheritance, empty `term` repair, working-directory finalization,
+  then the existing scalar tail.
+- Defaulted an unset `working-directory` to `inherit` for probable CLI contexts
+  and `home` otherwise.
+- Finalized explicit `~/...` working-directory paths using the resolved home
+  directory when available, while preserving explicit `home`, `inherit`, and
+  non-expandable paths.
+- Added deterministic tests for the probable-CLI default, heuristic rules,
+  explicit keyword preservation, tilde expansion, non-expandable paths, and
+  theme loading/replay ordering.
+
+Verification passed:
+
+1. `cargo test -p roastty config_working_directory_finalize`
+2. `cargo test -p roastty config_theme_loading`
+3. `cargo test -p roastty`
+4. `cargo fmt --check`
+5. `git diff --check`
+
+The focused working-directory run passed 6 tests. The full
+`cargo test -p roastty` run passed 4576 unit tests, the ABI harness, and doc
+tests. The ABI harness printed the existing 10 enum-conversion warnings.
+
+## Conclusion
+
+Roastty now implements the upstream finalize-time `working-directory` default
+decision and explicit path finalization in the correct order relative to theme
+loading, font-family inheritance, and empty `term` repair. This removes one
+config-finalize gap while leaving default shell resolution, passwd-home
+conversion for `WorkingDirectory::Home`, GTK single-instance defaults, link
+matcher mutation, and key-remap finalization for later experiments.
+
+## Completion Review
+
+Codex-native adversarial review ran in fresh context with subagent
+`019eb62d-faca-7cb2-8ce3-50645c5f6908`.
+
+Verdict: **APPROVED**
+
+Findings: None.

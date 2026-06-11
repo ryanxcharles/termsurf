@@ -24,13 +24,13 @@ use crate::config::unicode_range::{InvalidRange, UnicodeRangeParser};
 use crate::font::codepoint_map::CodepointMap;
 use crate::font::discovery::Descriptor;
 use crate::os::homedir::expand_home;
-use crate::os::resources_dir;
+use crate::os::{desktop, passwd, resources_dir};
 use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAULT_PALETTE};
 use crate::terminal::cursor;
 use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
 use crate::terminal::style::BoldColor as TerminalBoldColor;
 use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 
@@ -1819,9 +1819,17 @@ impl Config {
         &mut self,
         locations: ConfigThemeLocations,
     ) -> ConfigFinalizeReport {
+        self.finalize_with_theme_locations_and_context(locations, ConfigFinalizeContext::current())
+    }
+
+    fn finalize_with_theme_locations_and_context(
+        &mut self,
+        locations: ConfigThemeLocations,
+        context: ConfigFinalizeContext,
+    ) -> ConfigFinalizeReport {
         let mut report = ConfigFinalizeReport::default();
         self.finalize_theme(&mut report, &locations);
-        self.finalize_scalars();
+        self.finalize_scalars(&context);
         report
     }
 
@@ -1831,6 +1839,39 @@ impl Config {
         locations: Vec<PathBuf>,
     ) -> ConfigFinalizeReport {
         self.finalize_with_theme_locations(ConfigThemeLocations { locations })
+    }
+
+    #[cfg(test)]
+    fn finalize_with_context_for_test(
+        &mut self,
+        probable_cli: bool,
+        home: Option<&OsStr>,
+    ) -> ConfigFinalizeReport {
+        self.finalize_with_theme_locations_and_context(
+            ConfigThemeLocations {
+                locations: Vec::new(),
+            },
+            ConfigFinalizeContext {
+                probable_cli,
+                home: home.map(OsStr::to_os_string),
+            },
+        )
+    }
+
+    #[cfg(test)]
+    fn finalize_with_theme_locations_and_context_for_test(
+        &mut self,
+        locations: Vec<PathBuf>,
+        probable_cli: bool,
+        home: Option<&OsStr>,
+    ) -> ConfigFinalizeReport {
+        self.finalize_with_theme_locations_and_context(
+            ConfigThemeLocations { locations },
+            ConfigFinalizeContext {
+                probable_cli,
+                home: home.map(OsStr::to_os_string),
+            },
+        )
     }
 
     #[cfg(test)]
@@ -2006,11 +2047,7 @@ impl Config {
         }
     }
 
-    fn finalize_scalars(&mut self) {
-        if self.term.is_empty() {
-            self.term = "xterm-ghostty".to_string();
-        }
-
+    fn finalize_scalars(&mut self, context: &ConfigFinalizeContext) {
         if self.font_family.count() != 0 {
             if self.font_family_bold.count() == 0 {
                 self.font_family_bold = self.font_family.clone();
@@ -2022,6 +2059,12 @@ impl Config {
                 self.font_family_bold_italic = self.font_family.clone();
             }
         }
+
+        if self.term.is_empty() {
+            self.term = "xterm-ghostty".to_string();
+        }
+
+        self.finalize_working_directory(context);
 
         if self.click_repeat_interval == 0 {
             self.click_repeat_interval = 500;
@@ -2042,6 +2085,20 @@ impl Config {
             self.auto_update_channel = Some(PINNED_BUILD_RELEASE_CHANNEL);
         }
         self.faint_opacity = self.faint_opacity.clamp(0.0, 1.0);
+    }
+
+    fn finalize_working_directory(&mut self, context: &ConfigFinalizeContext) {
+        let mut working_directory = self.working_directory.clone().unwrap_or_else(|| {
+            if context.probable_cli {
+                WorkingDirectory::Inherit
+            } else {
+                WorkingDirectory::Home
+            }
+        });
+        if let Some(home) = context.home.as_deref() {
+            working_directory.finalize_with_home(home);
+        }
+        self.working_directory = Some(working_directory);
     }
 
     /// Load config from a source string (upstream's config-file `parse` driving
@@ -2416,6 +2473,50 @@ impl ConfigThemeLocations {
         }
         Self { locations }
     }
+}
+
+struct ConfigFinalizeContext {
+    probable_cli: bool,
+    home: Option<OsString>,
+}
+
+impl ConfigFinalizeContext {
+    fn current() -> Self {
+        Self {
+            probable_cli: probable_cli_environment(),
+            home: passwd::get().home,
+        }
+    }
+}
+
+fn probable_cli_environment() -> bool {
+    probable_cli_environment_from(
+        cfg!(target_os = "windows"),
+        cfg!(target_os = "macos") && desktop::launched_from_desktop(),
+        std::env::var_os("TERM_PROGRAM").as_deref(),
+        std::env::args_os().len(),
+    )
+}
+
+fn probable_cli_environment_from(
+    is_windows: bool,
+    launched_from_desktop: bool,
+    term_program: Option<&OsStr>,
+    arg_count: usize,
+) -> bool {
+    if is_windows {
+        return false;
+    }
+
+    if launched_from_desktop {
+        return false;
+    }
+
+    if term_program.is_some_and(|value| !value.is_empty()) {
+        return true;
+    }
+
+    arg_count > 1
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -7676,13 +7777,13 @@ mod tests {
     use super::EntryFormatter;
     use super::{parse_bool_field, parse_i16_field, parse_string_field};
     use super::{
-        AlphaBlending, AppNotifications, AsyncBackend, AutoUpdate, BackgroundBlur,
-        BackgroundBlurParseError, BackgroundImageFit, BackgroundImagePosition, BellFeatures,
-        BoldColor, ClipboardAccess, ClipboardCodepointMapEntry, ClipboardCodepointMapParseError,
-        ClipboardReplacement, Color, ColorList, ColorParseError, Command, CommandPaletteEntry,
-        Config, ConfigDiagnostic, ConfigFilePath, ConfigFinalizeReport,
-        ConfigRecursiveFileErrorKind, ConfigReplayEntry, ConfigSetError, ConfigSetSource,
-        ConfigThemeLoadReport, ConfirmCloseSurface, CopyOnSelect, CursorStyle,
+        probable_cli_environment_from, AlphaBlending, AppNotifications, AsyncBackend, AutoUpdate,
+        BackgroundBlur, BackgroundBlurParseError, BackgroundImageFit, BackgroundImagePosition,
+        BellFeatures, BoldColor, ClipboardAccess, ClipboardCodepointMapEntry,
+        ClipboardCodepointMapParseError, ClipboardReplacement, Color, ColorList, ColorParseError,
+        Command, CommandPaletteEntry, Config, ConfigDiagnostic, ConfigFilePath,
+        ConfigFinalizeReport, ConfigRecursiveFileErrorKind, ConfigReplayEntry, ConfigSetError,
+        ConfigSetSource, ConfigThemeLoadReport, ConfirmCloseSurface, CopyOnSelect, CursorStyle,
         CustomShaderAnimation, DefaultConfigPaths, Duration, DurationParseError, FlagsParseError,
         FontShapingBreak, FontStyle, FontStyleParseError, FontSyntheticStyle, Fullscreen,
         GraphemeWidthMethod, GtkSingleInstance, GtkTabsLocation, GtkTitlebarStyle, GtkToolbarStyle,
@@ -17855,6 +17956,119 @@ mod tests {
             cloned.working_directory,
             Some(WorkingDirectory::Path("/clone".to_string()))
         );
+    }
+
+    #[test]
+    fn config_working_directory_finalize_defaults_from_probable_cli() {
+        let mut cli = Config::default();
+        cli.finalize_with_context_for_test(true, Some(OsStr::new("/Users/tester")));
+        assert_eq!(cli.working_directory, Some(WorkingDirectory::Inherit));
+
+        let mut desktop = Config::default();
+        desktop.finalize_with_context_for_test(false, Some(OsStr::new("/Users/tester")));
+        assert_eq!(desktop.working_directory, Some(WorkingDirectory::Home));
+    }
+
+    #[test]
+    fn config_working_directory_finalize_probable_cli_heuristic_matches_upstream() {
+        assert!(!probable_cli_environment_from(
+            true,
+            false,
+            Some(OsStr::new("Apple_Terminal")),
+            2,
+        ));
+        assert!(!probable_cli_environment_from(
+            false,
+            true,
+            Some(OsStr::new("Apple_Terminal")),
+            2,
+        ));
+        assert!(probable_cli_environment_from(
+            false,
+            false,
+            Some(OsStr::new("Apple_Terminal")),
+            1,
+        ));
+        assert!(!probable_cli_environment_from(
+            false,
+            false,
+            Some(OsStr::new("")),
+            1,
+        ));
+        assert!(probable_cli_environment_from(false, false, None, 2));
+        assert!(!probable_cli_environment_from(false, false, None, 1));
+    }
+
+    #[test]
+    fn config_working_directory_finalize_preserves_explicit_keywords() {
+        let mut home = Config::default();
+        home.working_directory = Some(WorkingDirectory::Home);
+        home.finalize_with_context_for_test(true, Some(OsStr::new("/Users/tester")));
+        assert_eq!(home.working_directory, Some(WorkingDirectory::Home));
+
+        let mut inherit = Config::default();
+        inherit.working_directory = Some(WorkingDirectory::Inherit);
+        inherit.finalize_with_context_for_test(false, Some(OsStr::new("/Users/tester")));
+        assert_eq!(inherit.working_directory, Some(WorkingDirectory::Inherit));
+    }
+
+    #[test]
+    fn config_working_directory_finalize_expands_explicit_tilde_path() {
+        let mut cfg = Config::default();
+        cfg.working_directory = Some(WorkingDirectory::Path("~/projects/app".to_string()));
+        cfg.finalize_with_context_for_test(false, Some(OsStr::new("/Users/tester")));
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path(
+                "/Users/tester/projects/app".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn config_working_directory_finalize_preserves_non_expandable_paths() {
+        for value in ["~", "~other/app", "/tmp/app"] {
+            let mut cfg = Config::default();
+            cfg.working_directory = Some(WorkingDirectory::Path(value.to_string()));
+            cfg.finalize_with_context_for_test(false, Some(OsStr::new("/Users/tester")));
+            assert_eq!(
+                cfg.working_directory,
+                Some(WorkingDirectory::Path(value.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn config_working_directory_finalize_theme_then_user_replay() {
+        let dir = unique_config_test_dir("working-directory-finalize-theme");
+        let theme_path = dir.join("theme");
+        write_config_file(&theme_path, "working-directory = ~/theme\n");
+
+        let mut cfg = Config::default();
+        assert!(cfg
+            .load_str(&format!(
+                "theme = {}\n\
+                 working-directory = ~/user\n",
+                theme_path.display()
+            ))
+            .is_empty());
+
+        let report = cfg.finalize_with_theme_locations_and_context_for_test(
+            Vec::new(),
+            true,
+            Some(OsStr::new("/Users/tester")),
+        );
+
+        assert!(matches!(
+            report.theme,
+            Some(ConfigThemeLoadReport::Loaded { .. })
+        ));
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path("/Users/tester/user".to_string()))
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

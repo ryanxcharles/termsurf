@@ -292,6 +292,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   app ABI exposure, runtime OS-theme notifications, general conditional syntax,
   conditionalized theme-file replay steps, and live surface/app propagation
   remain later work.
+- **Working-directory finalize is wired.** Exp 102 computes the upstream
+  probable-CLI heuristic during config finalization, defaults an unset
+  `working-directory` to `inherit` for probable CLI launches and `home`
+  otherwise, and expands explicit `~/...` paths after theme replay; default
+  shell resolution, passwd-home conversion for `home`, GTK runtime defaults,
+  link matcher mutation, and key-remap finalization remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -983,7 +989,7 @@ stays unaltered except for the rename).
 - [Experiment 101: Phase F — conditional theme reload](101-conditional-theme-reload.md)
   — **Pass**
 - [Experiment 102: Phase F — working-directory finalize](102-working-directory-finalize.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
