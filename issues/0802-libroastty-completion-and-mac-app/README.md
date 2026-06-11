@@ -1271,6 +1271,8 @@ stays unaltered except for the rename).
   — **Partial**
 - [Experiment 133: Phase G — XCTest host lifecycle](133-xctest-host-lifecycle.md)
   — **Partial**
+- [Experiment 134: Phase G — file keybind loading](134-file-keybind-loading.md)
+  — **Designed**
 
 ## Process
 
