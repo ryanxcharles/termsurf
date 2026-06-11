@@ -130,3 +130,70 @@ Codex adversarial reviewer `019eb4e1-e792-7c63-93c1-3463fe28388e` re-reviewed
 the fix and returned **Approved** with no remaining findings. The reviewer
 confirmed the design now requires `Surface::apply_config` refresh behavior and
 an existing-surface update-path test.
+
+## Result
+
+**Result:** Pass
+
+Implemented `vt-kam-allowed` in `roastty/src/config/mod.rs` as a bool config
+field with upstream default `false`. It now parses explicit `true` / `false`,
+bare flags as true, empty values as reset-to-default, and invalid bool values as
+diagnostics. `format_config` emits it in upstream order immediately after
+`osc-color-report-format` and before `custom-shader-animation`.
+
+Implemented the runtime key gate in `roastty/src/lib.rs`. New surfaces copy the
+effective parsed `vt_kam_allowed` value from the app config, and
+`Surface::apply_config` refreshes the value for existing surfaces during
+`roastty_app_update_config` / `roastty_surface_update_config`. `Surface::key`
+still handles configured and default keybindings first; only fallthrough encoded
+key input is consumed when both `vt_kam_allowed` is true and the terminal has
+ANSI mode 2 (`disable_keyboard`) enabled.
+
+Runtime tests prove:
+
+- KAM mode alone does not block input when `vt-kam-allowed = false`.
+- `vt-kam-allowed = true` alone does not block input when terminal KAM mode is
+  disabled.
+- `vt-kam-allowed = true` plus terminal KAM mode consumes ordinary key input
+  without queuing it to the child pty.
+- Updating config on an existing surface toggles the gate without recreating the
+  surface.
+- Default keybindings still dispatch before the KAM gate.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty vt_kam`
+  - 6 targeted tests passed
+- `cargo test -p roastty config_format_config`
+  - 1 targeted order test passed
+- `cargo test -p roastty`
+  - 4529 unit tests passed
+  - ABI harness passed with the existing 10 enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+`vt-kam-allowed` now matches the pinned upstream config field and its key-input
+effect in the embedded surface path. This is not parser-only: it has live
+surface behavior, update propagation, and ordering parity with upstream
+keybindings-before-KAM semantics. The next upstream config gap after this field
+is `custom-shader`; `custom-shader-animation` is already present locally.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb4ed-8195-78c3-93d1-1d34e5fbb907` returned
+**Approved** with no findings. The reviewer verified that the working diff is
+limited to the expected four files, the result commit had not been made yet,
+`vt-kam-allowed` config behavior and format order match upstream, keybindings
+still run before the KAM gate, ANSI mode 2 is checked before encoded writes, and
+existing surfaces refresh `vt_kam_allowed` through `Surface::apply_config`.
+
+The reviewer also reran and passed:
+
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo test -p roastty vt_kam`
+- `cargo test -p roastty config_format_config`

@@ -303,6 +303,8 @@ pub(crate) struct Config {
     pub grapheme_width_method: GraphemeWidthMethod,
     /// `osc-color-report-format`.
     pub osc_color_report_format: OscColorReportFormat,
+    /// `vt-kam-allowed`.
+    pub vt_kam_allowed: bool,
     /// `scroll-to-bottom`.
     pub scroll_to_bottom: ScrollToBottom,
     /// `custom-shader-animation`.
@@ -477,6 +479,7 @@ impl Default for Config {
             font_shaping_break: FontShapingBreak::default(),
             grapheme_width_method: GraphemeWidthMethod::Unicode,
             osc_color_report_format: OscColorReportFormat::Bits16,
+            vt_kam_allowed: false,
             scroll_to_bottom: ScrollToBottom::default(),
             custom_shader_animation: CustomShaderAnimation::True,
             background: Color {
@@ -748,6 +751,7 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("command-palette-entry", out));
         self.osc_color_report_format
             .format_entry(&mut EntryFormatter::new("osc-color-report-format", out));
+        EntryFormatter::new("vt-kam-allowed", out).entry_bool(self.vt_kam_allowed);
         self.custom_shader_animation
             .format_entry(&mut EntryFormatter::new("custom-shader-animation", out));
         self.macos_non_native_fullscreen
@@ -1226,6 +1230,9 @@ impl Config {
                     default.osc_color_report_format,
                     OscColorReportFormat::from_keyword,
                 )?
+            }
+            "vt-kam-allowed" => {
+                self.vt_kam_allowed = set_bool_field(value, default.vt_kam_allowed)?
             }
             "custom-shader-animation" => {
                 self.custom_shader_animation = set_enum_field(
@@ -6805,6 +6812,7 @@ mod tests {
         // Terminal/render-behavior group (Experiment 471).
         assert_eq!(d.grapheme_width_method, GraphemeWidthMethod::Unicode);
         assert_eq!(d.osc_color_report_format, OscColorReportFormat::Bits16);
+        assert!(!d.vt_kam_allowed);
         assert_eq!(d.scroll_to_bottom, ScrollToBottom::default());
         assert_eq!(d.custom_shader_animation, CustomShaderAnimation::True);
         // Base-colors group (Experiment 472).
@@ -10766,6 +10774,7 @@ mod tests {
         );
         expected.extend([
             "osc-color-report-format",
+            "vt-kam-allowed",
             "custom-shader-animation",
             "macos-non-native-fullscreen",
             "macos-window-buttons",
@@ -11909,6 +11918,61 @@ mod tests {
             line(&cfg, "scroll-to-bottom"),
             "scroll-to-bottom = keystroke,no-output"
         );
+    }
+
+    #[test]
+    fn vt_kam_allowed_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with("vt-kam-allowed = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert!(!cfg.vt_kam_allowed);
+        assert_eq!(line(&cfg), "vt-kam-allowed = false");
+
+        cfg.set("vt-kam-allowed", Some("true")).unwrap();
+        assert!(cfg.vt_kam_allowed);
+        assert_eq!(line(&cfg), "vt-kam-allowed = true");
+
+        cfg.set("vt-kam-allowed", Some("false")).unwrap();
+        assert!(!cfg.vt_kam_allowed);
+        assert_eq!(line(&cfg), "vt-kam-allowed = false");
+
+        cfg.set("vt-kam-allowed", None).unwrap();
+        assert!(cfg.vt_kam_allowed);
+        assert_eq!(line(&cfg), "vt-kam-allowed = true");
+
+        cfg.set("vt-kam-allowed", Some("")).unwrap();
+        assert!(!cfg.vt_kam_allowed);
+        assert_eq!(line(&cfg), "vt-kam-allowed = false");
+
+        assert_eq!(
+            cfg.set("vt-kam-allowed", Some("maybe")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "vt-kam-allowed = true\n\
+             vt-kam-allowed = maybe\n\
+             vt-kam-allowed = false\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "vt-kam-allowed".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert!(!cfg.vt_kam_allowed);
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
     }
 
     #[test]

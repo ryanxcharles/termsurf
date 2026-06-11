@@ -1896,6 +1896,7 @@ struct Surface {
     clipboard_paste_bracketed_safe: bool,
     selection_clear_on_typing: bool,
     selection_word_chars: Vec<u32>,
+    vt_kam_allowed: bool,
     mouse_scroll_multiplier: config::MouseScrollMultiplier,
     click_repeat_interval_ns: u64,
     preedit: Option<String>,
@@ -2241,6 +2242,7 @@ impl Surface {
         self.clipboard_paste_bracketed_safe = parsed.clipboard_paste_bracketed_safe;
         self.selection_clear_on_typing = parsed.selection_clear_on_typing;
         self.selection_word_chars = parsed.selection_word_chars.codepoints.clone();
+        self.vt_kam_allowed = parsed.vt_kam_allowed;
         self.mouse_reporting = parsed.mouse_reporting;
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
         self.click_repeat_interval_ns = click_repeat_interval_ns(&parsed);
@@ -4676,6 +4678,9 @@ impl Surface {
             if event.event.action != key::KeyAction::Release {
                 self.last_consumed_default_binding = None;
             }
+            if self.vt_kam_allowed && self.terminal_kam_enabled() {
+                return true;
+            }
             return self.write_encoded_key_event(&event.event);
         }
         if let Some(binding) = default_key_event_binding(&event.event) {
@@ -4686,7 +4691,17 @@ impl Surface {
         if event.event.action != key::KeyAction::Release {
             self.last_consumed_default_binding = None;
         }
+        if self.vt_kam_allowed && self.terminal_kam_enabled() {
+            return true;
+        }
         self.write_encoded_key_event(&event.event)
+    }
+
+    fn terminal_kam_enabled(&self) -> bool {
+        self.termio_worker
+            .as_ref()
+            .and_then(|worker| worker.with_termio(|termio| termio.terminal().mode_get(2, true)))
+            .unwrap_or(false)
     }
 
     fn write_encoded_key_event(&mut self, event: &key::KeyEvent) -> bool {
@@ -14618,6 +14633,9 @@ pub extern "C" fn roastty_surface_new(
     let selection_word_chars = app_from_handle(app)
         .map(|app| app.parsed_config.selection_word_chars.codepoints.clone())
         .unwrap_or_else(|| config::SelectionWordChars::default().codepoints);
+    let vt_kam_allowed = app_from_handle(app)
+        .map(|app| app.parsed_config.vt_kam_allowed)
+        .unwrap_or(false);
     let mouse_reporting = app_from_handle(app)
         .map(|app| app.parsed_config.mouse_reporting)
         .unwrap_or(true);
@@ -14662,6 +14680,7 @@ pub extern "C" fn roastty_surface_new(
         clipboard_paste_bracketed_safe,
         selection_clear_on_typing,
         selection_word_chars,
+        vt_kam_allowed,
         mouse_scroll_multiplier,
         click_repeat_interval_ns,
         preedit: None,
@@ -16267,6 +16286,12 @@ mod tests {
         handle
     }
 
+    fn new_test_config_with_vt_kam_allowed(vt_kam_allowed: bool) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        config_from_handle(handle).unwrap().parsed.vt_kam_allowed = vt_kam_allowed;
+        handle
+    }
+
     fn new_test_config_with_mouse_behavior(
         mouse_reporting: bool,
         precision: f64,
@@ -16407,6 +16432,21 @@ mod tests {
             close_surface_cb: None,
         };
         roastty_app_new(&runtime, ptr::null_mut())
+    }
+
+    fn new_test_app_with_action_config(result: bool, config: RoasttyConfig) -> RoasttyApp {
+        reset_action_records(result);
+        let runtime = RoasttyRuntimeConfig {
+            userdata: ptr::null_mut(),
+            supports_selection_clipboard: false,
+            wakeup_cb: None,
+            action_cb: Some(split_action_cb),
+            read_clipboard_cb: None,
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
+            close_surface_cb: None,
+        };
+        roastty_app_new(&runtime, config)
     }
 
     unsafe extern "C" fn write_clipboard_record_cb(
@@ -16956,6 +16996,17 @@ mod tests {
             });
     }
 
+    fn set_surface_worker_ansi_mode(surface: RoasttySurface, mode: u16, enabled: bool) {
+        let surface = surface_from_handle(surface).unwrap();
+        surface
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                assert!(termio.terminal_mut().mode_set(mode, true, enabled));
+            });
+    }
+
     fn set_surface_worker_kitty_keyboard(surface: RoasttySurface, flags: u8) {
         let surface = surface_from_handle(surface).unwrap();
         surface
@@ -17013,6 +17064,43 @@ mod tests {
         } else {
             Some(unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string())
         }
+    }
+
+    fn key_press(key: key::Key, utf8: &[u8], unshifted_codepoint: u32, mods: c_int) -> KeyEvent {
+        let mut event = key::KeyEvent::default();
+        event.action = key::KeyAction::Press;
+        event.key = key;
+        event.utf8 = utf8.to_vec();
+        event.unshifted_codepoint = unshifted_codepoint;
+        event.mods = key_mods_from_raw(mods);
+        KeyEvent { event }
+    }
+
+    fn send_key(surface: RoasttySurface, event: KeyEvent) -> bool {
+        surface_from_handle(surface).unwrap().key(&event)
+    }
+
+    fn send_line(surface: RoasttySurface, key: key::Key, text: u8) {
+        assert!(send_key(
+            surface,
+            key_press(key, &[text], u32::from(text), ROASTTY_MODS_NONE)
+        ));
+        assert!(send_key(
+            surface,
+            key_press(key::Key::Enter, &[], 0, ROASTTY_MODS_NONE)
+        ));
+    }
+
+    fn wait_for_surface_plain_screen(app: RoasttyApp, surface: RoasttySurface, needle: &str) {
+        wait_until(|| {
+            roastty_app_tick(app);
+            surface_from_handle(surface)
+                .unwrap()
+                .termio_worker
+                .as_ref()
+                .unwrap()
+                .with_termio(|termio| termio.terminal().plain_screen(false).contains(needle))
+        });
     }
 
     fn take_roastty_text(mut text: RoasttyText) -> Vec<u8> {
@@ -17399,6 +17487,117 @@ mod tests {
         assert!(surface_from_handle(surface).unwrap().dirty);
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn vt_kam_allowed_false_does_not_block_key_input_when_terminal_kam_is_enabled() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_vt_kam_allowed(false);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "printf ready; IFS= read c; printf out:%s \"$c\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+        set_surface_worker_ansi_mode(surface, 2, true);
+
+        send_line(surface, key::Key::KeyX, b'x');
+
+        wait_for_surface_plain_screen(app, surface, "out:x");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn vt_kam_allowed_true_does_not_block_key_input_when_terminal_kam_is_disabled() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_vt_kam_allowed(true);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "printf ready; IFS= read c; printf out:%s \"$c\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+
+        send_line(surface, key::Key::KeyX, b'x');
+
+        wait_for_surface_plain_screen(app, surface, "out:x");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn vt_kam_allowed_true_blocks_key_input_when_terminal_kam_is_enabled() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_vt_kam_allowed(true);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "printf ready; IFS= read c; printf out:%s \"$c\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+        set_surface_worker_ansi_mode(surface, 2, true);
+
+        send_line(surface, key::Key::KeyX, b'x');
+        set_surface_worker_ansi_mode(surface, 2, false);
+        send_line(surface, key::Key::KeyY, b'y');
+
+        wait_for_surface_plain_screen(app, surface, "out:y");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn vt_kam_allowed_update_toggles_existing_surface_key_gate() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_vt_kam_allowed(false);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "printf ready; IFS= read c; printf out:%s \"$c\"; sleep 1",
+        ));
+        wait_for_surface_plain_screen(app, surface, "ready");
+        set_surface_worker_ansi_mode(surface, 2, true);
+
+        let enabled_config = new_test_config_with_vt_kam_allowed(true);
+        roastty_app_update_config(app, enabled_config);
+        send_line(surface, key::Key::KeyX, b'x');
+
+        let disabled_config = new_test_config_with_vt_kam_allowed(false);
+        roastty_app_update_config(app, disabled_config);
+        send_line(surface, key::Key::KeyY, b'y');
+
+        wait_for_surface_plain_screen(app, surface, "out:y");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(disabled_config);
+        roastty_config_free(enabled_config);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn vt_kam_allowed_keybindings_run_before_kam_gate() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_vt_kam_allowed(true);
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_worker_ansi_mode(surface, 2, true);
+
+        assert!(send_key(
+            surface,
+            key_press(key::Key::KeyQ, &[], u32::from(b'q'), ROASTTY_MODS_SUPER)
+        ));
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_QUIT);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     fn set_test_size_80x24(surface: RoasttySurface) {

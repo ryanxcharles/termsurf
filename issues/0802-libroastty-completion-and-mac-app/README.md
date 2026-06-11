@@ -208,6 +208,11 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   last-wins fields, quoted-string decoding, and canonical action validation /
   formatting through Roastty's keybinding action parser; runtime command-palette
   UI and app C ABI exposure remain later work.
+- **VT KAM is now a config-backed surface key gate.** Exp 86 wires
+  `vt-kam-allowed` through config parsing/formatting and into the embedded
+  surface key path: keybindings run first, then ANSI mode 2 (`disable_keyboard`)
+  consumes normal key input only when the config allows it; config updates also
+  refresh existing surfaces.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -867,7 +872,7 @@ stays unaltered except for the rename).
 - [Experiment 85: Phase F — command palette entry config](85-command-palette-entry-config.md)
   — **Pass**
 - [Experiment 86: Phase F — VT KAM config and key gate](86-vt-kam-config-key-gate.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
