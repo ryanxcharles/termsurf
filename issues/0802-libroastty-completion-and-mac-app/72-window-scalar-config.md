@@ -109,3 +109,61 @@ The reviewer verified the README link/status, required experiment sections,
 scope, upstream field defaults/types/order, existing Rust config parser/reset
 helpers, optional string behavior, verification criteria, `prettier --check`,
 and `git diff --check`.
+
+## Result
+
+**Result:** Pass
+
+Implemented the six approved window scalar config fields:
+
+- `window-vsync`
+- `window-inherit-working-directory`
+- `tab-inherit-working-directory`
+- `split-inherit-working-directory`
+- `window-inherit-font-size`
+- `window-title-font-family`
+
+The five booleans default to `true`, parse through the existing upstream-style
+boolean helper, support bare CLI `None` as `true`, and reset on empty values.
+`window-title-font-family` defaults to `None`, formats as an empty entry, parses
+as an optional string, resets on empty, reports `ValueRequired` on a missing
+value, and rejects interior NULs. Formatter order now matches the upstream
+sequence from `window-padding-color` through `window-subtitle`.
+
+Added focused coverage for defaults, formatting, bool false/bare/reset/invalid
+behavior, title-font parse/reset/missing/NUL diagnostics, `load_str` diagnostics
+preserving valid neighboring values, formatter order, and clone/equality
+preservation.
+
+Verification run:
+
+- `cargo fmt`
+- `cargo test -p roastty window_scalar_config`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty` — 4,507 unit tests passed; C ABI harness passed with
+  the existing enum-conversion warnings; doc tests passed.
+- `cargo fmt --check`
+- `git diff --check`
+- `git status --short`
+
+At result-recording time, the intended tracked changes were
+`roastty/src/config/mod.rs`,
+`issues/0802-libroastty-completion-and-mac-app/README.md`, and this experiment
+file.
+
+## Conclusion
+
+The next upstream window scalar block is now represented faithfully at the
+config parser/formatter layer. Runtime vsync, inheritance, and native app title
+font application remain separate work.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb416-456a-73a1-9596-35847b44e365` returned
+**Approved** with no findings.
+
+The reviewer independently verified `cargo fmt --check`, `git diff --check`,
+`prettier --check`, `cargo test -p roastty window_scalar_config`,
+`cargo test -p roastty config_format_config`, and full `cargo test -p roastty`.
+The reviewer also confirmed that `HEAD` was still the Exp72 plan commit and that
+only the three expected files were modified.

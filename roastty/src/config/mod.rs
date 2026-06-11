@@ -134,6 +134,16 @@ pub(crate) struct Config {
     pub window_padding_balance: WindowPaddingBalance,
     /// `window-padding-color`.
     pub window_padding_color: WindowPaddingColor,
+    /// `window-vsync`.
+    pub window_vsync: bool,
+    /// `window-inherit-working-directory`.
+    pub window_inherit_working_directory: bool,
+    /// `tab-inherit-working-directory`.
+    pub tab_inherit_working_directory: bool,
+    /// `split-inherit-working-directory`.
+    pub split_inherit_working_directory: bool,
+    /// `window-inherit-font-size`.
+    pub window_inherit_font_size: bool,
     /// `background-opacity`.
     pub background_opacity: f64,
     /// `background-opacity-cells`.
@@ -178,6 +188,8 @@ pub(crate) struct Config {
     pub window_subtitle: WindowSubtitle,
     /// `window-decoration`.
     pub window_decoration: WindowDecoration,
+    /// `window-title-font-family`.
+    pub window_title_font_family: Option<String>,
     /// `window-theme`.
     pub window_theme: WindowTheme,
     /// `window-position-x`.
@@ -322,6 +334,11 @@ impl Default for Config {
             },
             window_padding_balance: WindowPaddingBalance::False,
             window_padding_color: WindowPaddingColor::Background,
+            window_vsync: true,
+            window_inherit_working_directory: true,
+            tab_inherit_working_directory: true,
+            split_inherit_working_directory: true,
+            window_inherit_font_size: true,
             background_opacity: 1.0,
             background_opacity_cells: false,
             bg_image_opacity: 1.0,
@@ -344,6 +361,7 @@ impl Default for Config {
             maximize: false,
             window_subtitle: WindowSubtitle::False,
             window_decoration: WindowDecoration::Auto,
+            window_title_font_family: None,
             window_theme: WindowTheme::Auto,
             window_position_x: None,
             window_position_y: None,
@@ -541,10 +559,23 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("window-padding-balance", out));
         self.window_padding_color
             .format_entry(&mut EntryFormatter::new("window-padding-color", out));
-        self.window_subtitle
-            .format_entry(&mut EntryFormatter::new("window-subtitle", out));
+        EntryFormatter::new("window-vsync", out).entry_bool(self.window_vsync);
+        EntryFormatter::new("window-inherit-working-directory", out)
+            .entry_bool(self.window_inherit_working_directory);
+        EntryFormatter::new("tab-inherit-working-directory", out)
+            .entry_bool(self.tab_inherit_working_directory);
+        EntryFormatter::new("split-inherit-working-directory", out)
+            .entry_bool(self.split_inherit_working_directory);
+        EntryFormatter::new("window-inherit-font-size", out)
+            .entry_bool(self.window_inherit_font_size);
         self.window_decoration
             .format_entry(&mut EntryFormatter::new("window-decoration", out));
+        EntryFormatter::new("window-title-font-family", out)
+            .entry_optional(self.window_title_font_family.clone(), |v, f| {
+                f.entry_str(&v)
+            });
+        self.window_subtitle
+            .format_entry(&mut EntryFormatter::new("window-subtitle", out));
         self.window_theme
             .format_entry(&mut EntryFormatter::new("window-theme", out));
         EntryFormatter::new("window-position-x", out)
@@ -768,6 +799,23 @@ impl Config {
                     WindowPaddingColor::from_keyword,
                 )?
             }
+            "window-vsync" => self.window_vsync = set_bool_field(value, default.window_vsync)?,
+            "window-inherit-working-directory" => {
+                self.window_inherit_working_directory =
+                    set_bool_field(value, default.window_inherit_working_directory)?
+            }
+            "tab-inherit-working-directory" => {
+                self.tab_inherit_working_directory =
+                    set_bool_field(value, default.tab_inherit_working_directory)?
+            }
+            "split-inherit-working-directory" => {
+                self.split_inherit_working_directory =
+                    set_bool_field(value, default.split_inherit_working_directory)?
+            }
+            "window-inherit-font-size" => {
+                self.window_inherit_font_size =
+                    set_bool_field(value, default.window_inherit_font_size)?
+            }
             "background-image-position" => {
                 self.bg_image_position = set_enum_field(
                     value,
@@ -800,6 +848,13 @@ impl Config {
             }
             "window-decoration" => {
                 self.window_decoration = WindowDecoration::parse_cli(value)?;
+            }
+            "window-title-font-family" => {
+                self.window_title_font_family = set_optional_value_field(
+                    value,
+                    default.window_title_font_family,
+                    parse_string_field,
+                )?
             }
             "window-theme" => {
                 self.window_theme =
@@ -5524,6 +5579,11 @@ mod tests {
         );
         assert_eq!(d.window_padding_balance, WindowPaddingBalance::False);
         assert_eq!(d.window_padding_color, WindowPaddingColor::Background);
+        assert!(d.window_vsync);
+        assert!(d.window_inherit_working_directory);
+        assert!(d.tab_inherit_working_directory);
+        assert!(d.split_inherit_working_directory);
+        assert!(d.window_inherit_font_size);
         assert_eq!(d.background_opacity, 1.0);
         // Opacity options (Experiment 848): upstream defaults false / 0.5.
         assert!(!d.background_opacity_cells);
@@ -5573,6 +5633,7 @@ mod tests {
         assert!(!d.maximize);
         assert_eq!(d.window_subtitle, WindowSubtitle::False);
         assert_eq!(d.window_decoration, WindowDecoration::Auto);
+        assert_eq!(d.window_title_font_family, None);
         assert_eq!(d.window_theme, WindowTheme::Auto);
         assert_eq!(d.window_position_x, None);
         assert_eq!(d.window_position_y, None);
@@ -9435,8 +9496,14 @@ mod tests {
                 "window-padding-y",
                 "window-padding-balance",
                 "window-padding-color",
-                "window-subtitle",
+                "window-vsync",
+                "window-inherit-working-directory",
+                "tab-inherit-working-directory",
+                "split-inherit-working-directory",
+                "window-inherit-font-size",
                 "window-decoration",
+                "window-title-font-family",
+                "window-subtitle",
                 "window-theme",
                 "window-position-x",
                 "window-position-y",
@@ -11591,6 +11658,117 @@ mod tests {
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.window_padding_balance, WindowPaddingBalance::True);
+    }
+
+    #[test]
+    fn window_scalar_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        macro_rules! check_bool_field {
+            ($key:literal, $field:ident) => {{
+                let mut cfg = Config::default();
+                assert!(cfg.$field, "{} default", $key);
+                assert_eq!(line(&cfg, $key), format!("{} = true", $key));
+
+                cfg.set($key, Some("false")).unwrap();
+                assert!(!cfg.$field, "{} parses false", $key);
+                assert_eq!(line(&cfg, $key), format!("{} = false", $key));
+
+                cfg.set($key, None).unwrap();
+                assert!(cfg.$field, "{} bare flag parses true", $key);
+
+                cfg.$field = false;
+                cfg.set($key, Some("")).unwrap();
+                assert!(cfg.$field, "{} empty resets to default", $key);
+
+                assert_eq!(
+                    cfg.set($key, Some("maybe")),
+                    Err(ConfigSetError::InvalidValue),
+                    "{} rejects invalid bool",
+                    $key
+                );
+            }};
+        }
+
+        check_bool_field!("window-vsync", window_vsync);
+        check_bool_field!(
+            "window-inherit-working-directory",
+            window_inherit_working_directory
+        );
+        check_bool_field!(
+            "tab-inherit-working-directory",
+            tab_inherit_working_directory
+        );
+        check_bool_field!(
+            "split-inherit-working-directory",
+            split_inherit_working_directory
+        );
+        check_bool_field!("window-inherit-font-size", window_inherit_font_size);
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_title_font_family, None);
+        assert_eq!(
+            line(&cfg, "window-title-font-family"),
+            "window-title-font-family = "
+        );
+        cfg.set("window-title-font-family", Some("SF Pro")).unwrap();
+        assert_eq!(cfg.window_title_font_family.as_deref(), Some("SF Pro"));
+        assert_eq!(
+            line(&cfg, "window-title-font-family"),
+            "window-title-font-family = SF Pro"
+        );
+        cfg.set("window-title-font-family", Some("")).unwrap();
+        assert_eq!(cfg.window_title_font_family, None);
+        assert_eq!(
+            cfg.set("window-title-font-family", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-title-font-family", Some("bad\0font")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "window-vsync = false\n\
+             window-vsync = maybe\n\
+             window-title-font-family = System Font\n\
+             window-title-font-family = bad\0font\n\
+             tab-inherit-working-directory = false\n",
+        );
+        assert!(!cfg.window_vsync);
+        assert_eq!(cfg.window_title_font_family.as_deref(), Some("System Font"));
+        assert!(!cfg.tab_inherit_working_directory);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "window-vsync".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "window-title-font-family".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert!(!cloned.window_vsync);
+        assert_eq!(
+            cloned.window_title_font_family.as_deref(),
+            Some("System Font")
+        );
+        assert!(!cloned.tab_inherit_working_directory);
     }
 
     #[test]

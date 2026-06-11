@@ -170,6 +170,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   `window-padding-x` and `window-padding-y` through `Config` with upstream
   `WindowPadding` defaults and diagnostics; Exp 71 adds `window-padding-balance`
   as a config enum. Renderer geometry remains later work.
+- **Window inheritance/title scalar config is parser/formatter-only.** Exp 72
+  wires `window-vsync`, window/tab/split working-directory inheritance,
+  `window-inherit-font-size`, and `window-title-font-family`; runtime behavior
+  remains later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -801,7 +805,7 @@ stays unaltered except for the rename).
 - [Experiment 71: Phase F — window padding balance config](71-window-padding-balance-config.md)
   — **Pass**
 - [Experiment 72: Phase F — window scalar config](72-window-scalar-config.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 
