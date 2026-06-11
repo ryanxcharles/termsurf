@@ -50,6 +50,10 @@ pub(crate) struct Config {
     pub quick_terminal_position: QuickTerminalPosition,
     /// `quick-terminal-size`.
     pub quick_terminal_size: QuickTerminalSize,
+    /// `gtk-quick-terminal-layer`.
+    pub gtk_quick_terminal_layer: QuickTerminalLayer,
+    /// `gtk-quick-terminal-namespace`.
+    pub gtk_quick_terminal_namespace: String,
     /// `copy-on-select`.
     pub copy_on_select: CopyOnSelect,
     /// `selection-clear-on-typing`.
@@ -312,6 +316,8 @@ impl Default for Config {
             },
             quick_terminal_position: QuickTerminalPosition::Top,
             quick_terminal_size: QuickTerminalSize::default(),
+            gtk_quick_terminal_layer: QuickTerminalLayer::Top,
+            gtk_quick_terminal_namespace: "ghostty-quick-terminal".to_string(),
             copy_on_select: CopyOnSelect::True,
             selection_clear_on_typing: true,
             selection_clear_on_copy: false,
@@ -487,6 +493,10 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("quick-terminal-position", out));
         self.quick_terminal_size
             .format_entry(&mut EntryFormatter::new("quick-terminal-size", out));
+        self.gtk_quick_terminal_layer
+            .format_entry(&mut EntryFormatter::new("gtk-quick-terminal-layer", out));
+        EntryFormatter::new("gtk-quick-terminal-namespace", out)
+            .entry_str(&self.gtk_quick_terminal_namespace);
         self.font_family
             .format_entry(&mut EntryFormatter::new("font-family", out));
         self.font_family_bold
@@ -768,6 +778,20 @@ impl Config {
                     value,
                     default.quick_terminal_size,
                     QuickTerminalSize::parse_cli,
+                )?
+            }
+            "gtk-quick-terminal-layer" => {
+                self.gtk_quick_terminal_layer = set_enum_field(
+                    value,
+                    default.gtk_quick_terminal_layer,
+                    QuickTerminalLayer::from_keyword,
+                )?
+            }
+            "gtk-quick-terminal-namespace" => {
+                self.gtk_quick_terminal_namespace = set_value_field(
+                    value,
+                    default.gtk_quick_terminal_namespace,
+                    parse_string_field,
                 )?
             }
             "copy-on-select" => {
@@ -3425,6 +3449,44 @@ impl QuickTerminalSize {
     }
 }
 
+/// The `gtk-quick-terminal-layer` config (upstream `QuickTerminalLayer`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuickTerminalLayer {
+    Overlay,
+    Top,
+    Bottom,
+    Background,
+}
+
+impl QuickTerminalLayer {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            QuickTerminalLayer::Overlay => "overlay",
+            QuickTerminalLayer::Top => "top",
+            QuickTerminalLayer::Bottom => "bottom",
+            QuickTerminalLayer::Background => "background",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "overlay" => Some(QuickTerminalLayer::Overlay),
+            "top" => Some(QuickTerminalLayer::Top),
+            "bottom" => Some(QuickTerminalLayer::Bottom),
+            "background" => Some(QuickTerminalLayer::Background),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
 /// The `resize-overlay` config (upstream `ResizeOverlay`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResizeOverlay {
@@ -5855,7 +5917,7 @@ mod tests {
         MagicParseError, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
-        QuickTerminalDimensions, QuickTerminalPosition, QuickTerminalSize,
+        QuickTerminalDimensions, QuickTerminalLayer, QuickTerminalPosition, QuickTerminalSize,
         QuickTerminalSizeParseError, QuickTerminalSizeValue, RepeatableClipboardCodepointMap,
         RepeatableCodepointMap, RepeatableConfigPath, RepeatableConfigPathParseError,
         RepeatableString, RepeatableStringParseError, ResizeOverlay, ResizeOverlayPosition,
@@ -10051,6 +10113,8 @@ mod tests {
                 "quit-after-last-window-closed-delay",
                 "undo-timeout",
                 "quick-terminal-position",
+                "gtk-quick-terminal-layer",
+                "gtk-quick-terminal-namespace",
                 "font-family",
                 "font-family-bold",
                 "font-family-italic",
@@ -11272,7 +11336,9 @@ mod tests {
             .position(|key| *key == "quick-terminal-position")
             .unwrap();
         assert_eq!(keys[position_index + 1], "quick-terminal-size");
-        assert_eq!(keys[position_index + 2], "font-family");
+        assert_eq!(keys[position_index + 2], "gtk-quick-terminal-layer");
+        assert_eq!(keys[position_index + 3], "gtk-quick-terminal-namespace");
+        assert_eq!(keys[position_index + 4], "font-family");
 
         cfg.set("quick-terminal-size", Some("")).unwrap();
         assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
@@ -11324,6 +11390,128 @@ mod tests {
                 secondary: None,
             }
         );
+    }
+
+    #[test]
+    fn gtk_quick_terminal_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.gtk_quick_terminal_layer, QuickTerminalLayer::Top);
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "ghostty-quick-terminal");
+        assert_eq!(
+            line(&cfg, "gtk-quick-terminal-layer"),
+            "gtk-quick-terminal-layer = top"
+        );
+        assert_eq!(
+            line(&cfg, "gtk-quick-terminal-namespace"),
+            "gtk-quick-terminal-namespace = ghostty-quick-terminal"
+        );
+
+        for (keyword, expected) in [
+            ("overlay", QuickTerminalLayer::Overlay),
+            ("top", QuickTerminalLayer::Top),
+            ("bottom", QuickTerminalLayer::Bottom),
+            ("background", QuickTerminalLayer::Background),
+        ] {
+            cfg.set("gtk-quick-terminal-layer", Some(keyword)).unwrap();
+            assert_eq!(cfg.gtk_quick_terminal_layer, expected);
+            assert_eq!(
+                line(&cfg, "gtk-quick-terminal-layer"),
+                format!("gtk-quick-terminal-layer = {keyword}")
+            );
+        }
+
+        cfg.set("gtk-quick-terminal-layer", Some("")).unwrap();
+        assert_eq!(cfg.gtk_quick_terminal_layer, QuickTerminalLayer::Top);
+        assert_eq!(
+            line(&cfg, "gtk-quick-terminal-layer"),
+            "gtk-quick-terminal-layer = top"
+        );
+        assert_eq!(
+            cfg.set("gtk-quick-terminal-layer", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("gtk-quick-terminal-layer", Some("floating")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("gtk-quick-terminal-namespace", Some("roastty-panel"))
+            .unwrap();
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "roastty-panel");
+        assert_eq!(
+            line(&cfg, "gtk-quick-terminal-namespace"),
+            "gtk-quick-terminal-namespace = roastty-panel"
+        );
+
+        cfg.set("gtk-quick-terminal-namespace", Some("")).unwrap();
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "ghostty-quick-terminal");
+        assert_eq!(
+            line(&cfg, "gtk-quick-terminal-namespace"),
+            "gtk-quick-terminal-namespace = ghostty-quick-terminal"
+        );
+        assert_eq!(
+            cfg.set("gtk-quick-terminal-namespace", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("gtk-quick-terminal-namespace", Some("bad\0namespace")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let keys: Vec<&str> = out
+            .lines()
+            .map(|l| l.split(" = ").next().unwrap())
+            .collect();
+        let size_index = keys
+            .iter()
+            .position(|key| *key == "quick-terminal-size")
+            .unwrap();
+        assert_eq!(keys[size_index + 1], "gtk-quick-terminal-layer");
+        assert_eq!(keys[size_index + 2], "gtk-quick-terminal-namespace");
+        assert_eq!(keys[size_index + 3], "font-family");
+
+        let diagnostics = cfg.load_str(
+            "gtk-quick-terminal-layer = bottom\n\
+             gtk-quick-terminal-layer = floating\n\
+             gtk-quick-terminal-namespace = roastty-quick\n\
+             gtk-quick-terminal-namespace = bad\0namespace\n\
+             quick-terminal-position = right\n",
+        );
+        assert_eq!(cfg.gtk_quick_terminal_layer, QuickTerminalLayer::Bottom);
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "roastty-quick");
+        assert_eq!(cfg.quick_terminal_position, QuickTerminalPosition::Right);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "gtk-quick-terminal-layer".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "gtk-quick-terminal-namespace".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.gtk_quick_terminal_layer, QuickTerminalLayer::Bottom);
+        assert_eq!(cloned.gtk_quick_terminal_namespace, "roastty-quick");
     }
 
     #[test]
@@ -13743,6 +13931,16 @@ mod tests {
             assert_eq!(WindowShowTabBar::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(WindowShowTabBar::from_keyword("nope"), None);
+
+        for v in [
+            QuickTerminalLayer::Overlay,
+            QuickTerminalLayer::Top,
+            QuickTerminalLayer::Bottom,
+            QuickTerminalLayer::Background,
+        ] {
+            assert_eq!(QuickTerminalLayer::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(QuickTerminalLayer::from_keyword("floating"), None);
 
         for v in [
             ResizeOverlay::Always,

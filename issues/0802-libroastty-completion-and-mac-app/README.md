@@ -190,6 +190,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
 - **Quick-terminal size config is parser/formatter/calculation-only.** Exp 81
   wires `quick-terminal-size` as the upstream percentage/pixel struct; runtime
   window sizing and the app C ABI accessor remain later work.
+- **GTK quick-terminal config is parser/formatter-only.** Exp 82 wires
+  `gtk-quick-terminal-layer` and `gtk-quick-terminal-namespace`; empty values
+  reset to upstream defaults before enum/string parsing, and GTK layer-shell
+  runtime behavior remains later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -841,7 +845,7 @@ stays unaltered except for the rename).
 - [Experiment 81: Phase F — quick terminal size config](81-quick-terminal-size-config.md)
   — **Pass**
 - [Experiment 82: Phase F — GTK quick terminal config](82-gtk-quick-terminal-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

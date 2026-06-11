@@ -65,7 +65,9 @@ Out of scope:
   - `cargo test -p roastty config_format_config`
 - Add concrete test cases proving:
   - defaults are `QuickTerminalLayer::Top` and `"ghostty-quick-terminal"`;
-  - default `format_config` emits both keys after `quick-terminal-size` and
+  - default `format_config` emits both keys after `quick-terminal-position` and
+    before `font-family`, because default `quick-terminal-size` emits no entry;
+  - when `quick-terminal-size` is present, both GTK keys emit after it and
     before `font-family`;
   - all four layer keywords parse and format;
   - an empty layer value resets to `top`;
@@ -111,3 +113,60 @@ Codex re-reviewer `019eb489-0a39-7a23-8bb3-c8e874224a9a` returned **Approved**
 with no findings. The reviewer confirmed the prior finding is resolved, the
 design matches upstream's empty-reset branch before enum/string parsing, and the
 README links Experiment 82 as `Designed`.
+
+## Result
+
+**Result:** Pass
+
+Implemented `gtk-quick-terminal-layer` in `roastty/src/config/mod.rs` as
+`QuickTerminalLayer::{Overlay, Top, Bottom, Background}` with upstream default
+`Top`. The enum now parses exact upstream keywords, formats through the existing
+enum formatter path, resets an empty value to `top`, and reports missing or
+unknown values through the expected `ConfigSetError` variants.
+
+Implemented `gtk-quick-terminal-namespace` as a required `String` field with
+upstream default `"ghostty-quick-terminal"`. The setter uses the non-optional
+field path, so an empty value resets to the default before string parsing,
+matching upstream's generic empty-value rule. Missing values report
+`ValueRequired`, and embedded NUL bytes report `InvalidValue`.
+
+The plan's initial order wording was refined during implementation:
+`quick-terminal-size` emits no config entry at its default, so default
+`format_config` places the GTK quick-terminal keys after
+`quick-terminal-position`. When `quick-terminal-size` is present, the GTK keys
+follow it and precede `font-family`, preserving upstream declaration order among
+emitted keys.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty gtk_quick_terminal`
+- `cargo test -p roastty config_format_config`
+- `cargo test -p roastty`
+  - 4520 unit tests passed
+  - ABI harness passed with the existing 10 enum-conversion warnings
+  - doc tests passed
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+The GTK quick-terminal config surface now matches upstream defaults, enum/string
+parser behavior, empty-reset behavior, formatter output, and diagnostics for
+this slice. GTK/Wayland layer-shell runtime behavior and app C ABI accessors
+remain later work. The next upstream quick-terminal fields are
+`quick-terminal-screen`, `quick-terminal-animation-duration`, and
+`quick-terminal-autohide`.
+
+## Completion Review
+
+Codex adversarial reviewer `019eb492-8d96-7873-9b03-68733cbc1086` returned
+**Approved** with no required findings.
+
+The reviewer performed read-only verification that `git diff --check` passed,
+`cargo fmt --check` passed, `cargo test -p roastty gtk_quick_terminal` passed,
+`cargo test -p roastty config_format_config` passed, and `cargo test -p roastty`
+passed with 4520 unit tests plus the ABI harness and doc tests. The reviewer
+confirmed the implementation matches the reviewed scope: upstream defaults, enum
+keywords, empty-value resets, missing/invalid diagnostics, formatter ordering
+nuance, docs/result status, and no runtime behavior or C ABI accessor work.
