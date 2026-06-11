@@ -897,6 +897,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 89: Phase F — app notifications config](89-app-notifications-config.md)
   — **Pass**
+- [Experiment 90: Phase F — macOS icon config](90-macos-icon-config.md) —
+  **Designed**
 
 ## Process
 
