@@ -830,6 +830,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 79: Phase F — undo timeout config](79-undo-timeout-config.md) —
   **Pass**
+- [Experiment 80: Phase F — quick terminal position config](80-quick-terminal-position-config.md)
+  — **Designed**
 
 ## Process
 
