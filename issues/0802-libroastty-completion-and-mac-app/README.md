@@ -881,6 +881,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 87: Phase F — custom shader config](87-custom-shader-config.md) —
   **Pass**
+- [Experiment 88: Phase F — bell features config](88-bell-features-config.md) —
+  **Designed**
 
 ## Process
 
