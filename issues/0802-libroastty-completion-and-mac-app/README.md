@@ -812,7 +812,7 @@ stays unaltered except for the rename).
 - [Experiment 73: Phase F — window size and step resize config](73-window-size-step-config.md)
   — **Pass**
 - [Experiment 74: Phase F — window tab and titlebar config](74-window-tab-titlebar-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

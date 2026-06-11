@@ -204,6 +204,14 @@ pub(crate) struct Config {
     pub window_save_state: WindowSaveState,
     /// `window-step-resize`.
     pub window_step_resize: bool,
+    /// `window-new-tab-position`.
+    pub window_new_tab_position: WindowNewTabPosition,
+    /// `window-show-tab-bar`.
+    pub window_show_tab_bar: WindowShowTabBar,
+    /// `window-titlebar-background`.
+    pub window_titlebar_background: Option<Color>,
+    /// `window-titlebar-foreground`.
+    pub window_titlebar_foreground: Option<Color>,
     /// `fullscreen`.
     pub fullscreen: Fullscreen,
     /// `title`.
@@ -375,6 +383,10 @@ impl Default for Config {
             window_position_y: None,
             window_save_state: WindowSaveState::Default,
             window_step_resize: false,
+            window_new_tab_position: WindowNewTabPosition::Current,
+            window_show_tab_bar: WindowShowTabBar::Auto,
+            window_titlebar_background: None,
+            window_titlebar_foreground: None,
             fullscreen: Fullscreen::False,
             title: None,
             class: None,
@@ -598,6 +610,14 @@ impl Config {
         self.window_save_state
             .format_entry(&mut EntryFormatter::new("window-save-state", out));
         EntryFormatter::new("window-step-resize", out).entry_bool(self.window_step_resize);
+        self.window_new_tab_position
+            .format_entry(&mut EntryFormatter::new("window-new-tab-position", out));
+        self.window_show_tab_bar
+            .format_entry(&mut EntryFormatter::new("window-show-tab-bar", out));
+        EntryFormatter::new("window-titlebar-background", out)
+            .entry_optional(self.window_titlebar_background, |v, f| v.format_entry(f));
+        EntryFormatter::new("window-titlebar-foreground", out)
+            .entry_optional(self.window_titlebar_foreground, |v, f| v.format_entry(f));
         self.clipboard_read
             .format_entry(&mut EntryFormatter::new("clipboard-read", out));
         self.clipboard_write
@@ -897,6 +917,41 @@ impl Config {
             }
             "window-step-resize" => {
                 self.window_step_resize = set_bool_field(value, default.window_step_resize)?
+            }
+            "window-new-tab-position" => {
+                self.window_new_tab_position = set_enum_field(
+                    value,
+                    default.window_new_tab_position,
+                    WindowNewTabPosition::from_keyword,
+                )?
+            }
+            "window-show-tab-bar" => {
+                self.window_show_tab_bar = set_enum_field(
+                    value,
+                    default.window_show_tab_bar,
+                    WindowShowTabBar::from_keyword,
+                )?
+            }
+            "window-titlebar-background" => {
+                self.window_titlebar_background = set_optional_value_field(
+                    value,
+                    default.window_titlebar_background,
+                    Color::parse_cli,
+                )?
+            }
+            "window-titlebar-foreground" => {
+                self.window_titlebar_foreground = set_optional_value_field(
+                    value,
+                    default.window_titlebar_foreground,
+                    Color::parse_cli,
+                )?
+            }
+            "gtk-tabs-location" => {
+                if value == Some("hidden") {
+                    self.window_show_tab_bar = WindowShowTabBar::Never;
+                } else {
+                    return Err(ConfigSetError::UnknownField);
+                }
             }
             "fullscreen" => {
                 self.fullscreen =
@@ -2973,6 +3028,73 @@ impl WindowSaveState {
             "default" => Some(WindowSaveState::Default),
             "never" => Some(WindowSaveState::Never),
             "always" => Some(WindowSaveState::Always),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `window-new-tab-position` config (upstream `WindowNewTabPosition`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowNewTabPosition {
+    Current,
+    End,
+}
+
+impl WindowNewTabPosition {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowNewTabPosition::Current => "current",
+            WindowNewTabPosition::End => "end",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "current" => Some(WindowNewTabPosition::Current),
+            "end" => Some(WindowNewTabPosition::End),
+            _ => None,
+        }
+    }
+
+    /// Format this value as a config entry (upstream's generic enum branch).
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_str(self.keyword());
+    }
+}
+
+/// The `window-show-tab-bar` config (upstream `WindowShowTabBar`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WindowShowTabBar {
+    Always,
+    Auto,
+    Never,
+}
+
+impl WindowShowTabBar {
+    /// The config keyword (upstream tag name).
+    pub(crate) fn keyword(self) -> &'static str {
+        match self {
+            WindowShowTabBar::Always => "always",
+            WindowShowTabBar::Auto => "auto",
+            WindowShowTabBar::Never => "never",
+        }
+    }
+
+    /// Parse the config keyword (upstream `std.meta.stringToEnum`): an exact tag
+    /// match, else `None`.
+    pub(crate) fn from_keyword(value: &str) -> Option<Self> {
+        match value {
+            "always" => Some(WindowShowTabBar::Always),
+            "auto" => Some(WindowShowTabBar::Auto),
+            "never" => Some(WindowShowTabBar::Never),
             _ => None,
         }
     }
@@ -5336,10 +5458,10 @@ mod tests {
         RightClickAction, ScrollToBottom, Scrollbar, SelectionWordChars,
         SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
         SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
-        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowPadding,
-        WindowPaddingBalance, WindowPaddingColor, WindowPaddingParseError, WindowSaveState,
-        WindowSubtitle, WindowTheme, WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS,
-        NS_PER_S,
+        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowNewTabPosition,
+        WindowPadding, WindowPaddingBalance, WindowPaddingColor, WindowPaddingParseError,
+        WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme, WorkingDirectory,
+        WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
     };
     use crate::terminal::color::Rgb;
     use crate::terminal::cursor;
@@ -8540,6 +8662,37 @@ mod tests {
     }
 
     #[test]
+    fn window_tab_keywords_and_format_entry() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+
+        for (variant, kw) in [
+            (WindowNewTabPosition::Current, "current"),
+            (WindowNewTabPosition::End, "end"),
+        ] {
+            assert_eq!(variant.keyword(), kw);
+            assert_eq!(WindowNewTabPosition::from_keyword(kw), Some(variant));
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        assert_eq!(WindowNewTabPosition::from_keyword("nope"), None);
+
+        for (variant, kw) in [
+            (WindowShowTabBar::Always, "always"),
+            (WindowShowTabBar::Auto, "auto"),
+            (WindowShowTabBar::Never, "never"),
+        ] {
+            assert_eq!(variant.keyword(), kw);
+            assert_eq!(WindowShowTabBar::from_keyword(kw), Some(variant));
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {}\n", kw));
+        }
+        assert_eq!(WindowShowTabBar::from_keyword("nope"), None);
+    }
+
+    #[test]
     fn theme_format_entry() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
@@ -9544,6 +9697,10 @@ mod tests {
                 "window-position-y",
                 "window-save-state",
                 "window-step-resize",
+                "window-new-tab-position",
+                "window-show-tab-bar",
+                "window-titlebar-background",
+                "window-titlebar-foreground",
                 "clipboard-read",
                 "clipboard-write",
                 "clipboard-trim-trailing-spaces",
@@ -11932,6 +12089,187 @@ mod tests {
     }
 
     #[test]
+    fn window_tab_titlebar_config_parse_format_compat_and_diagnose() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_new_tab_position, WindowNewTabPosition::Current);
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Auto);
+        assert_eq!(cfg.window_titlebar_background, None);
+        assert_eq!(cfg.window_titlebar_foreground, None);
+        assert_eq!(
+            line(&cfg, "window-new-tab-position"),
+            "window-new-tab-position = current"
+        );
+        assert_eq!(
+            line(&cfg, "window-show-tab-bar"),
+            "window-show-tab-bar = auto"
+        );
+        assert_eq!(
+            line(&cfg, "window-titlebar-background"),
+            "window-titlebar-background = "
+        );
+        assert_eq!(
+            line(&cfg, "window-titlebar-foreground"),
+            "window-titlebar-foreground = "
+        );
+
+        cfg.set("window-new-tab-position", Some("end")).unwrap();
+        cfg.set("window-show-tab-bar", Some("always")).unwrap();
+        assert_eq!(cfg.window_new_tab_position, WindowNewTabPosition::End);
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Always);
+        assert_eq!(
+            line(&cfg, "window-new-tab-position"),
+            "window-new-tab-position = end"
+        );
+        assert_eq!(
+            line(&cfg, "window-show-tab-bar"),
+            "window-show-tab-bar = always"
+        );
+
+        cfg.set("window-new-tab-position", Some("")).unwrap();
+        cfg.set("window-show-tab-bar", Some("")).unwrap();
+        assert_eq!(cfg.window_new_tab_position, WindowNewTabPosition::Current);
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Auto);
+        for key in ["window-new-tab-position", "window-show-tab-bar"] {
+            assert_eq!(cfg.set(key, None), Err(ConfigSetError::ValueRequired));
+            assert_eq!(
+                cfg.set(key, Some("nope")),
+                Err(ConfigSetError::InvalidValue)
+            );
+        }
+
+        cfg.set("window-titlebar-background", Some("#010203"))
+            .unwrap();
+        cfg.set("window-titlebar-foreground", Some("ForestGreen"))
+            .unwrap();
+        assert_eq!(
+            cfg.window_titlebar_background,
+            Some(Color { r: 1, g: 2, b: 3 })
+        );
+        assert_eq!(
+            cfg.window_titlebar_foreground,
+            Some(Color {
+                r: 0x22,
+                g: 0x8b,
+                b: 0x22,
+            })
+        );
+        assert_eq!(
+            line(&cfg, "window-titlebar-background"),
+            "window-titlebar-background = #010203"
+        );
+        assert_eq!(
+            line(&cfg, "window-titlebar-foreground"),
+            "window-titlebar-foreground = #228b22"
+        );
+
+        cfg.set("window-titlebar-background", Some("")).unwrap();
+        cfg.set("window-titlebar-foreground", Some("")).unwrap();
+        assert_eq!(cfg.window_titlebar_background, None);
+        assert_eq!(cfg.window_titlebar_foreground, None);
+        for key in ["window-titlebar-background", "window-titlebar-foreground"] {
+            assert_eq!(cfg.set(key, None), Err(ConfigSetError::ValueRequired));
+            assert_eq!(
+                cfg.set(key, Some("nosuchcolor")),
+                Err(ConfigSetError::InvalidValue)
+            );
+        }
+
+        cfg.set("gtk-tabs-location", Some("hidden")).unwrap();
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Never);
+        assert_eq!(
+            cfg.set("gtk-tabs-location", Some("top")),
+            Err(ConfigSetError::UnknownField)
+        );
+        assert_eq!(
+            cfg.set("gtk-tabs-location", None),
+            Err(ConfigSetError::UnknownField)
+        );
+
+        let diagnostics = cfg.load_str(
+            "window-new-tab-position = end\n\
+             window-new-tab-position = middle\n\
+             window-show-tab-bar = always\n\
+             window-show-tab-bar = sometimes\n\
+             window-titlebar-background = #0A0B0C\n\
+             window-titlebar-background = nosuchcolor\n\
+             window-titlebar-foreground = black\n\
+             window-titlebar-foreground = also-bad\n\
+             gtk-tabs-location = hidden\n\
+             gtk-tabs-location = top\n",
+        );
+        assert_eq!(cfg.window_new_tab_position, WindowNewTabPosition::End);
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Never);
+        assert_eq!(
+            cfg.window_titlebar_background,
+            Some(Color {
+                r: 0x0a,
+                g: 0x0b,
+                b: 0x0c,
+            })
+        );
+        assert_eq!(
+            cfg.window_titlebar_foreground,
+            Some(Color { r: 0, g: 0, b: 0 })
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "window-new-tab-position".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "window-show-tab-bar".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 6,
+                    key: "window-titlebar-background".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 8,
+                    key: "window-titlebar-foreground".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 10,
+                    key: "gtk-tabs-location".to_string(),
+                    error: ConfigSetError::UnknownField,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.window_new_tab_position, WindowNewTabPosition::End);
+        assert_eq!(cloned.window_show_tab_bar, WindowShowTabBar::Never);
+        assert_eq!(
+            cloned.window_titlebar_background,
+            Some(Color {
+                r: 0x0a,
+                g: 0x0b,
+                b: 0x0c,
+            })
+        );
+        assert_eq!(
+            cloned.window_titlebar_foreground,
+            Some(Color { r: 0, g: 0, b: 0 })
+        );
+    }
+
+    #[test]
     fn config_window_position_routes_optional_i16_fields() {
         let line = |cfg: &Config, key: &str| -> String {
             let mut out = String::new();
@@ -12166,6 +12504,20 @@ mod tests {
             assert_eq!(WindowPaddingColor::from_keyword(v.keyword()), Some(v));
         }
         assert_eq!(WindowPaddingColor::from_keyword("nope"), None);
+
+        for v in [WindowNewTabPosition::Current, WindowNewTabPosition::End] {
+            assert_eq!(WindowNewTabPosition::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(WindowNewTabPosition::from_keyword("nope"), None);
+
+        for v in [
+            WindowShowTabBar::Always,
+            WindowShowTabBar::Auto,
+            WindowShowTabBar::Never,
+        ] {
+            assert_eq!(WindowShowTabBar::from_keyword(v.keyword()), Some(v));
+        }
+        assert_eq!(WindowShowTabBar::from_keyword("nope"), None);
 
         for v in [
             Fullscreen::False,
