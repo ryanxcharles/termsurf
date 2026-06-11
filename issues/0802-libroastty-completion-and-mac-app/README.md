@@ -931,6 +931,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 93: Phase F — GTK chrome config](93-gtk-chrome-config.md) —
   **Pass**
+- [Experiment 94: Phase F — GTK CSS, notifications, and progress config](94-gtk-css-notifications-progress-config.md)
+  — **Designed**
 
 ## Process
 
