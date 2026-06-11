@@ -921,6 +921,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 92: Phase F — Linux cgroup config](92-linux-cgroup-config.md) —
   **Pass**
+- [Experiment 93: Phase F — GTK chrome config](93-gtk-chrome-config.md) —
+  **Designed**
 
 ## Process
 
