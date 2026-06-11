@@ -1015,6 +1015,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 105: Phase F — quit-delay finalize warning](105-quit-delay-finalize-warning.md)
   — **Pass**
+- [Experiment 106: Phase F — link-url finalize](106-link-url-finalize.md) —
+  **Designed**
 
 ## Process
 
