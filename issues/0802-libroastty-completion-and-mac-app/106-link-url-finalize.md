@@ -99,3 +99,61 @@ Fix:
 Re-review verdict: **APPROVED**
 
 Remaining findings: None.
+
+## Result
+
+**Result:** Pass
+
+Implemented the config-owned default URL matcher and `link-url` finalization
+slice.
+
+- Added config-owned repeatable link storage using Roastty's existing
+  `input::link::Link` type.
+- Added the pinned upstream URL/path regex from
+  `vendor/ghostty/src/config/url.zig` as local config data for the default
+  matcher.
+- Initialized `Config::default()` with one default URL matcher using
+  `Action::Open` and `HoverMods(ctrl_or_super(Mods::new()))`.
+- Added finalize-time removal of the first/default matcher when
+  `link-url = false`.
+- Preserved the matcher when `link-url = true`.
+- Kept user `link = ...` parsing/formatting, regex compilation/matching,
+  renderer link ranges, link preview UI, open-url dispatch, app C ABI exposure,
+  key-remap finalization, and broader runtime link highlighting out of scope.
+
+Verification passed:
+
+1. `cargo test -p roastty config_link_url_finalize`
+2. `cargo test -p roastty link_url_maximize_config`
+3. `cargo test -p roastty config_finalize_scalar_tail`
+4. `cargo test -p roastty`
+5. `cargo fmt --check`
+6. `git diff --check`
+7. `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/106-link-url-finalize.md issues/0802-libroastty-completion-and-mac-app/README.md`
+
+The focused link-url finalize run passed 1 test. The link-url parser/formatter
+regression run passed 1 test. The scalar-finalize regression run passed 1 test.
+The full `cargo test -p roastty` run passed 4590 unit tests, the ABI harness,
+and doc tests. The ABI harness printed the existing 10 enum-conversion warnings.
+
+## Conclusion
+
+Roastty now has upstream's default URL/path matcher as config-owned data and
+honors the upstream `link-url = false` finalize rule by removing that default
+matcher. This closes the default-link mutation gap without claiming user
+`link = ...` parsing, regex compilation, renderer link-range generation, or link
+UI behavior. Remaining config-finalize gaps include key-remap finalization,
+app-facing/log plumbing for finalize warnings, and broader byte-faithful config
+string storage.
+
+## Completion Review
+
+Codex-native adversarial review ran in fresh context with subagent
+`019eb664-df53-7a03-b955-fe001533d6de` after implementation and result
+recording. The reviewer checked the experiment file, README, implementation diff
+from the plan commit, changed source, and upstream `Config.zig`, `url.zig`,
+`Link.zig`, and key-modifier sources.
+
+Verdict: **APPROVED**
+
+Findings: None.

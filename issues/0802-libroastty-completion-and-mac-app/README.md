@@ -317,6 +317,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   preserving the configured duration; app-facing/log plumbing, delayed shutdown
   behavior, link matcher mutation, key-remap finalization, and byte-faithful
   config string storage remain later work.
+- **Default link-url matcher finalization is wired.** Exp 106 adds config-owned
+  storage for upstream's pinned default URL/path matcher and removes that
+  first/default matcher during finalization when `link-url = false`; user
+  `link = ...` parsing, regex compilation/matching, renderer link ranges, link
+  preview UI, open-url dispatch, app C ABI exposure, key-remap finalization, and
+  byte-faithful config string storage remain later work.
 
 **Keep this current.** When an experiment yields a durable, reusable fact — a
 toolchain incantation, a dead-end to avoid, or where an artifact lives — distill
@@ -1016,7 +1022,7 @@ stays unaltered except for the rename).
 - [Experiment 105: Phase F — quit-delay finalize warning](105-quit-delay-finalize-warning.md)
   — **Pass**
 - [Experiment 106: Phase F — link-url finalize](106-link-url-finalize.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 

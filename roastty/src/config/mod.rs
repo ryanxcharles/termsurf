@@ -23,6 +23,8 @@ use crate::config::string::{codepoint_iterator, parse_quoted_string};
 use crate::config::unicode_range::{InvalidRange, UnicodeRangeParser};
 use crate::font::codepoint_map::CodepointMap;
 use crate::font::discovery::Descriptor;
+use crate::input::key_mods::{self, Mods};
+use crate::input::link;
 use crate::os::homedir::expand_home;
 use crate::os::{desktop, passwd, resources_dir};
 use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAULT_PALETTE};
@@ -37,6 +39,18 @@ use std::path::{Component, Path, PathBuf};
 /// The pinned Ghostty source for Issue 802 is `1.3.2-dev`, which upstream
 /// classifies as the prerelease `tip` channel in build config.
 const PINNED_BUILD_RELEASE_CHANNEL: ReleaseChannel = ReleaseChannel::Tip;
+
+/// Default URL/path regex from pinned upstream
+/// `vendor/ghostty/src/config/url.zig`. This is config data for the default
+/// link matcher; regex compilation and runtime link highlighting are later
+/// renderer work.
+const DEFAULT_URL_REGEX: &str = concat!(
+    r"(?:(?:https?://|mailto:|ftp://|file:|ssh:|git://|ssh://|tel:|magnet:|ipfs://|ipns://|gemini://|gopher://|news:)(?:(?:\[[:0-9a-fA-F]+(?:[:0-9a-fA-F]*)+\](?::[0-9]+)?)|[\w\-.~:/?#@!$&*+,;=%]+(?:[\(\[]\w*[\)\]])?)+(?<![,.]))",
+    "|",
+    r"(?:(?:\.\.\/|\.\/|(?<!\w)~\/|(?:[\w][\w\-.]*\/)*(?<!\w)\$[A-Za-z_]\w*\/|\.[\w][\w\-.]*\/|(?<![\w~\/])\/(?!\/))(?:(?=[\w\-.~:\/?#@!$&*+;=%]*\.)[\w\-.~:\/?#@!$&*+;=%]+(?:(?<!:) (?!\w+:\/\/)(?!\.{0,2}\/)(?!~\/)[\w\-.~:\/?#@!$&*+;=%]*[\/.])*(?<!:)(?: +(?= *$))?|(?![\w\-.~:\/?#@!$&*+;=%]*\.)[\w\-.~:\/?#@!$&*+;=%]+(?:(?<!:) (?!\w+:\/\/)(?!\.{0,2}\/)(?!~\/)[\w\-.~:\/?#@!$&*+;=%]+)*(?<!:)(?: +(?= *$))?))",
+    "|",
+    r"(?=[\w\-.~:\/?#@!$&*+;=%]*\.)(?<!\$\d*)(?<!\w)[\w][\w\-.]*\/[\w\-.~:\/?#@!$&*+;=%]+(?<!:)(?: +(?= *$))?",
+);
 
 /// The aggregating config struct (upstream `config.Config`) — the home of the
 /// config keys. Built up one coherent field group per slice; this lands the
@@ -134,6 +148,8 @@ pub(crate) struct Config {
     pub scrollbar: Scrollbar,
     /// `link-url`.
     pub link_url: bool,
+    /// `link`.
+    pub link: Vec<link::Link>,
     /// `window-colorspace`.
     pub window_colorspace: WindowColorspace,
     /// `alpha-blending`.
@@ -438,6 +454,7 @@ impl Default for Config {
             scrollback_limit: 10_000_000,
             scrollbar: Scrollbar::System,
             link_url: true,
+            link: vec![default_url_link()],
             window_colorspace: WindowColorspace::Srgb,
             alpha_blending: AlphaBlending::Native,
             background_blur: BackgroundBlur::False,
@@ -596,6 +613,14 @@ impl Default for Config {
             conditional_set: HashSet::new(),
             replay_entries: Vec::new(),
         }
+    }
+}
+
+fn default_url_link() -> link::Link {
+    link::Link {
+        regex: DEFAULT_URL_REGEX.as_bytes().to_vec(),
+        action: link::Action::Open,
+        highlight: link::Highlight::HoverMods(key_mods::ctrl_or_super(Mods::new())),
     }
 }
 
@@ -2134,11 +2159,18 @@ impl Config {
         if self.window_height > 0 {
             self.window_height = self.window_height.max(4);
         }
+        self.finalize_link_url();
         self.finalize_quit_delay_warning(report);
         if self.auto_update_channel.is_none() {
             self.auto_update_channel = Some(PINNED_BUILD_RELEASE_CHANNEL);
         }
         self.faint_opacity = self.faint_opacity.clamp(0.0, 1.0);
+    }
+
+    fn finalize_link_url(&mut self) {
+        if !self.link_url && !self.link.is_empty() {
+            self.link.remove(0);
+        }
     }
 
     fn finalize_quit_delay_warning(&self, report: &mut ConfigFinalizeReport) {
@@ -7935,8 +7967,10 @@ mod tests {
         ThemeParseError, WindowColorspace, WindowDecoration, WindowDecorationParseError,
         WindowNewTabPosition, WindowPadding, WindowPaddingBalance, WindowPaddingColor,
         WindowPaddingParseError, WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme,
-        WorkingDirectory, WorkingDirectoryParseError, NS_PER_MS, NS_PER_S,
+        WorkingDirectory, WorkingDirectoryParseError, DEFAULT_URL_REGEX, NS_PER_MS, NS_PER_S,
     };
+    use crate::input::key_mods::{self, Mods};
+    use crate::input::link::{Action as LinkAction, Highlight as LinkHighlight};
     use crate::terminal::color::Rgb;
     use crate::terminal::cursor;
     use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
@@ -17876,6 +17910,36 @@ mod tests {
         assert_eq!(cloned, cfg);
         assert!(!cloned.link_url);
         assert!(cloned.maximize);
+    }
+
+    #[test]
+    fn config_link_url_finalize() {
+        let cfg = Config::default();
+        assert_eq!(cfg.link.len(), 1);
+        let default_link = &cfg.link[0];
+        assert_eq!(default_link.regex, DEFAULT_URL_REGEX.as_bytes());
+        assert_eq!(default_link.action, LinkAction::Open);
+        assert_eq!(
+            default_link.highlight,
+            LinkHighlight::HoverMods(key_mods::ctrl_or_super(Mods::new()))
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.link[0].regex, DEFAULT_URL_REGEX.as_bytes());
+
+        let mut enabled = Config::default();
+        enabled.link_url = true;
+        enabled.finalize();
+        assert_eq!(enabled.link.len(), 1);
+        assert_eq!(enabled.link[0].regex, DEFAULT_URL_REGEX.as_bytes());
+
+        let mut disabled = Config::default();
+        disabled.link_url = false;
+        disabled.minimum_contrast = 99.0;
+        disabled.finalize();
+        assert!(disabled.link.is_empty());
+        assert_eq!(disabled.minimum_contrast, 21.0);
     }
 
     #[test]
