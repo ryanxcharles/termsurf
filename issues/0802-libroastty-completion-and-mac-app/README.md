@@ -1232,6 +1232,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 128: Phase G — binding catalog parity](128-binding-catalog-parity.md)
   — **Pass**
+- [Experiment 129: Phase G — command palette UI gate](129-command-palette-ui-gate.md)
+  — **Designed**
 
 ## Process
 
