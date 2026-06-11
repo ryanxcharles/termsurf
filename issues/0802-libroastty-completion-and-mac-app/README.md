@@ -1115,6 +1115,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 115: Phase G — catch-all keybind triggers](115-catch-all-keybind-triggers.md)
   — **Pass**
+- [Experiment 116: Phase G — key-table syntax storage](116-key-table-syntax-storage.md)
+  — **Designed**
 
 ## Process
 
