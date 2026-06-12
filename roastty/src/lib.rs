@@ -17300,8 +17300,9 @@ pub extern "C" fn roastty_app_key(app: RoasttyApp, event: RoasttyInputKey) -> bo
     app_ref.key(app, &ev.event)
 }
 
-/// Keyboard layout changed. Refresh the current layout used by option-as-alt
-/// fallback; full KeymapDarwin text translation remains later work.
+/// Keyboard layout changed. Reload the app-owned keymap used by option-as-alt
+/// layout detection. The copied app continues to provide key text through
+/// AppKit / `interpretKeyEvents`, matching upstream embedded scope.
 #[no_mangle]
 pub extern "C" fn roastty_app_keyboard_changed(app: RoasttyApp) {
     if let Some(app) = app_from_handle(app) {
@@ -39993,6 +39994,35 @@ mod tests {
             Some("Hello"),
             "disabled clear-on-typing should preserve selection after text entry"
         );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_key_by_value_utf8_reaches_child_pty() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let command =
+            CString::new("stty -echo -icanon min 2 time 0; dd bs=2 count=1 2>/dev/null").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        let text = CString::new("é").unwrap();
+        let input = RoasttyInputKey {
+            action: key_action_to_int(key::KeyAction::Press),
+            mods: ROASTTY_MODS_NONE,
+            consumed_mods: ROASTTY_MODS_NONE,
+            keycode: 0,
+            text: text.as_ptr(),
+            unshifted_codepoint: 'e' as u32,
+            composing: false,
+        };
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert!(roastty_surface_key(surface, input));
+        let text = surface_snapshot_text_until(app, surface, "é");
+        assert!(text.contains('é'), "{text:?}");
 
         roastty_surface_free(surface);
         roastty_app_free(app);

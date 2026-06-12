@@ -37,11 +37,8 @@ dead-key/IME UI automation remains later work.
   - Construct `Roastty.Input.KeyEvent` values with explicit UTF-8 text and
     `composing` state and verify `withCValue` preserves those fields only for
     the closure lifetime.
-  - Add a small raw-ABI surface test, using `Roastty.Surface.sendKeyEvent`, that
-    sends a printable multi-byte text event through `roastty_surface_key` and
-    verifies the terminal receives the app-provided text.
-  - Keep the test at the wrapper/raw ABI boundary; do not synthesize full AppKit
-    dead-key or IME sessions in this slice.
+  - Keep the hosted Swift test at the wrapper boundary; do not synthesize full
+    AppKit dead-key or IME sessions in this slice.
 - `roastty/src/lib.rs`
   - If needed, add one narrow Rust by-value `roastty_surface_key` regression
     test mirroring the existing opaque-handle
@@ -99,7 +96,7 @@ preserve app-provided text, Rust tests prove by-value `roastty_surface_key`
 accepts UTF-8 text, and no copied-app logic or public ABI semantics change.
 
 **Partial** = the scope correction is clear and Rust by-value coverage passes,
-but the hosted Swift surface test cannot be made stable without a larger app
+but the hosted Swift wrapper coverage cannot be made stable without a larger app
 test harness.
 
 **Fail** = the upstream embedded path actually requires Rust-side
@@ -133,3 +130,79 @@ context.
 
 The reviewer rechecked the fixes, confirmed no required findings remained, and
 reported `git diff --check` plus the Prettier check passing.
+
+## Result
+
+**Result:** Pass
+
+Implemented the scope correction without changing copied-app key handling or
+public ABI semantics.
+
+`roastty/macos/Tests/Roastty/SurfaceKeyTextTests.swift` now covers the hosted
+Swift wrapper boundary: `Roastty.Input.KeyEvent.withCValue` preserves explicit
+UTF-8 text, `composing`, modifier masks, consumed modifiers, unshifted
+codepoint, and nil text while building the temporary C event passed to
+`roastty_surface_key`.
+
+`roastty/src/lib.rs` now has a by-value raw-ABI regression test,
+`surface_key_by_value_utf8_reaches_child_pty`, which sends a multi-byte `é`
+through `roastty_surface_key` with a C `RoasttyInputKey` and verifies the child
+PTY receives the app-provided text. The stale `roastty_app_keyboard_changed`
+comment now describes the actual embedded scope: the app-owned keymap is for
+layout/reload state, while copied-app text remains AppKit / `interpretKeyEvents`
+provided.
+
+The first targeted hosted Swift run failed to compile because the test used an
+invalid forced unwrap on `UnicodeScalar("e")`. Removing the unwrap fixed the
+test source; the rerun passed.
+
+Verification run:
+
+- `cargo test -p roastty surface_key_printable` — passed
+- `cargo test -p roastty app_keymap` — passed
+- `cargo test -p roastty keymap_darwin` — passed
+- `cargo test -p roastty surface_key_by_value_utf8_reaches_child_pty` — passed
+- `cd roastty && macos/build.nu --action test --only-testing RoasttyTests/SurfaceKeyTextTests`
+  — passed, 2 tests in 1 suite after the compile fix
+- `cd roastty && macos/build.nu --action test` — passed, 208 tests in 21 suites
+- `cargo test -p roastty -- --test-threads=1` — passed, 4761 library tests, the
+  ABI harness, and doc tests
+- `cargo fmt --check` — passed
+- `git diff --check` — passed
+
+The Swift test output still includes pre-existing warnings/noise from the hosted
+app build, including the SwiftLint opening-brace warning in
+`SurfaceView_AppKit.swift`, a Sendable warning in `RoasttyPackage.swift`, and
+App Intents `linkd` messages, but the commands exited successfully.
+
+## Conclusion
+
+The remaining Phase G native-key target is narrower than the prior issue notes
+implied. `KeymapDarwin` belongs to app-owned layout/reload state and the
+translation primitive; the copied embedded macOS app does not replace its
+AppKit-generated text with Rust-side `KeymapDarwin.translate` inside
+`roastty_surface_key` or `roastty_app_key`.
+
+Remaining work is hosted dead-key/preedit runtime validation through the copied
+app path and permission-dependent live global shortcut installation.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Godel`, fresh context.
+
+**Verdict:** Approved.
+
+The reviewer reported no findings and no required fixes. It independently ran
+`cargo fmt --check`, `git diff --check`,
+`cargo test -p roastty surface_key_by_value_utf8_reaches_child_pty`, and
+`cd roastty && macos/build.nu --action test --only-testing RoasttyTests/SurfaceKeyTextTests`,
+all passing.
+
+The reviewer also confirmed the upstream embedded key-text boundary:
+app-provided text passes through `KeyEvent.core()`, while `KeymapDarwin` is
+app-owned layout/reload state and a translation primitive, not a replacement for
+copied AppKit text handling.
+
+Codex-native adversarial completion review approved Experiment 139: the
+implementation stayed within scope, the upstream embedded key-text boundary is
+documented correctly, and the focused Rust/Swift verification passed.
