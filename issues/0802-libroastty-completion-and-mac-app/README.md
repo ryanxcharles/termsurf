@@ -992,7 +992,10 @@ the live app, verified by a Phase-D UI test.)
       `roastty_surface_ime_point` width are covered (Exp 140), and focused
       XCTest now proves the copied app's native `Option-E`, `E` dead-key route
       through `keyDown`, `interpretKeyEvents`, marked text, and committed
-      preedit text (Exp 157 Partial). The remaining native-key gaps are an
+      preedit text (Exp 157 Partial). Experiment 158 added a focused
+      terminal-output oracle, but it remains Partial because copied-app UI
+      automation still cannot observe deterministic terminal text through the
+      current accessibility/copy path. The remaining native-key gaps are an
       app-visible terminal-output oracle for dead-key UI automation and
       permission-dependent live global shortcut installation.
 
@@ -1445,7 +1448,7 @@ stays unaltered except for the rename).
 - [Experiment 157: Phase G — dead-key UI automation](157-dead-key-ui-automation.md)
   — **Partial**
 - [Experiment 158: Phase G — terminal output UI oracle](158-terminal-output-ui-oracle.md)
-  — **Designed**
+  — **Partial**
 
 ## Process
 

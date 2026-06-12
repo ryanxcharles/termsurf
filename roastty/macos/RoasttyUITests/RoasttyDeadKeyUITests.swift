@@ -23,6 +23,7 @@ final class RoasttyDeadKeyUITests: RoasttyCustomConfigCase {
 
         let app = try roasttyApplication()
         app.launchEnvironment["ROASTTY_UI_KEY_TRACE_PATH"] = traceFile.path
+        app.launchEnvironment["DISABLE_AUTO_UPDATE"] = "true"
         app.launch()
 
         let terminal = app.groups["Terminal pane"].firstMatch
@@ -72,7 +73,7 @@ final class RoasttyDeadKeyUITests: RoasttyCustomConfigCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if terminalValue(terminal, app: app).contains(needle) {
+            if app.roasttyTerminalText(in: terminal).contains(needle) {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
@@ -91,20 +92,6 @@ final class RoasttyDeadKeyUITests: RoasttyCustomConfigCase {
         }
 
         return false
-    }
-
-    @MainActor private func terminalValue(_ terminal: XCUIElement, app: XCUIApplication) -> String {
-        var values: [String] = []
-        if let value = terminal.value as? String {
-            values.append(value)
-        }
-
-        let textView = app.textViews.firstMatch
-        if textView.exists, let value = textView.value as? String {
-            values.append(value)
-        }
-
-        return values.joined(separator: "\n")
     }
 
     private func waitForTrace(at url: URL, containing needle: String, timeout: TimeInterval) -> String {

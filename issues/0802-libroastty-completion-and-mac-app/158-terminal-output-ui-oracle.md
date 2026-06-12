@@ -140,3 +140,103 @@ using the `adversarial-review` skill's Codex path
 
 **Final verdict:** Approved. The re-review confirmed both Required findings are
 resolved and found no new Required findings.
+
+## Result
+
+**Result:** Partial
+
+The experiment added a focused copied-app UI selector for deterministic terminal
+output and broadened the terminal-text helper used by the dead-key UI test:
+
+- `RoasttyTerminalOutputUITests` launches the copied app through
+  `RoasttyCustomConfigCase`, configures a deterministic
+  `initial-command = direct:echo TERMSURF_READY_158`, and requires the
+  configured window title to become visible before it can require
+  `TERMSURF_READY_158` through the terminal accessibility text path.
+- `RoasttyTerminalText` collects terminal text from the wrapper group and every
+  accessible text view, and reports a useful per-text-view snapshot on failure.
+- `RoasttyDeadKeyUITests` now uses the shared terminal-text helper and disables
+  oh-my-zsh auto-update prompts for the launched test app before its existing
+  route trace.
+
+The focused terminal-output selector executed exactly one real test, but it
+still skipped. The first failing layer is the independent config/title proof:
+the launched copied app reported the default `👻` window title instead of the
+configured `RoasttyTerminalOutputUITests` title, so the test cannot honestly
+claim the configured initial command reached the first surface:
+
+```text
+Test skipped - Configured window title was not visible; actual title: 👻
+Test Suite 'RoasttyTerminalOutputUITests' passed
+Executed 1 test, with 1 test skipped and 0 failures
+```
+
+Earlier runs with typed input also exposed the host shell's oh-my-zsh update
+prompt as a `TextView` query, proving XCTest can see a terminal text element in
+some states, but not a deterministic command marker through the current helper.
+Switching from typed `echo TERMSURF_READY_158` to the app config
+`initial-command = direct:echo TERMSURF_READY_158` did not produce a visible
+marker, but the missing configured title means Experiment 158 must stop at layer
+1 from the design: the copied-app UI-test config path or the first surface's
+inheritance from that config is not proven active in this selector.
+
+The dead-key test therefore remains a route-only Partial gate. It still requires
+the native route trace through `setMarkedText`, `insertText accumulated=é`, and
+`committedPreeditText text=é` before it may skip the final app-visible output
+check.
+
+Verification run:
+
+- `swiftlint lint roastty/macos/RoasttyUITests/RoasttyTerminalText.swift roastty/macos/RoasttyUITests/RoasttyTerminalOutputUITests.swift roastty/macos/RoasttyUITests/RoasttyDeadKeyUITests.swift`
+  — pass, 0 violations.
+- `git diff --check` — pass.
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/158-terminal-output-ui-oracle.md issues/0802-libroastty-completion-and-mac-app/README.md`
+  — pass.
+- `cd roastty && macos/build.nu --action test` — pass, 213 tests in 23 suites,
+  UI skipped by default.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyTerminalOutputUITests`
+  — pass with exactly 1 executed test, 1 skip, 0 failures; the skip occurs at
+  the configured-title proof.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyDeadKeyUITests`
+  — pass with exactly 1 executed test, 1 skip, 0 failures after proving the
+  trace through `committedPreeditText text=é`.
+
+Rust code was not edited, so `cargo fmt` and `cargo test -p roastty` were not
+required.
+
+## Conclusion
+
+Experiment 158 improved the UI-test oracle plumbing but did not close the
+app-visible terminal-output gap. The next experiment should target the copied
+app config/initial-surface path directly: prove why the focused selector sees
+the default `👻` title instead of `title = "RoasttyTerminalOutputUITests"`, then
+prove whether `initial-command` reaches the first surface. Only after that
+should it add a narrow product/test hook that exposes
+`roastty_surface_read_text` for the active `SurfaceView` without relying on
+XCTest's lossy text-view query behavior.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent `Rawls` with fresh context,
+using the `adversarial-review` skill's Codex path
+(`multi_agent_v1.spawn_agent`), not Claude's named `adversarial-reviewer` agent.
+
+**Initial verdict:** Changes required.
+
+**Required finding:**
+
+- The completed test did not prove the UI-test config path was active with an
+  independent visible signal, so the result overclaimed that the failure pointed
+  past layer 1 from the design.
+
+**Fixes:**
+
+- `RoasttyTerminalOutputUITests` now checks the configured window title before
+  waiting for terminal output and skips with the actual title when it is not
+  visible.
+- The result now records the first failing layer as the config/title proof,
+  includes the exact `actual title: 👻` skip evidence, and says the config path
+  or first-surface inheritance is not proven active.
+
+**Final verdict:** Approved. The re-review confirmed the Required finding is
+resolved and found no new Required findings.
