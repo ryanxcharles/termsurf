@@ -123,3 +123,77 @@ The reviewer confirmed the README links Experiment 137 as `Designed`, the
 experiment has the required sections, the scope is narrow and does not overclaim
 copied-app runtime text input, IME, dead-key integration, or live global
 shortcut installation, and `git diff --check` plus the Prettier check passed.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a crate-internal `input::keymap_darwin` module that mirrors the
+first platform translation layer from upstream `input/KeymapDarwin.zig` without
+changing the copied app's keyDown path or the public `roastty_input_key_s` ABI.
+
+Implemented:
+
+- `KeymapDarwin` with retained current `TISInputSource`, borrowed
+  `UCKeyboardLayout` data pointer, `new`, `reload`, `source_id`, and `Drop`
+  release semantics.
+- `State` carrying the opaque dead-key state and `Translation` carrying UTF-8
+  text, composing state, and consumed translation modifiers.
+- Carbon/TextInputSources and HIToolbox FFI for
+  `TISCopyCurrentKeyboardLayoutInputSource`, `TISGetInputSourceProperty`,
+  `CFDataGetBytePtr`, `LMGetKbdType`, and `UCKeyTranslate`.
+- Upstream-shaped modifier handling: control is stripped before translation,
+  Shift/Caps/Option/Command are mapped to the Carbon modifier byte, and the
+  returned `mods` are the modifiers used for translation.
+- Upstream-shaped dead-key preedit handling: if `UCKeyTranslate` sets a dead-key
+  state with no output, Roastty probes Space with
+  `kUCKeyTranslateNoDeadKeysMask` and returns composing preedit text.
+- A non-macOS stub that compiles and returns `Unsupported`.
+- Internal module export for later app/ABI wiring, while leaving all runtime app
+  key behavior unchanged in this experiment.
+
+Tests cover Carbon modifier bit mapping, control stripping, UTF-16 decode bounds
+and invalid-surrogate handling, the non-macOS unsupported shape, and a macOS
+host smoke test that initializes the current keymap, reloads it, reads the
+source ID, translates native keycode `0`, and strengthens content assertions for
+US / US-International host layouts.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p roastty keymap_darwin` passed 5 targeted unit tests.
+- `cargo test -p roastty keyboard_layout` passed 3 targeted unit tests.
+- `cargo test -p roastty key_translation_mods` passed 10 targeted unit tests.
+- `cargo build -p roastty` passed.
+- `cargo test -p roastty -- --test-threads=1` passed once with 4,756 Rust unit
+  tests, the C ABI harness, and doc tests. A final rerun after a crate-internal
+  re-export hit the pre-existing
+  `surface_foreground_pid_reports_worker_foreground_pid_after_start` race
+  (`left: 373`, `right: 305`) with 4,755 tests passing; the exact failed test
+  passed immediately on rerun with
+  `cargo test -p roastty surface_foreground_pid_reports_worker_foreground_pid_after_start -- --test-threads=1`.
+- `cargo fmt --check` passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The native keymap gap is now split at a better boundary. Roastty has a real
+Rust-side macOS `UCKeyTranslate` foundation with upstream state, modifier, and
+dead-key preedit semantics, and the copied app behavior is intentionally
+unchanged. The remaining native-key work is to wire this foundation into the
+app-facing key input path, preserve or replace AppKit marked-text/IME behavior
+deliberately, and then validate dead-key/preedit runtime behavior from the
+hosted macOS app.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Aristotle`, fresh
+context.
+
+**Verdict:** Approved.
+
+**Findings:** None.
+
+The reviewer inspected the uncommitted result diff from plan commit
+`5eff2c2c33c39` and approved the implementation, tests, README status, and
+result documentation without required changes.

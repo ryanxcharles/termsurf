@@ -4,6 +4,7 @@ pub(crate) mod key;
 pub(crate) mod key_encode;
 pub(crate) mod key_mods;
 pub(crate) mod keyboard;
+pub(crate) mod keymap_darwin;
 pub(crate) mod link;
 pub(crate) mod mouse;
 pub(crate) mod paste;

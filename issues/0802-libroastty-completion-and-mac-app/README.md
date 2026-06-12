@@ -472,9 +472,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   stored layout used by `roastty_surface_key_translation_mods`. The
   deterministic Rust tests use a thread-local layout provider override, and Exp
   135 validates the production macOS Carbon/TIS probe from the hosted app-test
-  environment through `roastty_current_keyboard_layout()`. Remaining Phase G
-  native key work is full `KeymapDarwin` text translation, dead-key/preedit
-  handling, and native global shortcut registration.
+  environment through `roastty_current_keyboard_layout()`. Exp 137 adds the
+  crate-internal Rust `KeymapDarwin` / `UCKeyTranslate` foundation with
+  upstream-shaped modifier stripping and dead-key preedit state, but the copied
+  app keyDown path still uses AppKit text. Remaining Phase G native key work is
+  app/ABI wiring for Rust-side text translation, hosted dead-key/preedit runtime
+  validation, and native global shortcut registration.
 - **The old copied-app config/menu assertion cluster is fixed at the Rust ABI
   boundary, but the XCTest host still hangs.** Exp 132 wires the missing
   Swift-read `roastty_config_get` keys, parsed `macos-window-shadow`, direct
@@ -1292,7 +1295,7 @@ stays unaltered except for the rename).
 - [Experiment 136: Phase G — global event tap dispatch](136-global-event-tap-dispatch.md)
   — **Pass**
 - [Experiment 137: Phase G — KeymapDarwin translation foundation](137-keymap-darwin-translation-foundation.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
