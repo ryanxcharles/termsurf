@@ -1336,6 +1336,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 144: Phase H — custom-shader screen pass](144-custom-shader-screen-pass.md)
   — **Pass**
+- [Experiment 145: Phase H — custom-shader loader hookup](145-custom-shader-loader-hookup.md)
+  — **Designed**
 
 ## Process
 
