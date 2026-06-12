@@ -107,3 +107,68 @@ links Experiment 159 as `Designed`, the design has Description, Changes,
 Verification, and Pass/Partial/Fail criteria, the scope follows directly from
 Experiment 158's title/config blocker, it does not claim terminal-output or
 dead-key success, and it includes concrete UI test counts plus hygiene checks.
+
+## Result
+
+**Result:** Pass
+
+The copied-app custom-config title gate is now reliable.
+
+Changes made:
+
+- `roastty/macos/RoasttyUITests/RoasttyCustomConfigCase.swift`
+  - Sets `ROASTTY_CLEAR_USER_DEFAULTS=YES` for custom-config UI launches so the
+    shared helper starts from a clean test defaults suite.
+- `roastty/macos/RoasttyUITests/RoasttyTitleUITests.swift`
+  - Writes the title config from `setUpWithError`, after the helper's empty
+    config reset, instead of relying on the async setup ordering.
+  - Waits for the first window and polls all window titles, failing with the
+    observed titles plus the accessibility tree if the configured title is not
+    visible.
+- `roastty/macos/Sources/Features/Terminal/BaseTerminalController.swift`
+  - Carries `config.title` into the controller's derived config and reapplies
+    the configured title after config reloads.
+  - Keeps explicit runtime title overrides first, then configured title, then
+    the focused surface title.
+
+Verification:
+
+- `swiftlint lint roastty/macos/RoasttyUITests/RoasttyCustomConfigCase.swift roastty/macos/RoasttyUITests/RoasttyTitleUITests.swift roastty/macos/Sources/Features/Terminal/BaseTerminalController.swift`
+  - Pass, 0 violations.
+- `git diff --check`
+  - Pass.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyTitleUITests`
+  - Pass. The focused copied-app selector executed exactly 1 test with 0 skips
+    and 0 failures.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyTerminalOutputUITests`
+  - Pass with 1 executed test and 1 skip. The skip now occurs after the
+    configured-title gate; the accessibility tree shows the visible window and
+    Window menu item titled `RoasttyTerminalOutputUITests`.
+- `cd roastty && macos/build.nu --action test`
+  - The first run was invalid because it ran in parallel with the focused UI
+    diagnostic and collided while copying `libroastty.a` into the xcframework.
+    The rerun by itself passed: 213 tests in 23 suites.
+
+## Conclusion
+
+Experiment 159 restores layer 1 of the copied-app UI oracle. The UI harness now
+proves that `ROASTTY_CONFIG_PATH` reaches the visible copied-app window, and the
+terminal-output diagnostic proceeds past that prerequisite. Terminal text is
+still not exposed through the current UI automation tree, so the next experiment
+can focus on the actual terminal-output accessibility layer instead of
+config/title setup.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent `Zeno` with fresh context, using
+the `adversarial-review` skill's Codex path (`multi_agent_v1.spawn_agent`), not
+Claude's named `adversarial-reviewer` agent.
+
+**Verdict:** Approved.
+
+The reviewer found no Required, Optional, or Nit findings. It independently
+checked `git diff --check`, markdown formatting with `prettier --check`,
+SwiftLint for the edited Swift files, the requested working-tree diff,
+`git status --short`, and `git log -1 --oneline`. It also confirmed that the
+latest commit was still the Experiment 159 plan commit, so the result commit had
+not been made before completion review.

@@ -539,7 +539,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   work is hosted dead-key/IME UI automation and native global shortcut
   registration. Exp 140 adds hosted `NSTextInputClient` marked-text/preedit
   coverage and fixes live renderer cell metrics feeding `roastty_surface_size`,
-  which `roastty_surface_ime_point` needs for IME geometry.
+  which `roastty_surface_ime_point` needs for IME geometry. Exp 159 restores the
+  copied-app custom-config title gate, so UI automation now proves
+  `ROASTTY_CONFIG_PATH` reaches the visible first window before terminal-output
+  diagnostics continue.
 - **Live Kitty graphics now draw in the Metal presentation pass.** Exp 141 adds
   persistent `ImageState<MetalTexture>` to the live surface renderer, updates it
   from terminal Kitty render-placement snapshots each frame, uploads pending
@@ -1450,7 +1453,7 @@ stays unaltered except for the rename).
 - [Experiment 158: Phase G — terminal output UI oracle](158-terminal-output-ui-oracle.md)
   — **Partial**
 - [Experiment 159: Phase G — config title UI gate](159-config-title-ui-gate.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

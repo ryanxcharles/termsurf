@@ -584,6 +584,7 @@ class BaseTerminalController: NSWindowController,
 
         // Update our derived config
         self.derivedConfig = DerivedConfig(config)
+        applyTitleToWindow()
     }
 
     @objc private func roasttyCommandPaletteDidToggle(_ notification: Notification) {
@@ -864,6 +865,11 @@ class BaseTerminalController: NSWindowController,
             window.title = computeTitle(
                 title: titleOverride,
                 bell: focusedSurface?.bell ?? false)
+            return
+        }
+
+        if let title = derivedConfig.title {
+            window.title = title
             return
         }
 
@@ -1478,12 +1484,14 @@ class BaseTerminalController: NSWindowController,
     }
 
     private struct DerivedConfig {
+        let title: String?
         let macosTitlebarProxyIcon: Roastty.MacOSTitlebarProxyIcon
         let windowStepResize: Bool
         let focusFollowsMouse: Bool
         let splitPreserveZoom: Roastty.Config.SplitPreserveZoom
 
         init() {
+            self.title = nil
             self.macosTitlebarProxyIcon = .visible
             self.windowStepResize = false
             self.focusFollowsMouse = false
@@ -1491,6 +1499,7 @@ class BaseTerminalController: NSWindowController,
         }
 
         init(_ config: Roastty.Config) {
+            self.title = config.title
             self.macosTitlebarProxyIcon = config.macosTitlebarProxyIcon
             self.windowStepResize = config.windowStepResize
             self.focusFollowsMouse = config.focusFollowsMouse

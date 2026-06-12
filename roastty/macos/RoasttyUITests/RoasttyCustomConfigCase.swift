@@ -31,6 +31,7 @@ class RoasttyCustomConfigCase: XCTestCase {
         app.launchArguments.append(contentsOf: ["-ApplePersistenceIgnoreState", "YES"])
         app.launchEnvironment["ROASTTY_CONFIG_PATH"] = configFile.path
         app.launchEnvironment["ROASTTY_USER_DEFAULTS_SUITE"] = defaultsSuite
+        app.launchEnvironment["ROASTTY_CLEAR_USER_DEFAULTS"] = "YES"
         return app
     }
 }
