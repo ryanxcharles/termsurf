@@ -228,6 +228,11 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   into `Contents/Resources/terminfo/78/xterm-roastty`, changes Roastty's default
   `term` to `xterm-roastty`, and makes PTY spawns export matching `TERM`,
   `COLORTERM`, `TERMINFO`, and `ROASTTY_RESOURCES_DIR` values.
+- **CoreText temporary CF releases now use a worker.** Exp 154 ports Ghostty's
+  `os/cf_release_thread` performance behavior as a process-shared Rust worker
+  plus local per-shape pools, because Roastty has no long-lived `Shaper` owner;
+  CoreText shaping now hands temporary retained CF objects, including retained
+  `CTRun`s, to that pool after last use.
 - **GTK quick-terminal config is parser/formatter-only.** Exp 82 wires
   `gtk-quick-terminal-layer` and `gtk-quick-terminal-namespace`; empty values
   reset to upstream defaults before enum/string parsing, and GTK layer-shell
@@ -1008,7 +1013,9 @@ the live app, verified by a Phase-D UI test.)
 - [x] Terminfo resource/env — mechanically verified renamed terminfo source,
       compiled app-bundle database, `xterm-roastty` default config, and PTY
       terminal identity env wired in Exp 153
-- [ ] `os/cf_release_thread` (perf)
+- [x] `os/cf_release_thread` (perf) — bounded shared worker, per-shape release
+      pool, synchronous fallback, retained `CTRun` coverage, and targeted/full
+      Roastty plus hosted macOS app tests wired in Exp 154
 
 **Workstream 3 (continuous — the harness from Phase A, the roastty app from
 Phase D):** every app feature gets an automated UI test — typing, rendering,
@@ -1409,7 +1416,7 @@ stays unaltered except for the rename).
 - [Experiment 153: Phase I — terminfo resource env](153-terminfo-resource-env.md)
   — **Pass**
 - [Experiment 154: Phase I — CF release thread](154-cf-release-thread.md) —
-  **Designed**
+  **Pass**
 
 ## Process
 

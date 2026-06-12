@@ -112,3 +112,57 @@ using the `adversarial-review` skill's Codex path
   returns success.
 
 **Final verdict:** Approved.
+
+## Result
+
+**Result:** Pass
+
+Implemented the Phase I `os/cf_release_thread` performance item and wired it
+into CoreText shaping.
+
+- Added `roastty/src/os/cf_release_thread.rs` with a bounded 64-slot mailbox, a
+  background worker named `cf_release`, retained-pointer batch ownership,
+  synchronous fallback when enqueueing cannot hand work to the worker, and
+  test-owned worker shutdown that drains queued batches.
+- Exported the module from `roastty/src/os/mod.rs`.
+- Updated `roastty/src/font/face/coretext.rs` so `shape_run_with_features`
+  batches temporary retained CoreFoundation/CoreText objects and flushes them
+  after their last use: the run `CFString`, optional feature descriptor,
+  feature-applied run font, attributes dictionary, attributed string, `CTLine`,
+  glyph-runs `CFArray`, and each retained `CTRun` yielded by that array.
+- Added focused unit coverage proving worker-thread release, drop-time queue
+  drain, synchronous fallback, and empty-pool no-op behavior.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty cf_release_thread -- --test-threads=1` — 4 passed
+- `cargo test -p roastty coretext -- --test-threads=1` — 56 passed
+- `cargo test -p roastty font -- --test-threads=1` — 623 passed
+- `cargo test -p roastty -- --test-threads=1` — 4847 passed, 0 failed, 4
+  ignored; ABI harness passed; doc tests passed
+- `cd roastty && macos/build.nu --action test` — `TEST SUCCEEDED` with the
+  existing Swift/Main Thread Checker warnings
+- `cargo fmt --check`
+- `git diff --check`
+
+## Conclusion
+
+Roastty now has Ghostty's CF-release-thread performance behavior in Rust form.
+Ghostty owns the release thread on its long-lived `Shaper`; Roastty does not
+have that object, so the Rust port uses a process-shared worker plus a local
+per-shape release pool. This keeps the hot CoreText shaping path from doing
+ordinary temporary CF releases synchronously while still preserving a safe
+fallback path and avoiding ownership changes for long-lived face objects.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent `Jason` with fresh context,
+using the `adversarial-review` skill's Codex path
+(`multi_agent_v1.spawn_agent`), not Claude's named `adversarial-reviewer` agent.
+
+**Verdict:** Approved.
+
+**Findings:** No Required, Optional, or Nit findings.
+
+**Final verdict:** Approved.

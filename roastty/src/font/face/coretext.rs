@@ -30,6 +30,7 @@ use crate::font::glyph::Glyph;
 use crate::font::metrics::{FaceMetrics, Metrics};
 use crate::font::opentype::{head::Head, hhea::Hhea, os2::Os2, post::Post, svg::Svg};
 use crate::font::shape;
+use crate::os::cf_release_thread::CfReleasePool;
 
 /// The horizontal-shear transform used to synthesize an italic (oblique) face.
 /// `c ≈ tan(15°)` slants the glyphs to the right. Faithful to upstream's
@@ -373,11 +374,13 @@ impl Face {
         if text.is_empty() {
             return Vec::new();
         }
+        let mut release_pool = CfReleasePool::new();
         let cf_str = CFString::from_str(&text);
 
         // Apply the OpenType features by copying the face's font with a
         // feature-settings descriptor; that font drives shaping.
-        let run_font = match feature_settings_descriptor(features) {
+        let feature_desc = feature_settings_descriptor(features);
+        let run_font = match feature_desc.as_ref() {
             // SAFETY: `self.font`/`desc` are live; a null matrix is valid; size
             // `0.0` preserves the current size.
             Some(desc) => unsafe {
@@ -402,6 +405,13 @@ impl Face {
         let Some(attr_str) =
             (unsafe { CFAttributedString::new(None, Some(&cf_str), Some(attrs.as_opaque())) })
         else {
+            release_pool.push(cf_str);
+            if let Some(desc) = feature_desc {
+                release_pool.push(desc);
+            }
+            release_pool.push(run_font);
+            release_pool.push(attrs);
+            release_pool.flush();
             return Vec::new();
         };
 
@@ -440,6 +450,7 @@ impl Face {
             // SAFETY: `run` is live.
             let n = unsafe { run.glyph_count() }.max(0) as usize;
             if n == 0 {
+                release_pool.push(run);
                 continue;
             }
             let glyphs = run_glyphs(&run, n);
@@ -476,12 +487,25 @@ impl Face {
                 pen += advances[k].width;
                 run_offset_cluster = run_offset_cluster.max(cluster);
             }
+            release_pool.push(run);
         }
         // A non-LTR run left the buffer out of grid order; restore it by `x`.
         // (Exceptionally rare — only complex-shaping scripts trigger this.)
         if non_ltr {
             cells.sort_by(|a, b| a.x.cmp(&b.x));
         }
+
+        release_pool.push(cf_str);
+        if let Some(desc) = feature_desc {
+            release_pool.push(desc);
+        }
+        release_pool.push(run_font);
+        release_pool.push(attrs);
+        release_pool.push(attr_str);
+        release_pool.push(line);
+        release_pool.push(runs);
+        release_pool.flush();
+
         cells
     }
 
