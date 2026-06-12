@@ -817,6 +817,29 @@ mod tests {
     }
 
     #[test]
+    fn render_glyph_sprite_legacy_tail_and_branch() {
+        use crate::font::atlas::Format;
+        let mut r = menlo_resolver_sprites();
+        let mut atlas = Atlas::new(512, Format::Grayscale);
+        let opts = none_opts(
+            r.collection_mut()
+                .get_face(Index::new(Style::Regular, 0))
+                .unwrap(),
+        );
+        for (cp, label) in [(0x1fbe8, "legacy circle piece"), (0xf5d0, "branch line")] {
+            assert_eq!(
+                r.get_index(cp, Style::Regular, None),
+                Some(Index::special(Special::Sprite)),
+                "{label} resolves to sprite"
+            );
+            let g = r
+                .render_glyph(&mut atlas, Index::special(Special::Sprite), cp, &opts)
+                .unwrap_or_else(|_| panic!("{label} renders"));
+            assert!(g.width > 0 && g.height > 0, "{label} glyph is non-empty");
+        }
+    }
+
+    #[test]
     fn discovery_fallback_finds_emoji() {
         // Menlo lacks the grinning-face emoji; with discovery enabled, the
         // resolver discovers a color font that has it and adds it as a fallback.

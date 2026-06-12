@@ -164,6 +164,16 @@ impl Canvas {
         self.padding_y
     }
 
+    /// Keep only the unpadded cell when writing to the atlas. Upstream sets the
+    /// four clip margins directly for inverted glyphs whose ink reaches the
+    /// padded canvas but should still export as one cell.
+    pub(crate) fn clip_to_cell(&mut self) {
+        self.clip_left = self.padding_x;
+        self.clip_right = self.padding_x;
+        self.clip_top = self.padding_y;
+        self.clip_bottom = self.padding_y;
+    }
+
     /// The left trim margin (set by [`write_atlas`](Self::write_atlas)'s trim).
     /// Used to compute a rendered glyph's left bearing.
     pub(crate) fn clip_left(&self) -> u32 {
@@ -297,6 +307,31 @@ impl Canvas {
             &poly,
             raster::FillRule::NonZero,
         );
+    }
+
+    /// Fill an anti-aliased closed path with an arbitrary source alpha.
+    pub(crate) fn fill_path_with_color(&mut self, nodes: &[raster::PathNode], color: Color) {
+        if color == Color::ON {
+            self.fill_path(nodes);
+            return;
+        }
+
+        let translated: Vec<raster::PathNode> =
+            nodes.iter().map(|n| self.translate_node(*n)).collect();
+        let poly = raster::fill_plot(&translated, raster::MSAA_SCALE as f64, 0.1);
+        let mut src = vec![0u8; self.buf.len()];
+        raster::fill_polygon(
+            &mut src,
+            self.width as i32,
+            self.height as i32,
+            &poly,
+            raster::FillRule::NonZero,
+        );
+
+        for (dst, coverage) in self.buf.iter_mut().zip(src) {
+            let alpha = (coverage as u32 * color.0 as u32 / 255) as u8;
+            *dst = raster::src_over_alpha8(*dst, alpha);
+        }
     }
 
     /// Stroke an anti-aliased path with an **inner** stroke (the stroke clipped

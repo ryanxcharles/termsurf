@@ -681,7 +681,11 @@ pub(crate) fn draw_box_arc(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> b
         0x2570 => Corner::Tr,
         _ => return false,
     };
+    draw_arc_corner(corner, metrics, canvas);
+    true
+}
 
+fn draw_arc_corner(corner: Corner, metrics: &Metrics, canvas: &mut Canvas) {
     let thick_px = Thickness::Light.height(metrics.box_thickness);
     let float_width = metrics.cell_width as f64;
     let float_height = metrics.cell_height as f64;
@@ -758,7 +762,6 @@ pub(crate) fn draw_box_arc(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> b
     };
 
     canvas.stroke_path(&nodes, float_thick, raster::CapMode::Butt);
-    true
 }
 
 /// The curly underline (undercurl): a single-cycle wave — two cubic Béziers —
@@ -1296,6 +1299,7 @@ pub(crate) fn draw_codepoint(cp: u32, width: u32, metrics: &Metrics, canvas: &mu
         || draw_box_arc(cp, metrics, canvas)
         || draw_braille(cp, width, metrics, canvas)
         || draw_sextant(cp, metrics, canvas)
+        || draw_legacy_computing_tail(cp, width, h, metrics, canvas)
         || draw_octant(cp, metrics, canvas)
         || draw_separated_quadrant(cp, metrics, canvas)
         || draw_block(cp, metrics, canvas)
@@ -1306,6 +1310,7 @@ pub(crate) fn draw_codepoint(cp: u32, width: u32, metrics: &Metrics, canvas: &mu
         || draw_powerline_rounded(cp, width, h, metrics, canvas)
         || draw_powerline_diagonal(cp, metrics, canvas)
         || draw_powerline_flame(cp, width, h, metrics, canvas)
+        || draw_branch_subset(cp, metrics, canvas)
 }
 
 /// Whether `cp` is a drawable codepoint-keyed sprite glyph (ignoring
@@ -1983,6 +1988,868 @@ pub(crate) fn draw_sextant(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> b
     }
     if s.br {
         fill(metrics, canvas, Half, Full, TwoThirds, End);
+    }
+    true
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SmoothMosaic {
+    tl: bool,
+    ul: bool,
+    ll: bool,
+    bl: bool,
+    bc: bool,
+    br: bool,
+    lr: bool,
+    ur: bool,
+    tr: bool,
+    tc: bool,
+}
+
+fn smooth_mosaic_from(pattern: [&str; 4]) -> SmoothMosaic {
+    let at = |row: usize, col: usize| pattern[row].as_bytes()[col] == b'#';
+    SmoothMosaic {
+        tl: at(0, 0),
+        ul: at(1, 0) && (!at(0, 0) || !at(2, 0)),
+        ll: at(2, 0) && (!at(1, 0) || !at(3, 0)),
+        bl: at(3, 0),
+        bc: at(3, 1) && (!at(3, 0) || !at(3, 2)),
+        br: at(3, 2),
+        lr: at(2, 2) && (!at(3, 2) || !at(1, 2)),
+        ur: at(1, 2) && (!at(2, 2) || !at(0, 2)),
+        tr: at(0, 2),
+        tc: at(0, 1) && (!at(0, 2) || !at(0, 0)),
+    }
+}
+
+fn point(x: f64, y: f64) -> raster::Point {
+    raster::Point::new(x, y)
+}
+
+fn move_line_path(points: &[(f64, f64)], close: bool) -> Vec<raster::PathNode> {
+    let mut nodes = Vec::with_capacity(points.len() + usize::from(close));
+    if let Some(&(x, y)) = points.first() {
+        nodes.push(raster::PathNode::MoveTo(point(x, y)));
+        for &(x, y) in &points[1..] {
+            nodes.push(raster::PathNode::LineTo(point(x, y)));
+        }
+        if close {
+            nodes.push(raster::PathNode::ClosePath);
+        }
+    }
+    nodes
+}
+
+/// Smooth Mosaics (`U+1FB3C`-`U+1FB67`). Faithful port of upstream
+/// `draw1FB3C_1FB67`: the handwritten 3x4 pattern table is decoded into the
+/// ten contour points and filled as one closed path.
+pub(crate) fn draw_smooth_mosaic(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    let mosaic = match cp {
+        0x1fb3c => smooth_mosaic_from(["...", "...", "#..", "##."]),
+        0x1fb3d => smooth_mosaic_from(["...", "...", "#\\.", "###"]),
+        0x1fb3e => smooth_mosaic_from(["...", "#..", "#\\.", "##."]),
+        0x1fb3f => smooth_mosaic_from(["...", "#..", "##.", "###"]),
+        0x1fb40 => smooth_mosaic_from(["#..", "#..", "##.", "##."]),
+        0x1fb41 => smooth_mosaic_from(["/##", "###", "###", "###"]),
+        0x1fb42 => smooth_mosaic_from(["./#", "###", "###", "###"]),
+        0x1fb43 => smooth_mosaic_from([".##", ".##", "###", "###"]),
+        0x1fb44 => smooth_mosaic_from(["..#", ".##", "###", "###"]),
+        0x1fb45 => smooth_mosaic_from([".##", ".##", ".##", "###"]),
+        0x1fb46 => smooth_mosaic_from(["...", "./#", "###", "###"]),
+        0x1fb47 => smooth_mosaic_from(["...", "...", "..#", ".##"]),
+        0x1fb48 => smooth_mosaic_from(["...", "...", "./#", "###"]),
+        0x1fb49 => smooth_mosaic_from(["...", "..#", "./#", ".##"]),
+        0x1fb4a => smooth_mosaic_from(["...", "..#", ".##", "###"]),
+        0x1fb4b => smooth_mosaic_from(["..#", "..#", ".##", ".##"]),
+        0x1fb4c => smooth_mosaic_from(["##\\", "###", "###", "###"]),
+        0x1fb4d => smooth_mosaic_from(["#\\.", "###", "###", "###"]),
+        0x1fb4e => smooth_mosaic_from(["##.", "##.", "###", "###"]),
+        0x1fb4f => smooth_mosaic_from(["#..", "##.", "###", "###"]),
+        0x1fb50 => smooth_mosaic_from(["##.", "##.", "##.", "###"]),
+        0x1fb51 => smooth_mosaic_from(["...", "#\\.", "###", "###"]),
+        0x1fb52 => smooth_mosaic_from(["###", "###", "###", "\\##"]),
+        0x1fb53 => smooth_mosaic_from(["###", "###", "###", ".\\#"]),
+        0x1fb54 => smooth_mosaic_from(["###", "###", ".##", ".##"]),
+        0x1fb55 => smooth_mosaic_from(["###", "###", ".##", "..#"]),
+        0x1fb56 => smooth_mosaic_from(["###", ".##", ".##", ".##"]),
+        0x1fb57 => smooth_mosaic_from(["##.", "#..", "...", "..."]),
+        0x1fb58 => smooth_mosaic_from(["###", "#/.", "...", "..."]),
+        0x1fb59 => smooth_mosaic_from(["##.", "#/.", "#..", "..."]),
+        0x1fb5a => smooth_mosaic_from(["###", "##.", "#..", "..."]),
+        0x1fb5b => smooth_mosaic_from(["##.", "##.", "#..", "#.."]),
+        0x1fb5c => smooth_mosaic_from(["###", "###", "#/.", "..."]),
+        0x1fb5d => smooth_mosaic_from(["###", "###", "###", "##/"]),
+        0x1fb5e => smooth_mosaic_from(["###", "###", "###", "#/."]),
+        0x1fb5f => smooth_mosaic_from(["###", "###", "##.", "##."]),
+        0x1fb60 => smooth_mosaic_from(["###", "###", "##.", "#.."]),
+        0x1fb61 => smooth_mosaic_from(["###", "##.", "##.", "##."]),
+        0x1fb62 => smooth_mosaic_from([".##", "..#", "...", "..."]),
+        0x1fb63 => smooth_mosaic_from(["###", ".\\#", "...", "..."]),
+        0x1fb64 => smooth_mosaic_from([".##", ".\\#", "..#", "..."]),
+        0x1fb65 => smooth_mosaic_from(["###", ".##", "..#", "..."]),
+        0x1fb66 => smooth_mosaic_from([".##", ".##", "..#", "..#"]),
+        0x1fb67 => smooth_mosaic_from(["###", "###", ".\\#", "..."]),
+        _ => return false,
+    };
+
+    let top = 0.0;
+    let upper = Fraction::OneThird.float(metrics.cell_height);
+    let lower = Fraction::TwoThirds.float(metrics.cell_height);
+    let bottom = metrics.cell_height as f64;
+    let left = 0.0;
+    let center = Fraction::Half.float(metrics.cell_width);
+    let right = metrics.cell_width as f64;
+
+    let mut points = Vec::with_capacity(10);
+    if mosaic.tl {
+        points.push((left, top));
+    }
+    if mosaic.ul {
+        points.push((left, upper));
+    }
+    if mosaic.ll {
+        points.push((left, lower));
+    }
+    if mosaic.bl {
+        points.push((left, bottom));
+    }
+    if mosaic.bc {
+        points.push((center, bottom));
+    }
+    if mosaic.br {
+        points.push((right, bottom));
+    }
+    if mosaic.lr {
+        points.push((right, lower));
+    }
+    if mosaic.ur {
+        points.push((right, upper));
+    }
+    if mosaic.tr {
+        points.push((right, top));
+    }
+    if mosaic.tc {
+        points.push((center, top));
+    }
+    let nodes = move_line_path(&points, true);
+    canvas.fill_path(&nodes);
+    true
+}
+
+#[derive(Clone, Copy)]
+enum Edge {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+fn edge_triangle(metrics: &Metrics, canvas: &mut Canvas, edge: Edge) {
+    let upper = 0.0;
+    let middle = (metrics.cell_height as f64 / 2.0).round();
+    let lower = metrics.cell_height as f64;
+    let left = 0.0;
+    let center = (metrics.cell_width as f64 / 2.0).round();
+    let right = metrics.cell_width as f64;
+
+    let (x0, y0, x1, y1) = match edge {
+        Edge::Top => (right, upper, left, upper),
+        Edge::Left => (left, upper, left, lower),
+        Edge::Bottom => (left, lower, right, lower),
+        Edge::Right => (right, lower, right, upper),
+    };
+
+    let nodes = move_line_path(&[(center, middle), (x0, y0), (x1, y1)], true);
+    canvas.fill_path(&nodes);
+}
+
+fn invert_and_clip(canvas: &mut Canvas) {
+    canvas.invert();
+    canvas.clip_to_cell();
+}
+
+fn eighth_fraction(idx: u32) -> Fraction {
+    match idx {
+        0 => Fraction::Zero,
+        1 => Fraction::OneEighth,
+        2 => Fraction::TwoEighths,
+        3 => Fraction::ThreeEighths,
+        4 => Fraction::FourEighths,
+        5 => Fraction::FiveEighths,
+        6 => Fraction::SixEighths,
+        7 => Fraction::SevenEighths,
+        8 => Fraction::Full,
+        _ => unreachable!("eighth fraction index is in 0..=8"),
+    }
+}
+
+fn alignment(horizontal: HAlign, vertical: VAlign) -> Alignment {
+    Alignment {
+        horizontal,
+        vertical,
+    }
+}
+
+fn draw_edge_triangles(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    match cp {
+        0x1fb68 => {
+            edge_triangle(metrics, canvas, Edge::Left);
+            invert_and_clip(canvas);
+        }
+        0x1fb69 => {
+            edge_triangle(metrics, canvas, Edge::Top);
+            invert_and_clip(canvas);
+        }
+        0x1fb6a => {
+            edge_triangle(metrics, canvas, Edge::Right);
+            invert_and_clip(canvas);
+        }
+        0x1fb6b => {
+            edge_triangle(metrics, canvas, Edge::Bottom);
+            invert_and_clip(canvas);
+        }
+        0x1fb6c => edge_triangle(metrics, canvas, Edge::Left),
+        0x1fb6d => edge_triangle(metrics, canvas, Edge::Top),
+        0x1fb6e => edge_triangle(metrics, canvas, Edge::Right),
+        0x1fb6f => edge_triangle(metrics, canvas, Edge::Bottom),
+        _ => return false,
+    }
+    true
+}
+
+fn draw_vertical_eighth(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    if !(0x1fb70..=0x1fb75).contains(&cp) {
+        return false;
+    }
+    let n = cp + 1 - 0x1fb70;
+    fill(
+        metrics,
+        canvas,
+        eighth_fraction(n),
+        eighth_fraction(n + 1),
+        Fraction::Top,
+        Fraction::Bottom,
+    );
+    true
+}
+
+fn draw_horizontal_eighth(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    if !(0x1fb76..=0x1fb7b).contains(&cp) {
+        return false;
+    }
+    let n = cp + 1 - 0x1fb76;
+    draw_horizontal_eighth_index(n, metrics, canvas);
+    true
+}
+
+fn draw_horizontal_eighth_index(n: u32, metrics: &Metrics, canvas: &mut Canvas) {
+    fill(
+        metrics,
+        canvas,
+        Fraction::Left,
+        Fraction::Right,
+        eighth_fraction(n),
+        eighth_fraction(n + 1),
+    );
+}
+
+fn checkerboard_fill(metrics: &Metrics, canvas: &mut Canvas, parity: u32) {
+    let x_size = 4;
+    let y_size = (4.0 * (metrics.cell_height as f64 / metrics.cell_width as f64)).round() as u32;
+    for x in 0..x_size {
+        let x0 = metrics.cell_width * x / x_size;
+        let x1 = metrics.cell_width * (x + 1) / x_size;
+        for y in 0..y_size {
+            let y0 = metrics.cell_height * y / y_size;
+            let y1 = metrics.cell_height * (y + 1) / y_size;
+            if (x + y) % 2 == parity {
+                canvas.rect(
+                    Rect {
+                        x: x0 as i32,
+                        y: y0 as i32,
+                        width: x1.saturating_sub(x0) as i32,
+                        height: y1.saturating_sub(y0) as i32,
+                    },
+                    Color::ON,
+                );
+            }
+        }
+    }
+}
+
+fn draw_diagonal_fill(cp: u32, width: u32, height: u32, metrics: &Metrics, canvas: &mut Canvas) {
+    canvas.clip_to_cell();
+    let thick_px = Thickness::Light.height(metrics.box_thickness);
+    let line_count = (metrics.cell_width / (2 * thick_px)).max(1);
+    let float_width = metrics.cell_width as f64;
+    let float_height = metrics.cell_height as f64;
+    let float_thick = thick_px as f64;
+    let stride = (float_width / line_count as f64).round();
+    for i in 0..(line_count * 2 + 1) {
+        let i = i as i32 - line_count as i32;
+        let a = i as f64 * stride;
+        if cp == 0x1fb98 {
+            canvas.line(
+                point(a, 0.0),
+                point(float_width + a, float_height),
+                float_thick,
+            );
+        } else {
+            canvas.line(
+                point(float_width + a, 0.0),
+                point(a, float_height),
+                float_thick,
+            );
+        }
+    }
+    let _ = (width, height);
+}
+
+fn draw_corner_triangle_shade(
+    metrics: &Metrics,
+    canvas: &mut Canvas,
+    corner: Corner,
+    shade: Shade,
+) {
+    let w = metrics.cell_width as f64;
+    let h = metrics.cell_height as f64;
+    let points = match corner {
+        Corner::Tl => [(0.0, 0.0), (w, 0.0), (0.0, h)],
+        Corner::Tr => [(0.0, 0.0), (w, 0.0), (w, h)],
+        Corner::Bl => [(0.0, 0.0), (0.0, h), (w, h)],
+        Corner::Br => [(w, 0.0), (w, h), (0.0, h)],
+    };
+    let nodes = move_line_path(&points, true);
+    canvas.fill_path_with_color(&nodes, shade.color());
+}
+
+fn corner_diagonal_lines(metrics: &Metrics, canvas: &mut Canvas, corners: Quads) {
+    let thick_px = Thickness::Light.height(metrics.box_thickness) as f64;
+    let width = metrics.cell_width as f64;
+    let height = metrics.cell_height as f64;
+    let center_x = (metrics.cell_width / 2 + metrics.cell_width % 2) as f64;
+    let center_y = (metrics.cell_height / 2 + metrics.cell_height % 2) as f64;
+    if corners.tl {
+        canvas.line(point(center_x, 0.0), point(0.0, center_y), thick_px);
+    }
+    if corners.tr {
+        canvas.line(point(center_x, 0.0), point(width, center_y), thick_px);
+    }
+    if corners.bl {
+        canvas.line(point(center_x, height), point(0.0, center_y), thick_px);
+    }
+    if corners.br {
+        canvas.line(point(center_x, height), point(width, center_y), thick_px);
+    }
+}
+
+fn cell_diagonal(metrics: &Metrics, canvas: &mut Canvas, from: Alignment, to: Alignment) {
+    let width = metrics.cell_width as f64;
+    let height = metrics.cell_height as f64;
+    let x = |h| match h {
+        HAlign::Left => 0.0,
+        HAlign::Right => width,
+        HAlign::Center => width / 2.0,
+    };
+    let y = |v| match v {
+        VAlign::Top => 0.0,
+        VAlign::Bottom => height,
+        VAlign::Middle => height / 2.0,
+    };
+    canvas.line(
+        point(x(from.horizontal), y(from.vertical)),
+        point(x(to.horizontal), y(to.vertical)),
+        Thickness::Light.height(metrics.box_thickness) as f64,
+    );
+}
+
+fn circle_piece(metrics: &Metrics, canvas: &mut Canvas, position: Alignment, filled: bool) {
+    canvas.clip_to_cell();
+    let width = metrics.cell_width as f64;
+    let height = metrics.cell_height as f64;
+    let x = match position.horizontal {
+        HAlign::Left => 0.0,
+        HAlign::Right => width,
+        HAlign::Center => width / 2.0,
+    };
+    let y = match position.vertical {
+        VAlign::Top => 0.0,
+        VAlign::Bottom => height,
+        VAlign::Middle => height / 2.0,
+    };
+    let thick = Thickness::Light.height(metrics.box_thickness) as f64;
+    let radius = 0.5 * width.min(height);
+    let mut nodes = raster::arc(
+        x,
+        y,
+        if filled { radius } else { radius - thick / 2.0 },
+        0.0,
+        std::f64::consts::TAU,
+        0.1,
+    );
+    nodes.push(raster::PathNode::ClosePath);
+    if filled {
+        canvas.fill_path(&nodes);
+    } else {
+        canvas.stroke_path(&nodes, thick, raster::CapMode::Butt);
+    }
+}
+
+fn draw_legacy_computing_tail(
+    cp: u32,
+    width: u32,
+    height: u32,
+    metrics: &Metrics,
+    canvas: &mut Canvas,
+) -> bool {
+    const ONE_EIGHTH: f64 = 0.125;
+    const ONE_QUARTER: f64 = 0.25;
+    const THREE_EIGHTHS: f64 = 0.375;
+    const HALF: f64 = 0.5;
+    const FIVE_EIGHTHS: f64 = 0.625;
+    const TWO_THIRDS: f64 = 2.0 / 3.0;
+    const THREE_QUARTERS: f64 = 0.75;
+    const SEVEN_EIGHTHS: f64 = 0.875;
+
+    let quads = |tl: bool, tr: bool, bl: bool, br: bool| Quads { tl, tr, bl, br };
+
+    if draw_smooth_mosaic(cp, metrics, canvas)
+        || draw_edge_triangles(cp, metrics, canvas)
+        || draw_vertical_eighth(cp, metrics, canvas)
+        || draw_horizontal_eighth(cp, metrics, canvas)
+    {
+        return true;
+    }
+
+    match cp {
+        0x1fb7c => {
+            block(metrics, canvas, Alignment::LEFT, ONE_EIGHTH, 1.0);
+            block(metrics, canvas, Alignment::LOWER, 1.0, ONE_EIGHTH);
+        }
+        0x1fb7d => {
+            block(metrics, canvas, Alignment::LEFT, ONE_EIGHTH, 1.0);
+            block(metrics, canvas, Alignment::UPPER, 1.0, ONE_EIGHTH);
+        }
+        0x1fb7e => {
+            block(metrics, canvas, Alignment::RIGHT, ONE_EIGHTH, 1.0);
+            block(metrics, canvas, Alignment::UPPER, 1.0, ONE_EIGHTH);
+        }
+        0x1fb7f => {
+            block(metrics, canvas, Alignment::RIGHT, ONE_EIGHTH, 1.0);
+            block(metrics, canvas, Alignment::LOWER, 1.0, ONE_EIGHTH);
+        }
+        0x1fb80 => {
+            block(metrics, canvas, Alignment::UPPER, 1.0, ONE_EIGHTH);
+            block(metrics, canvas, Alignment::LOWER, 1.0, ONE_EIGHTH);
+        }
+        0x1fb81 => {
+            draw_horizontal_eighth_index(0, metrics, canvas);
+            draw_horizontal_eighth_index(2, metrics, canvas);
+            draw_horizontal_eighth_index(4, metrics, canvas);
+            draw_horizontal_eighth_index(7, metrics, canvas);
+        }
+        0x1fb82 => block(metrics, canvas, Alignment::UPPER, 1.0, ONE_QUARTER),
+        0x1fb83 => block(metrics, canvas, Alignment::UPPER, 1.0, THREE_EIGHTHS),
+        0x1fb84 => block(metrics, canvas, Alignment::UPPER, 1.0, FIVE_EIGHTHS),
+        0x1fb85 => block(metrics, canvas, Alignment::UPPER, 1.0, THREE_QUARTERS),
+        0x1fb86 => block(metrics, canvas, Alignment::UPPER, 1.0, SEVEN_EIGHTHS),
+        0x1fb87 => block(metrics, canvas, Alignment::RIGHT, ONE_QUARTER, 1.0),
+        0x1fb88 => block(metrics, canvas, Alignment::RIGHT, THREE_EIGHTHS, 1.0),
+        0x1fb89 => block(metrics, canvas, Alignment::RIGHT, FIVE_EIGHTHS, 1.0),
+        0x1fb8a => block(metrics, canvas, Alignment::RIGHT, THREE_QUARTERS, 1.0),
+        0x1fb8b => block(metrics, canvas, Alignment::RIGHT, SEVEN_EIGHTHS, 1.0),
+        0x1fb8c => block_shade(metrics, canvas, Alignment::LEFT, HALF, 1.0, Shade::Medium),
+        0x1fb8d => block_shade(metrics, canvas, Alignment::RIGHT, HALF, 1.0, Shade::Medium),
+        0x1fb8e => block_shade(metrics, canvas, Alignment::UPPER, 1.0, HALF, Shade::Medium),
+        0x1fb8f => block_shade(metrics, canvas, Alignment::LOWER, 1.0, HALF, Shade::Medium),
+        0x1fb90 => full_block_shade(metrics, canvas, Shade::Medium),
+        0x1fb91 => {
+            full_block_shade(metrics, canvas, Shade::Medium);
+            block(metrics, canvas, Alignment::UPPER, 1.0, HALF);
+        }
+        0x1fb92 => {
+            full_block_shade(metrics, canvas, Shade::Medium);
+            block(metrics, canvas, Alignment::LOWER, 1.0, HALF);
+        }
+        0x1fb93 => {}
+        0x1fb94 => {
+            full_block_shade(metrics, canvas, Shade::Medium);
+            block(metrics, canvas, Alignment::RIGHT, HALF, 1.0);
+        }
+        0x1fb95 => checkerboard_fill(metrics, canvas, 0),
+        0x1fb96 => checkerboard_fill(metrics, canvas, 1),
+        0x1fb97 => {
+            canvas.r#box(
+                0,
+                (height / 4) as i32,
+                width as i32,
+                (2 * height / 4) as i32,
+                Color::ON,
+            );
+            canvas.r#box(
+                0,
+                (3 * height / 4) as i32,
+                width as i32,
+                height as i32,
+                Color::ON,
+            );
+        }
+        0x1fb98 | 0x1fb99 => draw_diagonal_fill(cp, width, height, metrics, canvas),
+        0x1fb9a => {
+            edge_triangle(metrics, canvas, Edge::Top);
+            edge_triangle(metrics, canvas, Edge::Bottom);
+        }
+        0x1fb9b => {
+            edge_triangle(metrics, canvas, Edge::Left);
+            edge_triangle(metrics, canvas, Edge::Right);
+        }
+        0x1fb9c => draw_corner_triangle_shade(metrics, canvas, Corner::Tl, Shade::Medium),
+        0x1fb9d => draw_corner_triangle_shade(metrics, canvas, Corner::Tr, Shade::Medium),
+        0x1fb9e => draw_corner_triangle_shade(metrics, canvas, Corner::Br, Shade::Medium),
+        0x1fb9f => draw_corner_triangle_shade(metrics, canvas, Corner::Bl, Shade::Medium),
+        0x1fba0 => corner_diagonal_lines(metrics, canvas, quads(true, false, false, false)),
+        0x1fba1 => corner_diagonal_lines(metrics, canvas, quads(false, true, false, false)),
+        0x1fba2 => corner_diagonal_lines(metrics, canvas, quads(false, false, true, false)),
+        0x1fba3 => corner_diagonal_lines(metrics, canvas, quads(false, false, false, true)),
+        0x1fba4 => corner_diagonal_lines(metrics, canvas, quads(true, false, true, false)),
+        0x1fba5 => corner_diagonal_lines(metrics, canvas, quads(false, true, false, true)),
+        0x1fba6 => corner_diagonal_lines(metrics, canvas, quads(false, false, true, true)),
+        0x1fba7 => corner_diagonal_lines(metrics, canvas, quads(true, true, false, false)),
+        0x1fba8 => corner_diagonal_lines(metrics, canvas, quads(true, false, false, true)),
+        0x1fba9 => corner_diagonal_lines(metrics, canvas, quads(false, true, true, false)),
+        0x1fbaa => corner_diagonal_lines(metrics, canvas, quads(false, true, true, true)),
+        0x1fbab => corner_diagonal_lines(metrics, canvas, quads(true, false, true, true)),
+        0x1fbac => corner_diagonal_lines(metrics, canvas, quads(true, true, false, true)),
+        0x1fbad => corner_diagonal_lines(metrics, canvas, quads(true, true, true, false)),
+        0x1fbae => corner_diagonal_lines(metrics, canvas, quads(true, true, true, true)),
+        0x1fbaf => lines_char(metrics, canvas, lines(H, L, H, L)),
+        0x1fbbd => {
+            draw_box_diagonal(0x2573, metrics, canvas);
+            invert_and_clip(canvas);
+        }
+        0x1fbbe => {
+            corner_diagonal_lines(metrics, canvas, quads(false, false, false, true));
+            invert_and_clip(canvas);
+        }
+        0x1fbbf => {
+            corner_diagonal_lines(metrics, canvas, quads(true, true, true, true));
+            invert_and_clip(canvas);
+        }
+        0x1fbce => block(metrics, canvas, Alignment::LEFT, TWO_THIRDS, 1.0),
+        0x1fbcf => block(metrics, canvas, Alignment::LEFT, 1.0 / 3.0, 1.0),
+        0x1fbd0 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Right, VAlign::Middle),
+            alignment(HAlign::Left, VAlign::Bottom),
+        ),
+        0x1fbd1 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Right, VAlign::Top),
+            alignment(HAlign::Left, VAlign::Middle),
+        ),
+        0x1fbd2 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Left, VAlign::Top),
+            alignment(HAlign::Right, VAlign::Middle),
+        ),
+        0x1fbd3 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Left, VAlign::Middle),
+            alignment(HAlign::Right, VAlign::Bottom),
+        ),
+        0x1fbd4 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Left, VAlign::Top),
+            alignment(HAlign::Center, VAlign::Bottom),
+        ),
+        0x1fbd5 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Center, VAlign::Top),
+            alignment(HAlign::Right, VAlign::Bottom),
+        ),
+        0x1fbd6 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Right, VAlign::Top),
+            alignment(HAlign::Center, VAlign::Bottom),
+        ),
+        0x1fbd7 => cell_diagonal(
+            metrics,
+            canvas,
+            alignment(HAlign::Center, VAlign::Top),
+            alignment(HAlign::Left, VAlign::Bottom),
+        ),
+        0x1fbd8 => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Top),
+                alignment(HAlign::Center, VAlign::Middle),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Center, VAlign::Middle),
+                alignment(HAlign::Right, VAlign::Top),
+            );
+        }
+        0x1fbd9 => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Right, VAlign::Top),
+                alignment(HAlign::Center, VAlign::Middle),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Center, VAlign::Middle),
+                alignment(HAlign::Right, VAlign::Bottom),
+            );
+        }
+        0x1fbda => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Bottom),
+                alignment(HAlign::Center, VAlign::Middle),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Center, VAlign::Middle),
+                alignment(HAlign::Right, VAlign::Bottom),
+            );
+        }
+        0x1fbdb => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Top),
+                alignment(HAlign::Center, VAlign::Middle),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Center, VAlign::Middle),
+                alignment(HAlign::Left, VAlign::Bottom),
+            );
+        }
+        0x1fbdc => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Top),
+                alignment(HAlign::Center, VAlign::Bottom),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Center, VAlign::Bottom),
+                alignment(HAlign::Right, VAlign::Top),
+            );
+        }
+        0x1fbdd => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Right, VAlign::Top),
+                alignment(HAlign::Left, VAlign::Middle),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Middle),
+                alignment(HAlign::Right, VAlign::Bottom),
+            );
+        }
+        0x1fbde => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Bottom),
+                alignment(HAlign::Center, VAlign::Top),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Center, VAlign::Top),
+                alignment(HAlign::Right, VAlign::Bottom),
+            );
+        }
+        0x1fbdf => {
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Left, VAlign::Top),
+                alignment(HAlign::Right, VAlign::Middle),
+            );
+            cell_diagonal(
+                metrics,
+                canvas,
+                alignment(HAlign::Right, VAlign::Middle),
+                alignment(HAlign::Left, VAlign::Bottom),
+            );
+        }
+        0x1fbe0 => circle_piece(metrics, canvas, Alignment::UPPER, false),
+        0x1fbe1 => circle_piece(metrics, canvas, Alignment::RIGHT, false),
+        0x1fbe2 => circle_piece(metrics, canvas, Alignment::LOWER, false),
+        0x1fbe3 => circle_piece(metrics, canvas, Alignment::LEFT, false),
+        0x1fbe4 => block(
+            metrics,
+            canvas,
+            alignment(HAlign::Center, VAlign::Top),
+            HALF,
+            HALF,
+        ),
+        0x1fbe5 => block(
+            metrics,
+            canvas,
+            alignment(HAlign::Center, VAlign::Bottom),
+            HALF,
+            HALF,
+        ),
+        0x1fbe6 => block(
+            metrics,
+            canvas,
+            alignment(HAlign::Left, VAlign::Middle),
+            HALF,
+            HALF,
+        ),
+        0x1fbe7 => block(
+            metrics,
+            canvas,
+            alignment(HAlign::Right, VAlign::Middle),
+            HALF,
+            HALF,
+        ),
+        0x1fbe8 => circle_piece(metrics, canvas, Alignment::UPPER, true),
+        0x1fbe9 => circle_piece(metrics, canvas, Alignment::RIGHT, true),
+        0x1fbea => circle_piece(metrics, canvas, Alignment::LOWER, true),
+        0x1fbeb => circle_piece(metrics, canvas, Alignment::LEFT, true),
+        0x1fbec => circle_piece(metrics, canvas, alignment(HAlign::Right, VAlign::Top), true),
+        0x1fbed => circle_piece(
+            metrics,
+            canvas,
+            alignment(HAlign::Left, VAlign::Bottom),
+            true,
+        ),
+        0x1fbee => circle_piece(
+            metrics,
+            canvas,
+            alignment(HAlign::Right, VAlign::Bottom),
+            true,
+        ),
+        0x1fbef => circle_piece(metrics, canvas, alignment(HAlign::Left, VAlign::Top), true),
+        _ => return false,
+    }
+    true
+}
+
+fn fading_line(metrics: &Metrics, canvas: &mut Canvas, to: Edge, thickness: Thickness) {
+    let thick_px = thickness.height(metrics.box_thickness);
+    let h_top = metrics.cell_height.saturating_sub(thick_px) / 2;
+    let h_bottom = h_top.saturating_add(thick_px);
+    let v_left = metrics.cell_width.saturating_sub(thick_px) / 2;
+    let v_right = v_left.saturating_add(thick_px);
+
+    match to {
+        Edge::Top | Edge::Bottom => {
+            for y in 0..metrics.cell_height {
+                let t = if metrics.cell_height <= 1 {
+                    255.0
+                } else {
+                    y as f64 / metrics.cell_height as f64 * 255.0
+                };
+                let alpha = match to {
+                    Edge::Top => t.round() as u8,
+                    Edge::Bottom => (255.0 - t).round() as u8,
+                    _ => unreachable!(),
+                };
+                for x in v_left..v_right {
+                    canvas.pixel(x as i32, y as i32, Color(alpha));
+                }
+            }
+        }
+        Edge::Left | Edge::Right => {
+            for x in 0..metrics.cell_width {
+                let t = if metrics.cell_width <= 1 {
+                    255.0
+                } else {
+                    x as f64 / metrics.cell_width as f64 * 255.0
+                };
+                let alpha = match to {
+                    Edge::Left => t.round() as u8,
+                    Edge::Right => (255.0 - t).round() as u8,
+                    _ => unreachable!(),
+                };
+                for y in h_top..h_bottom {
+                    canvas.pixel(x as i32, y as i32, Color(alpha));
+                }
+            }
+        }
+    }
+}
+
+fn draw_branch_subset(cp: u32, metrics: &Metrics, canvas: &mut Canvas) -> bool {
+    match cp {
+        0xf5d0 => hline_middle(metrics, canvas, Thickness::Light),
+        0xf5d1 => vline_middle(metrics, canvas, Thickness::Light),
+        0xf5d2 => fading_line(metrics, canvas, Edge::Right, Thickness::Light),
+        0xf5d3 => fading_line(metrics, canvas, Edge::Left, Thickness::Light),
+        0xf5d4 => fading_line(metrics, canvas, Edge::Bottom, Thickness::Light),
+        0xf5d5 => fading_line(metrics, canvas, Edge::Top, Thickness::Light),
+        0xf5d6 => draw_arc_corner(Corner::Br, metrics, canvas),
+        0xf5d7 => draw_arc_corner(Corner::Bl, metrics, canvas),
+        0xf5d8 => draw_arc_corner(Corner::Tr, metrics, canvas),
+        0xf5d9 => draw_arc_corner(Corner::Tl, metrics, canvas),
+        0xf5da => {
+            vline_middle(metrics, canvas, Thickness::Light);
+            draw_arc_corner(Corner::Tr, metrics, canvas);
+        }
+        0xf5db => {
+            vline_middle(metrics, canvas, Thickness::Light);
+            draw_arc_corner(Corner::Br, metrics, canvas);
+        }
+        0xf5dc => {
+            draw_arc_corner(Corner::Tr, metrics, canvas);
+            draw_arc_corner(Corner::Br, metrics, canvas);
+        }
+        0xf5dd => {
+            vline_middle(metrics, canvas, Thickness::Light);
+            draw_arc_corner(Corner::Tl, metrics, canvas);
+        }
+        0xf5de => {
+            vline_middle(metrics, canvas, Thickness::Light);
+            draw_arc_corner(Corner::Bl, metrics, canvas);
+        }
+        0xf5df => {
+            draw_arc_corner(Corner::Tl, metrics, canvas);
+            draw_arc_corner(Corner::Bl, metrics, canvas);
+        }
+        0xf5e0 => {
+            draw_arc_corner(Corner::Bl, metrics, canvas);
+            hline_middle(metrics, canvas, Thickness::Light);
+        }
+        0xf5e1 => {
+            draw_arc_corner(Corner::Br, metrics, canvas);
+            hline_middle(metrics, canvas, Thickness::Light);
+        }
+        0xf5e2 => {
+            draw_arc_corner(Corner::Br, metrics, canvas);
+            draw_arc_corner(Corner::Bl, metrics, canvas);
+        }
+        0xf5e3 => {
+            draw_arc_corner(Corner::Tl, metrics, canvas);
+            hline_middle(metrics, canvas, Thickness::Light);
+        }
+        _ => return false,
     }
     true
 }
@@ -2744,6 +3611,10 @@ mod tests {
     /// Whether every pixel of the cell has the given alpha.
     fn all_alpha(c: &Canvas, m: &Metrics, alpha: u8) -> bool {
         (0..m.cell_height as i32).all(|y| (0..m.cell_width as i32).all(|x| c.get(x, y) == alpha))
+    }
+
+    fn any_ink(c: &Canvas, m: &Metrics) -> bool {
+        !all_alpha(c, m, 0)
     }
 
     #[test]
@@ -4236,5 +5107,123 @@ mod tests {
         let mut c2 = cell_canvas();
         assert!(draw_codepoint(0x2500, m.cell_width, &m, &mut c2));
         assert!(!all_alpha(&c2, &m, 0), "box still drawn");
+    }
+
+    const LEGACY_TAIL_RANGES: &[(u32, u32)] = &[
+        (0x1fb3c, 0x1fb67),
+        (0x1fb68, 0x1fb6f),
+        (0x1fb70, 0x1fb75),
+        (0x1fb76, 0x1fb7b),
+        (0x1fb7c, 0x1fb97),
+        (0x1fb98, 0x1fb98),
+        (0x1fb99, 0x1fb99),
+        (0x1fb9a, 0x1fb9f),
+        (0x1fba0, 0x1fbae),
+        (0x1fbaf, 0x1fbaf),
+        (0x1fbbd, 0x1fbbf),
+        (0x1fbce, 0x1fbcf),
+        (0x1fbd0, 0x1fbdf),
+        (0x1fbe0, 0x1fbef),
+    ];
+
+    #[test]
+    fn legacy_tail_exact_upstream_inventory_is_covered() {
+        let m = fixture_metrics();
+        for &(start, end) in LEGACY_TAIL_RANGES {
+            for cp in start..=end {
+                let mut c = cell_canvas();
+                assert!(
+                    draw_codepoint(cp, m.cell_width, &m, &mut c),
+                    "{cp:#07x} should dispatch"
+                );
+                assert!(has_codepoint(cp, &m), "{cp:#07x} should be covered");
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_tail_upstream_gaps_are_excluded() {
+        let m = fixture_metrics();
+        for cp in [0x1fbb0u32, 0x1fbbc, 0x1fbc0, 0x1fbcd, 0x1fbf0] {
+            let mut c = cell_canvas();
+            assert!(
+                !draw_codepoint(cp, m.cell_width, &m, &mut c),
+                "{cp:#07x} is an upstream gap"
+            );
+            assert!(!has_codepoint(cp, &m), "{cp:#07x} is not covered");
+            assert!(all_alpha(&c, &m, 0), "{cp:#07x} drew ink");
+        }
+    }
+
+    #[test]
+    fn branch_subset_exact_range_is_covered() {
+        let m = fixture_metrics();
+        for cp in 0xf5d0..=0xf5e3 {
+            let mut c = cell_canvas();
+            assert!(
+                draw_codepoint(cp, m.cell_width, &m, &mut c),
+                "{cp:#06x} should dispatch"
+            );
+            assert!(has_codepoint(cp, &m), "{cp:#06x} should be covered");
+            assert!(any_ink(&c, &m), "{cp:#06x} should draw ink");
+        }
+        for cp in [0xf5cfu32, 0xf5e4] {
+            let mut c = cell_canvas();
+            assert!(
+                !draw_codepoint(cp, m.cell_width, &m, &mut c),
+                "{cp:#06x} outside this branch slice"
+            );
+            assert!(!has_codepoint(cp, &m), "{cp:#06x} not covered yet");
+        }
+    }
+
+    #[test]
+    fn smooth_mosaic_draws_path_shape() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_codepoint(0x1fb3c, m.cell_width, &m, &mut c));
+        assert!(any_ink(&c, &m), "smooth mosaic inks");
+        assert!(inked(&c, 0, 17), "bottom-left corner participates");
+        assert!(!inked(&c, 8, 0), "top-right stays empty");
+    }
+
+    #[test]
+    fn eighth_block_positions_are_pinned() {
+        let m = fixture_metrics();
+        let mut vertical = cell_canvas();
+        assert!(draw_codepoint(0x1fb70, m.cell_width, &m, &mut vertical));
+        assert!(inked(&vertical, 1, 0), "second eighth column inked");
+        assert!(!inked(&vertical, 0, 0), "first eighth column empty");
+
+        let mut horizontal = cell_canvas();
+        assert!(draw_codepoint(0x1fb76, m.cell_width, &m, &mut horizontal));
+        assert!(inked(&horizontal, 0, 3), "second eighth row inked");
+        assert!(!inked(&horizontal, 0, 0), "first eighth row empty");
+    }
+
+    #[test]
+    fn legacy_intentional_empty_glyph_is_still_covered() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_codepoint(0x1fb93, m.cell_width, &m, &mut c));
+        assert!(has_codepoint(0x1fb93, &m));
+        assert!(all_alpha(&c, &m, 0), "upstream renders this hole empty");
+    }
+
+    #[test]
+    fn legacy_medium_triangle_uses_medium_alpha() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_codepoint(0x1fb9c, m.cell_width, &m, &mut c));
+        assert_eq!(c.get(1, 1), 0x80, "interior medium triangle alpha");
+    }
+
+    #[test]
+    fn legacy_circle_piece_clips_to_cell() {
+        let m = fixture_metrics();
+        let mut c = cell_canvas();
+        assert!(draw_codepoint(0x1fbe8, m.cell_width, &m, &mut c));
+        assert!(any_ink(&c, &m), "filled circle piece inks");
+        assert!(inked(&c, 4, 0), "top circle piece reaches top center");
     }
 }

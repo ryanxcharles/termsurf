@@ -141,3 +141,65 @@ and `Anscombe`, fresh context.
   upstream functions `draw1FB70_1FB75` and `draw1FB76_1FB7B`.
 
 **Final verdict:** Approved.
+
+## Result
+
+**Result:** Pass
+
+Ported the remaining Phase I sprite coverage for the exact upstream
+Symbols-for-Legacy-Computing draw-function inventory inside the
+`U+1FB3C`-`U+1FBEF` envelope and for branch glyphs `U+F5D0`-`U+F5E3`.
+
+`roastty/src/font/sprite/draw.rs` now dispatches smooth mosaics, edge triangles,
+vertical and horizontal eighth blocks, combined eighth/shade/checkerboard
+glyphs, diagonal fills, corner diagonal line sets, inverted diagonal glyphs,
+thirds, cell diagonals, circle pieces, and the initial branch drawing subset.
+The implementation reuses the existing sprite raster/path pipeline, the box-arc
+geometry, block/shade primitives, and adds narrow helpers for smooth-mosaic
+pattern decoding, edge triangles, checkerboards, cell clipping, medium-alpha
+path fills, fading branch lines, and circle pieces.
+
+The tests prove the important inventory rule from the design review:
+`U+1FB3C`-`U+1FBEF` is not dense. Every upstream-covered draw-function range in
+that envelope is recognized, while upstream gaps such as `U+1FBB0`, `U+1FBBC`,
+`U+1FBC0`, and `U+1FBCD` remain excluded. Representative pixel tests cover the
+new path, eighth-block, intentional-empty, medium-alpha, and clipped-circle
+paths, and resolver tests prove representative legacy/branch glyphs render
+through the normal sprite atlas path.
+
+Verification completed:
+
+- `cargo fmt`
+- `cargo test -p roastty font::sprite::draw -- --test-threads=1` — 142 passed
+- `cargo test -p roastty sprite -- --test-threads=1` — 269 passed
+- `cargo test -p roastty render_glyph_sprite -- --test-threads=1` — 5 passed
+- `cargo test -p roastty --test abi_harness` — 1 passed, with existing C enum
+  conversion warnings
+- `cargo test -p roastty -- --test-threads=1` — 4822 unit tests plus ABI harness
+  and doc tests passed, with existing C enum conversion warnings
+- `cd roastty && macos/build.nu --action test` — 211 hosted macOS tests passed
+  (`TEST SUCCEEDED`), with existing SwiftLint, Swift concurrency/sendability,
+  main-thread-checker, App Intents, missing testing config, and pasteboard
+  warnings/noise
+- `cargo fmt --check`
+- `git diff --check`
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/148-sprite-legacy-computing-coverage.md issues/0802-libroastty-completion-and-mac-app/README.md`
+
+## Conclusion
+
+Phase I sprite legacy-computing coverage is complete. Roastty now covers the
+upstream sprite draw-function set for the named legacy-computing and branch
+ranges, preserves upstream's intentional holes, and proves the new glyphs
+through both direct sprite tests and the normal sprite atlas rendering path.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Boole`, fresh context.
+
+**Verdict:** Approved.
+
+**Findings:** None.
+
+**Independent verification:** `cargo fmt --check`, `git diff --check`, focused
+sprite draw tests, focused sprite tests, focused sprite atlas tests, and
+markdown prettier check all passed.

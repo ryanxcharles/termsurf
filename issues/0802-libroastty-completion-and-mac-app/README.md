@@ -202,6 +202,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   `Roastty.app/Contents/Resources/roastty/shell-integration/...` and creates the
   `Contents/Resources/terminfo/78/xterm-roastty` sentinel that
   `ResourcesDir::host()` uses to resolve `Contents/Resources/roastty`.
+- **Sprite legacy-computing coverage follows upstream draw functions, not dense
+  Unicode spans.** Exp 148 ports the exact upstream draw-function inventory
+  inside the `U+1FB3C`-`U+1FBEF` envelope and keeps upstream gaps such as
+  `U+1FBB0`, `U+1FBBC`, `U+1FBC0`, and `U+1FBCD` excluded.
 - **GTK quick-terminal config is parser/formatter-only.** Exp 82 wires
   `gtk-quick-terminal-layer` and `gtk-quick-terminal-namespace`; empty values
   reset to upstream defaults before enum/string parsing, and GTK layer-shell
@@ -969,8 +973,10 @@ the live app, verified by a Phase-D UI test.)
       setup module, feature env export, supported-shell command/env rewrite,
       renamed resource tree, app-bundle copy phase, and PTY/hosted resource
       tests wired in Exp 147
-- [ ] Sprite legacy-computing coverage (Smooth Mosaics U+1FB3C–1FBEF) + branch
-      glyphs (U+F5D0–F5E3)
+- [x] Sprite legacy-computing coverage (Smooth Mosaics U+1FB3C–1FBEF) + branch
+      glyphs (U+F5D0–F5E3) — exact upstream draw-function inventory, intentional
+      gap exclusions, representative glyph pixels, and sprite atlas rendering
+      wired in Exp 148
 - [ ] Sentry crash capture (the init/capture half of `crash/`)
 - [ ] SIMD fast paths (perf — base64 / VT / index-of / width)
 - [ ] `os/cf_release_thread` (perf), terminfo resource
@@ -1362,7 +1368,7 @@ stays unaltered except for the rename).
 - [Experiment 147: Phase I — shell-integration setup](147-shell-integration-setup.md)
   — **Pass**
 - [Experiment 148: Phase I — sprite legacy-computing coverage](148-sprite-legacy-computing-coverage.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
