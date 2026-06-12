@@ -1449,6 +1449,8 @@ stays unaltered except for the rename).
   — **Partial**
 - [Experiment 158: Phase G — terminal output UI oracle](158-terminal-output-ui-oracle.md)
   — **Partial**
+- [Experiment 159: Phase G — config title UI gate](159-config-title-ui-gate.md)
+  — **Designed**
 
 ## Process
 
