@@ -145,3 +145,92 @@ the underlying `libroastty` surface state.
 
 The reviewer rechecked the fixes, confirmed each prior finding was resolved, and
 reported no new required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented hosted `SurfaceView` preedit coverage and fixed the Rust-side cell
+metric propagation needed for `roastty_surface_ime_point` to observe preedit
+width in a real hosted app surface.
+
+`roastty/macos/Tests/Roastty/SurfaceViewAppKitTests.swift` now constructs real
+hosted `Roastty.SurfaceView` instances backed by temporary `roastty_app_t`
+values, calls the copied `NSTextInputClient` marked-text methods, and verifies:
+
+- plain `String` marked text updates `hasMarkedText()` and `markedRange()`;
+- `NSAttributedString` marked text follows the same path;
+- `roastty_surface_ime_point` reports nonzero preedit width equal to the current
+  surface cell width times the marked text's display-cell width;
+- `unmarkText()` clears both Swift marked-text state and the underlying IME
+  preedit width back to zero.
+
+The first hosted test draft proved direct `SurfaceView` construction was stable
+but failed because `roastty_surface_ime_point` reported width `0`: Roastty's
+public app-facing size path updated pixel size but never copied live font cell
+metrics into `RoasttySurfaceSize`. `roastty/src/lib.rs` now copies the live
+renderer `SharedGrid` cell size into `surface.size.cell_width_px` /
+`cell_height_px` and derives `columns` / `rows` after the live renderer exists.
+That matches the upstream `ghostty_surface_size` / `Surface.imePoint` contract,
+where IME width is based on preedit cell width and the surface's current cell
+metrics.
+
+After that fix, the hosted test expected the real `roastty_surface_size`
+`cell_width_px` instead of a hand-set Swift `cellSize`, and the targeted suite
+passed.
+
+The completion reviewer then found a real gap: Roastty's public IME point used
+Unicode scalar count for preedit width, while upstream `Surface.imePoint` uses
+the preedit display-cell width. `roastty/src/lib.rs` now computes the public
+preedit width with `unicode-width`, the hosted Swift test expects `"かな"` to
+occupy four terminal cells, and the Rust ABI-facing unit coverage verifies
+`roastty_surface_preedit("かな")` reports `4 * cell_width`.
+
+Verification run:
+
+- `cd roastty && macos/build.nu --action test --only-testing RoasttyTests/SurfaceViewAppKitTests`
+  — passed, 5 tests in 1 suite
+- `cd roastty/macos && swiftlint` — exited 0; it still reports the pre-existing
+  warning at `SurfaceView_AppKit.swift:738`
+- `cargo test -p roastty preedit` — passed, 45 library tests plus the filtered
+  ABI harness
+- `cargo test -p roastty surface_preedit` — passed, 10 library tests plus the
+  filtered ABI harness
+- `cd roastty && macos/build.nu --action test` — passed, 210 tests in 21 suites
+- `cargo test -p roastty -- --test-threads=1` — passed, 4762 library tests, the
+  ABI harness, and doc tests
+- `cargo fmt --check` — passed
+- `git diff --check` — passed
+
+The hosted Swift runs still include pre-existing warnings/noise: the SwiftLint
+opening-brace warning in `SurfaceView_AppKit.swift:738`, Swift 6 Sendable /
+main-actor warnings, Main Thread Checker messages in unrelated SplitTree tests,
+App Intents `linkd` messages, and pasteboard background-thread warnings. The
+commands exited successfully.
+
+## Conclusion
+
+This experiment proves the copied app's hosted `NSTextInputClient` marked-text
+path updates both Swift marked state and the underlying `libroastty` preedit
+state observable through `roastty_surface_ime_point`.
+
+It also fixes a real app-facing size gap: live renderer cell metrics now
+populate `roastty_surface_size`, which is required for IME geometry and
+downstream resize/overlay behavior. Full dead-key/IME UI automation remains
+later work, as does permission-dependent live global shortcut installation.
+
+## Completion Review
+
+Codex-native adversarial reviewer `Pauli` initially reported **Changes
+Required**: public IME geometry counted Unicode scalars, while upstream counts
+preedit display cells. The experiment was fixed to compute display-cell width
+with `unicode-width`, expect `"かな"` to occupy four cells in hosted Swift
+coverage, and verify the raw `roastty_surface_preedit` /
+`roastty_surface_ime_point` path from Rust.
+
+Codex-native adversarial reviewer `Kuhn` re-reviewed the completed experiment
+after those fixes and reported:
+
+**Verdict:** Approved
+
+Required findings: none.

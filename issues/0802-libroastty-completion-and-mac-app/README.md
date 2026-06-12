@@ -479,8 +479,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   keyDown path intentionally keeps using AppKit / `interpretKeyEvents` text,
   matching upstream embedded scope; Exp 139 verifies the Swift wrapper and
   raw-ABI handoff preserve app-provided UTF-8 text. Remaining Phase G native key
-  work is hosted dead-key/preedit runtime validation and native global shortcut
-  registration.
+  work is hosted dead-key/IME UI automation and native global shortcut
+  registration. Exp 140 adds hosted `NSTextInputClient` marked-text/preedit
+  coverage and fixes live renderer cell metrics feeding `roastty_surface_size`,
+  which `roastty_surface_ime_point` needs for IME geometry.
 - **The old copied-app config/menu assertion cluster is fixed at the Rust ABI
   boundary, but the XCTest host still hangs.** Exp 132 wires the missing
   Swift-read `roastty_config_get` keys, parsed `macos-window-shadow`, direct
@@ -914,8 +916,10 @@ the live app, verified by a Phase-D UI test.)
       (Exp 136), and `App` now owns/reloads `KeymapDarwin` state for layout
       detection (Exp 138), while copied-app key text intentionally remains
       AppKit-provided and the wrapper/raw-ABI handoff preserves that text (Exp
-      139); hosted dead-key/preedit handling and permission-dependent live
-      global shortcut installation remain later work
+      139); hosted `NSTextInputClient` marked-text/preedit handling and
+      `roastty_surface_ime_point` width are covered (Exp 140), while full
+      dead-key/IME UI automation and permission-dependent live global shortcut
+      installation remain later work
 
 **Phase H — Renderer feature-completion (in the live pass)**
 
@@ -1306,7 +1310,7 @@ stays unaltered except for the rename).
 - [Experiment 139: Phase G — keymap text scope](139-keymap-text-scope.md) —
   **Pass**
 - [Experiment 140: Phase G — hosted preedit surface view](140-hosted-preedit-surface-view.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

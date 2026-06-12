@@ -47,6 +47,7 @@ use terminal::terminal::{
 };
 use terminal::{mouse, mouse_encode, osc, point, sgr, size_report, style};
 use terminal::{CodepointMapEntry, CodepointReplacement};
+use unicode_width::UnicodeWidthChar;
 
 mod config;
 #[allow(dead_code)]
@@ -3217,7 +3218,15 @@ impl Surface {
     fn preedit_width(&self) -> u32 {
         self.preedit
             .as_deref()
-            .map(|preedit| u32::try_from(preedit.chars().count()).unwrap_or(u32::MAX))
+            .map(|preedit| {
+                preedit.chars().fold(0u32, |width, ch| {
+                    width.saturating_add(
+                        ch.width()
+                            .and_then(|width| u32::try_from(width).ok())
+                            .unwrap_or(0),
+                    )
+                })
+            })
             .unwrap_or(0)
     }
 
@@ -3470,6 +3479,20 @@ impl Surface {
                 self.size.height_px,
                 self.scale_factor_x,
             );
+        }
+        if let Some(cell) = self
+            .renderer
+            .as_ref()
+            .map(|live| live.shared_grid.cell_size())
+        {
+            if cell.width > 0 && cell.height > 0 {
+                self.size.cell_width_px = cell.width;
+                self.size.cell_height_px = cell.height;
+                self.size.columns =
+                    (self.size.width_px / cell.width).min(u32::from(u16::MAX)) as u16;
+                self.size.rows =
+                    (self.size.height_px / cell.height).min(u32::from(u16::MAX)) as u16;
+            }
         }
         let width = self.size.width_px.max(1) as usize;
         let height = self.size.height_px.max(1) as usize;
@@ -25268,6 +25291,39 @@ mod tests {
             cell_width_px: 10,
             cell_height_px: 20,
         };
+    }
+
+    #[test]
+    fn surface_preedit_ime_point_uses_display_cell_width() {
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        set_test_size_80x24(surface);
+
+        let preedit = "かな";
+        roastty_surface_preedit(surface, preedit.as_ptr().cast(), preedit.len());
+
+        let mut width = -1.0;
+        roastty_surface_ime_point(
+            surface,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut width,
+            ptr::null_mut(),
+        );
+        assert_eq!(width, 40.0);
+
+        roastty_surface_preedit(surface, ptr::null(), 0);
+        roastty_surface_ime_point(
+            surface,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut width,
+            ptr::null_mut(),
+        );
+        assert_eq!(width, 0.0);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
     }
 
     fn selected_text(surface: RoasttySurface) -> Option<String> {
