@@ -56,6 +56,14 @@ pub(crate) enum BreakState {
 }
 
 pub(crate) fn get(codepoint: u32) -> Properties {
+    if is_plain_ascii_width_fast_path(codepoint) {
+        return ASCII_PRINTABLE_PROPERTIES;
+    }
+
+    table_properties(codepoint)
+}
+
+fn table_properties(codepoint: u32) -> Properties {
     let high = (codepoint >> 8) as usize;
     if high >= tables::STAGE1.len() {
         return fallback();
@@ -65,6 +73,17 @@ pub(crate) fn get(codepoint: u32) -> Properties {
     let stage2_index = usize::from(tables::STAGE1[high]) + low;
     let stage3_index = usize::from(tables::STAGE2[stage2_index]);
     tables::STAGE3[stage3_index]
+}
+
+const ASCII_PRINTABLE_PROPERTIES: Properties = Properties {
+    width: 1,
+    width_zero_in_grapheme: false,
+    grapheme_break: GraphemeBreak::Other,
+    emoji_vs_base: false,
+};
+
+const fn is_plain_ascii_width_fast_path(codepoint: u32) -> bool {
+    matches!(codepoint, 0x20..=0x7e) && !matches!(codepoint, 0x23 | 0x2a | 0x30..=0x39)
 }
 
 pub(crate) fn grapheme_break(previous: u32, current: u32, state: &mut BreakState) -> bool {
@@ -1192,15 +1211,17 @@ mod tests {
 
     #[test]
     fn unicode_properties_ascii_fast_path_width() {
-        assert_eq!(
-            props(0x41),
-            Properties {
-                width: 1,
-                width_zero_in_grapheme: false,
-                grapheme_break: GraphemeBreak::Other,
-                emoji_vs_base: false,
-            }
-        );
+        assert_eq!(props(0x41), ASCII_PRINTABLE_PROPERTIES);
+    }
+
+    #[test]
+    fn unicode_properties_ascii_fast_path_matches_table() {
+        for codepoint in 0x20..=0x7e {
+            assert_eq!(props(codepoint), table_properties(codepoint));
+        }
+        for codepoint in [0x00, 0x1f, 0x7f] {
+            assert_eq!(props(codepoint), table_properties(codepoint));
+        }
     }
 
     #[test]
@@ -1313,6 +1334,53 @@ mod tests {
                 emoji_vs_base: false,
             }
         );
+    }
+
+    #[test]
+    #[ignore = "release-mode perf probe"]
+    fn simd_fast_path_perf_unicode_width() {
+        let input: Vec<u32> = (0..(1024 * 128))
+            .map(|i| b'A' as u32 + (i % 26) as u32)
+            .collect();
+        let iterations = 100;
+
+        let scalar = time_iterations(iterations, || {
+            let mut sum = 0usize;
+            for &codepoint in &input {
+                sum += table_properties(codepoint).width as usize;
+            }
+            assert_eq!(sum, input.len());
+        });
+        let fast = time_iterations(iterations, || {
+            let mut sum = 0usize;
+            for &codepoint in &input {
+                sum += props(codepoint).width as usize;
+            }
+            assert_eq!(sum, input.len());
+        });
+        report_ratio("unicode_ascii_width", scalar, fast);
+    }
+
+    fn time_iterations(iterations: usize, mut f: impl FnMut()) -> std::time::Duration {
+        let start = std::time::Instant::now();
+        for _ in 0..iterations {
+            f();
+        }
+        start.elapsed()
+    }
+
+    fn assert_speedup(label: &str, scalar: std::time::Duration, fast: std::time::Duration) {
+        let ratio = scalar.as_secs_f64() / fast.as_secs_f64();
+        eprintln!("{label}: scalar={scalar:?} fast={fast:?} ratio={ratio:.2}x");
+        assert!(
+            ratio >= 1.05,
+            "{label} fast path ratio {ratio:.2}x below 1.05x"
+        );
+    }
+
+    fn report_ratio(label: &str, scalar: std::time::Duration, fast: std::time::Duration) {
+        let ratio = scalar.as_secs_f64() / fast.as_secs_f64();
+        eprintln!("{label}: scalar={scalar:?} fast={fast:?} ratio={ratio:.2}x");
     }
 
     #[test]

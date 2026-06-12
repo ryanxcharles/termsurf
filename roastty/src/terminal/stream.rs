@@ -302,8 +302,39 @@ impl Stream {
         input: &[u8],
         handler: &mut H,
     ) -> Result<(), H::Error> {
-        for &byte in input {
+        let mut input = input;
+        while !input.is_empty() {
+            let run = self.printable_ascii_run(input);
+            if run > 0 {
+                self.print_ascii_run(&input[..run], handler)?;
+                input = &input[run..];
+                continue;
+            }
+
+            let byte = input[0];
             self.next(byte, handler)?;
+            input = &input[1..];
+        }
+        Ok(())
+    }
+
+    fn printable_ascii_run(&self, input: &[u8]) -> usize {
+        if self.escape != EscapeState::Ground || self.utf8.is_pending() {
+            return 0;
+        }
+
+        let esc = crate::fastmem::index_of(input, 0x1b).unwrap_or(input.len());
+        input[..esc]
+            .iter()
+            .position(|&byte| !byte.is_ascii_graphic() && byte != b' ')
+            .unwrap_or(esc)
+    }
+
+    fn print_ascii_run<H: Handler>(&self, input: &[u8], handler: &mut H) -> Result<(), H::Error> {
+        for &byte in input {
+            handler.vt(Action::Print {
+                cp: char::from(byte),
+            })?;
         }
         Ok(())
     }
@@ -1733,6 +1764,11 @@ mod tests {
         osc_actions: Vec<OwnedOscAction>,
     }
 
+    #[derive(Debug, Default)]
+    struct CountingHandler {
+        prints: usize,
+    }
+
     impl Handler for RecordingHandler {
         type Error = ();
 
@@ -1743,6 +1779,17 @@ mod tests {
 
         fn osc(&mut self, action: OscAction<'_>) -> Result<(), Self::Error> {
             self.osc_actions.push(OwnedOscAction::from(action));
+            Ok(())
+        }
+    }
+
+    impl Handler for CountingHandler {
+        type Error = ();
+
+        fn vt(&mut self, action: Action) -> Result<(), Self::Error> {
+            if matches!(action, Action::Print { .. }) {
+                self.prints += 1;
+            }
             Ok(())
         }
     }
@@ -1949,6 +1996,33 @@ mod tests {
         stream.next_slice(input, handler).unwrap();
     }
 
+    fn next_slice_scalar(
+        stream: &mut Stream,
+        handler: &mut impl Handler<Error = ()>,
+        input: &[u8],
+    ) {
+        for &byte in input {
+            stream.next(byte, handler).unwrap();
+        }
+    }
+
+    fn time_iterations(iterations: usize, mut f: impl FnMut()) -> std::time::Duration {
+        let start = std::time::Instant::now();
+        for _ in 0..iterations {
+            f();
+        }
+        start.elapsed()
+    }
+
+    fn assert_speedup(label: &str, scalar: std::time::Duration, fast: std::time::Duration) {
+        let ratio = scalar.as_secs_f64() / fast.as_secs_f64();
+        eprintln!("{label}: scalar={scalar:?} fast={fast:?} ratio={ratio:.2}x");
+        assert!(
+            ratio >= 1.05,
+            "{label} fast path ratio {ratio:.2}x below 1.05x"
+        );
+    }
+
     #[test]
     fn stream_ascii_dispatches_one_print_action_per_character() {
         let mut stream = Stream::init();
@@ -1957,6 +2031,93 @@ mod tests {
         next_slice(&mut stream, &mut handler, b"Hello");
 
         assert_eq!(print_chars(&handler), vec!['H', 'e', 'l', 'l', 'o']);
+    }
+
+    #[test]
+    fn stream_ascii_fast_path_stops_before_escape() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"Hello\x1b[31mR");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'H' },
+                Action::Print { cp: 'e' },
+                Action::Print { cp: 'l' },
+                Action::Print { cp: 'l' },
+                Action::Print { cp: 'o' },
+                Action::SetAttribute {
+                    attr: sgr::Attribute::PaletteFg(1)
+                },
+                Action::Print { cp: 'R' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_ascii_fast_path_stops_before_c0_controls() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, b"ABC\nDEF");
+
+        assert_eq!(
+            actions(&handler),
+            &[
+                Action::Print { cp: 'A' },
+                Action::Print { cp: 'B' },
+                Action::Print { cp: 'C' },
+                Action::LineFeed,
+                Action::Print { cp: 'D' },
+                Action::Print { cp: 'E' },
+                Action::Print { cp: 'F' },
+            ]
+        );
+    }
+
+    #[test]
+    fn stream_ascii_fast_path_stops_before_non_ascii() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+
+        next_slice(&mut stream, &mut handler, "ABC✤D".as_bytes());
+
+        assert_eq!(print_chars(&handler), vec!['A', 'B', 'C', '✤', 'D']);
+    }
+
+    #[test]
+    fn stream_ascii_fast_path_respects_pending_utf8() {
+        let mut stream = Stream::init();
+        let mut handler = RecordingHandler::default();
+        let bytes = "✤A".as_bytes();
+
+        next_slice(&mut stream, &mut handler, &bytes[..1]);
+        next_slice(&mut stream, &mut handler, &bytes[1..]);
+
+        assert_eq!(print_chars(&handler), vec!['✤', 'A']);
+    }
+
+    #[test]
+    #[ignore = "release-mode perf probe"]
+    fn simd_fast_path_perf_stream_ascii() {
+        let input = vec![b'a'; 1024 * 1024];
+        let iterations = 25;
+
+        let scalar = time_iterations(iterations, || {
+            let mut stream = Stream::init();
+            let mut handler = CountingHandler::default();
+            next_slice_scalar(&mut stream, &mut handler, &input);
+            assert_eq!(handler.prints, input.len());
+        });
+        let fast = time_iterations(iterations, || {
+            let mut stream = Stream::init();
+            let mut handler = CountingHandler::default();
+            stream.next_slice(&input, &mut handler).unwrap();
+            assert_eq!(handler.prints, input.len());
+        });
+        assert_speedup("stream_ascii", scalar, fast);
     }
 
     #[test]

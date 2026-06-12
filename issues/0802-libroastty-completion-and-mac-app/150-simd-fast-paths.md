@@ -141,3 +141,82 @@ Claude's named `adversarial-reviewer` agent.
   real SIMD width path lands.
 
 **Final verdict:** Approved.
+
+## Result
+
+**Result:** Partial
+
+Roastty now has Rust-native accelerated fast paths for the three surfaces that
+mapped cleanly without adding a C++ build bridge:
+
+- base64 decoding uses `base64-simd::STANDARD_NO_PAD` on Roastty's safely
+  stripped standard alphabet input, with the existing scalar decoder retained as
+  the compatibility fallback for Kitty/OSC leniency cases;
+- shared byte `index_of` uses a direct `memchr` dependency, matching upstream's
+  `simd/index_of` surface while relying on Rust-native vectorized search on
+  supported targets;
+- `terminal::stream::Stream::next_slice` batches ground-state printable ASCII
+  runs and uses the shared byte search to stop before ESC, while preserving the
+  existing per-byte parser at controls, non-ASCII, escape states, and pending
+  UTF-8 boundaries.
+
+The Unicode width work is deliberately narrower. `unicode::get` now bypasses the
+generated table for plain printable ASCII codepoints whose complete `Properties`
+exactly match the generated table. It excludes ASCII emoji variation bases (`#`,
+`*`, and digits) because those carry `emoji_vs_base = true`. The release-mode
+perf probe measured this shortcut at 0.98x versus the table reference on this
+machine, so it is a correctness-safe scalar shortcut, not a completed
+upstream-equivalent SIMD width path.
+
+`ROASTTY_BUILD_INFO_SIMD` now reports true on targets where the Rust-native
+SIMD-backed crates used here have vector acceleration (`aarch64`, `x86_64`, and
+`wasm32`), and the Rust/C ABI tests were updated accordingly.
+
+## Verification
+
+- `cargo fmt` — passed
+- `cargo test -p roastty base64 -- --test-threads=1` — 20 passed, 1 ignored
+- `cargo test -p roastty fastmem -- --test-threads=1` — 10 passed, 1 ignored
+- `cargo test -p roastty stream -- --test-threads=1` — 860 passed, 1 ignored
+- `cargo test -p roastty unicode -- --test-threads=1` — 30 passed, 1 ignored
+- `cargo test -p roastty --test abi_harness` — 1 passed, with existing C
+  enum-conversion warnings
+- `cargo test --release -p roastty simd_fast_path_perf -- --ignored --nocapture --test-threads=1`
+  — 4 passed. Measured ratios:
+  - `index_of_miss`: 27.66x
+  - `index_of_late_hit`: 28.46x
+  - `base64_decode`: 1.72x
+  - `stream_ascii`: 11.01x
+  - `unicode_ascii_width`: 0.98x (reported only; this is why the result is
+    Partial)
+- `cargo test -p roastty -- --test-threads=1` — 4,836 unit tests passed; ABI
+  harness and doc-tests passed, with existing C enum-conversion warnings and
+  existing `[unknown](scope): message` noise
+- `cd roastty && macos/build.nu --action test` — 211 hosted macOS tests passed
+  (`TEST SUCCEEDED`), with existing SwiftLint, Swift concurrency,
+  main-thread-checker, and pasteboard warning noise
+- `cargo fmt --check` — passed
+- `git diff --check` — passed
+- `cargo tree -p roastty -i base64-simd` — direct dependency through `roastty`
+- `cargo tree -p roastty -i memchr` — direct dependency through `roastty`, plus
+  existing transitive paths
+
+## Conclusion
+
+The Rust-native SIMD/perf layer is useful but incomplete. Base64, byte search,
+and VT printable ASCII parsing now have measured accelerated paths and remain
+covered by compatibility tests. Width lookup still needs a real
+upstream-equivalent SIMD/range-accelerated implementation if the Phase I SIMD
+checklist item is to be fully closed; the current ASCII shortcut is safe but not
+faster on the release probe.
+
+## Completion Review
+
+Codex-native adversarial subagent `Darwin` reviewed the completed experiment
+with fresh context before the result commit. The reviewer inspected the
+experiment file, the implementation diff from plan commit `1a593d8b62348`, the
+changed source files, and the documented verification claims.
+
+**Verdict:** Approved.
+
+**Findings:** None.

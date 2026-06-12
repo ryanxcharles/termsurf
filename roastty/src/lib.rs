@@ -12659,7 +12659,7 @@ pub extern "C" fn roastty_build_info(data: c_int, out: *mut c_void) -> c_int {
         match data {
             ROASTTY_BUILD_INFO_INVALID => ROASTTY_INVALID_VALUE,
             ROASTTY_BUILD_INFO_SIMD => {
-                out.cast::<bool>().write(false);
+                out.cast::<bool>().write(simd_build_enabled());
                 ROASTTY_SUCCESS
             }
             ROASTTY_BUILD_INFO_KITTY_GRAPHICS => {
@@ -12698,6 +12698,14 @@ pub extern "C" fn roastty_build_info(data: c_int, out: *mut c_void) -> c_int {
             _ => ROASTTY_INVALID_VALUE,
         }
     }
+}
+
+fn simd_build_enabled() -> bool {
+    cfg!(any(
+        target_arch = "aarch64",
+        target_arch = "wasm32",
+        target_arch = "x86_64"
+    ))
 }
 
 fn keyboard_layout_to_abi(layout: input_keyboard::Layout) -> c_int {
@@ -43256,7 +43264,7 @@ mod tests {
             roastty_build_info(ROASTTY_BUILD_INFO_SIMD, (&mut simd as *mut bool).cast()),
             ROASTTY_SUCCESS
         );
-        assert!(!simd);
+        assert_eq!(simd, simd_build_enabled());
 
         let mut kitty_graphics = true;
         assert_eq!(

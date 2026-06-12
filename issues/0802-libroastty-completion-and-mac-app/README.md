@@ -984,7 +984,9 @@ the live app, verified by a Phase-D UI test.)
 - [x] Sentry crash capture (the init/capture half of `crash/`) — local-only
       Sentry SDK init, panic/event capture, custom envelope transport, and
       dependency checks excluding Sentry HTTP/TLS transports wired in Exp 149
-- [ ] SIMD fast paths (perf — base64 / VT / index-of / width)
+- [ ] SIMD fast paths (perf — base64 / VT / index-of / width) — base64,
+      index-of, and VT ASCII fast paths wired in Exp 150; width remains a scalar
+      shortcut and needs a real SIMD/range-accelerated follow-up
 - [ ] `os/cf_release_thread` (perf), terminfo resource
 
 **Workstream 3 (continuous — the harness from Phase A, the roastty app from
@@ -1378,7 +1380,7 @@ stays unaltered except for the rename).
 - [Experiment 149: Phase I — Sentry crash capture](149-sentry-crash-capture.md)
   — **Pass**
 - [Experiment 150: Phase I — SIMD fast paths](150-simd-fast-paths.md) —
-  **Designed**
+  **Partial**
 
 ## Process
 

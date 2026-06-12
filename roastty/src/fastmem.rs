@@ -1,8 +1,16 @@
-//! Single-step slice rotations (port of the rotation helpers in upstream `fastmem`).
+//! Single-step slice rotations and byte search helpers (ports of the relevant upstream `fastmem`
+//! and `simd/index_of` surfaces).
 //!
 //! Upstream also wraps libc `memmove` / `memcpy` (`move` / `copy`) purely to prefer them over the
 //! Zig builtins for speed. Rust's `slice::copy_within` / `copy_from_slice` already lower to those
-//! intrinsics, so only the rotation helpers are ported here.
+//! intrinsics, so only the rotation helpers are ported here. Upstream `simd/index_of` dispatches
+//! to a C++ SIMD helper when available; Roastty uses `memchr`, which provides vector-accelerated
+//! search on supported Rust targets.
+
+/// Find the first `needle` byte in `input` (upstream `simd/index_of.indexOf`).
+pub(crate) fn index_of(input: &[u8], needle: u8) -> Option<usize> {
+    memchr::memchr(needle, input)
+}
 
 /// Moves the first item to the end: `0 1 2 3` → `1 2 3 0` (upstream `rotateOnce`). The slice must
 /// be non-empty.
@@ -38,6 +46,73 @@ pub(crate) fn rotate_in_r<T>(items: &mut [T], item: T) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn index_of_finds_no_match() {
+        assert_eq!(index_of(b"hello", b' '), None);
+    }
+
+    #[test]
+    fn index_of_finds_short_match() {
+        assert_eq!(index_of(b"hi lo", b' '), Some(2));
+    }
+
+    #[test]
+    fn index_of_finds_larger_matches() {
+        assert_eq!(index_of(b"hello world", b' '), Some(5));
+        assert_eq!(
+            index_of(
+                b"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz abc",
+                b' '
+            ),
+            Some(52)
+        );
+    }
+
+    #[test]
+    #[ignore = "release-mode perf probe"]
+    fn simd_fast_path_perf_index_of() {
+        let mut input = vec![b'a'; 1024 * 1024];
+        let iterations = 200;
+
+        let scalar_miss = time_iterations(iterations, || {
+            assert_eq!(scalar_index_of(&input, b'!'), None);
+        });
+        let fast_miss = time_iterations(iterations, || {
+            assert_eq!(index_of(&input, b'!'), None);
+        });
+        assert_speedup("index_of_miss", scalar_miss, fast_miss);
+
+        *input.last_mut().unwrap() = b'!';
+        let scalar_hit = time_iterations(iterations, || {
+            assert_eq!(scalar_index_of(&input, b'!'), Some(input.len() - 1));
+        });
+        let fast_hit = time_iterations(iterations, || {
+            assert_eq!(index_of(&input, b'!'), Some(input.len() - 1));
+        });
+        assert_speedup("index_of_late_hit", scalar_hit, fast_hit);
+    }
+
+    fn scalar_index_of(input: &[u8], needle: u8) -> Option<usize> {
+        input.iter().position(|&byte| byte == needle)
+    }
+
+    fn time_iterations(iterations: usize, mut f: impl FnMut()) -> std::time::Duration {
+        let start = std::time::Instant::now();
+        for _ in 0..iterations {
+            f();
+        }
+        start.elapsed()
+    }
+
+    fn assert_speedup(label: &str, scalar: std::time::Duration, fast: std::time::Duration) {
+        let ratio = scalar.as_secs_f64() / fast.as_secs_f64();
+        eprintln!("{label}: scalar={scalar:?} fast={fast:?} ratio={ratio:.2}x");
+        assert!(
+            ratio >= 1.05,
+            "{label} fast path ratio {ratio:.2}x below 1.05x"
+        );
+    }
 
     #[test]
     fn rotate_once_moves_first_to_end() {

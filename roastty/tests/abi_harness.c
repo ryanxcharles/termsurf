@@ -1995,7 +1995,7 @@ static void assert_support_abi(void) {
   bool bool_value = true;
   assert(roastty_build_info(ROASTTY_BUILD_INFO_SIMD, &bool_value) ==
          ROASTTY_SUCCESS);
-  assert(!bool_value);
+  assert(bool_value);
   assert(roastty_build_info(ROASTTY_BUILD_INFO_KITTY_GRAPHICS, &bool_value) ==
          ROASTTY_SUCCESS);
   assert(!bool_value);
