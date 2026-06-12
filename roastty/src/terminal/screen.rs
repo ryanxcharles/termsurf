@@ -21,7 +21,7 @@ use super::selection;
 use super::selection_codepoints;
 use super::sgr;
 use super::size::CellCountInt;
-use super::string_map::StringMap;
+use super::string_map::{StringMap, ViewportStringMap};
 use super::style;
 use super::tabstops;
 use crate::font::run::RunOptions;
@@ -316,6 +316,36 @@ impl Screen {
             None, // codepoint_map
         );
         StringMap::from_page_string(page_string)
+    }
+
+    /// Flatten the visible viewport to text plus one viewport coordinate per
+    /// byte. Renderer link matching uses this to map regex byte offsets back to
+    /// cells without exposing page-list pins outside the terminal module.
+    pub(in crate::terminal) fn viewport_string_map(&self) -> ViewportStringMap {
+        let page_string = self.pages.screen_format_string_with_pin_map(
+            None,
+            false, // trim
+            true,  // unwrap soft wraps
+            PageOutputFormat::Plain,
+            None, // palette
+            None, // codepoint_map
+        );
+
+        let mut map = Vec::with_capacity(page_string.pin_map.len());
+        for pin in page_string.pin_map {
+            let grid_ref = GridRef::from(pin);
+            let Ok(coord) = self.point_from_grid_ref(
+                grid_ref.node,
+                grid_ref.x,
+                grid_ref.y,
+                point::Tag::Viewport,
+            ) else {
+                return ViewportStringMap::new(String::new(), Vec::new());
+            };
+            map.push(coord);
+        }
+
+        ViewportStringMap::new(page_string.text, map)
     }
 
     /// The active row count of this screen's page list (upstream `screen.pages.rows`).

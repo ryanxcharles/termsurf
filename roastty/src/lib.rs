@@ -1,6 +1,7 @@
 use std::alloc::{self, Layout};
 #[cfg(test)]
 use std::cell::Cell;
+use std::collections::HashSet;
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString, OsStr, OsString};
@@ -2909,6 +2910,7 @@ struct SurfaceLiveRenderer {
     frame_renderer: renderer::frame_renderer::FrameRenderer,
     image_state: renderer::image::ImageState<renderer::metal::texture::MetalTexture>,
     background_image: renderer::image::BackgroundImageState<renderer::metal::texture::MetalTexture>,
+    link_set: renderer::link::RendererLinkSet,
     custom_shader: SurfaceCustomShaderState,
     shared_grid: font::shared_grid::SharedGrid,
 }
@@ -3110,9 +3112,116 @@ fn build_live_renderer(
         frame_renderer,
         image_state: renderer::image::ImageState::default(),
         background_image: renderer::image::BackgroundImageState::default(),
+        link_set: renderer::link::RendererLinkSet::default(),
         custom_shader: SurfaceCustomShaderState::new(),
         shared_grid,
     })
+}
+
+#[derive(Clone, Copy)]
+struct MouseViewportGeometry {
+    screen_width: u32,
+    screen_height: u32,
+    fallback_cols: u16,
+    fallback_rows: u16,
+    cell_width: u32,
+    cell_height: u32,
+}
+
+fn mouse_viewport_from_geometry(
+    terminal: &InnerTerminal,
+    geometry: MouseViewportGeometry,
+    position: Option<(f64, f64)>,
+) -> Option<point::Coordinate> {
+    let (x, y) = position?;
+    if !x.is_finite() || !y.is_finite() || x > f64::from(f32::MAX) || y > f64::from(f32::MAX) {
+        return None;
+    }
+    if geometry.screen_width == 0 || geometry.screen_height == 0 {
+        return None;
+    }
+
+    let terminal_cols = u32::from(terminal.columns());
+    let terminal_rows = terminal.rows();
+    let cols = if terminal_cols == 0 {
+        u32::from(geometry.fallback_cols).max(1)
+    } else {
+        terminal_cols
+    };
+    let rows = if terminal_rows == 0 {
+        geometry.fallback_rows.max(1)
+    } else {
+        terminal_rows
+    };
+    let cell_width = if geometry.cell_width == 0 {
+        geometry.screen_width / cols.max(1)
+    } else {
+        geometry.cell_width
+    }
+    .max(1);
+    let cell_height = if geometry.cell_height == 0 {
+        geometry.screen_height / u32::from(rows.max(1))
+    } else {
+        geometry.cell_height
+    }
+    .max(1);
+
+    let geometry = mouse_encode::Geometry {
+        screen: mouse_encode::PixelSize {
+            width: geometry.screen_width,
+            height: geometry.screen_height,
+        },
+        cell: mouse_encode::PixelSize {
+            width: cell_width,
+            height: cell_height,
+        },
+        padding: mouse_encode::Padding::default(),
+    };
+    let pos = mouse_encode::Position {
+        x: x as f32,
+        y: y as f32,
+    };
+    (!geometry.pos_out_of_viewport(pos)).then(|| geometry.pos_to_cell(pos))
+}
+
+fn osc8_hover_link_ranges(
+    terminal: &InnerTerminal,
+    map: &terminal::string_map::ViewportStringMap,
+    rows: usize,
+    mouse_viewport: Option<point::Coordinate>,
+    mouse_mods: key_mods::Mods,
+) -> Vec<Vec<[u16; 2]>> {
+    let Some(mouse) = mouse_viewport else {
+        return vec![Vec::new(); rows];
+    };
+    if mouse_mods != key_mods::ctrl_or_super(key_mods::Mods::new()) {
+        return vec![Vec::new(); rows];
+    }
+    let Some(hover_ref) = terminal.grid_ref(TerminalPointTag::Viewport, mouse) else {
+        return vec![Vec::new(); rows];
+    };
+    let Ok(hover_uri) = hover_ref.hyperlink_uri() else {
+        return vec![Vec::new(); rows];
+    };
+    if hover_uri.is_empty() {
+        return vec![Vec::new(); rows];
+    }
+
+    let mut seen = HashSet::new();
+    let mut cells = Vec::new();
+    for &cell in &map.map {
+        if !seen.insert(cell) {
+            continue;
+        }
+        let Some(ref_) = terminal.grid_ref(TerminalPointTag::Viewport, cell) else {
+            continue;
+        };
+        if ref_.hyperlink_uri().is_ok_and(|uri| uri == hover_uri) {
+            cells.push(cell);
+        }
+    }
+
+    renderer::link::ranges_from_cells(rows, cells)
 }
 
 impl Drop for Surface {
@@ -3614,6 +3723,16 @@ impl Surface {
         let columns = self.size.columns;
         let rows = self.size.rows;
         let focused = self.focused;
+        let mouse_position = self.mouse.position;
+        let mouse_mods = self.mouse.mods;
+        let mouse_geometry = MouseViewportGeometry {
+            screen_width: self.size.width_px,
+            screen_height: self.size.height_px,
+            fallback_cols: self.pty_size().cols,
+            fallback_rows: self.pty_size().rows,
+            cell_width: self.size.cell_width_px,
+            cell_height: self.size.cell_height_px,
+        };
         let Some(live) = self.renderer.as_mut() else {
             return;
         };
@@ -3626,6 +3745,7 @@ impl Surface {
             frame_renderer,
             image_state,
             background_image,
+            link_set,
             custom_shader,
             shared_grid,
         } = live;
@@ -3647,17 +3767,28 @@ impl Surface {
         let config = app_from_handle(self.app)
             .map(|app| app.parsed_config.clone())
             .unwrap_or_default();
+        link_set.sync_from_config(&config.link);
         custom_shader.sync_from_config(device, &config);
         worker.with_termio(|termio| {
             let terminal = termio.terminal();
+            let viewport_map = terminal.viewport_string_map();
+            let mouse_viewport =
+                mouse_viewport_from_geometry(terminal, mouse_geometry, mouse_position);
+            let rows = usize::from(terminal.rows());
+            let regex_ranges =
+                link_set.render_ranges(&viewport_map, rows, mouse_viewport, mouse_mods);
+            let osc8_ranges =
+                osc8_hover_link_ranges(terminal, &viewport_map, rows, mouse_viewport, mouse_mods);
+            let link_ranges = renderer::link::merge_ranges(regex_ranges, &osc8_ranges);
             let kitty_placements = kitty_render_placement_snapshots(terminal);
             image_state.update_kitty_from_render_placements(&kitty_placements);
             let present_result = if custom_shader.pipelines.is_empty() {
-                frame_renderer.render_and_present_frame_with_images(
+                frame_renderer.render_and_present_frame_with_images_and_link_ranges(
                     terminal,
                     shared_grid,
                     image_state,
                     background_image,
+                    link_ranges,
                     renderer::frame_rebuild::RenderDirty::Full,
                     None,
                     &config,
@@ -3677,7 +3808,7 @@ impl Surface {
                 );
                 let pipeline_refs: Vec<_> = custom_shader.pipelines.iter().collect();
                 let result = frame_renderer
-                    .render_and_present_frame_with_images_and_custom_shaders(
+                    .render_and_present_frame_with_images_and_custom_shaders_and_link_ranges(
                         terminal,
                         shared_grid,
                         image_state,
@@ -3685,6 +3816,7 @@ impl Surface {
                         &mut custom_shader.uniforms,
                         custom_input,
                         &pipeline_refs,
+                        link_ranges,
                         renderer::frame_rebuild::RenderDirty::Full,
                         None,
                         &config,

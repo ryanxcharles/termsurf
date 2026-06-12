@@ -2093,6 +2093,10 @@ impl Terminal {
         self.screens.active().shape_run_options()
     }
 
+    pub(crate) fn viewport_string_map(&self) -> super::string_map::ViewportStringMap {
+        self.screens.active().viewport_string_map()
+    }
+
     pub(crate) fn kitty_virtual_placements_visible(
         &self,
     ) -> Vec<graphics_unicode::VirtualPlacement> {

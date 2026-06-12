@@ -205,8 +205,34 @@ impl FrameRenderer {
         config: &Config,
         presentation: FramePreparedPresentationInput<'_>,
     ) -> Result<FramePreparedFrameApplication, FramePreparedFrameError> {
+        self.render_and_present_frame_with_images_and_link_ranges(
+            terminal,
+            grid,
+            images,
+            background,
+            Vec::new(),
+            dirty,
+            preedit,
+            config,
+            presentation,
+        )
+    }
+
+    pub(crate) fn render_and_present_frame_with_images_and_link_ranges(
+        &mut self,
+        terminal: &Terminal,
+        grid: &mut SharedGrid,
+        images: &mut ImageState<MetalTexture>,
+        background: &mut BackgroundImageState<MetalTexture>,
+        link_ranges: Vec<Vec<[u16; 2]>>,
+        dirty: RenderDirty,
+        preedit: Option<Preedit>,
+        config: &Config,
+        presentation: FramePreparedPresentationInput<'_>,
+    ) -> Result<FramePreparedFrameApplication, FramePreparedFrameError> {
         background.update_from_config(config);
-        let state = FrameRenderState::from_terminal(terminal);
+        let mut state = FrameRenderState::from_terminal(terminal);
+        state.link_ranges = link_ranges;
         let knobs = FrameRenderKnobs::from_config(config);
         let input = state.rebuild_input(&knobs);
         self.update_and_present_frame_with_images(
@@ -235,8 +261,40 @@ impl FrameRenderer {
         config: &Config,
         presentation: FramePreparedPresentationInput<'_>,
     ) -> Result<FramePreparedFrameApplication, FramePreparedFrameError> {
+        self.render_and_present_frame_with_images_and_custom_shaders_and_link_ranges(
+            terminal,
+            grid,
+            images,
+            background,
+            custom_uniforms,
+            custom_input,
+            custom_pipelines,
+            Vec::new(),
+            dirty,
+            preedit,
+            config,
+            presentation,
+        )
+    }
+
+    pub(crate) fn render_and_present_frame_with_images_and_custom_shaders_and_link_ranges(
+        &mut self,
+        terminal: &Terminal,
+        grid: &mut SharedGrid,
+        images: &mut ImageState<MetalTexture>,
+        background: &mut BackgroundImageState<MetalTexture>,
+        custom_uniforms: &mut CustomShaderUniforms,
+        custom_input: FrameCustomShaderInput,
+        custom_pipelines: &[&MetalPipeline],
+        link_ranges: Vec<Vec<[u16; 2]>>,
+        dirty: RenderDirty,
+        preedit: Option<Preedit>,
+        config: &Config,
+        presentation: FramePreparedPresentationInput<'_>,
+    ) -> Result<FramePreparedFrameApplication, FramePreparedFrameError> {
         background.update_from_config(config);
-        let state = FrameRenderState::from_terminal(terminal);
+        let mut state = FrameRenderState::from_terminal(terminal);
+        state.link_ranges = link_ranges;
         state.update_custom_shader_uniforms_from_state(custom_uniforms);
         let knobs = FrameRenderKnobs::from_config(config);
         let input = state.rebuild_input(&knobs);

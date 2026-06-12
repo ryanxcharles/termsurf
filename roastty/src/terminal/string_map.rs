@@ -5,6 +5,7 @@
 use regex::bytes::Regex;
 
 use super::page_list::{PageStringWithPinMap, Pin};
+use super::point;
 use super::selection::Selection;
 
 /// A flattened string and the screen `Pin` for each of its bytes (upstream `StringMap`).
@@ -12,6 +13,20 @@ pub(in crate::terminal) struct StringMap {
     string: Vec<u8>,
     /// One pin per byte of `string` (`map.len() == string.len()`).
     map: Vec<Pin>,
+}
+
+/// A flattened viewport string and the viewport cell for each byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ViewportStringMap {
+    pub(crate) string: String,
+    pub(crate) map: Vec<point::Coordinate>,
+}
+
+impl ViewportStringMap {
+    pub(crate) fn new(string: String, map: Vec<point::Coordinate>) -> Self {
+        assert_eq!(string.len(), map.len(), "one viewport coordinate per byte");
+        Self { string, map }
+    }
 }
 
 impl StringMap {

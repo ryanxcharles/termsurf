@@ -138,7 +138,7 @@ pub(crate) mod style;
 mod stream;
 
 #[allow(dead_code)]
-mod string_map;
+pub(crate) mod string_map;
 
 #[allow(dead_code)]
 mod tabstops;

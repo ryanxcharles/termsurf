@@ -190,6 +190,9 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
 - **Quick-terminal size config is parser/formatter/calculation-only.** Exp 81
   wires `quick-terminal-size` as the upstream percentage/pixel struct; runtime
   window sizing and the app C ABI accessor remain later work.
+- **Link-highlight matching needs Oniguruma-compatible regex.** Exp 146 tried
+  `fancy-regex`, which rejected the default URL matcher's variable-width
+  look-behind, so Roastty uses `onig` for renderer link detection.
 - **GTK quick-terminal config is parser/formatter-only.** Exp 82 wires
   `gtk-quick-terminal-layer` and `gtk-quick-terminal-namespace`; empty values
   reset to upstream defaults before enum/string parsing, and GTK layer-shell
@@ -945,8 +948,10 @@ the live app, verified by a Phase-D UI test.)
       into live post-process pipelines) — runtime GLSL-to-SPIR-V-to-MSL loader,
       post-process pipeline builder, config-change reload, and live uniform-fed
       presentation wired in Exp 145
-- [ ] Link-highlight matcher (`renderer/link.zig` `renderCellMap`) + feed
-      `link_ranges`
+- [x] Link-highlight matcher (`renderer/link.zig` `renderCellMap`) + feed
+      `link_ranges` — Oniguruma-compatible regex matcher, default URL pattern,
+      hover/modifier predicates, OSC8 hover ranges, and live renderer feed wired
+      in Exp 146
 - [ ] Debug `Overlay` (optional)
 
 **Phase I — Polish / remaining**
@@ -1341,7 +1346,7 @@ stays unaltered except for the rename).
 - [Experiment 145: Phase H — custom-shader loader hookup](145-custom-shader-loader-hookup.md)
   — **Pass**
 - [Experiment 146: Phase H — link-highlight renderer feed](146-link-highlight-renderer-feed.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

@@ -3,6 +3,7 @@ pub(crate) mod cursor;
 pub(crate) mod frame_rebuild;
 pub(crate) mod frame_renderer;
 pub(crate) mod image;
+pub(crate) mod link;
 pub(crate) mod metal;
 pub(crate) mod shader;
 pub(crate) mod shadertoy;

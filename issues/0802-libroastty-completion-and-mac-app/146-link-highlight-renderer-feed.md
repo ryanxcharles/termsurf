@@ -142,3 +142,65 @@ refactor.
   look-around-capable regex engine."
 
 **Final verdict:** Approved.
+
+## Result
+
+**Result:** Pass
+
+Implemented the live link-highlight renderer feed and wired it into Roastty's
+frame presentation path.
+
+The renderer now maintains a reusable compiled link set from finalized app
+config, flattens the visible terminal viewport to a byte-to-cell map, evaluates
+configured link regexes against that map, applies upstream-style `always`,
+`always_mods`, `hover`, and `hover_mods` highlight predicates, and feeds merged
+per-row inclusive ranges into the existing cell rebuild underline override. Both
+normal live frames and custom-shader live frames receive the computed
+`link_ranges`.
+
+OSC8 hyperlink hover underlining is also seeded from terminal hyperlink metadata
+when the mouse is over a linked cell and `ctrlOrSuper` is held, matching
+upstream's default OSC8 hover policy.
+
+The implementation uses the `onig` crate for the renderer link matcher.
+`fancy-regex` was tried first, but it rejected the default upstream URL/path
+regex with a variable-width look-behind error. `onig` compiles and matches the
+default `link-url` pattern, so this slice uses an Oniguruma-compatible regex
+engine for renderer link detection.
+
+Invalid configured regexes are skipped and logged at live link-set rebuild time
+instead of aborting renderer initialization. That intentionally differs from
+upstream Ghostty's Zig init error propagation because Roastty's current live
+config reload path is non-fatal; the valid subset continues rendering.
+
+Verification completed:
+
+- `cargo fmt`
+- `cargo test -p roastty renderer::link -- --test-threads=1` — 6 passed
+- `cargo test -p roastty link_ranges -- --test-threads=1` — 1 passed
+- `cargo test -p roastty default_url_link -- --test-threads=1` — 1 passed
+- `cargo test -p roastty frame_renderer -- --test-threads=1` — 29 passed
+- `cargo test -p roastty --test abi_harness` — 1 passed, with existing C enum
+  conversion warnings
+- `cargo fmt --check`
+- `cargo test -p roastty -- --test-threads=1` — 4800 unit tests plus ABI harness
+  and doc tests passed, with existing C enum conversion warnings
+- `cd roastty && macos/build.nu --action test` — 210 hosted macOS tests passed
+  (`TEST SUCCEEDED`), with existing SwiftLint, main-actor/pasteboard,
+  main-thread-checker, macOS-version link, App Intents, and missing testing
+  config path warnings/noise
+
+## Conclusion
+
+Phase H's link-highlight matcher/feed is complete. Roastty now computes live
+renderer link ranges for the default URL matcher, configured regex links,
+hover/modifier-gated predicates, and OSC8 hover links, then presents those
+ranges through the existing renderer underline path without changing the C ABI.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Ohm`, fresh context.
+
+**Verdict:** Approved.
+
+**Findings:** None.
