@@ -1,6 +1,8 @@
 #include <assert.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -330,6 +332,17 @@ static void assert_config_uintptr(roastty_config_t config,
   uintptr_t value = 0;
   assert(roastty_config_get(config, &value, key, strlen(key)));
   assert(value == expected);
+}
+
+static void assert_config_path(roastty_config_t config,
+                               const char *key,
+                               const char *expected_path,
+                               bool expected_optional) {
+  roastty_config_path_s value = {0};
+  assert(roastty_config_get(config, &value, key, strlen(key)));
+  assert(value.path != NULL);
+  assert(strcmp(value.path, expected_path) == 0);
+  assert(value.optional == expected_optional);
 }
 
 static roastty_config_command_list_s config_command_list(roastty_config_t config) {
@@ -4428,6 +4441,32 @@ int main(int argc, char **argv) {
                              strlen("bell-audio-path")));
   assert(path.path == (const char *)0x1);
   assert(path.optional == true);
+  assert(!roastty_config_get(config,
+                             &path,
+                             "background-image",
+                             strlen("background-image")));
+  assert(path.path == (const char *)0x1);
+  assert(path.optional == true);
+
+  char *bg_path = write_temp_config("background-image = ?backdrop.png\n");
+  char tmp_real[PATH_MAX];
+  assert(realpath("/tmp", tmp_real) != NULL);
+  char expected_bg_path[PATH_MAX];
+  int expected_bg_len = snprintf(expected_bg_path,
+                                 sizeof(expected_bg_path),
+                                 "%s/backdrop.png",
+                                 tmp_real);
+  assert(expected_bg_len > 0);
+  assert((size_t)expected_bg_len < sizeof(expected_bg_path));
+  roastty_config_t bg_config = roastty_config_new();
+  roastty_config_load_file(bg_config, bg_path);
+  assert(unlink(bg_path) == 0);
+  free(bg_path);
+  assert_config_path(bg_config, "background-image", expected_bg_path, true);
+  roastty_config_t bg_clone = roastty_config_clone(bg_config);
+  roastty_config_free(bg_config);
+  assert_config_path(bg_clone, "background-image", expected_bg_path, true);
+  roastty_config_free(bg_clone);
 
   const char padded_key[] = "window-theme-with-extra-bytes";
   const char *theme = NULL;

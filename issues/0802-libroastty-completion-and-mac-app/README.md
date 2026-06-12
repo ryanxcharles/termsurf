@@ -487,8 +487,10 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   persistent `ImageState<MetalTexture>` to the live surface renderer, updates it
   from terminal Kitty render-placement snapshots each frame, uploads pending
   images with the Metal image upload backend, and interleaves Kitty image
-  buckets around background/text draw stages. Background-image config loading
-  and draw remain separate Phase H work.
+  buckets around background/text draw stages. Exp 142 wires the missing
+  `background-image` config path through parsing, formatting, expansion, clone,
+  and the C ABI; background-image file decode/load/upload/draw remains separate
+  Phase H work.
 - **The old copied-app config/menu assertion cluster is fixed at the Rust ABI
   boundary, but the XCTest host still hangs.** Exp 132 wires the missing
   Swift-read `roastty_config_get` keys, parsed `macos-window-shadow`, direct
@@ -931,7 +933,8 @@ the live app, verified by a Phase-D UI test.)
 
 - [ ] Invoke image draws (Kitty graphics + background image) in the live draw
       pass — live Kitty graphics wired and pixel-readback proven in Exp 141;
-      background image remains
+      background-image config path wired in Exp 142; background image
+      load/upload/draw remains
 - [ ] Custom-shader screen pass (ping-pong target + post-process apply)
 - [ ] Link-highlight matcher (`renderer/link.zig` `renderCellMap`) + feed
       `link_ranges`
@@ -1321,7 +1324,7 @@ stays unaltered except for the rename).
 - [Experiment 141: Phase H — live Kitty image presentation](141-live-kitty-image-presentation.md)
   — **Pass**
 - [Experiment 142: Phase H — background-image config path](142-background-image-config-path.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

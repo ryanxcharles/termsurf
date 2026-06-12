@@ -1781,6 +1781,7 @@ struct Config {
     keybind_chain_parent: Option<ConfigKeybindChainParent>,
     cached_title: Option<CString>,
     cached_window_title_font_family: Option<CString>,
+    cached_background_image: Option<CachedConfigPath>,
     cached_bell_audio_path: Option<CachedConfigPath>,
     cached_command_strings: Vec<CachedCommand>,
     cached_commands: Vec<RoasttyCommand>,
@@ -1956,6 +1957,7 @@ impl Config {
         self.confirm_close_surface = self.parsed.confirm_close_surface;
         self.rebuild_cached_title();
         self.rebuild_cached_window_title_font_family();
+        self.rebuild_cached_background_image();
         self.rebuild_cached_bell_audio_path();
         self.rebuild_cached_commands();
     }
@@ -1978,6 +1980,17 @@ impl Config {
         self.cached_bell_audio_path =
             self.parsed
                 .bell_audio_path
+                .as_ref()
+                .map(|path| CachedConfigPath {
+                    path: CString::new(path.path()).expect("config path parser rejects NUL"),
+                    optional: path.optional(),
+                });
+    }
+
+    fn rebuild_cached_background_image(&mut self) {
+        self.cached_background_image =
+            self.parsed
+                .background_image
                 .as_ref()
                 .map(|path| CachedConfigPath {
                     path: CString::new(path.path()).expect("config path parser rejects NUL"),
@@ -12737,6 +12750,7 @@ pub extern "C" fn roastty_config_new() -> RoasttyConfig {
         keybind_chain_parent: None,
         cached_title: None,
         cached_window_title_font_family: None,
+        cached_background_image: None,
         cached_bell_audio_path: None,
         cached_command_strings: Vec::new(),
         cached_commands: Vec::new(),
@@ -12812,6 +12826,7 @@ pub extern "C" fn roastty_config_clone(config: RoasttyConfig) -> RoasttyConfig {
         keybind_chain_parent: None,
         cached_title: None,
         cached_window_title_font_family: None,
+        cached_background_image: None,
         cached_bell_audio_path: None,
         cached_command_strings: Vec::new(),
         cached_commands: Vec::new(),
@@ -13121,6 +13136,19 @@ pub extern "C" fn roastty_config_get(
                     return false;
                 };
                 output.cast::<f64>().write(config.parsed.background_opacity);
+                true
+            }
+            b"background-image" => {
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                let Some(path) = config.cached_background_image.as_ref() else {
+                    return false;
+                };
+                output.cast::<RoasttyConfigPath>().write(RoasttyConfigPath {
+                    path: path.path.as_ptr(),
+                    optional: path.optional,
+                });
                 true
             }
             b"bell-audio-volume" => {
@@ -20007,6 +20035,29 @@ mod tests {
         )
     }
 
+    fn config_get_path_value(config: RoasttyConfig, key: &'static CStr) -> Option<(String, bool)> {
+        let mut value = RoasttyConfigPath {
+            path: ptr::null(),
+            optional: false,
+        };
+        if !roastty_config_get(
+            config,
+            (&mut value as *mut RoasttyConfigPath).cast(),
+            key.as_ptr(),
+            key.to_bytes().len(),
+        ) {
+            return None;
+        }
+        assert!(!value.path.is_null());
+        Some((
+            unsafe { CStr::from_ptr(value.path) }
+                .to_str()
+                .unwrap()
+                .to_string(),
+            value.optional,
+        ))
+    }
+
     #[test]
     fn config_get_macos_unit_test_scalar_keys() {
         let config = roastty_config_new();
@@ -20083,6 +20134,84 @@ mod tests {
             Some("never")
         );
 
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_get_background_image_path_default_set_reset_and_clone() {
+        let config = roastty_config_new();
+        assert_eq!(config_get_path_value(config, c"background-image"), None);
+
+        {
+            let config_ref = config_from_handle(config).unwrap();
+            config_ref
+                .parsed
+                .set("background-image", Some("backdrop.png"))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+        assert_eq!(
+            config_get_path_value(config, c"background-image"),
+            Some(("backdrop.png".to_string(), false))
+        );
+
+        {
+            let config_ref = config_from_handle(config).unwrap();
+            config_ref
+                .parsed
+                .set("background-image", Some("?optional.png"))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+        assert_eq!(
+            config_get_path_value(config, c"background-image"),
+            Some(("optional.png".to_string(), true))
+        );
+
+        let clone = roastty_config_clone(config);
+        roastty_config_free(config);
+        assert_eq!(
+            config_get_path_value(clone, c"background-image"),
+            Some(("optional.png".to_string(), true))
+        );
+
+        {
+            let config_ref = config_from_handle(clone).unwrap();
+            config_ref.parsed.set("background-image", Some("")).unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+        assert_eq!(config_get_path_value(clone, c"background-image"), None);
+        roastty_config_free(clone);
+    }
+
+    #[test]
+    fn config_get_background_image_path_validates_inputs() {
+        let config = roastty_config_new();
+        {
+            let config_ref = config_from_handle(config).unwrap();
+            config_ref
+                .parsed
+                .set("background-image", Some("backdrop.png"))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+
+        let mut path = RoasttyConfigPath {
+            path: ptr::null(),
+            optional: false,
+        };
+        assert!(!roastty_config_get(
+            ptr::null_mut(),
+            (&mut path as *mut RoasttyConfigPath).cast(),
+            c"background-image".as_ptr(),
+            "background-image".len()
+        ));
+        assert!(!roastty_config_get(
+            config,
+            ptr::null_mut(),
+            c"background-image".as_ptr(),
+            "background-image".len()
+        ));
         roastty_config_free(config);
     }
 

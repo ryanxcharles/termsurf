@@ -105,3 +105,66 @@ expansion needs a separate follow-up.
 **Verdict:** Approved.
 
 **Findings:** No required, optional, or nit findings.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the missing `background-image` config path surface:
+
+- `roastty/src/config/mod.rs` now carries
+  `background_image: Option<ConfigFilePath>`, formats it before
+  `background-image-opacity`, parses it with the same optional-path contract as
+  `bell-audio-path`, and expands it from file/CLI/default config bases.
+- `roastty/src/lib.rs` now caches the parsed path for C callers and exposes
+  `roastty_config_get(..., "background-image", ...)` as a `RoasttyConfigPath`,
+  including clone/reset/default-unset behavior.
+- `roastty/tests/abi_harness.c` now proves the generated header/link ABI can
+  read `background-image` as `roastty_config_path_s`.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p roastty config_format_config_emits_fields_in_upstream_order` —
+  1 passed
+- `cargo test -p roastty background_image` — 6 passed
+- `cargo test -p roastty config_get_background_image` — 2 passed
+- `cargo test -p roastty --test abi_harness` — 1 passed; existing C harness
+  enum-conversion warnings remain
+- `cargo test -p roastty -- --test-threads=1` — 4768 unit tests, C ABI harness,
+  and doc tests passed
+- `cd roastty && macos/build.nu --action test` — 210 hosted macOS tests passed
+- `cargo fmt --check`
+- `git diff --check`
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/142-background-image-config-path.md issues/0802-libroastty-completion-and-mac-app/README.md`
+
+During verification, the first broad Rust run exposed one expected-list miss in
+`config_format_config_emits_fields_in_upstream_order`; the implementation added
+the new formatted key but the pinned expected key list did not include it. The
+test expectation was updated to include `background-image` in the upstream-order
+slot before `background-image-opacity`, and the full no-skip suite passed after
+that fix.
+
+## Conclusion
+
+Roastty now has the config/ABI prerequisite for background images. The next
+Phase H background-image experiment can start from a stable optional path value
+and focus on file decode, live renderer state, Metal upload, and drawing through
+the existing `bg_image` shader.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Nash`, fresh context.
+
+**Verdict:** Approved.
+
+**Findings:** No required, optional, or nit findings.
+
+Nash independently checked that the result commit had not been made yet, the
+working tree changes were limited to the listed implementation and issue files,
+`background-image` mirrors existing `ConfigFilePath` behavior, the C ABI cache
+uses the same lifetime model as `bell-audio-path`, the issue README marks this
+experiment as `Pass`, and the verification logs support the claimed focused,
+full Roastty, ABI harness, and hosted macOS test results. Nash also reran
+`cargo fmt --check`, `git diff --check`, Prettier check, and
+`cargo test -p roastty config_get_background_image`.

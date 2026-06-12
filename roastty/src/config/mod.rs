@@ -200,6 +200,8 @@ pub(crate) struct Config {
     pub background_opacity: f64,
     /// `background-opacity-cells`.
     pub background_opacity_cells: bool,
+    /// `background-image`.
+    pub background_image: Option<ConfigFilePath>,
     /// `background-image-opacity`.
     pub bg_image_opacity: f32,
     /// `background-image-position`.
@@ -500,6 +502,7 @@ impl Default for Config {
             window_inherit_font_size: true,
             background_opacity: 1.0,
             background_opacity_cells: false,
+            background_image: None,
             bg_image_opacity: 1.0,
             bg_image_position: BackgroundImagePosition::Center,
             bg_image_fit: BackgroundImageFit::Contain,
@@ -708,6 +711,8 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("background", out));
         self.foreground
             .format_entry(&mut EntryFormatter::new("foreground", out));
+        EntryFormatter::new("background-image", out)
+            .entry_optional(self.background_image.clone(), |v, f| v.format_entry(f));
         EntryFormatter::new("background-image-opacity", out).entry_float(self.bg_image_opacity);
         self.bg_image_position
             .format_entry(&mut EntryFormatter::new("background-image-position", out));
@@ -1289,6 +1294,13 @@ impl Config {
                     value,
                     default.bg_image_position,
                     BackgroundImagePosition::from_keyword,
+                )?
+            }
+            "background-image" => {
+                self.background_image = set_optional_value_field(
+                    value,
+                    default.background_image,
+                    ConfigFilePath::parse_single,
                 )?
             }
             "background-image-fit" => {
@@ -2469,6 +2481,9 @@ impl Config {
         self.config_file.expand_from_base(base);
         self.custom_shader.expand_from_base(base);
         self.gtk_custom_css.expand_from_base(base);
+        if let Some(path) = self.background_image.as_mut() {
+            path.expand_from_base(base);
+        }
         if let Some(path) = self.bell_audio_path.as_mut() {
             path.expand_from_base(base);
         }
@@ -9488,6 +9503,59 @@ mod tests {
     }
 
     #[test]
+    fn background_image_config_parse_format_reset_and_diagnose() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("background-image = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.background_image, None);
+        assert_eq!(line(&cfg), "background-image = ");
+
+        cfg.set("background-image", Some("backdrop.png")).unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Required("backdrop.png".to_string()))
+        );
+        assert_eq!(line(&cfg), "background-image = backdrop.png");
+
+        cfg.set("background-image", Some("?optional.png")).unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Optional("optional.png".to_string()))
+        );
+        assert_eq!(line(&cfg), "background-image = ?optional.png");
+
+        cfg.set("background-image", Some("\"?required-literal.png\""))
+            .unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Required(
+                "?required-literal.png".to_string()
+            ))
+        );
+        assert_eq!(line(&cfg), "background-image = ?required-literal.png");
+
+        cfg.set("background-image", Some("")).unwrap();
+        assert_eq!(cfg.background_image, None);
+        assert_eq!(line(&cfg), "background-image = ");
+
+        assert_eq!(
+            cfg.set("background-image", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("background-image", Some("bad\0path")),
+            Err(ConfigSetError::InvalidValue)
+        );
+    }
+
+    #[test]
     fn config_file_accumulates_resets_and_formats() {
         let mut cfg = Config::default();
         cfg.set("config-file", Some("a")).unwrap();
@@ -9750,6 +9818,78 @@ mod tests {
                 std::fs::canonicalize(&cli_base)
                     .unwrap()
                     .join("missing.wav")
+                    .to_string_lossy()
+                    .into_owned()
+            ))
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn background_image_expands_from_file_cli_home_and_missing_bases() {
+        let dir = unique_config_test_dir("background-image-path-base");
+        let file_base = dir.join("file-base");
+        let cli_base = dir.join("cli-base");
+        let home = dir.join("home");
+        let config_file = file_base.join("config.roastty");
+        let file_image = file_base.join("file-bg.png");
+        let cli_image = cli_base.join("cli-bg.png");
+        let home_image = home.join("home-bg.png");
+        write_config_file(&config_file, "background-image = ./file-bg.png\n");
+        write_config_file(&file_image, "");
+        write_config_file(&cli_image, "");
+        write_config_file(&home_image, "");
+        let _home = EnvGuard::set("HOME", &home);
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_file(&config_file).unwrap();
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Required(
+                std::fs::canonicalize(&file_image)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            ))
+        );
+
+        let mut cfg = Config::default();
+        let diagnostics =
+            cfg.set_cli_args_from_base(["--background-image=?./cli-bg.png"], &cli_base);
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Optional(
+                std::fs::canonicalize(&cli_image)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            ))
+        );
+
+        let mut cfg = Config::default();
+        let diagnostics =
+            cfg.set_cli_args_from_base(["--background-image=~/home-bg.png"], &cli_base);
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Required(
+                home_image.to_string_lossy().into_owned()
+            ))
+        );
+
+        let mut cfg = Config::default();
+        let diagnostics =
+            cfg.set_cli_args_from_base(["--background-image=?sub/../missing.png"], &cli_base);
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Optional(
+                std::fs::canonicalize(&cli_base)
+                    .unwrap()
+                    .join("missing.png")
                     .to_string_lossy()
                     .into_owned()
             ))
@@ -14621,6 +14761,7 @@ mod tests {
             "theme",
             "background",
             "foreground",
+            "background-image",
             "background-image-opacity",
             "background-image-position",
             "background-image-fit",
