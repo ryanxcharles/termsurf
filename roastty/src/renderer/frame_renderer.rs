@@ -458,6 +458,10 @@ mod tests {
         GridSize { columns, rows }
     }
 
+    fn first_pixel(bytes: &[u8]) -> [u8; 4] {
+        [bytes[0], bytes[1], bytes[2], bytes[3]]
+    }
+
     fn terminal(columns: u16, rows: u16) -> Terminal {
         let mut terminal = Terminal::init(columns, rows, None).expect("terminal");
         terminal.next_slice(b"A").expect("terminal input");
@@ -1212,6 +1216,112 @@ mod tests {
         assert_eq!(app.rebuild.rows.rebuilt_rows, vec![0, 1, 2]);
         assert_eq!(renderer.current_grid(), grid(4, 3));
         assert_eq!(app.present.presentation.width, 8);
+    }
+
+    #[test]
+    fn live_kitty_image_frame_renderer_presents_terminal_placement_and_unloads() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let mut shared = menlo_grid();
+        let cell = shared.cell_size();
+        let (cw, ch) = (cell.width as usize, cell.height as usize);
+        let mut term = Terminal::init(1, 1, None).expect("terminal");
+        term.set_kitty_cell_metrics_for_tests(1, 1);
+        term.next_slice(b"\x1b[?25l\x1b_Ga=T,f=32,s=1,v=1,i=7,p=4,C=1;/wAA/w==\x1b\\")
+            .expect("hide cursor + transmit and display image");
+        let placements = crate::kitty_render_placement_snapshots(&term);
+        assert_eq!(placements.len(), 1);
+
+        let mut images = ImageState::<MetalTexture>::default();
+        images.update_kitty_from_render_placements(&placements);
+        let mut compositor = MetalFrameCompositor::new(MetalFrameCompositorOptions {
+            device,
+            width: cw,
+            height: ch,
+            pixel_format: MetalPixelFormat::Bgra8Unorm,
+            storage_mode: MetalStorageMode::Shared,
+            resource_options: MetalResourceOptions::image(MetalStorageMode::Shared),
+            grayscale_atlas: &shared.atlas_grayscale,
+            color_atlas: &shared.atlas_color,
+        })
+        .expect("compositor");
+
+        use crate::renderer::size::{CellSize, Padding, ScreenSize, Size};
+        let mut u = MetalUniforms::test_with_grid(
+            [cw as u16, ch as u16],
+            [1, 1],
+            [cw as f32, ch as f32],
+            [0.0; 4],
+            0,
+            [0, 0, 0, 255],
+        );
+        u.update_screen_size(
+            Size {
+                screen: ScreenSize {
+                    width: cw as u32,
+                    height: ch as u32,
+                },
+                cell: CellSize {
+                    width: cw as u32,
+                    height: ch as u32,
+                },
+                padding: Padding {
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    left: 0,
+                },
+            },
+            GridSize {
+                columns: 1,
+                rows: 1,
+            },
+        );
+        let mut renderer = FrameRenderer::new(u);
+        renderer
+            .render_and_present_frame_with_images(
+                &term,
+                &mut shared,
+                &mut images,
+                RenderDirty::Full,
+                None,
+                &Config::default(),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: cw,
+                    height: ch,
+                    contents_scale: 1.0,
+                },
+            )
+            .expect("image frame should present");
+        assert_eq!(first_pixel(&compositor.target_bytes()), [0, 0, 255, 255]);
+
+        let mut empty = Terminal::init(1, 1, None).expect("empty terminal");
+        empty.set_kitty_cell_metrics_for_tests(1, 1);
+        empty
+            .next_slice(b"\x1b[?25l")
+            .expect("hide cursor on empty terminal");
+        let empty_placements = crate::kitty_render_placement_snapshots(&empty);
+        assert!(empty_placements.is_empty());
+        images.update_kitty_from_render_placements(&empty_placements);
+        renderer
+            .render_and_present_frame_with_images(
+                &empty,
+                &mut shared,
+                &mut images,
+                RenderDirty::Full,
+                None,
+                &Config::default(),
+                FramePreparedPresentationInput {
+                    compositor: &mut compositor,
+                    width: cw,
+                    height: ch,
+                    contents_scale: 1.0,
+                },
+            )
+            .expect("empty frame should present");
+        assert_eq!(first_pixel(&compositor.target_bytes()), [0, 0, 0, 255]);
     }
 
     /// Issue 802 / Exp 17: the present must sample the **grid's** rasterized atlas, so glyph

@@ -483,6 +483,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   registration. Exp 140 adds hosted `NSTextInputClient` marked-text/preedit
   coverage and fixes live renderer cell metrics feeding `roastty_surface_size`,
   which `roastty_surface_ime_point` needs for IME geometry.
+- **Live Kitty graphics now draw in the Metal presentation pass.** Exp 141 adds
+  persistent `ImageState<MetalTexture>` to the live surface renderer, updates it
+  from terminal Kitty render-placement snapshots each frame, uploads pending
+  images with the Metal image upload backend, and interleaves Kitty image
+  buckets around background/text draw stages. Background-image config loading
+  and draw remain separate Phase H work.
 - **The old copied-app config/menu assertion cluster is fixed at the Rust ABI
   boundary, but the XCTest host still hangs.** Exp 132 wires the missing
   Swift-read `roastty_config_get` keys, parsed `macos-window-shadow`, direct
@@ -924,7 +930,8 @@ the live app, verified by a Phase-D UI test.)
 **Phase H — Renderer feature-completion (in the live pass)**
 
 - [ ] Invoke image draws (Kitty graphics + background image) in the live draw
-      pass
+      pass — live Kitty graphics wired and pixel-readback proven in Exp 141;
+      background image remains
 - [ ] Custom-shader screen pass (ping-pong target + post-process apply)
 - [ ] Link-highlight matcher (`renderer/link.zig` `renderCellMap`) + feed
       `link_ranges`
@@ -1312,7 +1319,7 @@ stays unaltered except for the rename).
 - [Experiment 140: Phase G — hosted preedit surface view](140-hosted-preedit-surface-view.md)
   — **Pass**
 - [Experiment 141: Phase H — live Kitty image presentation](141-live-kitty-image-presentation.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

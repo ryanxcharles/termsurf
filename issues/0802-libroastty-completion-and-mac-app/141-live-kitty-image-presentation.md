@@ -174,3 +174,88 @@ context.
 
 Codex-native adversarial reviewer `Pascal` re-reviewed only those fixes and
 approved the design with no required, optional, or nit findings.
+
+## Result
+
+**Result:** Pass
+
+Live Kitty graphics now participate in the live Metal presentation path:
+
+- `SurfaceLiveRenderer` owns persistent `ImageState<MetalTexture>`.
+- `Surface::present_live` snapshots the terminal's current Kitty render
+  placements, updates that persistent image state, and calls the image-aware
+  frame presentation path.
+- `FrameRenderer` / `FrameRebuildPlan` have image-aware presentation siblings
+  that preserve the existing cell-only entry points.
+- `MetalFrameCompositor` uploads pending images with `MetalImageUploadBackend`
+  and draws Kitty buckets in the upstream order around the split cell stages:
+  background color, Kitty below backgrounds, opaque cell backgrounds, Kitty
+  below text, cell text, Kitty above text.
+- `MetalRenderPass` keeps the existing `draw_cells` / `draw_frame` compatibility
+  path while exposing split cell-stage helpers and a small
+  `ImageDrawBackend<MetalTexture>` implementation for image draw calls.
+
+Required proof was added:
+
+- `compositor_live_kitty_image_buckets_interleave_with_cells_and_text`
+  constructs pending image state for all three Kitty buckets, exercises upload
+  plus draw, and reads back target pixels proving below-background images are
+  covered by opaque cell backgrounds, below-text images are covered by text
+  where a glyph overlaps them, and above-text images draw over text/background.
+- `live_kitty_image_frame_renderer_presents_terminal_placement_and_unloads`
+  feeds a real Kitty graphics APC into `Terminal`, snapshots visible terminal
+  placements, updates persistent image state, presents through
+  `MetalFrameCompositor`, reads back the image color, then presents a second
+  frame with no visible placements and confirms the pixel returns to cell-only
+  background.
+
+Verification passed:
+
+- `cargo fmt`
+- `cargo test -p roastty renderer_image_state` — 23 passed
+- `cargo test -p roastty image_render_pass` — 3 passed
+- `cargo test -p roastty compositor` — 8 passed
+- `cargo test -p roastty live_kitty_image` — 2 passed
+- `cargo test -p roastty kitty_graphics` — 178 passed
+- `cargo test -p roastty -- --test-threads=1` — 4,764 unit tests passed, plus
+  the C ABI harness and doc tests
+- `cd roastty && macos/build.nu --action test --only-testing RoasttyTests/SurfaceViewAppKitTests`
+  — 5 tests passed
+- `cd roastty && macos/build.nu --action test` — 210 tests passed
+
+Observed non-fatal warnings were existing warnings outside this experiment's
+Rust changes: the C ABI harness still emits enum-conversion warnings, and the
+macOS build still emits SwiftLint/Swift/main-thread-checker/pasteboard warnings.
+Both test commands exited successfully.
+
+## Conclusion
+
+The live renderer can now present terminal Kitty graphics without changing the
+copied app: image state is persistent across frames, upload/removal is driven by
+terminal placement snapshots, and the compositor honors the upstream z bucket
+order relative to cell backgrounds and text. Phase H image work is not fully
+closed because background-image config loading/upload/draw remains separate from
+Kitty graphics, but the Kitty half of live image presentation is complete and
+verified.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Mill`, fresh context.
+
+**Verdict:** Approved.
+
+**Findings:** No required, optional, or nit findings.
+
+The reviewer independently inspected the Issue 802 workflow state, experiment
+file, and implementation diff from the plan commit through the current working
+tree. It also ran read-only verification:
+
+- `git status --short`
+- `git diff 7e0f9994ca668..HEAD -- ...`
+- `git diff --check -- ...`
+- `cargo fmt --check`
+- `cargo test -p roastty live_kitty_image`
+- `cargo test -p roastty compositor_live_kitty_image_buckets_interleave_with_cells_and_text`
+
+The reviewer confirmed that the remaining required step is the Exp 141 result
+commit.

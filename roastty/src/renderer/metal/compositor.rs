@@ -217,37 +217,23 @@ impl MetalFrameCompositor {
                 self.frame.uniforms_buffer(),
                 self.frame.cells(),
             );
-            {
-                let mut image_pass = MetalImageDrawPass::new(
-                    &pass,
-                    &self.pipelines,
-                    self.frame.uniforms_buffer(),
-                    &self.image_sampler,
-                    MetalBufferOptions {
-                        device: &device,
-                        resource_options: self.resource_options,
-                    },
-                );
-                images.draw(DrawPlacements::KittyBelowBackground, &mut image_pass);
-            }
+            let mut image_pass = MetalImageDrawPass::new(
+                &pass,
+                &self.pipelines,
+                self.frame.uniforms_buffer(),
+                &self.image_sampler,
+                MetalBufferOptions {
+                    device: &device,
+                    resource_options: self.resource_options,
+                },
+            );
+            images.draw(DrawPlacements::KittyBelowBackground, &mut image_pass);
             pass.draw_cell_backgrounds(
                 &self.pipelines,
                 self.frame.uniforms_buffer(),
                 self.frame.cells(),
             );
-            {
-                let mut image_pass = MetalImageDrawPass::new(
-                    &pass,
-                    &self.pipelines,
-                    self.frame.uniforms_buffer(),
-                    &self.image_sampler,
-                    MetalBufferOptions {
-                        device: &device,
-                        resource_options: self.resource_options,
-                    },
-                );
-                images.draw(DrawPlacements::KittyBelowText, &mut image_pass);
-            }
+            images.draw(DrawPlacements::KittyBelowText, &mut image_pass);
             pass.draw_cell_text(
                 &self.pipelines,
                 self.frame.uniforms_buffer(),
@@ -256,19 +242,8 @@ impl MetalFrameCompositor {
                 self.frame.color_texture(),
                 fg_count,
             );
-            {
-                let mut image_pass = MetalImageDrawPass::new(
-                    &pass,
-                    &self.pipelines,
-                    self.frame.uniforms_buffer(),
-                    &self.image_sampler,
-                    MetalBufferOptions {
-                        device: &device,
-                        resource_options: self.resource_options,
-                    },
-                );
-                images.draw(DrawPlacements::KittyAboveText, &mut image_pass);
-            }
+            images.draw(DrawPlacements::KittyAboveText, &mut image_pass);
+            drop(image_pass);
         } else {
             pass.draw_frame(&self.pipelines, &self.frame, fg_count);
         }
@@ -326,6 +301,17 @@ impl MetalFrameCompositor {
         })
     }
 
+    fn draw_frame_with_images_immediate(
+        &mut self,
+        input: MetalFrameInput<'_>,
+        images: &mut ImageState<MetalTexture>,
+    ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
+        self.draw_frame_with_presenter(input, Some(images), |layer, target| {
+            assert!(layer.set_surface_if_size_matches(target.surface()));
+            MetalSurfacePresentationMode::Immediate
+        })
+    }
+
     pub(crate) fn target_bytes(&self) -> Vec<u8> {
         self.target
             .as_ref()
@@ -347,6 +333,7 @@ mod tests {
     use super::*;
     use crate::font::atlas::{Atlas, Format};
     use crate::renderer::cell::{Contents, Key};
+    use crate::renderer::image::{ImageId, PendingImage, PixelFormat, Placement, RendererImage};
     use crate::renderer::metal::api::MetalStorageMode;
     use crate::renderer::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
     use crate::renderer::size::GridSize;
@@ -398,6 +385,40 @@ mod tests {
     fn assert_pixels(bytes: &[u8], expected: [u8; 4]) {
         for pixel in bytes.chunks_exact(4) {
             assert_eq!(pixel, expected);
+        }
+    }
+
+    fn assert_pixel_grid(bytes: &[u8], expected: &[[u8; 4]]) {
+        let pixels = bytes
+            .chunks_exact(4)
+            .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3]])
+            .collect::<Vec<_>>();
+        assert_eq!(pixels, expected);
+    }
+
+    fn pending_rgba(rgba: [u8; 4]) -> PendingImage {
+        PendingImage {
+            width: 1,
+            height: 1,
+            pixel_format: PixelFormat::Rgba,
+            data: rgba.to_vec(),
+        }
+    }
+
+    fn placement(image_id: u32, x: i32, z: i32) -> Placement {
+        Placement {
+            image_id: ImageId::Kitty(image_id),
+            x,
+            y: 0,
+            z,
+            width: 1,
+            height: 1,
+            cell_offset_x: 0,
+            cell_offset_y: 0,
+            source_x: 0,
+            source_y: 0,
+            source_width: 1,
+            source_height: 1,
         }
     }
 
@@ -543,5 +564,83 @@ mod tests {
         assert_eq!(presentation.fg_count, 1);
         assert_eq!(compositor.layer_expected_pixel_size(), (2, 2));
         assert_pixels(&compositor.target_bytes(), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn compositor_live_kitty_image_buckets_interleave_with_cells_and_text() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let mut grayscale = Atlas::new(8, Format::Grayscale);
+        let region = grayscale.reserve(1, 1).expect("reserve glyph region");
+        grayscale.set(region, &[255]);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = compositor(device, 4, 1, &grayscale, &color);
+
+        let mut contents = Contents::default();
+        contents.resize(GridSize {
+            columns: 4,
+            rows: 1,
+        });
+        for x in 0..4 {
+            *contents.bg_cell_mut(0, x) = CellBg([5, 6, 7, 255]);
+        }
+        for x in 1..=2 {
+            contents.add(
+                Key::Text,
+                cell_text_vertex(
+                    [region.x, region.y],
+                    [1, 1],
+                    [0, 1],
+                    [x, 0],
+                    [255, 0, 0, 255],
+                ),
+            );
+        }
+
+        let mut images = ImageState::<MetalTexture>::default();
+        images.images.insert(
+            ImageId::Kitty(1),
+            RendererImage::Pending(pending_rgba([255, 0, 0, 255])),
+        );
+        images.images.insert(
+            ImageId::Kitty(2),
+            RendererImage::Pending(pending_rgba([0, 255, 0, 255])),
+        );
+        images.images.insert(
+            ImageId::Kitty(3),
+            RendererImage::Pending(pending_rgba([255, 255, 0, 255])),
+        );
+        images.images.insert(
+            ImageId::Kitty(4),
+            RendererImage::Pending(pending_rgba([0, 255, 255, 255])),
+        );
+        images.kitty_placements = vec![
+            placement(1, 0, i32::MIN / 2 - 1),
+            placement(2, 1, -1),
+            placement(4, 3, -1),
+            placement(3, 2, 0),
+        ];
+        images.kitty_bg_end = 1;
+        images.kitty_text_end = 3;
+
+        let uniforms = cell_text_uniforms([4, 1], [4, 1], [1.0, 1.0], [0, 0, 0, 0]);
+        let presentation = compositor
+            .draw_frame_with_images_immediate(
+                frame_input(4, 1, 1.0, &uniforms, &contents, &grayscale, &color),
+                &mut images,
+            )
+            .expect("image frame should draw");
+
+        assert_eq!(presentation.fg_count, 2);
+        assert_pixel_grid(
+            &compositor.target_bytes(),
+            &[
+                [7, 6, 5, 255],
+                [0, 0, 255, 255],
+                [0, 255, 255, 255],
+                [255, 255, 0, 255],
+            ],
+        );
     }
 }
