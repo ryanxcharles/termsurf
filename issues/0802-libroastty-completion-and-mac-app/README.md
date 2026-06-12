@@ -1311,6 +1311,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 140: Phase G — hosted preedit surface view](140-hosted-preedit-surface-view.md)
   — **Pass**
+- [Experiment 141: Phase H — live Kitty image presentation](141-live-kitty-image-presentation.md)
+  — **Designed**
 
 ## Process
 
