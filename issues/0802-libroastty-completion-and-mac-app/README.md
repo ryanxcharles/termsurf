@@ -1444,6 +1444,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 157: Phase G — dead-key UI automation](157-dead-key-ui-automation.md)
   — **Partial**
+- [Experiment 158: Phase G — terminal output UI oracle](158-terminal-output-ui-oracle.md)
+  — **Designed**
 
 ## Process
 
