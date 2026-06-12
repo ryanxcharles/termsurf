@@ -1429,6 +1429,8 @@ stays unaltered except for the rename).
   **Pass**
 - [Experiment 155: Phase G — command-palette hosted execution](155-command-palette-hosted-execution.md)
   — **Pass**
+- [Experiment 156: Phase G — command-palette UI discovery](156-command-palette-ui-discovery.md)
+  — **Designed**
 
 ## Process
 
