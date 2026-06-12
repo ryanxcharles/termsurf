@@ -1283,6 +1283,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 135: Phase G — live keyboard layout probe](135-live-keyboard-layout-probe.md)
   — **Pass**
+- [Experiment 136: Phase G — global event tap dispatch](136-global-event-tap-dispatch.md)
+  — **Designed**
 
 ## Process
 
