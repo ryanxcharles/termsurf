@@ -149,3 +149,70 @@ scope and verifier requirement resolve the prior findings, and found no new
 Required findings.
 
 **Final verdict:** Approved.
+
+## Result
+
+**Result:** Pass
+
+Roastty now ships a real renamed terminfo source and compiles it into the macOS
+app bundle during the existing resource-copy build phase. The bundled database
+contains `terminfo/78/xterm-roastty`, and `infocmp` resolves `xterm-roastty`
+from the built app's `Contents/Resources/terminfo` directory. The source is
+verified as a mechanical rename of the pinned upstream Ghostty
+`ghostty.terminfo`, not a hand-written placeholder.
+
+`Termio::spawn_with_options` now installs the terminal identity before shell
+integration setup. With a discovered resource directory it sets
+`ROASTTY_RESOURCES_DIR`, `TERM=<configured term>`, `COLORTERM=truecolor`, and
+`TERMINFO=<resources parent>/terminfo`; without resources it falls back to
+`TERM=xterm-256color` and `COLORTERM=truecolor`. Explicit stale caller env
+values for those keys are overwritten to match upstream's terminal identity
+behavior. Roastty's default config term and empty-term finalize fallback are now
+`xterm-roastty`, matching the bundled database.
+
+Verification run:
+
+- `cargo test -p roastty termio -- --test-threads=1` — pass, 38 tests.
+- `cargo test -p roastty resources_dir -- --test-threads=1` — pass, 12 tests.
+- `cargo test -p roastty config -- --test-threads=1` — pass, 459 tests.
+- `scripts/roastty-app/verify-terminfo-source.py` — pass.
+- `cargo fmt` — pass.
+- `cargo test -p roastty -- --test-threads=1` — pass, 4,843 tests; 4 ignored;
+  ABI harness and doc-tests passed. Existing enum-conversion warnings and
+  `[unknown](scope): message` remained.
+- `cd roastty && macos/build.nu --action test` — pass, 211 hosted macOS tests,
+  `TEST SUCCEEDED`. Existing SwiftLint/main-thread/pasteboard warnings remained.
+- `test -s roastty/macos/build/Debug/Roastty.app/Contents/Resources/terminfo/roastty.terminfo`
+  — pass.
+- `test -s roastty/macos/build/Debug/Roastty.app/Contents/Resources/terminfo/78/xterm-roastty`
+  — pass.
+- `TERMINFO=roastty/macos/build/Debug/Roastty.app/Contents/Resources/terminfo infocmp -x xterm-roastty`
+  — pass; output begins `xterm-roastty|roastty|Roastty,`.
+- `cargo fmt --check` — pass.
+- `git diff --check` — pass.
+
+## Conclusion
+
+The terminfo-resource half of the remaining Phase I polish line is complete.
+Roastty's default terminal identity, child PTY environment, resource discovery
+sentinel, bundled terminfo source, and compiled app-bundle database now agree on
+`xterm-roastty`. The remaining item on that roadmap line is the separate
+`os/cf_release_thread` performance work.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent `Popper` with fresh context,
+using the `adversarial-review` skill's Codex path
+(`multi_agent_v1.spawn_agent`), not Claude's named `adversarial-reviewer` agent.
+
+**Verdict:** Approved.
+
+**Findings:** No Required findings.
+
+**Independent checks:** The reviewer confirmed the result changes were still
+uncommitted on top of the plan commit, verified the terminfo source with
+`scripts/roastty-app/verify-terminfo-source.py`, independently compared the
+renamed source with upstream, ran `cargo fmt --check`, `git diff --check`, and
+the targeted `termio`, `config`, and `resources_dir` test filters, and confirmed
+the built bundle's `infocmp -x xterm-roastty` probe resolves to
+`xterm-roastty|roastty|Roastty,`.

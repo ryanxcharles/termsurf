@@ -584,16 +584,19 @@
 			);
 			inputPaths = (
 				"$(SRCROOT)/../resources/shell-integration",
+				"$(SRCROOT)/../resources/terminfo/roastty.terminfo",
 			);
 			name = "Copy Shell Integration Resources";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/roastty/shell-integration",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/terminfo/roastty.terminfo",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/terminfo/78/xterm-roastty",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\nresources=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nsrc=\"$SRCROOT/../resources/shell-integration\"\ndst=\"$resources/roastty/shell-integration\"\nsentinel=\"$resources/terminfo/78/xterm-roastty\"\nrm -rf \"$dst\"\nmkdir -p \"$(dirname \"$dst\")\" \"$(dirname \"$sentinel\")\"\n/usr/bin/ditto \"$src\" \"$dst\"\n: > \"$sentinel\"\n";
+			shellScript = "set -eu\nresources=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\"\nshell_src=\"$SRCROOT/../resources/shell-integration\"\nshell_dst=\"$resources/roastty/shell-integration\"\nterminfo_src=\"$SRCROOT/../resources/terminfo/roastty.terminfo\"\nterminfo_dst=\"$resources/terminfo\"\nsentinel=\"$terminfo_dst/78/xterm-roastty\"\nrm -rf \"$shell_dst\" \"$terminfo_dst\"\nmkdir -p \"$(dirname \"$shell_dst\")\" \"$terminfo_dst\"\n/usr/bin/ditto \"$shell_src\" \"$shell_dst\"\n/usr/bin/ditto \"$terminfo_src\" \"$terminfo_dst/roastty.terminfo\"\nif ! command -v tic >/dev/null 2>&1; then\n    echo \"error: tic is required to compile Roastty terminfo\" >&2\n    exit 1\nfi\ntic -x -o \"$terminfo_dst\" \"$terminfo_src\"\ntest -s \"$sentinel\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */

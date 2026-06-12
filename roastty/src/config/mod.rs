@@ -518,7 +518,7 @@ impl Default for Config {
             minimum_contrast: 1.0,
             bold_color: None,
             faint_opacity: 0.5,
-            term: "xterm-ghostty".to_string(),
+            term: "xterm-roastty".to_string(),
             enquiry_response: String::new(),
             async_backend: AsyncBackend::Auto,
             auto_update: None,
@@ -2178,7 +2178,7 @@ impl Config {
         }
 
         if self.term.is_empty() {
-            self.term = "xterm-ghostty".to_string();
+            self.term = "xterm-roastty".to_string();
         }
 
         self.finalize_working_directory(context);
@@ -8323,7 +8323,7 @@ mod tests {
         // Opacity options (Experiment 848): upstream defaults false / 0.5.
         assert!(!d.background_opacity_cells);
         assert_eq!(d.faint_opacity, 0.5);
-        assert_eq!(d.term, "xterm-ghostty");
+        assert_eq!(d.term, "xterm-roastty");
         assert_eq!(d.enquiry_response, "");
         // minimum-contrast (Experiment 849): upstream default 1.0.
         assert_eq!(d.minimum_contrast, 1.0);
@@ -14129,7 +14129,7 @@ mod tests {
         let mut cfg = Config::default();
         assert_eq!(cfg.finalize_with_report(), ConfigFinalizeReport::default());
 
-        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.term, "xterm-roastty");
         assert_eq!(cfg.auto_update_channel, Some(ReleaseChannel::Tip));
 
         let mut cfg = Config::default();
@@ -14137,7 +14137,7 @@ mod tests {
         cfg.set("minimum-contrast", Some("100")).unwrap();
         cfg.set("faint-opacity", Some("-1")).unwrap();
         assert_eq!(cfg.finalize_with_report(), ConfigFinalizeReport::default());
-        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.term, "xterm-roastty");
         assert_eq!(cfg.minimum_contrast, 21.0);
         assert_eq!(cfg.faint_opacity, 0.0);
     }
@@ -14177,9 +14177,9 @@ mod tests {
         };
 
         let mut cfg = Config::default();
-        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.term, "xterm-roastty");
         assert_eq!(cfg.enquiry_response, "");
-        assert_eq!(line(&cfg, "term"), "term = xterm-ghostty");
+        assert_eq!(line(&cfg, "term"), "term = xterm-roastty");
         assert_eq!(line(&cfg, "enquiry-response"), "enquiry-response = ");
 
         cfg.set("term", Some("xterm-256color")).unwrap();
@@ -14191,7 +14191,7 @@ mod tests {
 
         cfg.set("term", Some("")).unwrap();
         cfg.set("enquiry-response", Some("")).unwrap();
-        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.term, "xterm-roastty");
         assert_eq!(cfg.enquiry_response, "");
         assert_eq!(cfg.set("term", None), Err(ConfigSetError::ValueRequired));
         assert_eq!(
@@ -14393,11 +14393,11 @@ mod tests {
         assert_eq!(cfg.auto_update_channel, None);
 
         cfg.finalize();
-        assert_eq!(cfg.term, "xterm-ghostty");
+        assert_eq!(cfg.term, "xterm-roastty");
         assert_eq!(cfg.minimum_contrast, 1.0);
         assert_eq!(cfg.faint_opacity, 1.0);
         assert_eq!(cfg.auto_update_channel, Some(ReleaseChannel::Tip));
-        assert_eq!(line(&cfg, "term"), "term = xterm-ghostty");
+        assert_eq!(line(&cfg, "term"), "term = xterm-roastty");
         assert_eq!(line(&cfg, "minimum-contrast"), "minimum-contrast = 1");
         assert_eq!(line(&cfg, "faint-opacity"), "faint-opacity = 1");
         assert_eq!(

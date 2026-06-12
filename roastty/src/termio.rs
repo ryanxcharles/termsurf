@@ -2,7 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -32,6 +32,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) shell_integration: crate::config::ShellIntegration,
     pub(crate) shell_integration_features: crate::config::ShellIntegrationFeatures,
     pub(crate) resource_dir: Option<PathBuf>,
+    pub(crate) term: String,
 }
 
 impl Default for TermioSpawnOptions {
@@ -44,6 +45,7 @@ impl Default for TermioSpawnOptions {
             shell_integration: crate::config::ShellIntegration::Detect,
             shell_integration_features: crate::config::ShellIntegrationFeatures::default(),
             resource_dir: None,
+            term: "xterm-roastty".to_string(),
         }
     }
 }
@@ -140,6 +142,7 @@ impl Termio {
             .map(|arg| arg.as_ref().to_os_string())
             .collect();
         let mut env = options.env;
+        setup_terminal_identity(&mut env, options.resource_dir.as_deref(), &options.term);
         shell_integration::setup_features(
             &mut env,
             options.shell_integration_features,
@@ -291,6 +294,40 @@ impl Termio {
         }
         Ok(total)
     }
+}
+
+fn setup_terminal_identity(
+    env: &mut Vec<(String, String)>,
+    resource_dir: Option<&Path>,
+    term: &str,
+) {
+    match resource_dir {
+        Some(resource_dir) => {
+            put_env(
+                env,
+                "ROASTTY_RESOURCES_DIR",
+                resource_dir.display().to_string(),
+            );
+            put_env(env, "TERM", term.to_string());
+            put_env(env, "COLORTERM", "truecolor".to_string());
+            if let Some(parent) = resource_dir.parent() {
+                put_env(
+                    env,
+                    "TERMINFO",
+                    parent.join("terminfo").display().to_string(),
+                );
+            }
+        }
+        None => {
+            put_env(env, "TERM", "xterm-256color".to_string());
+            put_env(env, "COLORTERM", "truecolor".to_string());
+        }
+    }
+}
+
+fn put_env(env: &mut Vec<(String, String)>, key: &str, value: String) {
+    env.retain(|(existing, _)| existing != key);
+    env.push((key.to_string(), value));
 }
 
 impl TermioWorker {
@@ -737,6 +774,127 @@ mod tests {
         });
 
         assert!(termio.terminal().plain_screen(false).contains("termio-env"));
+    }
+
+    #[test]
+    fn spawn_with_options_sets_fallback_terminal_identity_without_resources() {
+        let _guard = pty_command_lock();
+        let mut termio = Termio::spawn_with_options(
+            "/bin/sh",
+            ["-c", "printf 'term:%s color:%s resources:%s' \"$TERM\" \"$COLORTERM\" \"$ROASTTY_RESOURCES_DIR\""],
+            TermioSpawnOptions {
+                env: vec![
+                    ("TERM".to_string(), "stale-term".to_string()),
+                    ("COLORTERM".to_string(), "stale-color".to_string()),
+                ],
+                shell_integration: crate::config::ShellIntegration::None,
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio without resources");
+
+        pump_until(&mut termio, |termio, _| {
+            termio
+                .terminal()
+                .plain_screen(false)
+                .contains("xterm-256color")
+        });
+
+        let screen = termio.terminal().plain_screen(false);
+        assert!(screen.contains("term:xterm-256color"));
+        assert!(screen.contains("color:truecolor"));
+        assert!(screen.contains("resources:"));
+        assert!(!screen.contains("stale-term"));
+        assert!(!screen.contains("stale-color"));
+    }
+
+    #[test]
+    fn spawn_with_options_sets_resource_terminal_identity() {
+        let _guard = pty_command_lock();
+        let resources_root = unique_test_dir("termio-resource-env");
+        let resources = resources_root.join("roastty");
+        std::fs::create_dir_all(&resources).expect("create resources dir");
+        let terminfo = resources_root.join("terminfo");
+
+        let mut termio = Termio::spawn_with_options(
+            "/bin/sh",
+            ["-c", "if [ \"$TERM\" = xterm-roastty ] && [ \"$COLORTERM\" = truecolor ] && [ \"$TERMINFO\" = \"$ROASTTY_EXPECT_TERMINFO\" ] && [ \"$ROASTTY_RESOURCES_DIR\" = \"$ROASTTY_EXPECT_RESOURCES\" ]; then printf ok; else printf 'fail:%s:%s:%s:%s' \"$TERM\" \"$COLORTERM\" \"$TERMINFO\" \"$ROASTTY_RESOURCES_DIR\"; fi"],
+            TermioSpawnOptions {
+                env: vec![
+                    (
+                        "ROASTTY_EXPECT_TERMINFO".to_string(),
+                        terminfo.display().to_string(),
+                    ),
+                    (
+                        "ROASTTY_EXPECT_RESOURCES".to_string(),
+                        resources.display().to_string(),
+                    ),
+                ],
+                resource_dir: Some(resources.clone()),
+                shell_integration: crate::config::ShellIntegration::None,
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio with resources");
+
+        pump_until(&mut termio, |termio, _| {
+            termio.terminal().plain_screen(false).contains("ok")
+        });
+
+        let screen = termio.terminal().plain_screen(false);
+        assert!(screen.contains("ok"));
+
+        let _ = std::fs::remove_dir_all(resources_root);
+    }
+
+    #[test]
+    fn spawn_with_options_resource_identity_uses_configured_term_and_overwrites_env() {
+        let _guard = pty_command_lock();
+        let resources_root = unique_test_dir("termio-resource-env-override");
+        let resources = resources_root.join("roastty");
+        std::fs::create_dir_all(&resources).expect("create resources dir");
+
+        let mut termio = Termio::spawn_with_options(
+            "/bin/sh",
+            ["-c", "if [ \"$TERM\" = screen-256color ] && [ \"$COLORTERM\" = truecolor ] && [ \"$TERMINFO\" = \"$ROASTTY_EXPECT_TERMINFO\" ] && [ \"$ROASTTY_RESOURCES_DIR\" = \"$ROASTTY_EXPECT_RESOURCES\" ]; then printf ok; else printf 'fail:%s:%s:%s:%s' \"$TERM\" \"$COLORTERM\" \"$TERMINFO\" \"$ROASTTY_RESOURCES_DIR\"; fi"],
+            TermioSpawnOptions {
+                env: vec![
+                    ("TERM".to_string(), "stale-term".to_string()),
+                    ("COLORTERM".to_string(), "stale-color".to_string()),
+                    ("TERMINFO".to_string(), "/stale/terminfo".to_string()),
+                    (
+                        "ROASTTY_RESOURCES_DIR".to_string(),
+                        "/stale/resources".to_string(),
+                    ),
+                    (
+                        "ROASTTY_EXPECT_TERMINFO".to_string(),
+                        resources_root.join("terminfo").display().to_string(),
+                    ),
+                    (
+                        "ROASTTY_EXPECT_RESOURCES".to_string(),
+                        resources.display().to_string(),
+                    ),
+                ],
+                resource_dir: Some(resources.clone()),
+                term: "screen-256color".to_string(),
+                shell_integration: crate::config::ShellIntegration::None,
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio with resource env overrides");
+
+        pump_until(&mut termio, |termio, _| {
+            termio.terminal().plain_screen(false).contains("ok")
+        });
+
+        let screen = termio.terminal().plain_screen(false);
+        assert!(screen.contains("ok"));
+        assert!(!screen.contains("stale"));
+
+        let _ = std::fs::remove_dir_all(resources_root);
     }
 
     #[test]

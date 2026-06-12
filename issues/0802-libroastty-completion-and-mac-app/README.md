@@ -222,6 +222,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   through the existing staged index path. The asserted release probe measured
   1.12x versus full-property width lookup, closing the width part of the Phase I
   SIMD/perf item without a C++ Highway bridge.
+- **Bundled terminfo is now real and matches `TERM`.** Exp 153 replaces the
+  placeholder `xterm-roastty` sentinel with a bundled `roastty.terminfo` source
+  that is mechanically verified against pinned upstream Ghostty, compiles it
+  into `Contents/Resources/terminfo/78/xterm-roastty`, changes Roastty's default
+  `term` to `xterm-roastty`, and makes PTY spawns export matching `TERM`,
+  `COLORTERM`, `TERMINFO`, and `ROASTTY_RESOURCES_DIR` values.
 - **GTK quick-terminal config is parser/formatter-only.** Exp 82 wires
   `gtk-quick-terminal-layer` and `gtk-quick-terminal-namespace`; empty values
   reset to upstream defaults before enum/string parsing, and GTK layer-shell
@@ -999,7 +1005,10 @@ the live app, verified by a Phase-D UI test.)
 - [x] SIMD fast paths (perf — base64 / VT / index-of / width) — base64,
       index-of, and VT ASCII fast paths wired in Exp 150; generated width-only
       table wired in Exp 152 and measured 1.12x over full-property width lookup
-- [ ] `os/cf_release_thread` (perf), terminfo resource
+- [x] Terminfo resource/env — mechanically verified renamed terminfo source,
+      compiled app-bundle database, `xterm-roastty` default config, and PTY
+      terminal identity env wired in Exp 153
+- [ ] `os/cf_release_thread` (perf)
 
 **Workstream 3 (continuous — the harness from Phase A, the roastty app from
 Phase D):** every app feature gets an automated UI test — typing, rendering,
@@ -1398,7 +1407,7 @@ stays unaltered except for the rename).
 - [Experiment 152: Phase I — generated width table](152-generated-width-table.md)
   — **Pass**
 - [Experiment 153: Phase I — terminfo resource env](153-terminfo-resource-env.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
