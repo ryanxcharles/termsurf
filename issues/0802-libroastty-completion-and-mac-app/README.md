@@ -1330,6 +1330,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 143: Phase H — background-image live rendering](143-background-image-live-rendering.md)
   — **Pass**
+- [Experiment 144: Phase H — custom-shader screen pass](144-custom-shader-screen-pass.md)
+  — **Designed**
 
 ## Process
 
