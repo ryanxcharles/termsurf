@@ -1291,6 +1291,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 136: Phase G — global event tap dispatch](136-global-event-tap-dispatch.md)
   — **Pass**
+- [Experiment 137: Phase G — KeymapDarwin translation foundation](137-keymap-darwin-translation-foundation.md)
+  — **Designed**
 
 ## Process
 
