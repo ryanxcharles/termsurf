@@ -63,6 +63,20 @@ pub(crate) fn render_target_texture_options(
     }
 }
 
+pub(crate) fn post_process_texture_options(
+    pixel_format: MetalPixelFormat,
+    storage_mode: MetalStorageMode,
+) -> ImageTextureOptions {
+    ImageTextureOptions {
+        pixel_format,
+        resource_options: MetalResourceOptions::image(storage_mode),
+        usage: MetalTextureUsage {
+            shader_read: true,
+            render_target: true,
+        },
+    }
+}
+
 pub(crate) fn image_texture_format_for_upload_pixel_format(
     format: PixelFormat,
 ) -> Option<ImageTextureFormat> {
@@ -491,6 +505,26 @@ mod tests {
                 render_target: true,
             }
         );
+    }
+
+    #[test]
+    fn post_process_texture_options_match_custom_shader_intent() {
+        let options =
+            post_process_texture_options(MetalPixelFormat::Bgra8Unorm, MetalStorageMode::Shared);
+
+        assert_eq!(options.pixel_format, MetalPixelFormat::Bgra8Unorm);
+        assert_eq!(
+            options.resource_options,
+            MetalResourceOptions::image(MetalStorageMode::Shared)
+        );
+        assert_eq!(
+            options.usage,
+            MetalTextureUsage {
+                shader_read: true,
+                render_target: true,
+            }
+        );
+        assert_eq!(options.usage.raw(), 0x5);
     }
 
     #[test]

@@ -32,6 +32,15 @@ impl MetalShaderLibrary {
         })
     }
 
+    pub(crate) fn compile_source(
+        device: &ProtocolObject<dyn MTLDevice>,
+        source: &str,
+    ) -> Result<Self, MetalShaderLibraryError> {
+        Ok(Self {
+            library: compile_source(device, source)?,
+        })
+    }
+
     pub(crate) fn library(&self) -> &ProtocolObject<dyn MTLLibrary> {
         &self.library
     }
@@ -554,6 +563,16 @@ fragment float4 bg_image_fragment() {
         let device = metal_device();
         let library =
             MetalShaderLibrary::compile(&device).expect("standard shader source should compile");
+
+        let _ = library.library();
+    }
+
+    #[test]
+    fn shader_library_compiles_source_strings() {
+        let device = metal_device();
+        let library =
+            MetalShaderLibrary::compile_source(&device, INCOMPATIBLE_STANDARD_SHADER_SOURCE)
+                .expect("custom shader source should compile");
 
         let _ = library.library();
     }

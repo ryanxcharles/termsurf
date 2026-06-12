@@ -11,6 +11,7 @@ use crate::renderer::metal::api::{
 use crate::renderer::metal::buffer::{MetalBuffer, MetalBufferOptions};
 use crate::renderer::metal::frame::{FrameState, FrameStateError};
 use crate::renderer::metal::iosurface_layer::{MetalIOSurfaceLayer, MetalSurfacePresentationMode};
+use crate::renderer::metal::pipeline::{MetalPipeline, MetalPipelineError};
 use crate::renderer::metal::render_pass::{
     MetalCommandFrame, MetalCommandFrameError, MetalImageDrawPass, MetalRenderPassAttachment,
     MetalRenderPassError,
@@ -22,7 +23,10 @@ use crate::renderer::metal::shaders::{
     MetalStandardPipelines, MetalStandardPipelinesError, MetalUniforms,
 };
 use crate::renderer::metal::target::{MetalTarget, MetalTargetError, MetalTargetOptions};
-use crate::renderer::metal::texture::{MetalImageUploadBackend, MetalTexture};
+use crate::renderer::metal::texture::{
+    post_process_texture_options, MetalImageUploadBackend, MetalTexture, MetalTextureError,
+};
+use crate::renderer::shadertoy::CustomShaderUniforms;
 
 pub(crate) struct MetalFrameCompositor {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
@@ -32,6 +36,7 @@ pub(crate) struct MetalFrameCompositor {
     image_sampler: MetalSampler,
     layer: MetalIOSurfaceLayer,
     target: Option<MetalTarget>,
+    custom_shader_state: Option<MetalCustomShaderState>,
     pixel_format: MetalPixelFormat,
     storage_mode: MetalStorageMode,
     resource_options: MetalResourceOptions,
@@ -60,6 +65,12 @@ pub(crate) struct MetalFrameInput<'a> {
     pub(crate) color_atlas: &'a Atlas,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct MetalCustomShaderInput<'a> {
+    pub(crate) uniforms: &'a CustomShaderUniforms,
+    pub(crate) pipelines: &'a [&'a MetalPipeline],
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct MetalFramePresentation {
     pub(crate) fg_count: usize,
@@ -78,6 +89,8 @@ pub(crate) enum MetalFrameCompositorError {
     Buffer(crate::renderer::metal::buffer::MetalBufferError),
     ImageSampler(MetalSamplerError),
     Target(MetalTargetError),
+    Texture(MetalTextureError),
+    Pipeline(MetalPipelineError),
     CommandFrame(MetalCommandFrameError),
     RenderPass(MetalRenderPassError),
 }
@@ -97,6 +110,18 @@ impl From<crate::renderer::metal::buffer::MetalBufferError> for MetalFrameCompos
 impl From<MetalTargetError> for MetalFrameCompositorError {
     fn from(error: MetalTargetError) -> Self {
         Self::Target(error)
+    }
+}
+
+impl From<MetalTextureError> for MetalFrameCompositorError {
+    fn from(error: MetalTextureError) -> Self {
+        Self::Texture(error)
+    }
+}
+
+impl From<MetalPipelineError> for MetalFrameCompositorError {
+    fn from(error: MetalPipelineError) -> Self {
+        Self::Pipeline(error)
     }
 }
 
@@ -143,6 +168,7 @@ impl MetalFrameCompositor {
             image_sampler,
             layer: MetalIOSurfaceLayer::new(),
             target: None,
+            custom_shader_state: None,
             pixel_format: options.pixel_format,
             storage_mode: options.storage_mode,
             resource_options: options.resource_options,
@@ -161,7 +187,7 @@ impl MetalFrameCompositor {
         &mut self,
         input: MetalFrameInput<'_>,
     ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
-        self.draw_frame_with_presenter(input, None, |layer, target| {
+        self.draw_frame_with_presenter(input, None, None, |layer, target| {
             layer.set_surface(target.surface())
         })
     }
@@ -172,7 +198,7 @@ impl MetalFrameCompositor {
         images: &mut ImageState<MetalTexture>,
         background: &mut BackgroundImageState<MetalTexture>,
     ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
-        self.draw_frame_with_presenter(input, Some((images, background)), |layer, target| {
+        self.draw_frame_with_presenter(input, Some((images, background)), None, |layer, target| {
             layer.set_surface(target.surface())
         })
     }
@@ -184,6 +210,7 @@ impl MetalFrameCompositor {
             &mut ImageState<MetalTexture>,
             &mut BackgroundImageState<MetalTexture>,
         )>,
+        custom: Option<MetalCustomShaderInput<'_>>,
         presenter: impl FnOnce(&MetalIOSurfaceLayer, &MetalTarget) -> MetalSurfacePresentationMode,
     ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
         if !input.contents_scale.is_finite() || input.contents_scale <= 0.0 {
@@ -203,19 +230,30 @@ impl MetalFrameCompositor {
             input.color_atlas,
         )?;
 
-        let target = self
-            .target
-            .as_ref()
-            .expect("target should exist after ensure_target");
         if let Some((images, background)) = images.as_mut() {
             let mut upload_backend =
                 MetalImageUploadBackend::new(&device, self.storage_mode, false);
             images.upload(&mut upload_backend);
             background.upload(&mut upload_backend);
         }
+        let custom_active = custom.is_some_and(|input| !input.pipelines.is_empty());
+        self.ensure_custom_shader_state(input.width, input.height, custom_active)?;
+        let target = self
+            .target
+            .as_ref()
+            .expect("target should exist after ensure_target");
         let command_frame = MetalCommandFrame::begin(&self.queue)?;
+        let normal_target_texture = if custom_active {
+            self.custom_shader_state
+                .as_ref()
+                .expect("custom shader state should exist when active")
+                .back_texture
+                .texture()
+        } else {
+            target.texture()
+        };
         let pass = command_frame.render_pass(&[MetalRenderPassAttachment {
-            texture: target.texture(),
+            texture: normal_target_texture,
             clear_color: Some(MetalClearColor {
                 red: 0.0,
                 green: 0.0,
@@ -223,11 +261,81 @@ impl MetalFrameCompositor {
                 alpha: 0.0,
             }),
         }])?;
+        self.encode_normal_frame(&pass, &device, images.as_mut(), fg_count)?;
+        pass.complete();
+
+        if let Some(custom) = custom.filter(|input| !input.pipelines.is_empty()) {
+            let state = self
+                .custom_shader_state
+                .as_mut()
+                .expect("custom shader state should exist when active");
+            state.uniforms.sync(
+                MetalBufferOptions {
+                    device: &device,
+                    resource_options: self.resource_options,
+                },
+                &[*custom.uniforms],
+            )?;
+            for (index, pipeline) in custom.pipelines.iter().enumerate() {
+                let final_pass = index + 1 == custom.pipelines.len();
+                let texture = if final_pass {
+                    target.texture()
+                } else {
+                    state.front_texture.texture()
+                };
+                let pass = command_frame.render_pass(&[MetalRenderPassAttachment {
+                    texture,
+                    clear_color: Some(MetalClearColor {
+                        red: 0.0,
+                        green: 0.0,
+                        blue: 0.0,
+                        alpha: 0.0,
+                    }),
+                }])?;
+                pass.draw_custom_shader(
+                    pipeline,
+                    &state.uniforms,
+                    &state.back_texture,
+                    &state.sampler,
+                );
+                pass.complete();
+                state.swap();
+            }
+        }
+
+        command_frame.commit_and_wait()?;
+
+        self.layer.set_bounds_pixels(
+            input.width as f64 / input.contents_scale,
+            input.height as f64 / input.contents_scale,
+            input.contents_scale,
+        );
+        let mode = presenter(&self.layer, target);
+
+        Ok(MetalFramePresentation {
+            fg_count,
+            mode,
+            width: input.width,
+            height: input.height,
+            target_reallocated,
+        })
+    }
+
+    fn encode_normal_frame(
+        &self,
+        pass: &crate::renderer::metal::render_pass::MetalRenderPass,
+        device: &ProtocolObject<dyn MTLDevice>,
+        images: Option<&mut (
+            &mut ImageState<MetalTexture>,
+            &mut BackgroundImageState<MetalTexture>,
+        )>,
+        fg_count: usize,
+    ) -> Result<(), MetalFrameCompositorError> {
         if let Some((images, background)) = images {
             let background_vertex = if let Some(texture) = background.ready_texture() {
                 let vertex = MetalBuffer::init_fill(
                     MetalBufferOptions {
-                        device: &device,
+                        device,
                         resource_options: self.resource_options,
                     },
                     &[background.vertex()],
@@ -253,7 +361,7 @@ impl MetalFrameCompositor {
                 self.frame.uniforms_buffer(),
                 &self.image_sampler,
                 MetalBufferOptions {
-                    device: &device,
+                    device,
                     resource_options: self.resource_options,
                 },
             );
@@ -278,23 +386,7 @@ impl MetalFrameCompositor {
         } else {
             pass.draw_frame(&self.pipelines, &self.frame, fg_count);
         }
-        pass.complete();
-        command_frame.commit_and_wait()?;
-
-        self.layer.set_bounds_pixels(
-            input.width as f64 / input.contents_scale,
-            input.height as f64 / input.contents_scale,
-            input.contents_scale,
-        );
-        let mode = presenter(&self.layer, target);
-
-        Ok(MetalFramePresentation {
-            fg_count,
-            mode,
-            width: input.width,
-            height: input.height,
-            target_reallocated,
-        })
+        Ok(())
     }
 
     fn ensure_target(
@@ -318,6 +410,117 @@ impl MetalFrameCompositor {
         })?);
         Ok(true)
     }
+
+    fn ensure_custom_shader_state(
+        &mut self,
+        width: usize,
+        height: usize,
+        active: bool,
+    ) -> Result<(), MetalFrameCompositorError> {
+        if !active {
+            self.custom_shader_state = None;
+            return Ok(());
+        }
+
+        let options = MetalCustomShaderStateOptions {
+            device: &self.device,
+            width,
+            height,
+            pixel_format: self.pixel_format,
+            storage_mode: self.storage_mode,
+            resource_options: self.resource_options,
+        };
+        match self.custom_shader_state.as_mut() {
+            Some(state) => state.resize(options)?,
+            None => self.custom_shader_state = Some(MetalCustomShaderState::new(options)?),
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct MetalCustomShaderStateOptions<'a> {
+    device: &'a ProtocolObject<dyn MTLDevice>,
+    width: usize,
+    height: usize,
+    pixel_format: MetalPixelFormat,
+    storage_mode: MetalStorageMode,
+    resource_options: MetalResourceOptions,
+}
+
+struct MetalCustomShaderState {
+    front_texture: MetalTexture,
+    back_texture: MetalTexture,
+    sampler: MetalSampler,
+    uniforms: MetalBuffer<CustomShaderUniforms>,
+}
+
+impl MetalCustomShaderState {
+    fn new(options: MetalCustomShaderStateOptions<'_>) -> Result<Self, MetalFrameCompositorError> {
+        let front_texture = custom_shader_texture(options)?;
+        let back_texture = custom_shader_texture(options)?;
+        let sampler = MetalSampler::new(MetalSamplerOptions {
+            device: options.device,
+            descriptor: custom_shader_sampler_descriptor(),
+        })
+        .map_err(MetalFrameCompositorError::ImageSampler)?;
+        let uniforms = MetalBuffer::init_fill(
+            MetalBufferOptions {
+                device: options.device,
+                resource_options: options.resource_options,
+            },
+            &[CustomShaderUniforms::new()],
+        )?;
+
+        Ok(Self {
+            front_texture,
+            back_texture,
+            sampler,
+            uniforms,
+        })
+    }
+
+    fn resize(
+        &mut self,
+        options: MetalCustomShaderStateOptions<'_>,
+    ) -> Result<(), MetalFrameCompositorError> {
+        if self.front_texture.width() == options.width
+            && self.front_texture.height() == options.height
+            && self.back_texture.width() == options.width
+            && self.back_texture.height() == options.height
+        {
+            return Ok(());
+        }
+
+        self.front_texture = custom_shader_texture(options)?;
+        self.back_texture = custom_shader_texture(options)?;
+        Ok(())
+    }
+
+    fn swap(&mut self) {
+        std::mem::swap(&mut self.front_texture, &mut self.back_texture);
+    }
+}
+
+fn custom_shader_texture(
+    options: MetalCustomShaderStateOptions<'_>,
+) -> Result<MetalTexture, MetalTextureError> {
+    MetalTexture::new(
+        options.device,
+        post_process_texture_options(options.pixel_format, options.storage_mode),
+        options.width,
+        options.height,
+        None,
+    )
+}
+
+fn custom_shader_sampler_descriptor() -> MetalSamplerDescriptorOptions {
+    MetalSamplerDescriptorOptions {
+        min_filter: crate::renderer::metal::api::MetalSamplerMinMagFilter::Linear,
+        mag_filter: crate::renderer::metal::api::MetalSamplerMinMagFilter::Linear,
+        s_address_mode: crate::renderer::metal::api::MetalSamplerAddressMode::ClampToEdge,
+        t_address_mode: crate::renderer::metal::api::MetalSamplerAddressMode::ClampToEdge,
+    }
 }
 
 #[cfg(test)]
@@ -326,7 +529,7 @@ impl MetalFrameCompositor {
         &mut self,
         input: MetalFrameInput<'_>,
     ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
-        self.draw_frame_with_presenter(input, None, |layer, target| {
+        self.draw_frame_with_presenter(input, None, None, |layer, target| {
             assert!(layer.set_surface_if_size_matches(target.surface()));
             MetalSurfacePresentationMode::Immediate
         })
@@ -338,10 +541,39 @@ impl MetalFrameCompositor {
         images: &mut ImageState<MetalTexture>,
         background: &mut BackgroundImageState<MetalTexture>,
     ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
-        self.draw_frame_with_presenter(input, Some((images, background)), |layer, target| {
+        self.draw_frame_with_presenter(input, Some((images, background)), None, |layer, target| {
             assert!(layer.set_surface_if_size_matches(target.surface()));
             MetalSurfacePresentationMode::Immediate
         })
+    }
+
+    fn draw_frame_with_custom_shaders_immediate(
+        &mut self,
+        input: MetalFrameInput<'_>,
+        custom: MetalCustomShaderInput<'_>,
+    ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
+        self.draw_frame_with_presenter(input, None, Some(custom), |layer, target| {
+            assert!(layer.set_surface_if_size_matches(target.surface()));
+            MetalSurfacePresentationMode::Immediate
+        })
+    }
+
+    fn draw_frame_with_images_and_custom_shaders_immediate(
+        &mut self,
+        input: MetalFrameInput<'_>,
+        images: &mut ImageState<MetalTexture>,
+        background: &mut BackgroundImageState<MetalTexture>,
+        custom: MetalCustomShaderInput<'_>,
+    ) -> Result<MetalFramePresentation, MetalFrameCompositorError> {
+        self.draw_frame_with_presenter(
+            input,
+            Some((images, background)),
+            Some(custom),
+            |layer, target| {
+                assert!(layer.set_surface_if_size_matches(target.surface()));
+                MetalSurfacePresentationMode::Immediate
+            },
+        )
     }
 
     pub(crate) fn target_bytes(&self) -> Vec<u8> {
@@ -353,6 +585,15 @@ impl MetalFrameCompositor {
 
     fn layer_expected_pixel_size(&self) -> (usize, usize) {
         self.layer.expected_pixel_size()
+    }
+
+    fn custom_shader_texture_size(&self) -> Option<((usize, usize), (usize, usize))> {
+        self.custom_shader_state.as_ref().map(|state| {
+            (
+                (state.front_texture.width(), state.front_texture.height()),
+                (state.back_texture.width(), state.back_texture.height()),
+            )
+        })
     }
 }
 
@@ -370,7 +611,12 @@ mod tests {
         BackgroundImageState, ImageId, PendingImage, PixelFormat, Placement, RendererImage,
     };
     use crate::renderer::metal::api::MetalStorageMode;
+    use crate::renderer::metal::pipeline::{
+        post_process_pipeline_build_values, MetalPipeline, MetalPipelineOptions,
+    };
+    use crate::renderer::metal::shaders::MetalShaderLibrary;
     use crate::renderer::shader::{CellBg, CellTextAtlas, CellTextFlags, CellTextVertex};
+    use crate::renderer::shadertoy::CustomShaderUniforms;
     use crate::renderer::size::GridSize;
 
     fn metal_device() -> Option<Retained<ProtocolObject<dyn MTLDevice>>> {
@@ -429,6 +675,52 @@ mod tests {
             .map(|chunk| [chunk[0], chunk[1], chunk[2], chunk[3]])
             .collect::<Vec<_>>();
         assert_eq!(pixels, expected);
+    }
+
+    fn custom_shader_source(body: &str) -> String {
+        format!(
+            r#"
+#include <metal_stdlib>
+using namespace metal;
+
+struct CustomShaderUniforms {{
+    float3 resolution;
+    float time;
+}};
+
+fragment float4 main0(
+    texture2d<float> iChannel0 [[texture(0)]],
+    sampler iChannel0Sampler [[sampler(0)]],
+    constant CustomShaderUniforms& uniforms [[buffer(1)]],
+    float4 position [[position]]
+) {{
+    float2 uv = position.xy / uniforms.resolution.xy;
+    float4 terminal = iChannel0.sample(iChannel0Sampler, uv);
+    {body}
+}}
+"#
+        )
+    }
+
+    fn custom_shader_pipeline(device: &ProtocolObject<dyn MTLDevice>, body: &str) -> MetalPipeline {
+        let standard_library =
+            MetalShaderLibrary::compile(device).expect("standard shader source should compile");
+        let custom_source = custom_shader_source(body);
+        let custom_library = MetalShaderLibrary::compile_source(device, &custom_source)
+            .expect("custom shader source should compile");
+        MetalPipeline::new(MetalPipelineOptions {
+            device,
+            vertex_library: standard_library.library(),
+            fragment_library: custom_library.library(),
+            values: post_process_pipeline_build_values("main0", MetalPixelFormat::Bgra8Unorm),
+        })
+        .expect("custom shader pipeline should build")
+    }
+
+    fn custom_shader_uniforms(width: usize, height: usize) -> CustomShaderUniforms {
+        let mut uniforms = CustomShaderUniforms::new();
+        uniforms.update_for_frame(0.0, 0.0, width as u32, height as u32);
+        uniforms
     }
 
     fn pending_rgba(rgba: [u8; 4]) -> PendingImage {
@@ -765,6 +1057,199 @@ mod tests {
             .expect("background image alpha frame should draw");
 
         assert_eq!(compositor.target_bytes(), vec![0, 0, 128, 128]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn compositor_empty_custom_shader_list_uses_direct_target() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = compositor(device, 1, 1, &grayscale, &color);
+        let contents = Contents::default();
+        let uniforms = cell_text_uniforms([1, 1], [1, 1], [1.0, 1.0], [255, 0, 0, 255]);
+        let shader_uniforms = custom_shader_uniforms(1, 1);
+        let pipelines = [];
+
+        compositor
+            .draw_frame_with_custom_shaders_immediate(
+                frame_input(1, 1, 1.0, &uniforms, &contents, &grayscale, &color),
+                MetalCustomShaderInput {
+                    uniforms: &shader_uniforms,
+                    pipelines: &pipelines,
+                },
+            )
+            .expect("frame should draw");
+
+        assert_eq!(compositor.target_bytes(), vec![0, 0, 255, 255]);
+        assert_eq!(compositor.custom_shader_texture_size(), None);
+    }
+
+    #[test]
+    fn compositor_custom_shader_samples_offscreen_frame_into_final_target() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let pipeline =
+            custom_shader_pipeline(&device, "return float4(0.0, terminal.r, 0.0, terminal.a);");
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = compositor(device, 1, 1, &grayscale, &color);
+        let contents = Contents::default();
+        let uniforms = cell_text_uniforms([1, 1], [1, 1], [1.0, 1.0], [255, 0, 0, 255]);
+        let shader_uniforms = custom_shader_uniforms(1, 1);
+        let pipelines = [&pipeline];
+
+        compositor
+            .draw_frame_with_custom_shaders_immediate(
+                frame_input(1, 1, 1.0, &uniforms, &contents, &grayscale, &color),
+                MetalCustomShaderInput {
+                    uniforms: &shader_uniforms,
+                    pipelines: &pipelines,
+                },
+            )
+            .expect("custom shader frame should draw");
+
+        assert_eq!(compositor.target_bytes(), vec![0, 255, 0, 255]);
+        assert_eq!(
+            compositor.custom_shader_texture_size(),
+            Some(((1, 1), (1, 1)))
+        );
+    }
+
+    #[test]
+    fn compositor_custom_shader_ping_pongs_multiple_passes() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let first =
+            custom_shader_pipeline(&device, "return float4(0.0, terminal.r, 0.0, terminal.a);");
+        let second =
+            custom_shader_pipeline(&device, "return float4(0.0, 0.0, terminal.g, terminal.a);");
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = compositor(device, 1, 1, &grayscale, &color);
+        let contents = Contents::default();
+        let uniforms = cell_text_uniforms([1, 1], [1, 1], [1.0, 1.0], [255, 0, 0, 255]);
+        let shader_uniforms = custom_shader_uniforms(1, 1);
+        let pipelines = [&first, &second];
+
+        compositor
+            .draw_frame_with_custom_shaders_immediate(
+                frame_input(1, 1, 1.0, &uniforms, &contents, &grayscale, &color),
+                MetalCustomShaderInput {
+                    uniforms: &shader_uniforms,
+                    pipelines: &pipelines,
+                },
+            )
+            .expect("custom shader frame should draw");
+
+        assert_eq!(compositor.target_bytes(), vec![255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn compositor_custom_shader_resizes_intermediate_textures() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let pipeline = custom_shader_pipeline(&device, "return terminal;");
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = compositor(device, 1, 1, &grayscale, &color);
+        let contents = Contents::default();
+        let uniforms_1 = cell_text_uniforms([1, 1], [1, 1], [1.0, 1.0], [255, 0, 0, 255]);
+        let shader_uniforms_1 = custom_shader_uniforms(1, 1);
+        let pipelines = [&pipeline];
+
+        compositor
+            .draw_frame_with_custom_shaders_immediate(
+                frame_input(1, 1, 1.0, &uniforms_1, &contents, &grayscale, &color),
+                MetalCustomShaderInput {
+                    uniforms: &shader_uniforms_1,
+                    pipelines: &pipelines,
+                },
+            )
+            .expect("custom shader frame should draw");
+        assert_eq!(
+            compositor.custom_shader_texture_size(),
+            Some(((1, 1), (1, 1)))
+        );
+
+        let uniforms_2 = cell_text_uniforms([2, 3], [1, 1], [2.0, 3.0], [255, 0, 0, 255]);
+        let shader_uniforms_2 = custom_shader_uniforms(2, 3);
+        compositor
+            .draw_frame_with_custom_shaders_immediate(
+                frame_input(2, 3, 1.0, &uniforms_2, &contents, &grayscale, &color),
+                MetalCustomShaderInput {
+                    uniforms: &shader_uniforms_2,
+                    pipelines: &pipelines,
+                },
+            )
+            .expect("resized custom shader frame should draw");
+
+        assert_eq!(
+            compositor.custom_shader_texture_size(),
+            Some(((2, 3), (2, 3)))
+        );
+    }
+
+    #[test]
+    fn compositor_custom_shader_uses_shadertoy_sampler_options() {
+        let descriptor = custom_shader_sampler_descriptor();
+
+        assert_eq!(
+            descriptor.min_filter,
+            crate::renderer::metal::api::MetalSamplerMinMagFilter::Linear
+        );
+        assert_eq!(
+            descriptor.mag_filter,
+            crate::renderer::metal::api::MetalSamplerMinMagFilter::Linear
+        );
+        assert_eq!(
+            descriptor.s_address_mode,
+            crate::renderer::metal::api::MetalSamplerAddressMode::ClampToEdge
+        );
+        assert_eq!(
+            descriptor.t_address_mode,
+            crate::renderer::metal::api::MetalSamplerAddressMode::ClampToEdge
+        );
+    }
+
+    #[test]
+    fn compositor_image_aware_frame_can_be_custom_shader_source() {
+        let Some(device) = metal_device() else {
+            return;
+        };
+        let pipeline =
+            custom_shader_pipeline(&device, "return float4(0.0, terminal.r, 0.0, terminal.a);");
+        let grayscale = Atlas::new(8, Format::Grayscale);
+        let color = Atlas::new(8, Format::Bgra);
+        let mut compositor = compositor(device, 1, 1, &grayscale, &color);
+        let contents = Contents::default();
+        let uniforms = cell_text_uniforms([1, 1], [1, 1], [1.0, 1.0], [0, 0, 0, 255]);
+        let mut images = ImageState::<MetalTexture>::default();
+        let dir = temp_image_dir("custom-background-source");
+        let path = dir.join("bg.png");
+        write_png(&path, [255, 0, 0, 255]);
+        let mut background = background_state(&path);
+        let shader_uniforms = custom_shader_uniforms(1, 1);
+        let pipelines = [&pipeline];
+
+        compositor
+            .draw_frame_with_images_and_custom_shaders_immediate(
+                frame_input(1, 1, 1.0, &uniforms, &contents, &grayscale, &color),
+                &mut images,
+                &mut background,
+                MetalCustomShaderInput {
+                    uniforms: &shader_uniforms,
+                    pipelines: &pipelines,
+                },
+            )
+            .expect("image-aware custom shader frame should draw");
+
+        assert_eq!(compositor.target_bytes(), vec![0, 255, 0, 255]);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

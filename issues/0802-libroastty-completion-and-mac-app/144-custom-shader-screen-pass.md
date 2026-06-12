@@ -150,3 +150,83 @@ context, with focused re-review by `Carson`.
   linear/linear clamp-to-edge sampler and by adding descriptor verification.
 
 Carson re-reviewed the fix and approved the design with no remaining findings.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the live Metal custom-shader screen-pass foundation:
+
+- `roastty/src/renderer/metal/texture.rs` now has post-process texture options
+  with both shader-read and render-target usage, matching upstream custom shader
+  texture requirements.
+- `roastty/src/renderer/metal/shaders.rs` exposes source-string Metal library
+  compilation for custom/test fragment libraries.
+- `roastty/src/renderer/metal/pipeline.rs` now builds post-process pipeline
+  values that use the standard `full_screen_vertex`, custom fragment function
+  `main0`, no vertex descriptor, and disabled blending.
+- `roastty/src/renderer/metal/render_pass.rs` now has `draw_custom_shader`,
+  binding the custom uniform buffer, source texture slot 0, sampler slot 0, and
+  a full-screen triangle.
+- `roastty/src/renderer/metal/compositor.rs` now owns custom shader state with
+  front/back textures, an upstream Shadertoy linear clamp-to-edge sampler, and a
+  `MetalBuffer<CustomShaderUniforms>`. A non-empty post-process pipeline list
+  renders the normal terminal frame into the back texture, syncs custom
+  uniforms, applies each post-process pass, swaps front/back after each pass,
+  and writes the final pass into the IOSurface target. An empty pipeline list
+  preserves the direct draw-to-final-target path.
+
+Verification:
+
+- `cargo fmt`
+- `cargo test -p roastty custom_shader -- --test-threads=1` — 23 passed
+- `cargo test -p roastty metal::compositor -- --test-threads=1` — 12 passed
+- `cargo test -p roastty metal::render_pass -- --test-threads=1` — 29 passed
+- `cargo test -p roastty metal::pipeline -- --test-threads=1` — 19 passed
+- `cargo test -p roastty --test abi_harness` — 1 passed; existing C enum
+  conversion warnings remain
+- First `cargo test -p roastty -- --test-threads=1` run: 4,786 passed and
+  `surface_foreground_pid_reports_worker_foreground_pid_after_start` failed with
+  a foreground PID mismatch (`left: 9620`, `right: 9615`)
+- `cargo test -p roastty surface_foreground_pid_reports_worker_foreground_pid_after_start -- --test-threads=1`
+  — 1 passed
+- Second `cargo test -p roastty -- --test-threads=1` run — 4,787 unit tests, ABI
+  harness, and doc tests passed
+- `cd roastty && macos/build.nu --action test` — 210 hosted macOS tests passed;
+  existing SwiftLint/main-thread/pasteboard warnings remain
+- `cargo fmt --check`
+- `git diff --check`
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/144-custom-shader-screen-pass.md issues/0802-libroastty-completion-and-mac-app/README.md`
+
+## Conclusion
+
+Roastty's live Metal compositor now has the same custom-shader screen-pass shape
+as upstream Ghostty: the normal frame can be rendered offscreen, post-process
+pipelines sample it, multiple passes ping-pong through front/back textures, and
+the last pass writes to the final IOSurface target. The screen-pass path is
+proven with Metal readback tests for direct rendering, one-pass sampling,
+multi-pass ping-pong, resizing, sampler options, render-pass binding, pipeline
+creation, and image-aware source ordering.
+
+This does not yet make user `custom-shader` config paths active at runtime. The
+remaining custom-shader work is the loader/cross-compiler hookup that turns
+configured files into live post-process pipelines.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Einstein`, fresh
+context.
+
+**Verdict:** Approved after fixes.
+
+**Findings and fixes:**
+
+- **Required:** Einstein found that the Phase H README checklist still left the
+  image-draw item unchecked even though its note said live Kitty graphics and
+  background-image draw were already complete in Experiments 141 and 143. Fixed
+  by marking that item complete so the checklist matches the recorded experiment
+  results.
+
+Einstein independently verified `git diff --check`, `cargo fmt --check`, focused
+custom-shader/compositor/render-pass/pipeline tests, and Prettier check. Mendel
+re-reviewed the README checklist fix and approved it with no remaining findings.

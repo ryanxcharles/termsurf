@@ -934,11 +934,15 @@ the live app, verified by a Phase-D UI test.)
 
 **Phase H — Renderer feature-completion (in the live pass)**
 
-- [ ] Invoke image draws (Kitty graphics + background image) in the live draw
+- [x] Invoke image draws (Kitty graphics + background image) in the live draw
       pass — live Kitty graphics wired and pixel-readback proven in Exp 141;
       background-image config path wired in Exp 142; background image
       load/upload/draw wired in Exp 143
-- [ ] Custom-shader screen pass (ping-pong target + post-process apply)
+- [x] Custom-shader screen pass (ping-pong target + post-process apply) —
+      offscreen target, post-process apply, ping-pong, resize, sampler, and
+      readback coverage wired in Exp 144
+- [ ] Custom-shader loader/cross-compiler hookup (`custom-shader` config paths
+      into live post-process pipelines)
 - [ ] Link-highlight matcher (`renderer/link.zig` `renderCellMap`) + feed
       `link_ranges`
 - [ ] Debug `Overlay` (optional)
@@ -1331,7 +1335,7 @@ stays unaltered except for the rename).
 - [Experiment 143: Phase H — background-image live rendering](143-background-image-live-rendering.md)
   — **Pass**
 - [Experiment 144: Phase H — custom-shader screen pass](144-custom-shader-screen-pass.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

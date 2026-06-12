@@ -12,6 +12,7 @@ use objc2_metal::{MTLBuffer, MTLDevice};
 use crate::renderer::cell::Contents;
 use crate::renderer::metal::api::{MetalResourceOptions, MetalStorageMode};
 use crate::renderer::shader::{BgImageVertex, CellBg, CellTextVertex, ImageVertex};
+use crate::renderer::shadertoy::CustomShaderUniforms;
 
 pub(crate) unsafe trait MetalBufferElement: Copy {}
 
@@ -19,6 +20,7 @@ unsafe impl MetalBufferElement for ImageVertex {}
 unsafe impl MetalBufferElement for CellTextVertex {}
 unsafe impl MetalBufferElement for CellBg {}
 unsafe impl MetalBufferElement for BgImageVertex {}
+unsafe impl MetalBufferElement for CustomShaderUniforms {}
 
 #[derive(Clone, Copy)]
 pub(crate) struct MetalBufferOptions<'a> {

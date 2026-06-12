@@ -19,6 +19,7 @@ use crate::renderer::metal::sampler::MetalSampler;
 use crate::renderer::metal::shaders::MetalStandardPipelines;
 use crate::renderer::metal::texture::MetalTexture;
 use crate::renderer::shader::{BgImageVertex, ImageDrawCall, ImageVertex, PrimitiveType};
+use crate::renderer::shadertoy::CustomShaderUniforms;
 
 pub(crate) struct MetalCommandFrame {
     command_buffer: Retained<ProtocolObject<dyn MTLCommandBuffer>>,
@@ -211,6 +212,27 @@ impl MetalRenderPass {
             textures: &[Some(texture)],
             samplers: &[],
             uniforms: Some(uniforms),
+            draw: MetalDraw {
+                primitive_type: MetalPrimitiveType::Triangle,
+                vertex_count: 3,
+                instance_count: 1,
+            },
+        });
+    }
+
+    pub(crate) fn draw_custom_shader(
+        &self,
+        pipeline: &MetalPipeline,
+        uniforms: &MetalBuffer<CustomShaderUniforms>,
+        source: &MetalTexture,
+        sampler: &MetalSampler,
+    ) {
+        self.step(MetalRenderPassStep {
+            pipeline,
+            buffers: &[],
+            textures: &[Some(source)],
+            samplers: &[Some(sampler)],
+            uniforms: Some(uniforms.buffer()),
             draw: MetalDraw {
                 primitive_type: MetalPrimitiveType::Triangle,
                 vertex_count: 3,
@@ -415,17 +437,24 @@ mod tests {
         MetalStorageMode,
     };
     use crate::renderer::metal::buffer::{MetalBuffer, MetalBufferOptions};
+    use crate::renderer::metal::pipeline::{
+        post_process_pipeline_build_values, MetalPipeline, MetalPipelineOptions,
+    };
     use crate::renderer::metal::sampler::{
         MetalSampler, MetalSamplerDescriptorOptions, MetalSamplerOptions,
     };
-    use crate::renderer::metal::shaders::{MetalStandardPipelines, MetalUniforms};
+    use crate::renderer::metal::shaders::{
+        MetalShaderLibrary, MetalStandardPipelines, MetalUniforms,
+    };
     use crate::renderer::metal::texture::{
-        image_texture_options, render_target_texture_options, ImageTextureFormat,
+        image_texture_options, post_process_texture_options, render_target_texture_options,
+        ImageTextureFormat,
     };
     use crate::renderer::shader::{
         BgImageFit, BgImageInfo, BgImagePosition, BgImageVertex, CellBg, CellTextAtlas,
         CellTextFlags, CellTextVertex, ImageVertex,
     };
+    use crate::renderer::shadertoy::CustomShaderUniforms;
 
     fn metal_device() -> Retained<ProtocolObject<dyn MTLDevice>> {
         MTLCreateSystemDefaultDevice().expect("Roastty requires a Metal device")
@@ -619,6 +648,60 @@ mod tests {
             Some(rgba),
         )
         .expect("image texture should be created")
+    }
+
+    fn custom_shader_pipeline(device: &ProtocolObject<dyn MTLDevice>) -> MetalPipeline {
+        let standard_library =
+            MetalShaderLibrary::compile(device).expect("standard shader source should compile");
+        let custom_library = MetalShaderLibrary::compile_source(
+            device,
+            r#"
+#include <metal_stdlib>
+using namespace metal;
+
+struct CustomShaderUniforms {
+    float3 resolution;
+    float time;
+};
+
+fragment float4 main0(
+    texture2d<float> iChannel0 [[texture(0)]],
+    sampler iChannel0Sampler [[sampler(0)]],
+    constant CustomShaderUniforms& uniforms [[buffer(1)]],
+    float4 position [[position]]
+) {
+    float2 uv = position.xy / uniforms.resolution.xy;
+    float4 terminal = iChannel0.sample(iChannel0Sampler, uv);
+    return float4(0.0, terminal.r, 0.0, terminal.a);
+}
+"#,
+        )
+        .expect("custom shader source should compile");
+
+        MetalPipeline::new(MetalPipelineOptions {
+            device,
+            vertex_library: standard_library.library(),
+            fragment_library: custom_library.library(),
+            values: post_process_pipeline_build_values("main0", MetalPixelFormat::Bgra8Unorm),
+        })
+        .expect("custom shader pipeline should build")
+    }
+
+    fn custom_shader_uniform_buffer(
+        device: &ProtocolObject<dyn MTLDevice>,
+        width: u32,
+        height: u32,
+    ) -> MetalBuffer<CustomShaderUniforms> {
+        let mut uniforms = CustomShaderUniforms::new();
+        uniforms.update_for_frame(0.0, 0.0, width, height);
+        MetalBuffer::init_fill(
+            MetalBufferOptions {
+                device,
+                resource_options: MetalResourceOptions::image(MetalStorageMode::Shared),
+            },
+            &[uniforms],
+        )
+        .expect("custom shader uniform buffer should be created")
     }
 
     fn grayscale_atlas_texture(
@@ -1943,6 +2026,55 @@ mod tests {
                 [255, 255, 255, 255],
             ],
         );
+    }
+
+    #[test]
+    fn custom_shader_render_pass_samples_source_texture() {
+        let device = metal_device();
+        let queue = device
+            .newCommandQueue()
+            .expect("command queue should be created");
+        let source = MetalTexture::new(
+            &device,
+            post_process_texture_options(MetalPixelFormat::Rgba8Unorm, MetalStorageMode::Shared),
+            1,
+            1,
+            Some(&[255, 0, 0, 255]),
+        )
+        .expect("source texture should be created");
+        let sampler = MetalSampler::new(MetalSamplerOptions {
+            device: &device,
+            descriptor: MetalSamplerDescriptorOptions {
+                min_filter: MetalSamplerMinMagFilter::Linear,
+                mag_filter: MetalSamplerMinMagFilter::Linear,
+                s_address_mode: MetalSamplerAddressMode::ClampToEdge,
+                t_address_mode: MetalSamplerAddressMode::ClampToEdge,
+            },
+        })
+        .expect("sampler should be created");
+        let uniforms = custom_shader_uniform_buffer(&device, 1, 1);
+        let pipeline = custom_shader_pipeline(&device);
+        let target = render_target(&device, 1, 1);
+        let frame = MetalCommandFrame::begin(&queue).expect("command frame should begin");
+        let pass = frame
+            .render_pass(&[MetalRenderPassAttachment {
+                texture: target.texture(),
+                clear_color: Some(MetalClearColor {
+                    red: 0.0,
+                    green: 0.0,
+                    blue: 0.0,
+                    alpha: 0.0,
+                }),
+            }])
+            .expect("render pass should begin");
+
+        pass.draw_custom_shader(&pipeline, &uniforms, &source, &sampler);
+        pass.complete();
+        frame
+            .commit_and_wait()
+            .expect("command frame should complete");
+
+        assert_eq!(target.read_bytes(), vec![0, 255, 0, 255]);
     }
 
     #[test]

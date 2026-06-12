@@ -179,6 +179,23 @@ pub(crate) fn standard_pipeline_build_values(
     }
 }
 
+pub(crate) fn post_process_pipeline_build_values(
+    fragment_function: &'static str,
+    pixel_format: MetalPixelFormat,
+) -> MetalPipelineBuildValues {
+    MetalPipelineBuildValues {
+        name: "custom_shader",
+        vertex_function: "full_screen_vertex",
+        fragment_function,
+        vertex_input: MetalPipelineVertexInputKind::None,
+        vertex_descriptor: None,
+        attachment: pipeline_attachment_descriptor(MetalPipelineAttachmentOptions {
+            pixel_format,
+            blending_enabled: false,
+        }),
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct MetalPipeline {
     state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
@@ -456,6 +473,24 @@ fragment float4 image_fragment() {
             .expect("test shader source should compile")
     }
 
+    fn custom_fragment_library(
+        device: &ProtocolObject<dyn MTLDevice>,
+    ) -> Retained<ProtocolObject<dyn MTLLibrary>> {
+        let source = NSString::from_str(
+            r#"
+#include <metal_stdlib>
+using namespace metal;
+
+fragment float4 main0() {
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+"#,
+        );
+        device
+            .newLibraryWithSource_options_error(&source, None)
+            .expect("custom fragment source should compile")
+    }
+
     fn standard_values(name: &str, pixel_format: MetalPixelFormat) -> MetalPipelineBuildValues {
         let description = STANDARD_PIPELINE_DESCRIPTIONS
             .iter()
@@ -463,6 +498,25 @@ fragment float4 image_fragment() {
             .find(|description| description.name == name)
             .expect("standard pipeline exists");
         standard_pipeline_build_values(description, pixel_format)
+    }
+
+    #[test]
+    fn post_process_pipeline_values_match_upstream_shape() {
+        let values = post_process_pipeline_build_values("main0", MetalPixelFormat::Bgra8Unorm);
+
+        assert_eq!(values.name, "custom_shader");
+        assert_eq!(values.vertex_function, "full_screen_vertex");
+        assert_eq!(values.fragment_function, "main0");
+        assert_eq!(values.vertex_input, MetalPipelineVertexInputKind::None);
+        assert_eq!(values.vertex_descriptor, None);
+        assert_eq!(
+            values.attachment,
+            MetalPipelineAttachmentDescriptor {
+                pixel_format: MetalPixelFormat::Bgra8Unorm,
+                blending_enabled: false,
+                blend: None,
+            }
+        );
     }
 
     #[test]
@@ -884,6 +938,24 @@ fragment float4 image_fragment() {
             values,
         })
         .expect("image pipeline should compile");
+
+        let _ = pipeline.state();
+    }
+
+    #[test]
+    fn live_pipeline_creation_accepts_post_process_values() {
+        let device = metal_device();
+        let vertex_library = test_library(&device);
+        let fragment_library = custom_fragment_library(&device);
+        let values = post_process_pipeline_build_values("main0", MetalPixelFormat::Bgra8Unorm);
+
+        let pipeline = MetalPipeline::new(MetalPipelineOptions {
+            device: &device,
+            vertex_library: &vertex_library,
+            fragment_library: &fragment_library,
+            values,
+        })
+        .expect("post-process pipeline should compile");
 
         let _ = pipeline.state();
     }
