@@ -1417,6 +1417,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 154: Phase I — CF release thread](154-cf-release-thread.md) —
   **Pass**
+- [Experiment 155: Phase G — command-palette hosted execution](155-command-palette-hosted-execution.md)
+  — **Designed**
 
 ## Process
 
