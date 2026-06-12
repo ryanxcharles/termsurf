@@ -1391,6 +1391,8 @@ stays unaltered except for the rename).
   **Partial**
 - [Experiment 151: Phase I — codepoint width fast path](151-codepoint-width-fast-path.md)
   — **Partial**
+- [Experiment 152: Phase I — generated width table](152-generated-width-table.md)
+  — **Designed**
 
 ## Process
 
