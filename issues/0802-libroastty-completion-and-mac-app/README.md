@@ -1296,6 +1296,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 137: Phase G — KeymapDarwin translation foundation](137-keymap-darwin-translation-foundation.md)
   — **Pass**
+- [Experiment 138: Phase G — app keymap state](138-app-keymap-state.md) —
+  **Designed**
 
 ## Process
 
