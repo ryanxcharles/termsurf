@@ -23,6 +23,7 @@ use crate::config::string::{codepoint_iterator, parse_quoted_string};
 use crate::config::unicode_range::{InvalidRange, UnicodeRangeParser};
 use crate::font::codepoint_map::CodepointMap;
 use crate::font::discovery::Descriptor;
+use crate::font::metrics::Modifier as MetricModifier;
 use crate::input::key_mods::{self, Mods, RemapSet, RemapSetParseError};
 use crate::input::link;
 use crate::os::homedir::expand_home;
@@ -154,6 +155,32 @@ pub(crate) struct Config {
     pub window_colorspace: WindowColorspace,
     /// `alpha-blending`.
     pub alpha_blending: AlphaBlending,
+    /// `adjust-cell-width`.
+    pub adjust_cell_width: Option<MetricModifier>,
+    /// `adjust-cell-height`.
+    pub adjust_cell_height: Option<MetricModifier>,
+    /// `adjust-font-baseline`.
+    pub adjust_font_baseline: Option<MetricModifier>,
+    /// `adjust-underline-position`.
+    pub adjust_underline_position: Option<MetricModifier>,
+    /// `adjust-underline-thickness`.
+    pub adjust_underline_thickness: Option<MetricModifier>,
+    /// `adjust-strikethrough-position`.
+    pub adjust_strikethrough_position: Option<MetricModifier>,
+    /// `adjust-strikethrough-thickness`.
+    pub adjust_strikethrough_thickness: Option<MetricModifier>,
+    /// `adjust-overline-position`.
+    pub adjust_overline_position: Option<MetricModifier>,
+    /// `adjust-overline-thickness`.
+    pub adjust_overline_thickness: Option<MetricModifier>,
+    /// `adjust-cursor-thickness`.
+    pub adjust_cursor_thickness: Option<MetricModifier>,
+    /// `adjust-cursor-height`.
+    pub adjust_cursor_height: Option<MetricModifier>,
+    /// `adjust-box-thickness`.
+    pub adjust_box_thickness: Option<MetricModifier>,
+    /// `adjust-icon-height`.
+    pub adjust_icon_height: Option<MetricModifier>,
     /// `background-blur`.
     pub background_blur: BackgroundBlur,
     /// `unfocused-split-opacity`.
@@ -495,6 +522,19 @@ impl Default for Config {
             link: vec![default_url_link()],
             window_colorspace: WindowColorspace::Srgb,
             alpha_blending: AlphaBlending::Native,
+            adjust_cell_width: None,
+            adjust_cell_height: None,
+            adjust_font_baseline: None,
+            adjust_underline_position: None,
+            adjust_underline_thickness: None,
+            adjust_strikethrough_position: None,
+            adjust_strikethrough_thickness: None,
+            adjust_overline_position: None,
+            adjust_overline_thickness: None,
+            adjust_cursor_thickness: None,
+            adjust_cursor_height: None,
+            adjust_box_thickness: None,
+            adjust_icon_height: None,
             background_blur: BackgroundBlur::False,
             unfocused_split_opacity: 0.7,
             unfocused_split_fill: None,
@@ -760,6 +800,52 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("font-shaping-break", out));
         self.alpha_blending
             .format_entry(&mut EntryFormatter::new("alpha-blending", out));
+        EntryFormatter::new("adjust-cell-width", out)
+            .entry_optional(self.adjust_cell_width, |v, f| format_metric_modifier(v, f));
+        EntryFormatter::new("adjust-cell-height", out)
+            .entry_optional(self.adjust_cell_height, |v, f| format_metric_modifier(v, f));
+        EntryFormatter::new("adjust-font-baseline", out)
+            .entry_optional(self.adjust_font_baseline, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-underline-position", out)
+            .entry_optional(self.adjust_underline_position, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-underline-thickness", out)
+            .entry_optional(self.adjust_underline_thickness, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-strikethrough-position", out)
+            .entry_optional(self.adjust_strikethrough_position, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-strikethrough-thickness", out)
+            .entry_optional(self.adjust_strikethrough_thickness, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-overline-position", out)
+            .entry_optional(self.adjust_overline_position, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-overline-thickness", out)
+            .entry_optional(self.adjust_overline_thickness, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-cursor-thickness", out)
+            .entry_optional(self.adjust_cursor_thickness, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-cursor-height", out)
+            .entry_optional(self.adjust_cursor_height, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-box-thickness", out)
+            .entry_optional(self.adjust_box_thickness, |v, f| {
+                format_metric_modifier(v, f)
+            });
+        EntryFormatter::new("adjust-icon-height", out)
+            .entry_optional(self.adjust_icon_height, |v, f| format_metric_modifier(v, f));
         self.grapheme_width_method
             .format_entry(&mut EntryFormatter::new("grapheme-width-method", out));
         EntryFormatter::new("theme", out)
@@ -1335,6 +1421,97 @@ impl Config {
             "alpha-blending" => {
                 self.alpha_blending =
                     set_enum_field(value, default.alpha_blending, AlphaBlending::from_keyword)?
+            }
+            "adjust-cell-width" => {
+                self.adjust_cell_width = set_optional_value_field(
+                    value,
+                    default.adjust_cell_width,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-cell-height" => {
+                self.adjust_cell_height = set_optional_value_field(
+                    value,
+                    default.adjust_cell_height,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-font-baseline" => {
+                self.adjust_font_baseline = set_optional_value_field(
+                    value,
+                    default.adjust_font_baseline,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-underline-position" => {
+                self.adjust_underline_position = set_optional_value_field(
+                    value,
+                    default.adjust_underline_position,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-underline-thickness" => {
+                self.adjust_underline_thickness = set_optional_value_field(
+                    value,
+                    default.adjust_underline_thickness,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-strikethrough-position" => {
+                self.adjust_strikethrough_position = set_optional_value_field(
+                    value,
+                    default.adjust_strikethrough_position,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-strikethrough-thickness" => {
+                self.adjust_strikethrough_thickness = set_optional_value_field(
+                    value,
+                    default.adjust_strikethrough_thickness,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-overline-position" => {
+                self.adjust_overline_position = set_optional_value_field(
+                    value,
+                    default.adjust_overline_position,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-overline-thickness" => {
+                self.adjust_overline_thickness = set_optional_value_field(
+                    value,
+                    default.adjust_overline_thickness,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-cursor-thickness" => {
+                self.adjust_cursor_thickness = set_optional_value_field(
+                    value,
+                    default.adjust_cursor_thickness,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-cursor-height" => {
+                self.adjust_cursor_height = set_optional_value_field(
+                    value,
+                    default.adjust_cursor_height,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-box-thickness" => {
+                self.adjust_box_thickness = set_optional_value_field(
+                    value,
+                    default.adjust_box_thickness,
+                    parse_metric_modifier,
+                )?
+            }
+            "adjust-icon-height" => {
+                self.adjust_icon_height = set_optional_value_field(
+                    value,
+                    default.adjust_icon_height,
+                    parse_metric_modifier,
+                )?
             }
             "window-padding-color" => {
                 self.window_padding_color = set_enum_field(
@@ -3300,6 +3477,25 @@ fn set_f32_field(value: Option<&str>, default_value: f32) -> Result<f32, ConfigS
         Some("") => Ok(default_value),
         None => Err(ConfigSetError::ValueRequired),
         Some(v) => v.parse::<f32>().map_err(|_| ConfigSetError::InvalidValue),
+    }
+}
+
+fn parse_metric_modifier(value: Option<&str>) -> Result<MetricModifier, ConfigSetError> {
+    let value = value.ok_or(ConfigSetError::ValueRequired)?;
+    MetricModifier::parse(value).map_err(|_| ConfigSetError::InvalidValue)
+}
+
+fn format_metric_modifier(value: MetricModifier, formatter: &mut EntryFormatter) {
+    match value {
+        MetricModifier::Percent(v) => {
+            let percent = (v - 1.0) * 100.0;
+            if percent.is_nan() {
+                formatter.entry_str("nan%");
+            } else {
+                formatter.entry_str(&format!("{}%", percent));
+            }
+        }
+        MetricModifier::Absolute(v) => formatter.entry_int(v),
     }
 }
 
@@ -8291,7 +8487,7 @@ mod tests {
         FontStyleParseError, FontSyntheticStyle, FontVariation, Fullscreen, GraphemeWidthMethod,
         GtkSingleInstance, GtkTabsLocation, GtkTitlebarStyle, GtkToolbarStyle, LinkPreviews,
         LinuxCgroup, MacAppIcon, MacAppIconFrame, MacHidden, MacOSDockDropBehavior, MacShortcuts,
-        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError,
+        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError, MetricModifier,
         MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
@@ -8532,6 +8728,19 @@ mod tests {
         // Renderer-appearance group (Experiment 465).
         assert_eq!(d.window_colorspace, WindowColorspace::Srgb);
         assert_eq!(d.alpha_blending, AlphaBlending::Native);
+        assert_eq!(d.adjust_cell_width, None);
+        assert_eq!(d.adjust_cell_height, None);
+        assert_eq!(d.adjust_font_baseline, None);
+        assert_eq!(d.adjust_underline_position, None);
+        assert_eq!(d.adjust_underline_thickness, None);
+        assert_eq!(d.adjust_strikethrough_position, None);
+        assert_eq!(d.adjust_strikethrough_thickness, None);
+        assert_eq!(d.adjust_overline_position, None);
+        assert_eq!(d.adjust_overline_thickness, None);
+        assert_eq!(d.adjust_cursor_thickness, None);
+        assert_eq!(d.adjust_cursor_height, None);
+        assert_eq!(d.adjust_box_thickness, None);
+        assert_eq!(d.adjust_icon_height, None);
         assert_eq!(d.background_blur, BackgroundBlur::False);
         assert_eq!(d.unfocused_split_opacity, 0.7);
         assert_eq!(d.unfocused_split_fill, None);
@@ -15526,6 +15735,19 @@ mod tests {
             "font-thicken-strength",
             "font-shaping-break",
             "alpha-blending",
+            "adjust-cell-width",
+            "adjust-cell-height",
+            "adjust-font-baseline",
+            "adjust-underline-position",
+            "adjust-underline-thickness",
+            "adjust-strikethrough-position",
+            "adjust-strikethrough-thickness",
+            "adjust-overline-position",
+            "adjust-overline-thickness",
+            "adjust-cursor-thickness",
+            "adjust-cursor-height",
+            "adjust-box-thickness",
+            "adjust-icon-height",
             "grapheme-width-method",
             "theme",
             "background",
@@ -16608,6 +16830,133 @@ mod tests {
         assert_eq!(cfg.click_repeat_interval, 250);
         assert_eq!(cfg.mouse_scroll_multiplier.precision, 0.5);
         assert_eq!(cfg.mouse_scroll_multiplier.discrete, 2.0);
+    }
+
+    #[test]
+    fn font_metric_adjust_config_parse_format_reset_load_and_clone() {
+        let line = |cfg: &Config, key: &str| -> String {
+            let prefix = format!("{} = ", key);
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|l| l.starts_with(&prefix))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(line(&cfg, "adjust-cell-width"), "adjust-cell-width = ");
+
+        let cases = [
+            ("adjust-cell-width", "2", "adjust-cell-width = 2"),
+            ("adjust-cell-height", "-3", "adjust-cell-height = -3"),
+            ("adjust-font-baseline", "25%", "adjust-font-baseline = 25%"),
+            (
+                "adjust-underline-position",
+                "-50%",
+                "adjust-underline-position = -50%",
+            ),
+            (
+                "adjust-underline-thickness",
+                "-120%",
+                "adjust-underline-thickness = -100%",
+            ),
+            (
+                "adjust-strikethrough-position",
+                "4",
+                "adjust-strikethrough-position = 4",
+            ),
+            (
+                "adjust-strikethrough-thickness",
+                "5",
+                "adjust-strikethrough-thickness = 5",
+            ),
+            (
+                "adjust-overline-position",
+                "-6",
+                "adjust-overline-position = -6",
+            ),
+            (
+                "adjust-overline-thickness",
+                "7",
+                "adjust-overline-thickness = 7",
+            ),
+            (
+                "adjust-cursor-thickness",
+                "8",
+                "adjust-cursor-thickness = 8",
+            ),
+            ("adjust-cursor-height", "9", "adjust-cursor-height = 9"),
+            ("adjust-box-thickness", "10", "adjust-box-thickness = 10"),
+            ("adjust-icon-height", "11", "adjust-icon-height = 11"),
+        ];
+        for (key, value, expected) in cases {
+            cfg.set(key, Some(value)).unwrap();
+            assert_eq!(line(&cfg, key), expected);
+        }
+
+        assert_eq!(cfg.adjust_cell_width, Some(MetricModifier::Absolute(2)));
+        assert_eq!(
+            cfg.adjust_font_baseline,
+            Some(MetricModifier::Percent(1.25))
+        );
+        assert_eq!(
+            cfg.adjust_underline_position,
+            Some(MetricModifier::Percent(0.5))
+        );
+        assert_eq!(
+            cfg.adjust_underline_thickness,
+            Some(MetricModifier::Percent(0.0))
+        );
+
+        cfg.set("adjust-cell-width", Some("")).unwrap();
+        assert_eq!(cfg.adjust_cell_width, None);
+        assert_eq!(line(&cfg, "adjust-cell-width"), "adjust-cell-width = ");
+        assert_eq!(
+            cfg.set("adjust-cell-width", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("adjust-cell-width", Some("1.5")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("adjust-cell-width", Some("bad%")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "adjust-cell-width = 12\n\
+             adjust-cell-height = nope\n\
+             adjust-font-baseline\n\
+             adjust-cell-width =\n",
+        );
+        assert_eq!(cfg.adjust_cell_width, None);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "adjust-cell-height".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "adjust-font-baseline".to_string(),
+                    error: ConfigSetError::ValueRequired,
+                },
+            ]
+        );
+
+        let diagnostics = cfg.set_cli_args(["--adjust-cell-width=13", "--adjust-cell-height=25%"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.adjust_cell_width, Some(MetricModifier::Absolute(13)));
+        assert_eq!(cfg.adjust_cell_height, Some(MetricModifier::Percent(1.25)));
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.adjust_cell_width, cfg.adjust_cell_width);
+        assert_eq!(cloned.adjust_cell_height, cfg.adjust_cell_height);
     }
 
     #[test]

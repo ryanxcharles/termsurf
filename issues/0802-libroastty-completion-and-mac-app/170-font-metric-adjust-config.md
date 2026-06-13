@@ -97,3 +97,73 @@ experiment has the required sections, the scope is bounded to the upstream
 `MetricModifier` and optional `parseIntoField` semantics, and the verification
 includes focused tests, the full roastty suite, Rust formatting, markdown
 prettier, and `git diff --check`.
+
+## Result
+
+**Result:** Pass
+
+Roastty now stores, parses, and formats all 13 upstream `adjust-*` font metric
+modifier config fields:
+
+- `adjust-cell-width`
+- `adjust-cell-height`
+- `adjust-font-baseline`
+- `adjust-underline-position`
+- `adjust-underline-thickness`
+- `adjust-strikethrough-position`
+- `adjust-strikethrough-thickness`
+- `adjust-overline-position`
+- `adjust-overline-thickness`
+- `adjust-cursor-thickness`
+- `adjust-cursor-height`
+- `adjust-box-thickness`
+- `adjust-icon-height`
+
+The fields default to `None`, format as void lines when unset, and appear in
+upstream declaration order after `alpha-blending` and before
+`grapheme-width-method`. Non-empty values reuse the existing
+`font::metrics::Modifier` storage: integer values become absolute `i32` deltas,
+trailing-percent values become percent multipliers, and `-100%` or lower clamps
+to `0.0`. Missing values report `ValueRequired`; invalid values report
+`InvalidValue`; set-but-empty values reset the optional field to `None`.
+
+This is parser/formatter/storage only. Applying the configured modifiers to live
+font metrics remains font runtime work.
+
+The Phase F public-config tail is now three keys: `freetype-load-flags`,
+`input`, and `keybind`.
+
+Verification:
+
+- `cargo test -p roastty font_metric_adjust_config` passed 1 filtered unit test
+  plus the ABI harness filter.
+- `cargo test -p roastty config_format_config_emits_fields_in_upstream_order`
+  passed 1 filtered unit test plus the ABI harness filter.
+- `cargo test -p roastty` passed 4,866 Rust unit tests, 0 failed, 4 ignored; the
+  C ABI harness passed with the existing enum-conversion warnings; doc tests
+  passed with 0 tests.
+- `cargo fmt --check -p roastty` passed.
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/170-font-metric-adjust-config.md issues/0802-libroastty-completion-and-mac-app/README.md`
+  passed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The `adjust-*` font metric group is no longer a public config field gap. The
+next Phase F config slice should wire `freetype-load-flags`; after that, only
+`input` and `keybind` remain in the public config tail tracked here.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Sagan`, fresh context.
+
+**Verdict:** Approved after one required verification rerun.
+
+The first completion review found that the reviewer’s independent
+`cargo test -p roastty` run hit a failure in
+`tests::surface_foreground_pid_reports_worker_foreground_pid_after_start`, while
+a focused rerun of that test passed. The implementation did not change. I reran
+the full `cargo test -p roastty`; the previously failing test passed, the full
+unit suite passed with 4,866 tests, the ABI harness passed with the existing
+enum-conversion warnings, and doc tests passed with 0 tests. Re-review approved
+the result with no remaining findings.
