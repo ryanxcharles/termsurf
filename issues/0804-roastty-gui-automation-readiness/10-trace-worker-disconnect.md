@@ -144,3 +144,73 @@ Overall result:
   identified precisely.
 - **Fail** if the worker lifecycle trace cannot be built or does not emit under
   `ROASTTY_UI_KEY_TRACE_PATH`.
+
+## Result
+
+**Result:** Pass
+
+The worker lifecycle trace identified and fixed the keyboard blocker. External
+System Events keyboard input now reaches the live Roastty terminal and executes
+a command proven by a marker file.
+
+Implementation:
+
+- Promoted the trace helper in `roastty/src/lib.rs` to `pub(crate)` so
+  `termio.rs` can log into the existing `ROASTTY_UI_KEY_TRACE_PATH` file.
+- Added trace points for `Surface::start_termio`,
+  `Surface::drain_termio_events`, `Surface::apply_termio_event`,
+  `TermioWorker::spawn`, worker command handling, and worker loop exit reasons.
+- Changed live `Termio::pump_once` to treat
+  `TerminalStreamError::ManagedCellUnsupported` as a nonfatal render/model error
+  while preserving the terminal parser's standalone error behavior.
+
+Verification:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml` succeeded.
+- `scripts/roastty-app/build-roastty-kit.sh` succeeded before and after the fix:
+  - `logs/issue804-exp10-build-roastty-kit.log`
+  - `logs/issue804-exp10-build-roastty-kit-after-fix.log`
+- The local debug app rebuilt with `-derivedDataPath build` before and after the
+  fix:
+  - `logs/issue804-exp10-xcodebuild-local-debug.log`
+  - `logs/issue804-exp10-xcodebuild-local-debug-after-fix.log`
+- Before the fix, `logs/issue804-exp10-worker-trace.log` showed:
+  - the worker was healthy after idle launch;
+  - the first typed bytes queued successfully;
+  - the worker exited on `TerminalStream(ManagedCellUnsupported)`;
+  - later key writes failed with `CommandDisconnected`.
+- After the fix, `logs/issue804-exp10-worker-trace-after-fix.log` showed every
+  typed byte queued successfully and repeated
+  `rust termio_pump ignored managed-cell render error` entries instead of a
+  worker exit.
+- The guarded focus proof passed before typing: `frontmost-name=roastty`,
+  `frontmost-pid=95903`, `target-pid=95903`.
+- The marker file was created after the command executed through Roastty:
+  `/tmp/termsurf-issue804-exp10-after-fix-system-events/marker.txt` contained
+  `ISSUE804_EXP10_AFTER_FIX_SYSTEM_EVENTS`.
+- Cleanup captured
+  `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp10-after-fix-final-20260613-142255.png`,
+  killed PID `95903`, unset the launchd trace variables, and left no debug
+  Roastty process running.
+- Focused Rust tests passed:
+  - `cargo test --manifest-path roastty/Cargo.toml managed_cell`
+  - `cargo test --manifest-path roastty/Cargo.toml pending_wrap_managed`
+
+## Conclusion
+
+The primary Issue 804 keyboard gate is now satisfied for System Events input:
+
+- keyboard injection works in this macOS VM;
+- the harness can target Roastty instead of Ghostty/Codex;
+- Roastty AppKit receives the key events;
+- Rust encodes and queues the key bytes;
+- the live PTY worker stays alive across managed-cell render errors;
+- the shell executes a command typed by external keyboard automation.
+
+The managed-cell issue was not caused by OS permissions. It was an app-side
+worker robustness bug: a private terminal render/model error propagated out of
+the live PTY pump and killed the worker thread. The fix keeps that specific
+private error nonfatal in the live pump while preserving existing terminal unit
+behavior.
+
+Per user instruction, no adversarial review was run for this issue.

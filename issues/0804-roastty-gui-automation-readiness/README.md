@@ -206,6 +206,14 @@ Roastty GUI automation work. Keep hypotheses in Analysis until they are proven.
   present. The failure is `worker.queue_write(...) -> CommandDisconnected`,
   which means the worker command receiver has exited while the surface still
   holds a stale worker handle and stale prompt contents.
+- **External System Events keyboard input now reaches the live Roastty terminal
+  and executes commands.** Experiment 10 proved the worker was healthy at idle,
+  then found the live PTY worker exited on
+  `TerminalStream(ManagedCellUnsupported)` while processing echoed input.
+  Treating that private managed-cell render error as nonfatal in the live
+  `Termio` pump kept the worker alive; the guarded marker command created
+  `/tmp/termsurf-issue804-exp10-after-fix-system-events/marker.txt` with
+  `ISSUE804_EXP10_AFTER_FIX_SYSTEM_EVENTS`.
 
 ## Verification
 
@@ -259,4 +267,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
   **Partial** (trace identified the loss point: encoded key bytes cannot queue
   because the terminal worker command receiver is disconnected)
 - [Experiment 10: Trace worker disconnect](10-trace-worker-disconnect.md) —
-  **Designed**
+  **Pass** (fixed the live worker disconnect; guarded System Events keyboard
+  input created the marker file through Roastty)

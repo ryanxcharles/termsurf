@@ -3817,10 +3817,25 @@ impl Surface {
     }
 
     fn start_termio(&mut self) -> c_int {
+        append_ui_key_trace(format!(
+            "rust surface_start_termio begin app_null={} has_worker={} initial_surface={} process_exited={} size={}x{} rows={} cols={}",
+            self.app.is_null(),
+            self.termio_worker.is_some(),
+            self.initial_surface,
+            self.process_exited,
+            self.size.width_px,
+            self.size.height_px,
+            self.size.rows,
+            self.size.columns
+        ));
         if self.app.is_null() {
+            append_ui_key_trace("rust surface_start_termio result=invalid reason=app-null");
             return ROASTTY_INVALID_VALUE;
         }
         if self.termio_worker.is_some() {
+            append_ui_key_trace(
+                "rust surface_start_termio result=success reason=already-has-worker",
+            );
             return ROASTTY_SUCCESS;
         }
 
@@ -3841,6 +3856,21 @@ impl Surface {
         } else {
             None
         };
+        append_ui_key_trace(format!(
+            "rust surface_start_termio command={} initial_command={} cwd={} env_count={} term={}",
+            command.unwrap_or("<default-shell>"),
+            initial_command
+                .map(|command| match command {
+                    config::Command::Shell(_) => "shell",
+                    config::Command::Direct(_) => "direct",
+                })
+                .unwrap_or("none"),
+            cwd.as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            self.env_vars.len(),
+            config.term
+        ));
 
         let options = termio::TermioSpawnOptions {
             cwd,
@@ -3886,15 +3916,28 @@ impl Surface {
             ),
         };
         let Ok(termio) = termio else {
+            append_ui_key_trace(
+                "rust surface_start_termio result=invalid reason=termio-spawn-failed",
+            );
             return ROASTTY_INVALID_VALUE;
         };
 
         let worker = termio::TermioWorker::spawn(termio, 10, 4096);
         let Ok(worker) = worker else {
+            append_ui_key_trace(
+                "rust surface_start_termio result=invalid reason=worker-spawn-failed",
+            );
             return ROASTTY_INVALID_VALUE;
         };
         if let Some(initial_input) = &self.initial_input {
+            append_ui_key_trace(format!(
+                "rust surface_start_termio initial_input_len={}",
+                initial_input.len()
+            ));
             if worker.queue_write(initial_input).is_err() {
+                append_ui_key_trace(
+                    "rust surface_start_termio result=invalid reason=initial-input-disconnected",
+                );
                 return ROASTTY_INVALID_VALUE;
             }
         }
@@ -3907,6 +3950,7 @@ impl Surface {
         // with a live terminal. (Continuous live updates need the slice-2 CVDisplayLink driver.)
         self.present_live();
         self.last_termio_error = None;
+        append_ui_key_trace("rust surface_start_termio result=success reason=worker-assigned");
         ROASTTY_SUCCESS
     }
 
@@ -6844,6 +6888,13 @@ impl Surface {
             }
         }
 
+        if !events.is_empty() {
+            append_ui_key_trace(format!(
+                "rust surface_drain_termio_events count={}",
+                events.len()
+            ));
+        }
+
         for event in events {
             self.apply_termio_event(event);
         }
@@ -6852,6 +6903,14 @@ impl Surface {
     fn apply_termio_event(&mut self, event: termio::TermioWorkerEvent) {
         match event {
             termio::TermioWorkerEvent::Pump(pump) => {
+                append_ui_key_trace(format!(
+                    "rust surface_apply_termio_event pump bytes_read={} bytes_written={} pending_write={} eof={} child_exited={}",
+                    pump.bytes_read,
+                    pump.bytes_written,
+                    pump.pending_write_bytes,
+                    pump.eof,
+                    pump.child_exited
+                ));
                 if pump.bytes_read > 0 {
                     self.reset_cursor_blink_for_output(std::time::Instant::now());
                 }
@@ -6868,11 +6927,13 @@ impl Surface {
                 }
             }
             termio::TermioWorkerEvent::Error(err) => {
+                append_ui_key_trace(format!("rust surface_apply_termio_event error={err}"));
                 self.last_termio_error = Some(err);
                 self.process_exited = true;
                 self.dirty = true;
             }
             termio::TermioWorkerEvent::Clipboard(event) => {
+                append_ui_key_trace("rust surface_apply_termio_event clipboard");
                 self.handle_terminal_clipboard_event(event);
             }
         }
@@ -18019,7 +18080,7 @@ fn trace_input_text_hex(event: &RoasttyInputKey) -> String {
     trace_hex(unsafe { CStr::from_ptr(event.text) }.to_bytes())
 }
 
-fn append_ui_key_trace(line: impl AsRef<str>) {
+pub(crate) fn append_ui_key_trace(line: impl AsRef<str>) {
     let Some(path) = std::env::var_os("ROASTTY_UI_KEY_TRACE_PATH") else {
         return;
     };
