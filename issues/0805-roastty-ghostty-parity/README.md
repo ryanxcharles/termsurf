@@ -318,3 +318,5 @@ remains open.
 - [Experiment 1: Pinned A/B baseline](01-pinned-ab-baseline.md) — **Partial**
 - [Experiment 2: Keyboard target isolation](02-keyboard-target-isolation.md) —
   **Pass**
+- [Experiment 3: Parity matrix schema](03-parity-matrix-schema.md) —
+  **Designed**
