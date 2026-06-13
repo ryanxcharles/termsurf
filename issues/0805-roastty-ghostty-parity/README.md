@@ -87,6 +87,54 @@ This issue should maintain durable parity matrices as experiments progress:
 Do not treat the matrices as optional notes. They are the proof surface for
 closing the issue.
 
+Each matrix row should record its regression guard:
+
+- guard tier;
+- guard command or checklist path;
+- when it should run;
+- why that tier is sufficient.
+
+Passing behavior without a durable guard remains provisional and does not count
+toward final parity certification unless it is explicitly accepted as a manual
+walkthrough item.
+
+## Regression Guard Policy
+
+Every passing experiment result should leave behind the cheapest sufficient
+guard that would catch a later regression. Do not default to slow GUI tests when
+a static check, unit test, or focused integration test proves the behavior.
+
+Guard tiers:
+
+- **Tier 0: Static or matrix check.** Fastest. Use for inventories, ABI symbol
+  drift, forbidden-name scans, generated table completeness, config coverage,
+  and documentation/matrix consistency.
+- **Tier 1: Unit test.** Fast. Use for parsers, config defaults, formatters,
+  terminal state transitions, key encoding, selection math, renderer data
+  structures, and pure helper behavior.
+- **Tier 2: Focused integration test.** Medium. Use for PTY worker behavior,
+  config load/reload, shell integration, clipboard helpers, process lifecycle,
+  and non-GUI end-to-end paths.
+- **Tier 3: GUI smoke test.** Slower. Use when the real macOS app surface is the
+  behavior under test, such as launch, keyboard delivery, mouse
+  click/drag/scroll, screenshots, menu actions, or accessibility state.
+- **Tier 4: Full A/B parity walkthrough.** Slowest. Use for milestone checks,
+  nightly/manual certification, or broad Ghostty-versus-Roastty workflow
+  comparisons. Do not require this tier for every code change.
+
+Rules:
+
+- Add the cheapest guard that would have caught the regression.
+- Slow GUI or full A/B guards require a short justification in the relevant
+  matrix row or experiment result.
+- Most config behavior should be guarded by static matrix checks and
+  parser/default/formatter/runtime unit tests. Only representative runtime
+  config behavior should require GUI proof.
+- GUI tests should be small, stable, and high-signal. Prefer one representative
+  smoke per app/input/rendering surface over exhaustive GUI permutations.
+- If a behavior cannot yet be automated, record it as a manual walkthrough row
+  with the reason and revisit automation before final certification.
+
 ## Proposed Stages
 
 Experiments must still be created one at a time. The stages below define the
@@ -199,6 +247,33 @@ The issue can close only when:
 - config parity is complete;
 - the conclusion names the exact Ghostty commit hash and summarizes the final
   evidence.
+
+## Learnings
+
+Record concrete, reusable findings here as experiments discover how to prove or
+fix Roastty parity with Ghostty. Update this section whenever an experiment
+learns something that may be useful to future experiments. Keep hypotheses in
+experiment files until they are proven.
+
+- **The upstream parity target is fixed.** All source, config, ABI, and app
+  behavior comparisons in this issue target Ghostty commit
+  `2c62d182cec246764ff725096a70b9ef44996f7f`.
+- **Use the resolved Ghostty app build wrapper.** The pinned Ghostty app should
+  be built with `scripts/ghostty-app/build-macos-app.sh Debug`, not by
+  hand-running `build.zig` from `vendor/ghostty/macos`.
+- **Use the current Roastty app bundle.** `scripts/roastty-app/start-app.sh` now
+  honors `ROASTTY_APP` and otherwise prefers the newer debug app bundle when
+  both Roastty debug layouts exist.
+- **The VM can synthesize keyboard and mouse input.** Issue 804 proved System
+  Events keyboard input, CGEvent mouse click/drag/scroll, full-window
+  screenshots, and cleanup against the current Roastty app after the required
+  permissions were granted to Ghostty, the responsible host app for this Codex
+  session.
+- **Passing behavior needs a durable but cheap guard.** Future experiments
+  should record the cheapest sufficient regression guard for each passing parity
+  row. Prefer static checks and unit tests when they prove the behavior; reserve
+  GUI and full A/B tests for behavior that genuinely requires the real app
+  surface.
 
 ## Verification
 
