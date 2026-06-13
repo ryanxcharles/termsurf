@@ -168,3 +168,62 @@ Overall result:
   fields before audits can start.
 - **Fail** if the matrix files are missing or the schema would allow parity to
   be claimed without evidence and guards.
+
+## Result
+
+**Result:** Pass
+
+All required matrix artifacts were created:
+
+- `feature-matrix.md`
+- `config-matrix.md`
+- `source-audit.md`
+- `walkthrough-matrix.md`
+- `divergences.md`
+
+Each matrix defines the required row schema. Non-divergence rows include
+upstream behavior/source, Roastty behavior/path, status, verification method,
+evidence, regression guard tier, guard command/checklist, run cadence, guard
+sufficiency, owner experiment, and notes. `divergences.md` also requires
+status/outcome, reason, user impact, acceptance rationale, evidence, guard
+fields, and owner experiment.
+
+Seed rows were intentionally limited to behavior already proven by Experiments 1
+and 2:
+
+- live A/B smoke render baseline;
+- PID-guarded keyboard delivery;
+- matched config-file baseline;
+- clean pinned Ghostty source build;
+- side-by-side debug app launch and cleanup;
+- keyboard marker command delivery.
+
+Verification:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/*.md`
+- `rg -n 'Status|Upstream|Roastty|Verification|Evidence|Guard|Owner experiment' issues/0805-roastty-ghostty-parity/{feature-matrix.md,config-matrix.md,source-audit.md,walkthrough-matrix.md}`
+- `rg -n 'Upstream behavior|Roastty behavior|Reason|User impact|Acceptance' issues/0805-roastty-ghostty-parity/divergences.md`
+- `rg -n 'Evidence|Guard tier|Guard command|Run cadence|Guard sufficiency' issues/0805-roastty-ghostty-parity/divergences.md`
+- `git diff --check`
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+The reviewer reported no required, optional, or nit findings. It independently
+verified that the result remained docs-only, all five matrix artifacts exist,
+schemas require evidence and guard fields, seed rows are limited to Experiment 1
+and 2 evidence, `divergences.md` does not allow evidence-free accepted rows, the
+README marks Experiment 3 as `Pass`, the experiment has Result and Conclusion,
+the result commit had not been made before review, and `git diff --check`
+passes.
+
+## Conclusion
+
+Issue 805 now has the proof surface needed for the real parity work. Future
+experiments should add or update matrix rows as they audit source, config, and
+app behavior. A row cannot count toward final parity certification unless it has
+an accepted status, concrete evidence, and a durable guard or documented manual
+walkthrough guard.

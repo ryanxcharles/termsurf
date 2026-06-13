@@ -295,6 +295,11 @@ experiment files until they are proven.
   verify the global frontmost PID equals the target PID, and only then type. For
   Roastty, click the terminal window center after activation to give the
   terminal view first-responder focus before the final pre-type PID guard.
+- **Parity rows need evidence and guard fields.** Experiment 3 created the
+  required feature, config, source-audit, walkthrough, and divergence matrices.
+  Every row must name status, verification, evidence, regression guard tier,
+  guard command or checklist, cadence, guard sufficiency, and owner experiment;
+  divergence rows are not exempt.
 - **A/B app runs should use matched config files.** Ghostty loads user config
   from `~/.config/ghostty/config`. Roastty's analogous config path is
   `~/.config/roastty/config`. The user's Ghostty config has been cloned to the
@@ -318,5 +323,4 @@ remains open.
 - [Experiment 1: Pinned A/B baseline](01-pinned-ab-baseline.md) — **Partial**
 - [Experiment 2: Keyboard target isolation](02-keyboard-target-isolation.md) —
   **Pass**
-- [Experiment 3: Parity matrix schema](03-parity-matrix-schema.md) —
-  **Designed**
+- [Experiment 3: Parity matrix schema](03-parity-matrix-schema.md) — **Pass**
