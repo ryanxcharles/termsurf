@@ -338,3 +338,5 @@ remains open.
   — **Partial**
 - [Experiment 5: Resolve non-app embedded ABI functions](05-resolve-non-app-embedded-abi-functions.md)
   — **Pass**
+- [Experiment 6: Config option inventory](06-config-option-inventory.md) —
+  **Designed**
