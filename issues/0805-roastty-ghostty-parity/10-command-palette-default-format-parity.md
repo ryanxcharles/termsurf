@@ -102,3 +102,84 @@ No Required findings.
 
 No Optional findings or Nits.
 ```
+
+## Result
+
+**Result:** Pass
+
+Roastty's default `command-palette-entry` output now matches the pinned Ghostty
+macOS default output exactly after the existing app-name normalization. The
+default-config oracle now compares every normalized default config line in
+order, including `keybind` and `command-palette-entry`.
+
+Key changes:
+
+- `roastty/src/config/mod.rs`
+  - Changed the built-in Ghostty command-palette text action from pre-escaped
+    ASCII text to the semantic UTF-8 text payload.
+  - Tightened `config_default_format_oracle` to compare all normalized default
+    config lines exactly and in order.
+  - Asserted ordered `command-palette-entry` equality, 88 entries on each side,
+    and 0 command-palette multiset mismatches.
+  - Updated the focused command-palette config test to expect the upstream
+    formatter output for the default text action.
+- Issue docs
+  - Updated the default-config oracle, config matrix, README learning, and
+    Experiment 10 status.
+
+Current oracle counts:
+
+- Ghostty raw default output: 635 lines.
+- Roastty raw default output: 635 lines.
+- Normalized ordered lines match after app-name normalization: true.
+- Normalized multiset mismatches: 0.
+- Ghostty `keybind` lines: 93.
+- Roastty `keybind` lines: 93.
+- `keybind` ordered match: true.
+- `keybind` multiset mismatches: 0.
+- Ghostty `command-palette-entry` lines: 88.
+- Roastty `command-palette-entry` lines: 88.
+- `command-palette-entry` ordered match: true.
+- `command-palette-entry` multiset mismatches: 0.
+- Total missing normalized lines: 0.
+- Total extra normalized lines: 0.
+
+Verification:
+
+```bash
+ROASTTY_DEFAULT_CONFIG_OUT=/Users/astrohacker/dev/termsurf/logs/issue805-exp10-roastty-default-config.txt \
+  cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle -- --nocapture
+cargo test --manifest-path roastty/Cargo.toml command_palette_entry_config_parse_format_reset_and_diagnose -- --nocapture
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+Evidence:
+
+- `logs/issue805-exp10-roastty-default-config.txt`
+- `logs/issue805-exp10-default-config-diff-summary.txt`
+
+## Conclusion
+
+Default config formatter parity is now exact for the full pinned Ghostty default
+output after app-name normalization. This does not prove general command-palette
+parser parity, command-palette UI dispatch, config-file precedence, reload
+behavior, or runtime effects; those remain separate Issue 805 audit surfaces.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no required
+findings.
+
+Reviewer verdict:
+
+```text
+VERDICT: APPROVED
+
+No Required findings.
+```
+
+Accepted nit:
+
+- Updated the stale default-config oracle regeneration example from the
+  Experiment 9 Roastty output log path to the Experiment 10 log path.

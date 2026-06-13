@@ -340,6 +340,11 @@ experiment files until they are proven.
   using Ghostty's modifier order (`super`, `ctrl`, `alt`, `shift`), and adding
   the physical `digit_1` through `digit_8` aliases that pair with the unicode
   number shortcuts.
+- **Default command-palette text actions store semantic UTF-8.** Experiment 10
+  matched pinned Ghostty's default command-palette output by storing the
+  built-in Ghostty text action as the semantic UTF-8 text payload, letting the
+  shared action formatter emit Ghostty's `\xf0\x9f\x91\xbb` bytes instead of
+  double-escaping a pre-escaped string.
 
 ## Verification
 
@@ -370,4 +375,4 @@ remains open.
 - [Experiment 9: Default keybind format parity](09-default-keybind-format-parity.md)
   — **Pass**
 - [Experiment 10: Command palette default format parity](10-command-palette-default-format-parity.md)
-  — **Designed**
+  — **Pass**

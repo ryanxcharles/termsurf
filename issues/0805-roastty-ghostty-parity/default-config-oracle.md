@@ -27,7 +27,7 @@ Capture Roastty's current default formatter output while running the oracle
 test:
 
 ```bash
-ROASTTY_DEFAULT_CONFIG_OUT=/Users/astrohacker/dev/termsurf/logs/issue805-exp9-roastty-default-config.txt \
+ROASTTY_DEFAULT_CONFIG_OUT=/Users/astrohacker/dev/termsurf/logs/issue805-exp10-roastty-default-config.txt \
   cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle -- --nocapture
 ```
 
@@ -44,39 +44,33 @@ The test normalizes only the application rename:
 - `Ghostty` and `Roastty` become `{App}`.
 - `ghostty` and `roastty` become `{app}`.
 
-The test does not normalize semantic values. It compares all
-non-`command-palette-entry` lines exactly and in order, including `keybind`.
+The test does not normalize semantic values. It compares every default config
+line exactly and in order after app-name normalization.
 
 ## Current Result
 
-Current counts from `logs/issue805-exp9-default-config-diff-summary.txt`:
+Current counts from `logs/issue805-exp10-default-config-diff-summary.txt`:
 
 - Ghostty raw lines: 635
 - Roastty raw lines: 635
-- Comparable lines excluding only `command-palette-entry`: 547 on each side
-- Comparable exact match after app-name normalization: true
+- Normalized ordered lines match after app-name normalization: true
+- Normalized multiset mismatches: 0
 - Ghostty `keybind` lines: 93
 - Roastty `keybind` lines: 93
 - `keybind` ordered match: true
 - `keybind` multiset mismatches: 0
 - Ghostty `command-palette-entry` lines: 88
 - Roastty `command-palette-entry` lines: 88
-- `command-palette-entry` ordered match: false
-- `command-palette-entry` multiset mismatches: 2
-- Total missing normalized lines: 1
-- Total extra normalized lines: 1
-- Missing key counts: none
-- Extra key counts: none
+- `command-palette-entry` ordered match: true
+- `command-palette-entry` multiset mismatches: 0
+- Total missing normalized lines: 0
+- Total extra normalized lines: 0
 
 ## Gaps
 
-The remaining default-format diffs are tracked as gaps, not intentional
-divergences:
-
-- One command-palette default entry has different escaped text formatting,
-  producing one missing and one extra multiset element.
+There are no known default-format diffs after app-name normalization.
 
 This oracle proves default values, formatter output, and formatter order only
-for the comparable default-format surface. It does not prove parser behavior,
-diagnostics, config-file precedence, CLI/env precedence, config reload, or
-runtime effects.
+for the full default-format surface. It does not prove parser behavior,
+diagnostics, config-file precedence, CLI/env precedence, config reload, command
+palette UI behavior, or runtime effects.

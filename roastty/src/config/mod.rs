@@ -7378,7 +7378,7 @@ const DEFAULT_COMMAND_PALETTE_ENTRIES: &[(&str, &str, &str)] = &[
     ("Focus Split: Up", "Focus the split above, if it exists.", "goto_split:up"),
     ("Focus Window: Next", "Focus the next window, if any.", "goto_window:next"),
     ("Focus Window: Previous", "Focus the previous window, if any.", "goto_window:previous"),
-    ("Ghostty", "Put a little Ghostty in your terminal.", "text:\\xf0\\x9f\\x91\\xbb"),
+    ("Ghostty", "Put a little Ghostty in your terminal.", "text:\u{1f47b}"),
     ("Increase Font Size", "Increase the font size by 1 point.", "increase_font_size:1"),
     ("Move Tab Left", "Move the current tab to the left.", "move_tab:-1"),
     ("Move Tab Right", "Move the current tab to the right.", "move_tab:1"),
@@ -16322,6 +16322,7 @@ mod tests {
             std::fs::write(path, &roastty_raw).unwrap();
         }
         let roastty = normalize_default_config_fixture(&roastty_raw);
+        assert_eq!(roastty.lines().count(), ghostty.lines().count());
 
         let ghostty_comparable = comparable_default_config_lines(&ghostty);
         let roastty_comparable = comparable_default_config_lines(&roastty);
@@ -16345,12 +16346,13 @@ mod tests {
             default_config_lines_for_key(&roastty, "command-palette-entry");
         assert_eq!(ghostty_command_palette.len(), 88);
         assert_eq!(roastty_command_palette.len(), 88);
+        assert_eq!(roastty_command_palette, ghostty_command_palette);
         assert_eq!(
             default_config_multiset_mismatch_count(
                 &ghostty_command_palette,
                 &roastty_command_palette
             ),
-            2
+            0
         );
     }
 
@@ -16363,10 +16365,7 @@ mod tests {
     }
 
     fn comparable_default_config_lines(input: &str) -> Vec<&str> {
-        input
-            .lines()
-            .filter(|line| !line.starts_with("command-palette-entry = "))
-            .collect()
+        input.lines().collect()
     }
 
     fn default_config_lines_for_key<'a>(input: &'a str, key: &str) -> Vec<&'a str> {
@@ -16618,7 +16617,7 @@ mod tests {
                 entry!(
                     "Ghostty",
                     "Put a little Ghostty in your terminal.",
-                    "text:\\xf0\\x9f\\x91\\xbb"
+                    "text:\u{1f47b}"
                 ),
                 entry!(
                     "Increase Font Size",
@@ -16758,7 +16757,7 @@ mod tests {
             .contains(&CommandPaletteEntry::new(
                 "Ghostty",
                 "Put a little Ghostty in your terminal.",
-                "text:\\xf0\\x9f\\x91\\xbb",
+                "text:\u{1f47b}",
             )));
 
         let mut out = String::new();
@@ -16772,7 +16771,7 @@ mod tests {
             lines[0],
             "command-palette-entry = title:\"Change Tab Title\\xe2\\x80\\xa6\",description:\"Prompt for a new title for the current tab.\",action:\"prompt_tab_title\""
         );
-        assert!(lines.contains(&"command-palette-entry = title:\"Ghostty\",description:\"Put a little Ghostty in your terminal.\",action:\"text:\\\\xf0\\\\x9f\\\\x91\\\\xbb\""));
+        assert!(lines.contains(&"command-palette-entry = title:\"Ghostty\",description:\"Put a little Ghostty in your terminal.\",action:\"text:\\xf0\\x9f\\x91\\xbb\""));
 
         cfg.set("command-palette-entry", Some("clear")).unwrap();
         assert!(cfg.command_palette_entry.entries.is_empty());
