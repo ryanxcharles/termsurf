@@ -1470,6 +1470,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 162: Phase I — CF release-thread test isolation](162-cf-release-thread-test-isolation.md)
   — **Pass**
+- [Experiment 163: Phase G — global event tap installation state](163-global-event-tap-installation-state.md)
+  — **Designed**
 
 ## Process
 
