@@ -91,6 +91,192 @@ impl Rgb {
         }
         Some(Self::new(r, g, b))
     }
+
+    pub(crate) fn luminance(self) -> f64 {
+        fn component(c: u8) -> f64 {
+            let normalized = f64::from(c) / 255.0;
+            if normalized <= 0.03928 {
+                normalized / 12.92
+            } else {
+                ((normalized + 0.055) / 1.055).powf(2.4)
+            }
+        }
+
+        0.2126 * component(self.r) + 0.7152 * component(self.g) + 0.0722 * component(self.b)
+    }
+}
+
+/// Generate the extended 256-color palette from the base16 theme colors,
+/// terminal background, and terminal foreground (upstream
+/// `terminal.color.generate256Color`).
+pub(crate) fn generate_256_color(
+    base: Palette,
+    skip: PaletteMask,
+    bg: Rgb,
+    fg: Rgb,
+    harmonious: bool,
+) -> Palette {
+    let mut base8 = [
+        Lab::from_rgb(bg),
+        Lab::from_rgb(base[1]),
+        Lab::from_rgb(base[2]),
+        Lab::from_rgb(base[3]),
+        Lab::from_rgb(base[4]),
+        Lab::from_rgb(base[5]),
+        Lab::from_rgb(base[6]),
+        Lab::from_rgb(fg),
+    ];
+
+    let is_light_theme = base8[7].l < base8[0].l;
+    if is_light_theme && !harmonious {
+        base8.swap(0, 7);
+    }
+
+    let mut result = base;
+    let mut idx = 16usize;
+    for ri in 0..6 {
+        let tr = ri as f32 / 5.0;
+        let c0 = Lab::lerp(tr, base8[0], base8[1]);
+        let c1 = Lab::lerp(tr, base8[2], base8[3]);
+        let c2 = Lab::lerp(tr, base8[4], base8[5]);
+        let c3 = Lab::lerp(tr, base8[6], base8[7]);
+        for gi in 0..6 {
+            let tg = gi as f32 / 5.0;
+            let c4 = Lab::lerp(tg, c0, c1);
+            let c5 = Lab::lerp(tg, c2, c3);
+            for bi in 0..6 {
+                if !skip.get(idx as u8) {
+                    result[idx] = Lab::lerp(bi as f32 / 5.0, c4, c5).to_rgb();
+                }
+                idx += 1;
+            }
+        }
+    }
+
+    for i in 0..24 {
+        if !skip.get(idx as u8) {
+            result[idx] = Lab::lerp((i + 1) as f32 / 25.0, base8[0], base8[7]).to_rgb();
+        }
+        idx += 1;
+    }
+
+    result
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Lab {
+    l: f32,
+    a: f32,
+    b: f32,
+}
+
+impl Lab {
+    fn from_rgb(rgb: Rgb) -> Self {
+        let mut r = f32::from(rgb.r) / 255.0;
+        let mut g = f32::from(rgb.g) / 255.0;
+        let mut b = f32::from(rgb.b) / 255.0;
+
+        r = if r > 0.04045 {
+            ((r + 0.055) / 1.055).powf(2.4)
+        } else {
+            r / 12.92
+        };
+        g = if g > 0.04045 {
+            ((g + 0.055) / 1.055).powf(2.4)
+        } else {
+            g / 12.92
+        };
+        b = if b > 0.04045 {
+            ((b + 0.055) / 1.055).powf(2.4)
+        } else {
+            b / 12.92
+        };
+
+        let mut x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047;
+        let mut y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750;
+        let mut z = (r * 0.0193339 + g * 0.1191920 + b * 0.9503041) / 1.08883;
+
+        x = if x > 0.008856 {
+            x.cbrt()
+        } else {
+            7.787 * x + 16.0 / 116.0
+        };
+        y = if y > 0.008856 {
+            y.cbrt()
+        } else {
+            7.787 * y + 16.0 / 116.0
+        };
+        z = if z > 0.008856 {
+            z.cbrt()
+        } else {
+            7.787 * z + 16.0 / 116.0
+        };
+
+        Self {
+            l: 116.0 * y - 16.0,
+            a: 500.0 * (x - y),
+            b: 200.0 * (y - z),
+        }
+    }
+
+    fn to_rgb(self) -> Rgb {
+        let y = (self.l + 16.0) / 116.0;
+        let x = self.a / 500.0 + y;
+        let z = y - self.b / 200.0;
+
+        let x3 = x * x * x;
+        let y3 = y * y * y;
+        let z3 = z * z * z;
+        let xf = if x3 > 0.008856 {
+            x3
+        } else {
+            (x - 16.0 / 116.0) / 7.787
+        } * 0.95047;
+        let yf = if y3 > 0.008856 {
+            y3
+        } else {
+            (y - 16.0 / 116.0) / 7.787
+        };
+        let zf = if z3 > 0.008856 {
+            z3
+        } else {
+            (z - 16.0 / 116.0) / 7.787
+        } * 1.08883;
+
+        let mut r = xf * 3.2404542 - yf * 1.5371385 - zf * 0.4985314;
+        let mut g = -xf * 0.9692660 + yf * 1.8760108 + zf * 0.0415560;
+        let mut b = xf * 0.0556434 - yf * 0.2040259 + zf * 1.0572252;
+
+        r = if r > 0.0031308 {
+            1.055 * r.powf(1.0 / 2.4) - 0.055
+        } else {
+            12.92 * r
+        };
+        g = if g > 0.0031308 {
+            1.055 * g.powf(1.0 / 2.4) - 0.055
+        } else {
+            12.92 * g
+        };
+        b = if b > 0.0031308 {
+            1.055 * b.powf(1.0 / 2.4) - 0.055
+        } else {
+            12.92 * b
+        };
+
+        Rgb::new(to_u8(r), to_u8(g), to_u8(b))
+    }
+
+    fn lerp(t: f32, a: Lab, b: Lab) -> Lab {
+        Lab {
+            l: a.l + t * (b.l - a.l),
+            a: a.a + t * (b.a - a.a),
+            b: a.b + t * (b.b - a.b),
+        }
+    }
+}
+
+fn to_u8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
 fn parse_hash_rgb(hex: &[u8]) -> Option<Rgb> {
@@ -541,5 +727,127 @@ mod tests {
         assert_eq!(DEFAULT_PALETTE[21], Rgb::new(0, 0, 255));
         assert_eq!(DEFAULT_PALETTE[232], Rgb::new(8, 8, 8));
         assert_eq!(DEFAULT_PALETTE[255], Rgb::new(238, 238, 238));
+    }
+
+    fn assert_palette_samples(palette: Palette, expected: &[(usize, Rgb)]) {
+        for (index, rgb) in expected {
+            assert_eq!(palette[*index], *rgb, "palette index {index}");
+        }
+    }
+
+    #[test]
+    fn generate_256_color_dark_theme_matches_upstream_samples() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        let palette =
+            generate_256_color(DEFAULT_PALETTE, PaletteMask::empty(), black, white, false);
+
+        for index in 0..16 {
+            assert_eq!(palette[index], DEFAULT_PALETTE[index]);
+        }
+        assert_eq!(palette[16], black);
+        assert_eq!(palette[231], white);
+        assert_palette_samples(
+            palette,
+            &[
+                (17, Rgb::new(0x1e, 0x22, 0x27)),
+                (52, Rgb::new(0x2a, 0x19, 0x19)),
+                (88, Rgb::new(0x4e, 0x2b, 0x2a)),
+                (100, Rgb::new(0x7f, 0x64, 0x44)),
+                (160, Rgb::new(0xa0, 0x52, 0x51)),
+                (232, Rgb::new(0x0e, 0x0e, 0x0e)),
+                (240, Rgb::new(0x55, 0x55, 0x55)),
+                (255, Rgb::new(0xf3, 0xf3, 0xf3)),
+            ],
+        );
+
+        let mut previous = 0.0;
+        for rgb in &palette[232..256] {
+            let luminance = rgb.luminance();
+            assert!(luminance >= previous);
+            previous = luminance;
+        }
+    }
+
+    #[test]
+    fn generate_256_color_light_theme_inverts_without_harmonious() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        let palette =
+            generate_256_color(DEFAULT_PALETTE, PaletteMask::empty(), white, black, false);
+
+        assert_eq!(palette[16], black);
+        assert_eq!(palette[231], white);
+        assert_palette_samples(
+            palette,
+            &[
+                (17, Rgb::new(0x1e, 0x22, 0x27)),
+                (52, Rgb::new(0x2a, 0x19, 0x19)),
+                (88, Rgb::new(0x4e, 0x2b, 0x2a)),
+                (100, Rgb::new(0x7f, 0x64, 0x44)),
+                (160, Rgb::new(0xa0, 0x52, 0x51)),
+                (232, Rgb::new(0x0e, 0x0e, 0x0e)),
+                (240, Rgb::new(0x55, 0x55, 0x55)),
+                (255, Rgb::new(0xf3, 0xf3, 0xf3)),
+            ],
+        );
+    }
+
+    #[test]
+    fn generate_256_color_harmonious_light_theme_keeps_orientation() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        let palette = generate_256_color(DEFAULT_PALETTE, PaletteMask::empty(), white, black, true);
+
+        assert_eq!(palette[16], white);
+        assert_eq!(palette[231], black);
+        assert_palette_samples(
+            palette,
+            &[
+                (17, Rgb::new(0xe6, 0xec, 0xf2)),
+                (52, Rgb::new(0xf8, 0xe0, 0xdf)),
+                (88, Rgb::new(0xf0, 0xc1, 0xbf)),
+                (100, Rgb::new(0xe3, 0xc1, 0x9e)),
+                (160, Rgb::new(0xda, 0x85, 0x83)),
+                (232, Rgb::new(0xf3, 0xf3, 0xf3)),
+                (240, Rgb::new(0x9b, 0x9b, 0x9b)),
+                (255, Rgb::new(0x0e, 0x0e, 0x0e)),
+            ],
+        );
+
+        let mut previous = 1.0;
+        for rgb in &palette[232..256] {
+            let luminance = rgb.luminance();
+            assert!(luminance <= previous);
+            previous = luminance;
+        }
+    }
+
+    #[test]
+    fn generate_256_color_skip_mask_preserves_user_entries() {
+        let black = Rgb::new(0, 0, 0);
+        let white = Rgb::new(255, 255, 255);
+        let mut skip = PaletteMask::empty();
+        skip.set(20);
+        skip.set(100);
+        skip.set(240);
+        let palette = generate_256_color(DEFAULT_PALETTE, skip, black, white, false);
+
+        assert_eq!(palette[20], DEFAULT_PALETTE[20]);
+        assert_eq!(palette[100], DEFAULT_PALETTE[100]);
+        assert_eq!(palette[240], DEFAULT_PALETTE[240]);
+        assert_palette_samples(
+            palette,
+            &[
+                (17, Rgb::new(0x1e, 0x22, 0x27)),
+                (52, Rgb::new(0x2a, 0x19, 0x19)),
+                (88, Rgb::new(0x4e, 0x2b, 0x2a)),
+                (100, Rgb::new(0x87, 0x87, 0x00)),
+                (160, Rgb::new(0xa0, 0x52, 0x51)),
+                (232, Rgb::new(0x0e, 0x0e, 0x0e)),
+                (240, Rgb::new(0x58, 0x58, 0x58)),
+                (255, Rgb::new(0xf3, 0xf3, 0xf3)),
+            ],
+        );
     }
 }

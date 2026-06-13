@@ -228,6 +228,12 @@ pub(crate) struct Config {
     pub selection_word_chars: SelectionWordChars,
     /// `minimum-contrast`.
     pub minimum_contrast: f64,
+    /// `palette`.
+    pub palette: Palette,
+    /// `palette-generate`.
+    pub palette_generate: bool,
+    /// `palette-harmonious`.
+    pub palette_harmonious: bool,
     /// `bold-color`.
     pub bold_color: Option<BoldColor>,
     /// `faint-opacity`.
@@ -516,6 +522,9 @@ impl Default for Config {
             selection_background: None,
             selection_word_chars: SelectionWordChars::default(),
             minimum_contrast: 1.0,
+            palette: Palette::default(),
+            palette_generate: false,
+            palette_harmonious: false,
             bold_color: None,
             faint_opacity: 0.5,
             term: "xterm-roastty".to_string(),
@@ -728,6 +737,10 @@ impl Config {
         self.selection_word_chars
             .format_entry(&mut EntryFormatter::new("selection-word-chars", out));
         EntryFormatter::new("minimum-contrast", out).entry_float(self.minimum_contrast);
+        self.palette
+            .format_entry(&mut EntryFormatter::new("palette", out));
+        EntryFormatter::new("palette-generate", out).entry_bool(self.palette_generate);
+        EntryFormatter::new("palette-harmonious", out).entry_bool(self.palette_harmonious);
         EntryFormatter::new("cursor-color", out)
             .entry_optional(self.cursor_color, |v, f| v.format_entry(f));
         EntryFormatter::new("cursor-opacity", out).entry_float(self.cursor_opacity);
@@ -1786,6 +1799,19 @@ impl Config {
             "faint-opacity" => self.faint_opacity = set_f64_field(value, default.faint_opacity)?,
             "minimum-contrast" => {
                 self.minimum_contrast = set_f64_field(value, default.minimum_contrast)?
+            }
+            "palette" => {
+                if value == Some("") {
+                    self.palette = default.palette;
+                } else {
+                    self.palette.parse_cli(value)?;
+                }
+            }
+            "palette-generate" => {
+                self.palette_generate = set_bool_field(value, default.palette_generate)?
+            }
+            "palette-harmonious" => {
+                self.palette_harmonious = set_bool_field(value, default.palette_harmonious)?
             }
             "font-family" => self.font_family.parse_cli(value)?,
             "font-family-bold" => self.font_family_bold.parse_cli(value)?,
@@ -3113,6 +3139,17 @@ impl From<ColorParseError> for ConfigSetError {
         match e {
             ColorParseError::ValueRequired => ConfigSetError::ValueRequired,
             ColorParseError::Invalid => ConfigSetError::InvalidValue,
+        }
+    }
+}
+
+impl From<PaletteParseError> for ConfigSetError {
+    fn from(e: PaletteParseError) -> Self {
+        match e {
+            PaletteParseError::ValueRequired => ConfigSetError::ValueRequired,
+            PaletteParseError::InvalidValue | PaletteParseError::Overflow => {
+                ConfigSetError::InvalidValue
+            }
         }
     }
 }
@@ -11994,6 +12031,111 @@ mod tests {
     }
 
     #[test]
+    fn palette_config_parse_format_reset_and_diagnose() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.palette.value[0], Rgb::new(0x1d, 0x1f, 0x21));
+        assert!(cfg.palette.mask.is_empty());
+        assert!(!cfg.palette_generate);
+        assert!(!cfg.palette_harmonious);
+
+        cfg.set("palette", Some("0=#aabbcc")).unwrap();
+        cfg.set("palette", Some("0x10=#112233")).unwrap();
+        cfg.set("palette-generate", Some("true")).unwrap();
+        cfg.set("palette-harmonious", None).unwrap();
+        assert_eq!(cfg.palette.value[0], Rgb::new(0xaa, 0xbb, 0xcc));
+        assert_eq!(cfg.palette.value[16], Rgb::new(0x11, 0x22, 0x33));
+        assert!(cfg.palette.mask.get(0));
+        assert!(cfg.palette.mask.get(16));
+        assert!(cfg.palette_generate);
+        assert!(cfg.palette_harmonious);
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let lines: Vec<&str> = out.lines().collect();
+        let minimum_contrast = lines
+            .iter()
+            .position(|line| line.starts_with("minimum-contrast = "))
+            .unwrap();
+        assert_eq!(lines[minimum_contrast + 1], "palette = 0=#aabbcc");
+        assert_eq!(lines[minimum_contrast + 17], "palette = 16=#112233");
+        assert_eq!(lines[minimum_contrast + 257], "palette-generate = true");
+        assert_eq!(lines[minimum_contrast + 258], "palette-harmonious = true");
+        assert_eq!(lines[minimum_contrast + 259], "cursor-color = ");
+
+        cfg.set("palette", Some("")).unwrap();
+        cfg.set("palette-generate", Some("")).unwrap();
+        cfg.set("palette-harmonious", Some("")).unwrap();
+        assert_eq!(cfg.palette, Palette::default());
+        assert!(!cfg.palette_generate);
+        assert!(!cfg.palette_harmonious);
+
+        assert_eq!(cfg.set("palette", None), Err(ConfigSetError::ValueRequired));
+        assert_eq!(
+            cfg.set("palette", Some("256=#ffffff")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("palette", Some("0")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("palette-generate", Some("maybe")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "palette = 1=#010203\n\
+             palette = 256=#ffffff\n\
+             palette-generate\n\
+             palette-harmonious = true\n\
+             palette-harmonious = maybe\n",
+        );
+        assert_eq!(cfg.palette.value[1], Rgb::new(1, 2, 3));
+        assert!(cfg.palette_generate);
+        assert!(cfg.palette_harmonious);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "palette".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 5,
+                    key: "palette-harmonious".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+    }
+
+    #[test]
+    fn palette_config_replay_preserves_cli_and_file_values() {
+        let mut cfg = Config::default();
+        assert!(cfg.load_str("palette = 0=#111111\n").is_empty());
+        assert!(cfg
+            .set_cli_args([
+                "--palette=2=#222222",
+                "--palette-generate",
+                "--palette-harmonious=true",
+            ])
+            .is_empty());
+
+        let mut replayed = Config::default();
+        cfg.replay_into(&mut replayed).unwrap();
+        assert_eq!(replayed.palette.value[0], Rgb::new(0x11, 0x11, 0x11));
+        assert_eq!(replayed.palette.value[2], Rgb::new(0x22, 0x22, 0x22));
+        assert!(replayed.palette.mask.get(0));
+        assert!(replayed.palette.mask.get(2));
+        assert!(replayed.palette_generate);
+        assert!(replayed.palette_harmonious);
+    }
+
+    #[test]
     fn duration_format_entry_decomposes_units() {
         let fmt = |ns: u64| {
             let mut out = String::new();
@@ -14771,6 +14913,11 @@ mod tests {
             "selection-clear-on-typing",
             "selection-word-chars",
             "minimum-contrast",
+        ];
+        expected.extend(std::iter::repeat("palette").take(cfg.palette.value.len()));
+        expected.extend([
+            "palette-generate",
+            "palette-harmonious",
             "cursor-color",
             "cursor-opacity",
             "cursor-style",
@@ -14857,7 +15004,7 @@ mod tests {
             "confirm-close-surface",
             "shell-integration",
             "shell-integration-features",
-        ];
+        ]);
         expected.extend(
             std::iter::repeat("command-palette-entry")
                 .take(cfg.command_palette_entry.entries.len()),

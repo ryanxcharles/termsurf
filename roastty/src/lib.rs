@@ -3389,6 +3389,28 @@ fn default_finalized_config() -> config::Config {
     config
 }
 
+fn derived_config_palette(config: &config::Config) -> color::Palette {
+    if config.palette_generate && !config.palette.mask.is_empty() {
+        return color::generate_256_color(
+            config.palette.value,
+            config.palette.mask,
+            config.background.to_terminal_rgb(),
+            config.foreground.to_terminal_rgb(),
+            config.palette_harmonious,
+        );
+    }
+
+    config.palette.value
+}
+
+fn palette_color_tuples(palette: color::Palette) -> [(u8, u8, u8); 256] {
+    let mut result = [(0, 0, 0); 256];
+    for (index, rgb) in palette.into_iter().enumerate() {
+        result[index] = (rgb.r, rgb.g, rgb.b);
+    }
+    result
+}
+
 fn click_repeat_interval_ns(config: &config::Config) -> u64 {
     u64::from(config.click_repeat_interval) * 1_000_000
 }
@@ -3416,6 +3438,15 @@ impl Surface {
         self.mouse_reporting = parsed.mouse_reporting;
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
         self.click_repeat_interval_ns = click_repeat_interval_ns(&parsed);
+        let palette = derived_config_palette(&parsed);
+        if let Some(worker) = &self.termio_worker {
+            worker.with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .set_palette_default(Some(palette_color_tuples(palette)));
+            });
+            self.dirty = true;
+        }
     }
 
     fn selection_word_boundaries(&self) -> &[u32] {
@@ -3618,6 +3649,7 @@ impl Surface {
             shell_integration_features: config.shell_integration_features,
             resource_dir: resource_dir.clone(),
             term: config.term.clone(),
+            palette: derived_config_palette(&config),
         };
 
         let termio = match (command, initial_command) {
@@ -13451,6 +13483,31 @@ pub extern "C" fn roastty_config_get(
                 output.cast::<f64>().write(config.parsed.background_opacity);
                 true
             }
+            b"palette" => {
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output
+                    .cast::<RoasttyPalette>()
+                    .write(palette_from_color(config.parsed.palette.value));
+                true
+            }
+            b"palette-generate" => {
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output.cast::<bool>().write(config.parsed.palette_generate);
+                true
+            }
+            b"palette-harmonious" => {
+                let Some(config) = config_from_handle(config) else {
+                    return false;
+                };
+                output
+                    .cast::<bool>()
+                    .write(config.parsed.palette_harmonious);
+                true
+            }
             b"background-image" => {
                 let Some(config) = config_from_handle(config) else {
                     return false;
@@ -20258,6 +20315,81 @@ mod tests {
     }
 
     #[test]
+    fn surface_apply_config_updates_palette_defaults() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        let config = roastty_config_new();
+        {
+            let config_ref = config_from_handle(config).unwrap();
+            config_ref.parsed.set("palette", Some("1=#010203")).unwrap();
+            config_ref
+                .parsed
+                .set("palette", Some("240=#040506"))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+
+        roastty_surface_update_config(surface, config);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        assert!(surface_ref.dirty);
+        let worker = surface_ref.termio_worker.as_ref().unwrap();
+        let default = worker.with_termio(|termio| termio.terminal().palette_default());
+        let current = worker.with_termio(|termio| termio.terminal().palette_current());
+        assert_eq!(default[1], (1, 2, 3));
+        assert_eq!(default[240], (4, 5, 6));
+        assert_eq!(current[1], (1, 2, 3));
+        assert_eq!(current[240], (4, 5, 6));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_apply_config_updates_generated_palette_defaults() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        let config = roastty_config_new();
+        {
+            let config_ref = config_from_handle(config).unwrap();
+            config_ref
+                .parsed
+                .set("background", Some("#000000"))
+                .unwrap();
+            config_ref
+                .parsed
+                .set("foreground", Some("#ffffff"))
+                .unwrap();
+            config_ref.parsed.set("palette", Some("1=#010203")).unwrap();
+            config_ref
+                .parsed
+                .set("palette-generate", Some("true"))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+
+        roastty_surface_update_config(surface, config);
+
+        let surface_ref = surface_from_handle(surface).unwrap();
+        let worker = surface_ref.termio_worker.as_ref().unwrap();
+        let default = worker.with_termio(|termio| termio.terminal().palette_default());
+        assert_eq!(default[1], (1, 2, 3));
+        assert_eq!(default[17], (0x1e, 0x22, 0x27));
+        assert_eq!(default[240], (0x55, 0x55, 0x55));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
     fn vt_kam_allowed_false_does_not_block_key_input_when_terminal_kam_is_enabled() {
         let _guard = pty_command_lock();
         let config = new_test_config_with_vt_kam_allowed(false);
@@ -20421,6 +20553,17 @@ mod tests {
         value
     }
 
+    fn config_get_palette_value(config: RoasttyConfig) -> RoasttyPalette {
+        let mut value = [RoasttyRgb::default(); 256];
+        assert!(roastty_config_get(
+            config,
+            (&mut value as *mut RoasttyPalette).cast(),
+            c"palette".as_ptr(),
+            "palette".len()
+        ));
+        value
+    }
+
     fn config_get_string_value(config: RoasttyConfig, key: &'static CStr) -> Option<String> {
         let mut value: *const c_char = ptr::null();
         if !roastty_config_get(
@@ -20542,6 +20685,72 @@ mod tests {
         );
 
         roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_get_palette_default_set_generate_and_clone() {
+        let config = roastty_config_new();
+        let default_palette = config_get_palette_value(config);
+        assert_eq!(
+            default_palette[0],
+            RoasttyRgb {
+                r: 0x1d,
+                g: 0x1f,
+                b: 0x21
+            }
+        );
+        assert!(!config_get_bool_value(config, c"palette-generate"));
+        assert!(!config_get_bool_value(config, c"palette-harmonious"));
+
+        {
+            let config_ref = config_from_handle(config).unwrap();
+            config_ref.parsed.set("palette", Some("0=#aabbcc")).unwrap();
+            config_ref.parsed.set("palette", Some("1=#010203")).unwrap();
+            config_ref
+                .parsed
+                .set("palette-generate", Some("true"))
+                .unwrap();
+            config_ref
+                .parsed
+                .set("palette-harmonious", Some("true"))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+
+        let raw_palette = config_get_palette_value(config);
+        assert_eq!(
+            raw_palette[0],
+            RoasttyRgb {
+                r: 0xaa,
+                g: 0xbb,
+                b: 0xcc
+            }
+        );
+        assert_eq!(raw_palette[1], RoasttyRgb { r: 1, g: 2, b: 3 });
+        assert_eq!(raw_palette[100], default_palette[100]);
+        assert!(config_get_bool_value(config, c"palette-generate"));
+        assert!(config_get_bool_value(config, c"palette-harmonious"));
+
+        let clone = roastty_config_clone(config);
+        roastty_config_free(config);
+        assert_eq!(config_get_palette_value(clone), raw_palette);
+        assert!(config_get_bool_value(clone, c"palette-generate"));
+        assert!(config_get_bool_value(clone, c"palette-harmonious"));
+
+        {
+            let config_ref = config_from_handle(clone).unwrap();
+            config_ref.parsed.set("palette", Some("")).unwrap();
+            config_ref.parsed.set("palette-generate", Some("")).unwrap();
+            config_ref
+                .parsed
+                .set("palette-harmonious", Some(""))
+                .unwrap();
+            config_ref.sync_from_parsed_config();
+        }
+        assert_eq!(config_get_palette_value(clone), default_palette);
+        assert!(!config_get_bool_value(clone, c"palette-generate"));
+        assert!(!config_get_bool_value(clone, c"palette-harmonious"));
+        roastty_config_free(clone);
     }
 
     #[test]

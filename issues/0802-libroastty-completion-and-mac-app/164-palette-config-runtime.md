@@ -122,3 +122,85 @@ dark, light, harmonious-light, and masked cases.
 
 The reviewer re-reviewed the fix and approved the design with no remaining
 findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now exposes Ghostty's `palette`, `palette-generate`, and
+`palette-harmonious` config fields through the Rust config surface, C config
+ABI, and terminal runtime defaults.
+
+The config parser stores the upstream `Palette` value and user-set mask on
+`Config`, formats all 256 `palette = N=#rrggbb` entries in upstream order, and
+supports empty-value resets plus diagnostics for missing values, invalid colors,
+overflowing indices, and invalid boolean flags. File/CLI replay preserves
+palette assignments and generator flags.
+
+The terminal color module now ports upstream `generate256Color`: CIELAB
+interpolation derives the 216-color cube and 24-step grayscale ramp from the
+base palette plus background/foreground, skips explicit user-set indices, and
+keeps the light-theme `palette-harmonious` behavior. Tests pin representative
+non-endpoint RGB samples for dark, light, harmonious-light, and masked cases.
+
+Runtime wiring now derives the effective config palette in the same boundary as
+upstream `Termio.DerivedConfig`. New `Termio` instances receive the derived
+palette through `TermioSpawnOptions`, `roastty_config_get("palette")` returns
+the raw configured C-compatible palette like upstream's C config getter, and
+`roastty_surface_update_config` refreshes the default palette for live workers
+while preserving the terminal's dynamic palette override semantics.
+
+Verification:
+
+- `cargo test -p roastty palette` passed 55 filtered unit tests plus the ABI
+  harness filter.
+- `cargo test -p roastty spawn_with_options_initializes_palette_defaults` passed
+  1 filtered unit test plus the ABI harness filter.
+- `cargo test -p roastty config_get_palette` passed 1 filtered unit test plus
+  the ABI harness filter.
+- `cargo test -p roastty surface_apply_config_updates_palette` passed 1 filtered
+  unit test plus the ABI harness filter.
+- `cargo test -p roastty surface_foreground_pid_reports_worker_foreground_pid_after_start`
+  passed when rerun alone after one unrelated full-suite foreground-PID mismatch
+  in an earlier full run.
+- Final `cargo test -p roastty` passed 4,860 Rust unit tests, 0 failed, 4
+  ignored; the C ABI harness passed with the existing enum-conversion warnings;
+  doc tests passed with 0 tests.
+- `cargo fmt --check -p roastty` passed.
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/164-palette-config-runtime.md issues/0802-libroastty-completion-and-mac-app/README.md`
+  passed.
+- `git diff --check` passed.
+
+## Completion Review
+
+**Reviewers:** Codex-native adversarial review subagents `Kierkegaard` and
+`Ampere`, fresh context.
+
+`Kierkegaard` approved the completed result with no findings after independently
+verifying the result commit had not been made, `git diff --check`,
+`cargo fmt --check -p roastty`, focused palette/runtime/config tests, and
+Prettier.
+
+`Ampere` found one required upstream-fidelity issue:
+`roastty_config_get("palette")` returned the generated runtime palette, while
+upstream's C config getter returns the raw configured palette and keeps
+generation inside `Termio.DerivedConfig`.
+
+**Fix:** `roastty_config_get("palette")` now returns
+`config.parsed.palette.value`, and the C ABI test proves generated-palette flags
+do not affect the raw returned palette while clone/load behavior still preserves
+the raw palette and boolean flags. The result text now documents the raw C
+getter semantics separately from runtime derivation.
+
+`Ampere` re-reviewed the fix and approved it with no remaining required
+findings.
+
+## Conclusion
+
+The palette config group is no longer a parser-only helper or a host-only
+terminal option. It now behaves as a first-class upstream config field group:
+config files can define explicit 256-color entries, generated palettes are
+derived and tested at byte-level sample points for runtime use, the C config
+getter preserves upstream raw-config semantics, and both new and live terminals
+receive the effective defaults. The remaining Phase F config surface excludes
+palette and is now 28 public upstream keys.

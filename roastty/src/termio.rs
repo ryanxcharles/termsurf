@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use crate::os::pty::{PtyChild, PtyCommand, PtyReadiness, PtySize};
+use crate::terminal::color;
 use crate::terminal::cursor;
 use crate::terminal::terminal::{
     Terminal, TerminalClipboardEvent, TerminalInitError, TerminalInitOptions, TerminalStreamError,
@@ -33,6 +34,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) shell_integration_features: crate::config::ShellIntegrationFeatures,
     pub(crate) resource_dir: Option<PathBuf>,
     pub(crate) term: String,
+    pub(crate) palette: color::Palette,
 }
 
 impl Default for TermioSpawnOptions {
@@ -46,6 +48,7 @@ impl Default for TermioSpawnOptions {
             shell_integration_features: crate::config::ShellIntegrationFeatures::default(),
             resource_dir: None,
             term: "xterm-roastty".to_string(),
+            palette: color::DEFAULT_PALETTE,
         }
     }
 }
@@ -159,7 +162,7 @@ impl Termio {
             }
         }
 
-        let terminal = Terminal::init_with_options(
+        let mut terminal = Terminal::init_with_options(
             size.cols,
             size.rows,
             None,
@@ -168,6 +171,7 @@ impl Termio {
                 cursor_blink: options.cursor_blink,
             },
         )?;
+        terminal.set_palette_default(Some(palette_tuple(options.palette)));
         let mut command = PtyCommand::new(program, size);
         for arg in &args {
             command.arg(arg);
@@ -294,6 +298,14 @@ impl Termio {
         }
         Ok(total)
     }
+}
+
+fn palette_tuple(palette: color::Palette) -> [(u8, u8, u8); 256] {
+    let mut result = [(0, 0, 0); 256];
+    for (index, rgb) in palette.into_iter().enumerate() {
+        result[index] = (rgb.r, rgb.g, rgb.b);
+    }
+    result
 }
 
 fn setup_terminal_identity(
@@ -992,6 +1004,30 @@ mod tests {
             cursor::VisualStyle::Underline
         );
         assert!(!termio.terminal().cursor_blinking());
+    }
+
+    #[test]
+    fn spawn_with_options_initializes_palette_defaults() {
+        let _guard = pty_command_lock();
+        let mut palette = color::DEFAULT_PALETTE;
+        palette[1] = color::Rgb::new(1, 2, 3);
+        palette[240] = color::Rgb::new(4, 5, 6);
+
+        let termio = Termio::spawn_with_options(
+            "/bin/sleep",
+            ["1"],
+            TermioSpawnOptions {
+                palette,
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio with palette defaults");
+
+        let default = termio.terminal().palette_default();
+        assert_eq!(default[1], (1, 2, 3));
+        assert_eq!(default[240], (4, 5, 6));
+        assert_eq!(termio.terminal().palette_current(), default);
     }
 
     #[test]

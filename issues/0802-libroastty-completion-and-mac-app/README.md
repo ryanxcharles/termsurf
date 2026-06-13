@@ -954,8 +954,9 @@ the live app, verified by a Phase-D UI test.)
 
 **Phase F — Config completeness**
 
-- [ ] The remaining ~140 config options (font, palette, link, command,
-      cursor/mouse, scrollback, `macos-*`, …)
+- [ ] The remaining 28 public config options (language, font
+      feature/variation/metric/freetype knobs, cursor-click/mouse-hide, `input`,
+      `keybind`, and the remaining `macos-*` scalars)
 - [ ] `finalize()` — cross-field validation / derivation / clamping
 - [ ] Theme loading (themes-dir locator + file read + palette/option
       application)
@@ -1484,7 +1485,7 @@ stays unaltered except for the rename).
 - [Experiment 163: Phase G — global event tap installation state](163-global-event-tap-installation-state.md)
   — **Pass**
 - [Experiment 164: Phase F — palette config runtime](164-palette-config-runtime.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
