@@ -341,8 +341,52 @@ with no blocking findings.
 
 ## Result
 
-Not run yet.
+**Result:** Partial
+
+The experiment ran through the preflight gate and stopped at the first designed
+permission blocker.
+
+Command transcript:
+
+- `logs/issue804-exp1-preflight.log`
+- `logs/issue804-exp1-ancestry.log`
+- `logs/issue804-exp1-cleanup.log`
+
+Observed output:
+
+- `git status --short` was clean at the start of the audit.
+- Git identity was `Max Commits <maxcommits@ryanxcharles.com>`.
+- `swift -e 'import ApplicationServices; print(AXIsProcessTrusted())'` printed
+  `false`.
+- `osascript -e 'tell application "System Events" to count processes'` printed
+  `45`, so Apple Events / Automation access to `System Events` was available.
+- Process ancestry showed this agent session is hosted by
+  `/Applications/Ghostty.app/Contents/MacOS/ghostty`.
+- Cleanup found no debug Roastty process running.
+
+The designed stop condition fired before build, launch, screenshot, keyboard,
+mouse, live A/B, or XCTest automation could be exercised. No harness or product
+code was changed.
+
+Completion review:
+
+- Codex reviewer `Herschel` reviewed the completed experiment and returned
+  `APPROVED` with no required findings.
+- The reviewer noted one optional documentation improvement: include the process
+  ancestry evidence in the listed transcripts. This result now lists
+  `logs/issue804-exp1-ancestry.log`.
+
+Permission required:
+
+1. Open System Settings -> Privacy & Security -> Accessibility.
+2. Enable `Ghostty`.
+3. If `Ghostty` is not listed, add `/Applications/Ghostty.app`.
+4. Restart this terminal/Codex session after granting the permission, then rerun
+   Experiment 1 from the beginning.
 
 ## Conclusion
 
-Pending.
+The automation host currently lacks Accessibility permission, so synthetic
+keyboard and mouse testing cannot be trusted yet. The next step is to grant
+Accessibility to Ghostty and rerun this same experiment; the remaining planned
+checks are still valid and should not be replaced by a new experiment.

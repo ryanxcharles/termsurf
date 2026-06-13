@@ -108,4 +108,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
 ## Experiments
 
 - [Experiment 1: Automation readiness audit](01-automation-readiness-audit.md) —
-  **Designed**
+  **Partial** (blocked at Accessibility preflight; grant Ghostty Accessibility
+  permission and rerun)
