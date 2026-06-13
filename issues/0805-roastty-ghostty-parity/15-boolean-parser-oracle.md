@@ -141,3 +141,94 @@ VERDICT: APPROVED
 
 Findings: none.
 ```
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a durable upstream-derived boolean parser oracle for the 39
+ordinary `set_bool_field` parser rows. The focused test proves the shared
+direct-parser semantics:
+
+- true spellings: `1`, `t`, `T`, `true`;
+- false spellings: `0`, `f`, `F`, `false`;
+- bare missing value parses as `true`;
+- set-but-empty value resets to the field default;
+- invalid values return `ConfigSetError::InvalidValue`;
+- both false-default (`maximize`) and true-default (`link-url`) fields use the
+  same helper semantics.
+
+`config-default-files` remains `Audit covered` intentionally. Its direct parser
+and effective default-file load-order semantics must be proven together under
+CFG-221, not by this parser-family slice.
+
+Verification:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml boolean_config_parser_family_oracle
+```
+
+Output:
+
+```text
+running 1 test
+test config::tests::boolean_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4905 filtered out; finished in 0.01s
+```
+
+Parser inventory command:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=39
+audit_covered=164
+gap=0
+```
+
+Matrix assertion output:
+
+```text
+parser_rows=203 boolean_oracle=39 cfg217=Gap owner=Experiment 15
+```
+
+## Conclusion
+
+CFG-217 remains open, but the boolean parser family is no longer merely
+inventoried. The next parser work should promote another parser family to
+`Oracle complete` while leaving source/precedence-sensitive behavior such as
+`config-default-files` to CFG-221.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result:
+
+```text
+VERDICT: APPROVED
+
+Findings: none.
+```
+
+The reviewer independently ran the focused Rust test, regenerated the parser
+inventory to temporary files, verified 203 parser rows with 39 ordinary boolean
+rows `Oracle complete`, confirmed `config-default-files` remains
+`Audit covered`, checked CFG-217 is still `Gap` and owned by Experiment 15, and
+ran `git diff --check` plus
+`cargo fmt --manifest-path roastty/Cargo.toml -- --check`.

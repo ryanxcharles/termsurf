@@ -23,6 +23,7 @@ import config_inventory
 
 ARM_RE = re.compile(r'^\s*(?P<keys>"[^"]+"(?:\s*\|\s*"[^"]+")*)\s*=>')
 KEY_RE = re.compile(r'"([^"]+)"')
+BOOLEAN_ORACLE_TEST = "boolean_config_parser_family_oracle"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,7 +241,11 @@ def emit_inventory(rows: list[ParserRow], aliases: list[str], output: Path) -> N
 
 
 def update_cfg217(
-    matrix: Path, parser_inventory_path: Path, incomplete_count: int, gap_count: int
+    matrix: Path,
+    parser_inventory_path: Path,
+    oracle_count: int,
+    incomplete_count: int,
+    gap_count: int,
 ) -> None:
     lines = matrix.read_text().splitlines()
     updated: list[str] = []
@@ -251,9 +256,9 @@ def update_cfg217(
                 "All parser rows are Oracle complete."
                 if incomplete_count == 0
                 else (
-                    f"Experiment 14 closes dispatch gaps; {incomplete_count} "
-                    f"parser rows are not Oracle complete and {gap_count} "
-                    "parser rows are dispatch gaps."
+                    f"Experiment 15 proves {oracle_count} parser rows Oracle "
+                    f"complete; {incomplete_count} parser rows are not Oracle "
+                    f"complete and {gap_count} parser rows are dispatch gaps."
                 )
             )
             line = (
@@ -271,13 +276,18 @@ def update_cfg217(
                 "issues/0805-roastty-ghostty-parity/config-matrix.md` | Before closing "
                 "Issue 805 and when config parser dispatch changes. | CFG-217 only "
                 "passes when every parser inventory row is `Oracle complete`; audit "
-                f"coverage alone is insufficient. | Experiment 14 | {notes} |"
+                f"coverage alone is insufficient. | Experiment 15 | {notes} |"
             )
         updated.append(line)
     matrix.write_text("\n".join(updated) + "\n")
 
 
-def build_rows(upstream: list[str], aliases: list[str], arms: list[ParserArm]) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
+def build_rows(
+    upstream: list[str],
+    aliases: list[str],
+    arms: list[ParserArm],
+    boolean_oracle_present: bool,
+) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
     arm_by_key: dict[str, ParserArm] = {}
     for arm in arms:
         for key in arm.keys:
@@ -304,14 +314,29 @@ def build_rows(upstream: list[str], aliases: list[str], arms: list[ParserArm]) -
 
         path_text = parser_path(arm.text)
         family = parser_family(path_text, arm.text)
+        status = "Audit covered"
+        evidence = "Parser dispatch path identified; option still needs upstream-derived full-value oracle"
+        missing_evidence = "Full accepted variants/classes plus rejection/reset semantics are not yet proven."
+        if boolean_oracle_present and family == "boolean" and option != "config-default-files":
+            status = "Oracle complete"
+            evidence = (
+                "Shared boolean parser oracle covers upstream true/false spellings, "
+                "bare true, empty reset, and invalid values"
+            )
+            missing_evidence = "None for direct boolean parser semantics."
+        elif option == "config-default-files":
+            missing_evidence = (
+                "Direct parser and effective default-file load-order semantics must "
+                "be proven together under CFG-221."
+            )
         rows.append(
             ParserRow(
                 option=option,
                 parser_path=f"`{path_text}`",
                 family=family,
-                status="Audit covered",
-                evidence="Parser dispatch path identified; option still needs upstream-derived full-value oracle",
-                missing_evidence="Full accepted variants/classes plus rejection/reset semantics are not yet proven.",
+                status=status,
+                evidence=evidence,
+                missing_evidence=missing_evidence,
                 source_line=arm.line,
             )
         )
@@ -337,11 +362,15 @@ def main() -> int:
 
     upstream, aliases, _internal = config_inventory.extract_ghostty(args.upstream)
     arms = extract_set_from_source_arms(args.roastty)
-    rows, missing, compatibility_only, noncanonical = build_rows(upstream, aliases, arms)
+    boolean_oracle_present = BOOLEAN_ORACLE_TEST in args.roastty.read_text()
+    rows, missing, compatibility_only, noncanonical = build_rows(
+        upstream, aliases, arms, boolean_oracle_present
+    )
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]
+    oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
-    update_cfg217(args.matrix, args.output, len(incomplete), gap_count)
+    update_cfg217(args.matrix, args.output, oracle_count, len(incomplete), gap_count)
 
     print(f"ghostty_canonical={len(upstream)}")
     print(f"roastty_parser_rows={len(rows)}")

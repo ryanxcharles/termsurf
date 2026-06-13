@@ -368,6 +368,12 @@ experiment files until they are proven.
   returns a recognized not-implemented parser error. CFG-217 still remains `Gap`
   because parser-family oracles are not complete, but there are no remaining
   canonical parser dispatch gaps.
+- **Ordinary boolean parser rows share one upstream oracle.** Experiment 15
+  proved the direct parser semantics for 39 ordinary `set_bool_field` rows:
+  upstream true spellings, false spellings, bare true, set-but-empty default
+  reset, and invalid values. `config-default-files` remains `Audit covered`
+  because its direct parser and effective default-file load-order semantics must
+  be proven together under CFG-221.
 
 ## Verification
 
@@ -407,5 +413,4 @@ remains open.
   — **Pass**
 - [Experiment 14: Link parser recognition](14-link-parser-recognition.md) —
   **Pass**
-- [Experiment 15: Boolean parser oracle](15-boolean-parser-oracle.md) —
-  **Designed**
+- [Experiment 15: Boolean parser oracle](15-boolean-parser-oracle.md) — **Pass**

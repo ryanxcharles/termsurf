@@ -20383,6 +20383,65 @@ mod tests {
     }
 
     #[test]
+    fn boolean_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        }
+
+        for value in ["1", "t", "T", "true"] {
+            let mut cfg = Config::default();
+            cfg.set("maximize", Some(value)).unwrap();
+            assert!(cfg.maximize, "maximize parses {value:?} as true");
+            assert_eq!(line(&cfg, "maximize"), "maximize = true");
+
+            cfg.set("link-url", Some("false")).unwrap();
+            cfg.set("link-url", Some(value)).unwrap();
+            assert!(cfg.link_url, "link-url parses {value:?} as true");
+            assert_eq!(line(&cfg, "link-url"), "link-url = true");
+        }
+
+        for value in ["0", "f", "F", "false"] {
+            let mut cfg = Config::default();
+            cfg.set("maximize", Some("true")).unwrap();
+            cfg.set("maximize", Some(value)).unwrap();
+            assert!(!cfg.maximize, "maximize parses {value:?} as false");
+            assert_eq!(line(&cfg, "maximize"), "maximize = false");
+
+            cfg.set("link-url", Some(value)).unwrap();
+            assert!(!cfg.link_url, "link-url parses {value:?} as false");
+            assert_eq!(line(&cfg, "link-url"), "link-url = false");
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("maximize", None).unwrap();
+        assert!(cfg.maximize);
+        cfg.set("link-url", Some("false")).unwrap();
+        cfg.set("link-url", None).unwrap();
+        assert!(cfg.link_url);
+
+        cfg.set("maximize", Some("true")).unwrap();
+        cfg.set("maximize", Some("")).unwrap();
+        assert!(!cfg.maximize);
+        cfg.set("link-url", Some("false")).unwrap();
+        cfg.set("link-url", Some("")).unwrap();
+        assert!(cfg.link_url);
+
+        assert_eq!(
+            cfg.set("maximize", Some("yes")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("link-url", Some("yes")),
+            Err(ConfigSetError::InvalidValue)
+        );
+    }
+
+    #[test]
     fn config_link_url_finalize() {
         let cfg = Config::default();
         assert_eq!(cfg.link.len(), 1);
