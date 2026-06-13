@@ -119,3 +119,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
 - [Experiment 4: Reproduce Issue 802 input methods against Roastty](04-reproduce-issue-802-methods-against-roastty.md)
   — **Partial** (XCTest, bootstrap, screenshots, scroll, and drag pass; external
   keyboard still fails, click/right-click lacks a strong receipt oracle)
+- [Experiment 5: Rerun after Input Monitoring grant](05-rerun-after-input-monitoring-grant.md)
+  — **Designed**
