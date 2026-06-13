@@ -1428,6 +1428,13 @@ impl Config {
             "scrollbar" => {
                 self.scrollbar = set_enum_field(value, default.scrollbar, Scrollbar::from_keyword)?
             }
+            "link" => {
+                if value == Some("") {
+                    self.link = default.link;
+                } else {
+                    return Err(ConfigSetError::NotImplemented);
+                }
+            }
             "link-url" => self.link_url = set_bool_field(value, default.link_url)?,
             "window-colorspace" => {
                 self.window_colorspace = set_enum_field(
@@ -2978,8 +2985,7 @@ pub(crate) enum ConfigRecursiveFileErrorKind {
     Io(std::io::Error),
 }
 
-/// An error from `Config::set` (upstream `parseIntoField`'s
-/// `error.{InvalidField,InvalidValue,ValueRequired}`).
+/// An error from `Config::set` (upstream `parseIntoField` errors).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConfigSetError {
     /// No field matched the key (upstream `error.InvalidField`).
@@ -2988,6 +2994,8 @@ pub(crate) enum ConfigSetError {
     InvalidValue,
     /// The field requires a value but none was given.
     ValueRequired,
+    /// The field exists but the upstream parser returns `error.NotImplemented`.
+    NotImplemented,
 }
 
 /// A per-line config-load diagnostic (upstream's `parse` diagnostics): the 1-indexed
@@ -20334,6 +20342,44 @@ mod tests {
         assert_eq!(cloned, cfg);
         assert!(!cloned.link_url);
         assert!(cloned.maximize);
+    }
+
+    #[test]
+    fn link_config_parser_recognizes_not_implemented_and_empty_reset() {
+        let mut cfg = Config::default();
+        let default_links = cfg.link.clone();
+        assert_eq!(default_links.len(), 1);
+
+        assert_eq!(
+            cfg.set("link", Some("regex=https://example.invalid")),
+            Err(ConfigSetError::NotImplemented)
+        );
+        assert_eq!(cfg.set("link", None), Err(ConfigSetError::NotImplemented));
+        assert_eq!(cfg.link, default_links);
+
+        cfg.link.clear();
+        assert!(cfg.link.is_empty());
+        cfg.set("link", Some("")).unwrap();
+        assert_eq!(cfg.link, default_links);
+
+        let diagnostics =
+            cfg.load_str("link = https://example.invalid\nlink =\nunknown-link = x\n");
+        assert_eq!(cfg.link, default_links);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "link".to_string(),
+                    error: ConfigSetError::NotImplemented,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "unknown-link".to_string(),
+                    error: ConfigSetError::UnknownField,
+                },
+            ]
+        );
     }
 
     #[test]

@@ -106,6 +106,7 @@ def extract_set_from_source_arms(path: Path) -> list[ParserArm]:
 
 def parser_path(text: str) -> str:
     checks = [
+        "ConfigSetError::NotImplemented",
         "set_bool_field",
         "set_enum_field",
         "set_optional_enum_field",
@@ -135,6 +136,8 @@ def parser_path(text: str) -> str:
 
 
 def parser_family(path_text: str, arm_text: str) -> str:
+    if "ConfigSetError::NotImplemented" in path_text:
+        return "unsupported"
     if "set_bool_field" in path_text or "parse_compat_bool" in path_text:
         return "boolean"
     if "set_enum_field" in path_text or "set_optional_enum_field" in path_text or "from_keyword" in path_text:
@@ -236,7 +239,9 @@ def emit_inventory(rows: list[ParserRow], aliases: list[str], output: Path) -> N
     output.write_text("\n".join(lines) + "\n")
 
 
-def update_cfg217(matrix: Path, parser_inventory_path: Path, incomplete_count: int) -> None:
+def update_cfg217(
+    matrix: Path, parser_inventory_path: Path, incomplete_count: int, gap_count: int
+) -> None:
     lines = matrix.read_text().splitlines()
     updated: list[str] = []
     for line in lines:
@@ -245,7 +250,11 @@ def update_cfg217(matrix: Path, parser_inventory_path: Path, incomplete_count: i
             notes = (
                 "All parser rows are Oracle complete."
                 if incomplete_count == 0
-                else f"Experiment 13 audit keeps this facet open: {incomplete_count} parser rows are not Oracle complete."
+                else (
+                    f"Experiment 14 closes dispatch gaps; {incomplete_count} "
+                    f"parser rows are not Oracle complete and {gap_count} "
+                    "parser rows are dispatch gaps."
+                )
             )
             line = (
                 "| CFG-217 | Non-default parser semantics | Ghostty parsers accept "
@@ -262,7 +271,7 @@ def update_cfg217(matrix: Path, parser_inventory_path: Path, incomplete_count: i
                 "issues/0805-roastty-ghostty-parity/config-matrix.md` | Before closing "
                 "Issue 805 and when config parser dispatch changes. | CFG-217 only "
                 "passes when every parser inventory row is `Oracle complete`; audit "
-                f"coverage alone is insufficient. | Experiment 13 | {notes} |"
+                f"coverage alone is insufficient. | Experiment 14 | {notes} |"
             )
         updated.append(line)
     matrix.write_text("\n".join(updated) + "\n")
@@ -331,7 +340,8 @@ def main() -> int:
     rows, missing, compatibility_only, noncanonical = build_rows(upstream, aliases, arms)
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]
-    update_cfg217(args.matrix, args.output, len(incomplete))
+    gap_count = sum(row.status == "Gap" for row in rows)
+    update_cfg217(args.matrix, args.output, len(incomplete), gap_count)
 
     print(f"ghostty_canonical={len(upstream)}")
     print(f"roastty_parser_rows={len(rows)}")

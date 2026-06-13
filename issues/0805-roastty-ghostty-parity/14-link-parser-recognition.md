@@ -137,3 +137,89 @@ VERDICT: APPROVED
 
 Findings: none.
 ```
+
+## Result
+
+**Result:** Pass
+
+Roastty now recognizes canonical `link` in `Config::set_from_source` without
+claiming the full upstream parser exists:
+
+- `link =` / `--link=` resets the link list to the default and succeeds,
+  matching Ghostty's generic set-but-empty reset before `parseCLI`.
+- Bare `link` / `--link` and non-empty `link` values return
+  `ConfigSetError::NotImplemented`, distinct from `UnknownField`.
+- Unknown keys still return `UnknownField`.
+- The parser inventory now reports 203 canonical parser rows, 0 missing dispatch
+  rows, 203 audit-covered rows, and 0 gap rows.
+- CFG-217 remains `Gap` because no parser row is `Oracle complete`.
+
+Verification:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml link_config_parser_recognizes_not_implemented_and_empty_reset
+```
+
+Output:
+
+```text
+running 1 test
+test config::tests::link_config_parser_recognizes_not_implemented_and_empty_reset ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4904 filtered out; finished in 0.00s
+```
+
+Parser inventory command:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=0
+audit_covered=203
+gap=0
+```
+
+Matrix assertion output:
+
+```text
+parser_rows=203 cfg217=Gap
+```
+
+## Conclusion
+
+The first concrete parser dispatch gap is closed. The next CFG-217 work should
+raise parser families from `Audit covered` to `Oracle complete` with
+upstream-derived accepted-value and rejection/reset oracles.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result:
+
+```text
+VERDICT: APPROVED
+
+Findings: none.
+```
+
+The reviewer independently ran the focused Rust test, regenerated the parser
+inventory to temporary files, verified the matrix assertion, checked
+`git diff --check`, checked
+`cargo fmt --manifest-path roastty/Cargo.toml -- --check`, confirmed the result
+was uncommitted before review, and verified the upstream empty-reset and
+`RepeatableLink.parseCLI` `NotImplemented` evidence.

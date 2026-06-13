@@ -362,6 +362,12 @@ experiment files until they are proven.
   `RepeatableLink.parseCLI` is itself `NotImplemented`, so the next parser
   experiment must decide and prove the exact equivalent Roastty behavior instead
   of treating `UnknownField` as parity by accident.
+- **`link` is recognized-but-unsupported, not unknown.** Experiment 14 matched
+  Ghostty's parser shape for canonical `link`: set-but-empty `link =` resets to
+  the default link list before parser dispatch, while bare or non-empty `link`
+  returns a recognized not-implemented parser error. CFG-217 still remains `Gap`
+  because parser-family oracles are not complete, but there are no remaining
+  canonical parser dispatch gaps.
 
 ## Verification
 
@@ -400,4 +406,4 @@ remains open.
 - [Experiment 13: Non-default parser facet audit](13-non-default-parser-facet-audit.md)
   — **Pass**
 - [Experiment 14: Link parser recognition](14-link-parser-recognition.md) —
-  **Designed**
+  **Pass**
