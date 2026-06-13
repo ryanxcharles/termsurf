@@ -274,15 +274,22 @@ experiment files until they are proven.
   row. Prefer static checks and unit tests when they prove the behavior; reserve
   GUI and full A/B tests for behavior that genuinely requires the real app
   surface.
-- **Ghostty builds require Homebrew `zig@0.15` on this VM.** The vendored
-  upstream Zig 0.15.2 tarball hit the known Xcode 26.4+ linker issue on macOS
-  26.5.1 / Xcode 26.6. Homebrew's `zig@0.15` 0.15.2 carries the workaround patch
-  Ghostty recommends, and `scripts/ghostty-app/setup-zig.sh` now prefers it when
-  installed.
-- **The pinned A/B comparison rig works.** Experiment 1 proved the debug Ghostty
-  and Roastty apps can both build, launch side by side, produce isolated window
-  screenshots, receive System Events keyboard input, create independent marker
-  files, and clean up their debug processes in this VM.
+- **Plain `zig` builds pinned Ghostty on this VM.** Homebrew `zig@0.15` is on
+  `PATH` as `/opt/homebrew/bin/zig`, version `0.15.2`. With that toolchain,
+  pinned Ghostty builds from a clean source checkout with
+  `zig build -Demit-macos-app=false` and
+  `nu macos/build.nu --configuration Debug`; the old build-only
+  `macos-only-xcframework.patch` is no longer needed for the baseline.
+- **The pinned A/B build/render rig works.** Experiment 1 proved the debug
+  Ghostty and Roastty apps can both build, launch side by side, render the same
+  startup recipe through the live A/B smoke harness, capture comparable
+  screenshots, and clean up their debug process trees in this VM.
+- **Keyboard injection must avoid duplicate Ghostty process targeting.** When
+  Codex itself is running inside installed Ghostty, System Events can resolve a
+  debug Ghostty PID activation attempt to the installed `ghostty` host process.
+  This can send typed test commands into the Codex window instead of the debug
+  Ghostty window. Future keyboard experiments must use a safer targeting method
+  or a harness that avoids the duplicate-process-name collision.
 - **A/B app runs should use matched config files.** Ghostty loads user config
   from `~/.config/ghostty/config`. Roastty's analogous config path is
   `~/.config/roastty/config`. The user's Ghostty config has been cloned to the
@@ -303,4 +310,4 @@ remains open.
 
 ## Experiments
 
-- [Experiment 1: Pinned A/B baseline](01-pinned-ab-baseline.md) — **Pass**
+- [Experiment 1: Pinned A/B baseline](01-pinned-ab-baseline.md) — **Partial**

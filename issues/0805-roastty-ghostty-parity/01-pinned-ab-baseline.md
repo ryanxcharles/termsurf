@@ -282,3 +282,91 @@ Overall result:
   needs a harness fix before broader parity work.
 - **Fail** if the pinned Ghostty app cannot be built/launched or if the harness
   cannot distinguish the two apps.
+
+## Result
+
+**Result:** Partial
+
+The build, launch, screenshot, live A/B render, and cleanup baseline works. The
+keyboard-marker portion is not yet a valid baseline because System Events can
+target the installed Ghostty process that hosts this Codex session instead of
+the debug Ghostty process under test.
+
+Passing evidence:
+
+- Pinned Ghostty checkout is clean and fixed at
+  `2c62d182cec246764ff725096a70b9ef44996f7f`; `git describe` reports
+  `v1.3.1-1070-g2c62d182c`.
+- Plain `zig` resolves to `/opt/homebrew/bin/zig`, version `0.15.2`.
+- Pinned Ghostty builds from clean upstream source with no
+  `macos-only-xcframework.patch` or other source modification:
+  - `zig build -Demit-macos-app=false`
+  - `nu macos/build.nu --configuration Debug`
+  - transcripts: `logs/issue805-clean-ghostty-zig-build.log`,
+    `logs/issue805-clean-ghostty-app-build.log`,
+    `logs/issue805-exp1-rerun-clean-baseline.log`
+  - app: `vendor/ghostty/macos/build/Debug/Ghostty.app`
+- Current Roastty builds:
+  - `scripts/roastty-app/build-roastty-kit.sh`
+  - `xcodebuild build -project Roastty.xcodeproj -scheme Roastty -configuration Debug -derivedDataPath build`
+  - transcript: `logs/issue805-exp1-rerun-clean-baseline.log`
+  - app: `roastty/macos/build/Build/Products/Debug/Roastty.app`
+- The user's Ghostty config has been cloned to the analogous Roastty config
+  path. The rerun transcript verifies the files match without logging their
+  contents:
+  - Ghostty config: `~/.config/ghostty/config`
+  - Roastty config: `~/.config/roastty/config`
+  - transcript line: `CONFIG_FILES_MATCH=yes`
+- The live A/B smoke harness successfully launched clean-source Ghostty and
+  current Roastty with a generated startup recipe, captured comparable
+  screenshots, diffed them, and cleaned up both process trees:
+  - command:
+    `ROASTTY_APP="$PWD/roastty/macos/build/Build/Products/Debug/Roastty.app" TERMSURF_AB_HOLD_SECONDS=5 scripts/roastty-app/live-ab-smoke.sh --recipe smoke --comparison-region full --max-mismatch-ratio 1 --max-mean-channel-delta 255`
+  - transcript: `logs/issue805-exp1-live-ab-smoke.log`
+  - Ghostty PID: `19196`
+  - Roastty PID: `19204`
+  - marker: `ISSUE802_AB_SMOKE_20260613-153205`
+  - full-window diff verdict: `PASS`
+  - content-region diff verdict: `PASS`
+  - screenshots:
+    - `/Users/astrohacker/.cache/termsurf/shots/ghostty-ab-crop-20260613-153205.png`
+    - `/Users/astrohacker/.cache/termsurf/shots/roastty-ab-crop-20260613-153205.png`
+    - `/Users/astrohacker/.cache/termsurf/shots/ghostty-ab-content-20260613-153205.png`
+    - `/Users/astrohacker/.cache/termsurf/shots/roastty-ab-content-20260613-153205.png`
+  - cleanup killed Ghostty descendant PIDs `19220`, `19221`, Ghostty PID
+    `19196`, Roastty descendant PID `19214`, and Roastty PID `19204`.
+
+Blocking evidence for the keyboard-marker part:
+
+- `logs/issue805-exp1-rerun-clean-baseline.log` attempted to activate debug
+  Ghostty PID `18974`, but System Events reported `ghostty,679,frontmost=true`.
+  PID `679` was the installed Ghostty process hosting this Codex session, not
+  the debug Ghostty process under test.
+- The typed command appeared in the Codex conversation instead of the debug
+  Ghostty terminal, so the run was invalid as keyboard proof.
+- The Ghostty marker file never appeared:
+  `MARKER_MISSING path=/tmp/termsurf-issue805-exp1-ghostty-marker`.
+- The debug Ghostty PID `18974` and debug Roastty PID `18998` were killed after
+  the invalid run, and temporary marker files were removed.
+
+## Conclusion
+
+Experiment 1 proves enough of the comparison rig to continue source, config, and
+visual/app walkthrough work: both apps build, the pinned Ghostty source stays
+clean, matched configs are available, the live A/B harness can launch both apps,
+screenshots and permissive diffs work, and cleanup is scoped to launched debug
+process trees.
+
+Experiment 1 does not yet prove keyboard delivery to both apps in the
+side-by-side setup. The next experiment should focus on a safe
+keyboard-targeting method for duplicate-named Ghostty processes, or explicitly
+split keyboard coverage so Roastty is tested through System Events while Ghostty
+reference keyboard behavior is proven through another oracle.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
