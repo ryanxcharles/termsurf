@@ -1625,6 +1625,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 184: Phase G — trigger-prefix finality audit](184-trigger-prefix-finality-audit.md)
   — **Pass**
+- [Experiment 185: Phase G — native keymap and global finality audit](185-native-keymap-global-finality-audit.md)
+  — **Designed**
 
 ## Process
 
