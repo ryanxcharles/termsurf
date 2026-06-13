@@ -1060,14 +1060,17 @@ the live app, verified by a Phase-D UI test.)
 
 **Phase G — Input / keybindings**
 
-- [ ] Multi-key sequences / chords (the trie), leader keys, key tables —
+- [x] Multi-key sequences / chords (the trie), leader keys, key tables —
       configured root and active-table surface sequences plus `ignore` /
       `end_key_sequence` are wired (Exp 118–121), and configured `chain=` leaves
       are wired on the surface path (Exp 122) and direct app-key path (Exp 123),
       with global app-key surface-control fanout for direct key-table and
       `end_key_sequence` leaves (Exp 125), and file-loaded `keybind` entries are
-      wired for direct/default/recursive config files (Exp 134), but native
-      keymaps/global shortcuts remain later work
+      wired for direct/default/recursive config files (Exp 134). Experiment 183
+      proves configured root/table sequence tries, active key tables,
+      sequence-control actions, chained leaves, direct app-key chains, surface
+      `all:` / `global:` fanout, file-loaded keybinds, and the ABI harness;
+      native keymaps/global shortcuts remain tracked by separate Phase G items.
 - [ ] Trigger-prefix flags (`global:` / `all:` / `unconsumed:` / `performable:`)
       — parser/storage/query metadata and surface unconsumed/performable
       consumption are wired (Exp 110–111), and configured `global:` app-key
@@ -1615,7 +1618,7 @@ stays unaltered except for the rename).
 - [Experiment 182: Phase F — config finalize and theme audit](182-config-finalize-theme-audit.md)
   — **Pass**
 - [Experiment 183: Phase G — key sequence and table audit](183-key-sequence-table-audit.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

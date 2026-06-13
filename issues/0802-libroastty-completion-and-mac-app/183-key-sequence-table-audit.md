@@ -118,3 +118,84 @@ first remaining Phase G item, and the design explicitly limits itself to
 configured key sequence/table proof while leaving trigger-prefix and native /
 global shortcut items open. Required hygiene checks and separate plan/result
 commit gates are present.
+
+## Result
+
+**Result:** Pass.
+
+This audit found the configured multi-key/key-table surface wired broadly enough
+to close the first remaining Phase G checklist item.
+
+Source inspection confirmed:
+
+- `roastty/src/lib.rs` defines key sequence action payloads, keybind trie
+  storage, `keybind_chain_parent`, runtime `active_key_sequence` /
+  `queued_key_sequence`, and `active_key_tables`.
+- The runtime path owns `start_key_sequence`, `handle_active_key_sequence`,
+  `dispatch_sequence_leaf`, `end_key_sequence`, `activate_key_table`,
+  `deactivate_key_table`, and `deactivate_all_key_tables`.
+- Config-file `keybind` loading routes through `parse_config_keybind_entry` and
+  `store_keybind_entry`, with focused `config_file_keybind_*` coverage.
+
+Focused verification passed:
+
+- `cargo test -p roastty sequence` — 52 passed.
+- `cargo test -p roastty key_table` — 25 passed.
+- `cargo test -p roastty chain` — 26 passed.
+- `cargo test -p roastty key_sequence` — 15 passed.
+- `cargo test -p roastty surface_key` — 99 passed.
+- `cargo test -p roastty app_key` — 31 passed.
+- `cargo test -p roastty surface_key_all` — 6 passed.
+- `cargo test -p roastty surface_key_configured_global_all` — 2 passed.
+- `cargo test -p roastty config_file_keybind_ -- --test-threads=1` — 4 passed.
+- `cargo test -p roastty config_trigger_ -- --test-threads=1` — 12 passed.
+- `cargo test -p roastty parse_config_keybind` — 23 passed.
+- `cargo test -p roastty --test abi_harness` — 1 passed, with the existing
+  enum-conversion warnings and `[unknown](scope): message`.
+
+Regression and hygiene checks passed:
+
+- `cargo fmt --check -p roastty`
+- `prettier --check --prose-wrap always --print-width 80 issues/0802-libroastty-completion-and-mac-app/183-key-sequence-table-audit.md issues/0802-libroastty-completion-and-mac-app/README.md`
+- `git diff --check`
+
+No production code changed. The roadmap checkbox for configured multi-key
+sequences/chords, leader/key tables, chains, app-key dispatch, surface fanout,
+and file-loaded keybinds is now justified. Trigger-prefix final proof and native
+keymap/global shortcut work remain separate open Phase G items.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial review subagent `Galileo the 2nd`, fresh
+context.
+
+**Verdict:** Approved.
+
+Findings: None.
+
+The reviewer independently verified that only the experiment file and issue
+README are modified, the result commit had not been made, the diff from plan
+commit `716f3e096252` is documentation-only, the source `rg` probes find the
+claimed key sequence/table storage, runtime dispatch, and config-file keybind
+paths, and the hygiene checks pass.
+
+The reviewer also reran all focused tests listed in this experiment and
+confirmed the recorded counts, including the ABI harness with the existing
+enum-conversion warnings and `[unknown](scope): message`.
+
+The reviewer approved the result as staying inside the audit/proof scope,
+checking only the configured multi-key/key-table roadmap item, and not claiming
+trigger-prefix finality, native keymaps, native global shortcuts, or overall
+Issue 802 completion.
+
+## Conclusion
+
+Configured key sequences and key tables are complete enough for the Phase G
+roadmap item: the trie/storage layer, root and active-table sequence runtime,
+sequence-control actions, chained leaves, direct app-key chains, surface `all:`
+/ `global:` fanout, file-loaded keybind entries, and ABI harness all have
+focused evidence.
+
+The next required Issue 802 work is not more sequence/table implementation. It
+is the remaining Phase G trigger-prefix finality audit and native
+keymap/global-shortcut audit, plus the optional debug overlay if still desired.
