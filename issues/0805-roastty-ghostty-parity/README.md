@@ -290,6 +290,11 @@ experiment files until they are proven.
   This can send typed test commands into the Codex window instead of the debug
   Ghostty window. Future keyboard experiments must use a safer targeting method
   or a harness that avoids the duplicate-process-name collision.
+- **PID-guarded System Events keyboard input works for both debug apps.**
+  Experiment 2 proved the safe sequence: activate by exact Unix PID, immediately
+  verify the global frontmost PID equals the target PID, and only then type. For
+  Roastty, click the terminal window center after activation to give the
+  terminal view first-responder focus before the final pre-type PID guard.
 - **A/B app runs should use matched config files.** Ghostty loads user config
   from `~/.config/ghostty/config`. Roastty's analogous config path is
   `~/.config/roastty/config`. The user's Ghostty config has been cloned to the
@@ -312,4 +317,4 @@ remains open.
 
 - [Experiment 1: Pinned A/B baseline](01-pinned-ab-baseline.md) — **Partial**
 - [Experiment 2: Keyboard target isolation](02-keyboard-target-isolation.md) —
-  **Designed**
+  **Pass**

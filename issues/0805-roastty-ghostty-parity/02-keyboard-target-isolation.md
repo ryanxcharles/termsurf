@@ -231,3 +231,79 @@ Overall result:
   defines a concrete alternate Ghostty keyboard oracle for the next experiment.
 - **Fail** if no app can be safely targeted or cleanup cannot be bounded to the
   launched debug processes.
+
+## Result
+
+**Result:** Pass
+
+The experiment found a safe keyboard-targeting method for both debug apps:
+
+1. activate the target by exact Unix PID with System Events;
+2. immediately verify the global frontmost PID equals the target debug PID;
+3. for Roastty, click the terminal window center to establish first-responder
+   focus and verify the frontmost PID again;
+4. type only after the final pre-type PID guard passes.
+
+Evidence:
+
+- Full build and first activation transcript: `logs/issue805-exp2-run.log`.
+- Combined successful keyboard transcript:
+  `logs/issue805-exp2-combined-keyboard-pass.log`.
+- Pinned Ghostty was built from clean source before the activation probes:
+  `zig build -Demit-macos-app=false` and
+  `nu macos/build.nu --configuration Debug`.
+- Current Roastty was built before the activation probes:
+  `scripts/roastty-app/build-roastty-kit.sh` and
+  `xcodebuild build -project Roastty.xcodeproj -scheme Roastty -configuration Debug -derivedDataPath build`.
+- Side-by-side debug app PIDs in the successful combined run:
+  - Ghostty PID `21183`:
+    `vendor/ghostty/macos/build/Debug/Ghostty.app/Contents/MacOS/ghostty`
+  - Roastty PID `21206`:
+    `roastty/macos/build/Build/Products/Debug/Roastty.app/Contents/MacOS/roastty`
+- Ghostty target proof and marker:
+  - activation proof:
+    `FRONTMOST_AFTER_ACTIVATE target=ghostty name=ghostty pid=21183`
+  - pre-type guard:
+    `PRETYPE_GUARD target=ghostty target_pid=21183 frontmost_pid=21183`
+  - marker proof:
+    `MARKER_OK ... path=/tmp/termsurf-issue805-exp2-ghostty-marker ...`
+- Roastty target proof and marker:
+  - activation proof:
+    `FRONTMOST_AFTER_ACTIVATE target=roastty name=roastty pid=21206`
+  - first-responder focus proof:
+    `ROASTTY_WINDOW target_pid=21206 id=206 x=959 y=112 w=731 h=632` followed by
+    `FRONTMOST_AFTER_ROASTTY_CLICK name=roastty pid=21206`
+  - pre-type guard:
+    `PRETYPE_GUARD target=roastty target_pid=21206 frontmost_pid=21206`
+  - marker proof:
+    `MARKER_OK ... path=/tmp/termsurf-issue805-exp2-roastty-marker ...`
+- Cleanup proof:
+  - `killing debug Ghostty PIDs: 21183`
+  - `killing debug Roastty PIDs: 21206`
+  - `CLEANUP_NO_DEBUG_PROCESSES=yes`
+
+No Ghostty source code, Roastty product code, or harness files were changed.
+
+## Conclusion
+
+Keyboard automation is safe in this VM when every typed command is guarded by
+the exact target PID immediately before typing. The installed Ghostty host
+collision from Experiment 1 is avoided by treating app names as insufficient and
+using Unix PID equality as the typing gate.
+
+The reusable keyboard recipe for future A/B app tests is:
+
+- Ghostty: System Events activate by debug PID, verify frontmost PID, type.
+- Roastty: System Events activate by debug PID, click the terminal window
+  center, verify frontmost PID again, type.
+
+Future experiments can now use keyboard input for real app walkthrough steps, as
+long as they preserve the pre-type PID guard and Roastty focus click.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
