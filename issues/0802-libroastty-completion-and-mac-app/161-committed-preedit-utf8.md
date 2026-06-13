@@ -120,6 +120,97 @@ terminal UTF-8 decoding, or accessibility/copy layer with concrete evidence.
 native key path, weakens the route assertions, claims success from trace alone,
 or changes unrelated input architecture without evidence.
 
+## Result
+
+**Result:** Pass
+
+The failing layer was not Swift's UTF-8 handoff and not Rust's by-value
+`roastty_surface_key` conversion. The committed preedit path was already passing
+valid `é` text into the same by-value key event shape that libroastty can
+deliver to a child PTY.
+
+This experiment made the focused dead-key UI test deterministic by running the
+copied app surface against a UTF-8 echo command:
+
+```text
+stty -echo -icanon min 2 time 0; dd bs=2 count=1 2>/dev/null; sleep 1
+```
+
+That command removes the interactive shell's locale, prompt, and echo behavior
+from the final oracle while preserving the real copied app, native AppKit
+`typeKey` route, `keyDown` / `interpretKeyEvents`, marked-text commit, Swift
+`committedPreeditTextAction`, by-value `roastty_surface_key`, PTY write, and
+terminal accessibility observation.
+
+The UI trace hook now records bounded byte-level detail when
+`ROASTTY_UI_KEY_TRACE_PATH` is present, including UTF-8 bytes, Unicode scalars,
+keycode, modifier masks, consumed modifier masks, composing state, and the
+committed-preedit path. It remains inert outside UI tests.
+
+The Rust regression
+`surface_key_by_value_committed_preedit_shape_reaches_child_pty` now covers the
+exact committed-preedit shape Swift sends: `keycode = 0`,
+`unshifted_codepoint = 0`, no modifiers, `composing = false`, and text `é`.
+
+Verification:
+
+- `swiftlint lint roastty/macos/RoasttyUITests/RoasttyDeadKeyUITests.swift 'roastty/macos/Sources/Roastty/Surface View/SurfaceView_AppKit.swift'`
+  — 0 violations, 0 serious.
+- `cargo fmt -p roastty` — pass.
+- `cargo test -p roastty surface_key_by_value -- --nocapture` — pass: 2 passed,
+  including the new committed-preedit shape regression and the existing by-value
+  UTF-8 regression.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyDeadKeyUITests`
+  — pass: exactly 1 executed test, 0 skips, 0 failures. The test observed
+  visible `é` in the copied app terminal.
+- `cd roastty && macos/build.nu --action test --ui-tests --only-testing RoasttyUITests/RoasttyTerminalOutputUITests`
+  — pass: exactly 1 executed test, 0 skips, 0 failures. The test observed
+  `TERMSURF_READY_158`.
+- `cd roastty && macos/build.nu --action test` — pass. UI tests remain skipped
+  by default; hosted app tests passed: 213 tests in 23 suites.
+- `cargo test -p roastty` — unrelated failure: 4,848 passed, 2 failed, 4
+  ignored. The failures were
+  `os::cf_release_thread::tests::pool_flush_releases_on_worker_thread` and
+  `os::cf_release_thread::tests::worker_drop_drains_queued_refs`. A focused
+  rerun of `cargo test -p roastty os::cf_release_thread::tests -- --nocapture`
+  reproduced persistent release-thread state failures in that module, including
+  `empty_pool_is_noop`; this is outside the touched committed-preedit,
+  key-event, PTY, and UI-test paths.
+- `git diff --check` — pass.
+
+## Conclusion
+
+The native macOS dead-key path is now proven end to end in the copied app for
+the deterministic UTF-8 terminal case. `Option-E`, `E` produces AppKit marked
+text, commits `é`, sends the committed text through `committedPreeditTextAction`
+and by-value `roastty_surface_key`, reaches the PTY, and becomes visible through
+the real terminal accessibility oracle.
+
+The previous replacement-character observation depended on an interactive
+shell/echo environment as the final oracle. The product input path and terminal
+UTF-8 path are covered by focused UI and Rust tests; broader shell locale
+behavior is not part of this experiment's pass condition.
+
+## Completion Review
+
+**Reviewer:** Codex-native adversarial subagent `Feynman` with fresh context,
+using the `adversarial-review` skill's Codex path
+(`multi_agent_v1.spawn_agent`), not Claude's named `adversarial-reviewer` agent.
+
+**Verdict:** Approved after fixes.
+
+The reviewer found two Required findings:
+
+1. The Pass-path visible-`é` oracle still used `XCTSkip`, which would have let a
+   future visible-text regression report as skipped instead of failed.
+2. The experiment file had not yet recorded the completion review.
+
+Both findings were fixed before the result commit. The final visible-text oracle
+now fails hard with the same trace and terminal snapshot evidence, and this
+section records the completion review outcome. The reviewer also confirmed that
+the native AppKit route is preserved and that the Rust regression matches the
+committed-preedit event shape.
+
 ## Design Review
 
 **Reviewer:** Codex-native adversarial subagent `Cicero` with fresh context,

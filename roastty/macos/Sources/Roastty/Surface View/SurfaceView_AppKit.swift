@@ -1454,7 +1454,9 @@ extension Roastty {
             // Without this, `ctrl+enter` does the wrong thing.
             if let text, text.count > 0,
                let codepoint = text.utf8.first, codepoint >= 0x20 {
-                appendUITestKeyTrace("keyAction text=\(text) composing=\(composing)")
+                appendUITestKeyTrace(
+                    "keyAction text=\(text) \(Self.uiTestTextDetails(text)) composing=\(composing) keycode=\(key_ev.keycode) mods=\(key_ev.mods) consumedMods=\(key_ev.consumed_mods)"
+                )
                 return text.withCString { ptr in
                     key_ev.text = ptr
                     return roastty_surface_key(surface, key_ev)
@@ -1495,7 +1497,9 @@ extension Roastty {
             key_ev.unshifted_codepoint = 0
 
             return text.withCString { ptr in
-                appendUITestKeyTrace("committedPreeditText text=\(text)")
+                appendUITestKeyTrace(
+                    "committedPreeditText text=\(text) \(Self.uiTestTextDetails(text)) action=\(action) keycode=\(key_ev.keycode) mods=\(key_ev.mods) consumedMods=\(key_ev.consumed_mods) composing=\(key_ev.composing) path=roastty_surface_key"
+                )
                 key_ev.text = ptr
                 return roastty_surface_key(surface, key_ev)
             }
@@ -2092,11 +2096,19 @@ extension Roastty.SurfaceView: NSTextInputClient {
         if FileManager.default.fileExists(atPath: path),
            let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) {
             defer { try? handle.close() }
-            try? handle.seekToEnd()
+            _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
         } else {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
+    }
+
+    private static func uiTestTextDetails(_ text: String) -> String {
+        let utf8 = text.utf8.map { String($0) }.joined(separator: ",")
+        let scalars = text.unicodeScalars
+            .map { String(format: "U+%04X", $0.value) }
+            .joined(separator: ",")
+        return "utf8=[\(utf8)] scalars=[\(scalars)]"
     }
 
     /// True when `text` is a single C0 control character (U+0000-U+001F)

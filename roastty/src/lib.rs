@@ -40627,6 +40627,35 @@ mod tests {
     }
 
     #[test]
+    fn surface_key_by_value_committed_preedit_shape_reaches_child_pty() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let command =
+            CString::new("stty -echo -icanon min 2 time 0; dd bs=2 count=1 2>/dev/null").unwrap();
+        let mut config = roastty_surface_config_new();
+        config.command = command.as_ptr();
+        let surface = new_test_surface_with_config(app, &config);
+        let text = CString::new("é").unwrap();
+        let input = RoasttyInputKey {
+            action: key_action_to_int(key::KeyAction::Press),
+            mods: ROASTTY_MODS_NONE,
+            consumed_mods: ROASTTY_MODS_NONE,
+            keycode: 0,
+            text: text.as_ptr(),
+            unshifted_codepoint: 0,
+            composing: false,
+        };
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert!(roastty_surface_key(surface, input));
+        let text = surface_snapshot_text_until(app, surface, "é");
+        assert!(text.contains('é'), "{text:?}");
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
     fn surface_text_unbracketed_reaches_child_pty() {
         let _guard = pty_command_lock();
         let app = new_test_app();

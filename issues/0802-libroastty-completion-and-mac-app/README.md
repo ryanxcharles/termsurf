@@ -1463,7 +1463,7 @@ stays unaltered except for the rename).
 - [Experiment 160: Phase G — terminal accessibility oracle](160-terminal-accessibility-oracle.md)
   — **Pass**
 - [Experiment 161: Phase G — committed preedit UTF-8](161-committed-preedit-utf8.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

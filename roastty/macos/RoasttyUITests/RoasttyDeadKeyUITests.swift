@@ -14,12 +14,14 @@ final class RoasttyDeadKeyUITests: RoasttyCustomConfigCase {
             """
             title = "RoasttyDeadKeyUITests"
             macos-option-as-alt = false
+            initial-command = shell:stty -echo -icanon min 2 time 0; dd bs=2 count=1 2>/dev/null; sleep 1
             """
         )
 
         let traceFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("RoasttyDeadKeyUITests.trace")
             .appendingPathExtension("log")
+        try? FileManager.default.removeItem(at: traceFile)
 
         let app = try roasttyApplication()
         app.launchEnvironment["ROASTTY_UI_KEY_TRACE_PATH"] = traceFile.path
@@ -57,9 +59,11 @@ final class RoasttyDeadKeyUITests: RoasttyCustomConfigCase {
         )
 
         guard waitForCommittedText(terminal, app: app, containing: "é", timeout: 5) else {
-            throw XCTSkip(
-                "Dead-key route was exercised, but this host did not expose the committed text through terminal accessibility or copy. Trace:\n\(trace)"
+            let snapshot = app.roasttyTerminalSnapshot(in: terminal)
+            XCTFail(
+                "Dead-key route was exercised, but this host did not expose the committed text through terminal accessibility or copy. Trace:\n\(trace)\nTerminal snapshot:\n\(snapshot)"
             )
+            return
         }
 
         try? FileManager.default.removeItem(at: traceFile)
