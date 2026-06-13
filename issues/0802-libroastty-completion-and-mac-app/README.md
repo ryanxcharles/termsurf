@@ -1544,6 +1544,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 172: Phase F — input config surface](172-input-config-surface.md)
   — **Pass**
+- [Experiment 173: Phase F — keybind config surface](173-keybind-config-surface.md)
+  — **Designed**
 
 ## Process
 
