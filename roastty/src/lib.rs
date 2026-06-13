@@ -6741,19 +6741,34 @@ impl Surface {
 
     fn write_encoded_key_event(&mut self, event: &key::KeyEvent) -> bool {
         let encoded = key_encode::encode(event, self.key_encode_options());
+        append_ui_key_trace(format!(
+            "rust write_encoded_key_event encoded_len={} encoded_hex={} utf8_hex={} readonly={} has_worker={}",
+            encoded.len(),
+            trace_hex(&encoded),
+            trace_hex(&event.utf8),
+            self.readonly,
+            self.termio_worker.is_some()
+        ));
         if encoded.is_empty() {
+            append_ui_key_trace("rust write_encoded_key_event result=false reason=empty-encoded");
             return false;
         }
         if self.readonly {
+            append_ui_key_trace("rust write_encoded_key_event result=true reason=readonly");
             return true;
         }
         let Some(worker) = self.termio_worker.as_ref() else {
+            append_ui_key_trace("rust write_encoded_key_event result=false reason=no-worker");
             return false;
         };
         if let Err(err) = worker.queue_write(&encoded) {
+            append_ui_key_trace(format!(
+                "rust write_encoded_key_event result=false reason=queue-write-error error={err:?}"
+            ));
             self.apply_termio_event(termio::TermioWorkerEvent::Error(format!("{err:?}")));
             return false;
         }
+        append_ui_key_trace("rust write_encoded_key_event result=true reason=queued");
         if event.key == key::Key::Escape
             || (self.selection_clear_on_typing && !key_is_modifier(event.key))
         {
@@ -17988,15 +18003,68 @@ fn input_key_to_event(k: &RoasttyInputKey) -> KeyEvent {
     KeyEvent { event: ev }
 }
 
+fn trace_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn trace_input_text_hex(event: &RoasttyInputKey) -> String {
+    if event.text.is_null() {
+        return String::new();
+    }
+
+    trace_hex(unsafe { CStr::from_ptr(event.text) }.to_bytes())
+}
+
+fn append_ui_key_trace(line: impl AsRef<str>) {
+    let Some(path) = std::env::var_os("ROASTTY_UI_KEY_TRACE_PATH") else {
+        return;
+    };
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+
+    let _ = writeln!(file, "{}", line.as_ref());
+}
+
 /// Embedded by-value `surface_key` (the app's path) — supersedes the opaque
 /// `*_handle` variant (kept for the existing tests).
 #[no_mangle]
 pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyInputKey) -> bool {
     let Some(surface) = surface_from_handle(surface) else {
+        append_ui_key_trace(format!(
+            "rust roastty_surface_key result=false reason=no-surface action={} keycode={} mods={} consumed_mods={} composing={} text_hex={}",
+            event.action,
+            event.keycode,
+            event.mods,
+            event.consumed_mods,
+            event.composing,
+            trace_input_text_hex(&event)
+        ));
         return false;
     };
     let ev = input_key_to_event(&event);
-    surface.key(&ev)
+    let result = surface.key(&ev);
+    append_ui_key_trace(format!(
+        "rust roastty_surface_key result={} action={} keycode={} mods={} consumed_mods={} composing={} text_hex={} utf8_hex={}",
+        result,
+        event.action,
+        event.keycode,
+        event.mods,
+        event.consumed_mods,
+        event.composing,
+        trace_input_text_hex(&event),
+        trace_hex(&ev.event.utf8)
+    ));
+    result
 }
 
 /// Embedded by-value `app_key`. Handles configured global keybinds, direct

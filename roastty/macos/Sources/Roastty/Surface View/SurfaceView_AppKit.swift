@@ -1457,13 +1457,17 @@ extension Roastty {
                 appendUITestKeyTrace(
                     "keyAction text=\(text) \(Self.uiTestTextDetails(text)) composing=\(composing) keycode=\(key_ev.keycode) mods=\(key_ev.mods) consumedMods=\(key_ev.consumed_mods)"
                 )
-                return text.withCString { ptr in
+                let result = text.withCString { ptr in
                     key_ev.text = ptr
                     return roastty_surface_key(surface, key_ev)
                 }
+                appendUITestKeyTrace("keyAction result=\(result) path=roastty_surface_key text")
+                return result
             } else {
                 appendUITestKeyTrace("keyAction raw composing=\(composing)")
-                return roastty_surface_key(surface, key_ev)
+                let result = roastty_surface_key(surface, key_ev)
+                appendUITestKeyTrace("keyAction result=\(result) path=roastty_surface_key raw")
+                return result
             }
         }
 

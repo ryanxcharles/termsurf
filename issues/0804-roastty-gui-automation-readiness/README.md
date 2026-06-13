@@ -200,6 +200,12 @@ Roastty GUI automation work. Keep hypotheses in Analysis until they are proven.
   screenshot and the marker file was not created even though the key trace
   reached `keyAction`. The next probe needs to inspect `roastty_surface_key`,
   encoded bytes, readonly state, and PTY queueing.
+- **Key encoding works, but PTY queueing fails with `CommandDisconnected`.**
+  Experiment 9 instrumented the forwarding path and showed each typed character
+  encodes to one byte, the surface is not read-only, and `termio_worker` is
+  present. The failure is `worker.queue_write(...) -> CommandDisconnected`,
+  which means the worker command receiver has exited while the surface still
+  holds a stale worker handle and stale prompt contents.
 
 ## Verification
 
@@ -250,4 +256,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
   **Partial** (focus ownership and AppKit key entry proven; marker still fails
   because typed text is not displayed or executed by the terminal)
 - [Experiment 9: Trace key forwarding path](09-trace-key-forwarding-path.md) —
-  **Designed**
+  **Partial** (trace identified the loss point: encoded key bytes cannot queue
+  because the terminal worker command receiver is disconnected)

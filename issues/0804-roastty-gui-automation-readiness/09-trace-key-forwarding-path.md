@@ -166,3 +166,85 @@ Overall result:
   layer.
 - **Fail** if the trace instrumentation cannot be built or does not emit under
   `ROASTTY_UI_KEY_TRACE_PATH`.
+
+## Result
+
+**Result:** Partial
+
+The trace instrumentation built and emitted correctly. The rerun identified the
+exact keyboard loss point: encoded key bytes cannot be queued because the
+terminal worker command receiver is disconnected.
+
+Implementation notes:
+
+- Added trace-only Swift logging in
+  `roastty/macos/Sources/Roastty/Surface View/SurfaceView_AppKit.swift` so
+  `keyAction` records the boolean result returned by `roastty_surface_key`.
+- Added trace-only Rust logging in `roastty/src/lib.rs` so `roastty_surface_key`
+  and `write_encoded_key_event` record event inputs, encoded bytes, read-only
+  state, worker presence, queue results, and failures.
+- The trace remains inert unless `ROASTTY_UI_KEY_TRACE_PATH` is set.
+
+Verification:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml` succeeded.
+- `scripts/roastty-app/build-roastty-kit.sh` succeeded; transcript:
+  `logs/issue804-exp9-build-roastty-kit.log`.
+- `xcodebuild build -project Roastty.xcodeproj -scheme Roastty -configuration Debug`
+  succeeded, but only updated DerivedData; the repo-local launch bundle was then
+  rebuilt with `-derivedDataPath build`. Transcript:
+  `logs/issue804-exp9-xcodebuild-local-debug.log`.
+- The instrumented app launched from
+  `roastty/macos/build/Build/Products/Debug/Roastty.app`; transcript:
+  `logs/issue804-exp9-launch.log`.
+- The frontmost guard passed immediately before typing:
+  `frontmost-name=roastty`, `frontmost-pid=95376`, `target-pid=95376`.
+- The marker oracle still failed:
+  `/tmp/termsurf-issue804-exp9-system-events/marker.txt` was not created.
+- The after screenshot at
+  `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp9-after-keyboard-20260613-141630.png`
+  showed the prompt unchanged and no typed command visible.
+- Cleanup killed PID `95376` and removed the launchd trace env vars; transcript:
+  `logs/issue804-exp9-cleanup.log`.
+
+The decisive trace lines in `logs/issue804-exp9-system-events-keyboard.log` are:
+
+```text
+rust write_encoded_key_event encoded_len=1 encoded_hex=65 utf8_hex=65 readonly=false has_worker=true
+rust write_encoded_key_event result=false reason=queue-write-error error=CommandDisconnected
+rust roastty_surface_key result=false action=1 keycode=14 mods=0 consumed_mods=0 composing=false text_hex=65 utf8_hex=65
+keyAction result=false path=roastty_surface_key text
+```
+
+The same pattern repeated for every typed character and for Enter
+(`encoded_hex=0d`). Release events encoded to zero bytes, which is expected and
+not the blocker.
+
+## Conclusion
+
+The end-to-end keyboard failure is no longer a permissions problem, a VM
+problem, a focus problem, an AppKit text-input problem, or a key-encoding
+problem.
+
+Current known path:
+
+- System Events keyboard events target Roastty.
+- Roastty AppKit receives them through `keyDown` / `insertText`.
+- Swift calls `roastty_surface_key`.
+- Rust encodes each press to the expected byte.
+- The surface is not read-only.
+- `termio_worker` is `Some`.
+- `queue_write` fails because the worker command channel is disconnected.
+
+The next experiment should diagnose and fix why the `TermioWorker` receiver
+exits while the surface still displays a stale prompt and retains
+`Some(termio_worker)`. Likely probes:
+
+- trace `TermioWorker::spawn`, `run_termio_worker` exit reasons, pump EOF,
+  `child_exited`, and worker errors;
+- trace `Surface::apply_termio_event` for `Pump` and `Error` events;
+- determine whether the shell process exits immediately after launch or whether
+  the worker exits because event delivery is disconnected;
+- clear or restart stale `termio_worker` handles if the worker has exited.
+
+Per user instruction, no adversarial review was run for this issue.
