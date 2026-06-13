@@ -1042,9 +1042,17 @@ the live app, verified by a Phase-D UI test.)
 **Phase F — Config completeness**
 
 - [x] The remaining public config option (`keybind`)
-- [ ] `finalize()` — cross-field validation / derivation / clamping
-- [ ] Theme loading (themes-dir locator + file read + palette/option
-      application)
+- [x] `finalize()` — cross-field validation / derivation / clamping — Experiment
+      182 audits the current finalize pipeline and focused regression tests,
+      proving theme-first finalization, scalar derivations,
+      working-directory/command/home defaults, GTK detect defaulting, link-url
+      mutation, quit-delay warnings, auto-update and opacity clamps, and
+      key-remap finalization.
+- [x] Theme loading (themes-dir locator + file read + palette/option
+      application) — Experiment 182 proves renamed user and app-resource theme
+      directories, absolute and named theme file loading, user-over-theme replay
+      priority, light/dark conditional reload, and theme-driven option/palette
+      application.
 - [x] Conditional state wiring (`changeConditionalState` + conditional reload)
 - [x] `font-codepoint-map` + `clipboard-codepoint-map` as config fields
 - [x] `SharedGridSet` config→font assembly (`Key`/`DerivedConfig` → discovery →
@@ -1605,7 +1613,7 @@ stays unaltered except for the rename).
 - [Experiment 181: Phase C — ASCII terminal milestone](181-ascii-terminal-milestone.md)
   — **Pass**
 - [Experiment 182: Phase F — config finalize and theme audit](182-config-finalize-theme-audit.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 

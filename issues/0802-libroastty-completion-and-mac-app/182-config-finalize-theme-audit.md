@@ -124,3 +124,76 @@ the audit-only plan is legitimate because current source already shows
 `Config::finalize()` wiring theme finalization, scalar finalization, and
 key-remap finalization, with named/absolute theme loading and theme-location
 discovery covered by the cited regions. Required hygiene checks are present.
+
+## Result
+
+**Result:** Pass.
+
+The current source and focused regression tests prove both remaining Phase F
+roadmap items: `Config::finalize()` and theme loading.
+
+Source audit:
+
+- `roastty/src/config/mod.rs` shows `Config::finalize()` delegating to
+  `finalize_with_report()`, which uses `ConfigThemeLocations::default()`, calls
+  `finalize_theme()` first, then `finalize_scalars()`.
+- `finalize_theme()` selects the light/dark theme from the conditional state,
+  resolves absolute or named theme paths, loads the theme file, parses it into a
+  fresh `Config`, replays user file/CLI entries over the theme config, restores
+  replay entries and conditional state, applies the finalized theme config, and
+  handles different light/dark themes by forcing `window-theme = system` when
+  needed and marking `conditional::Key::Theme`.
+- `resolve_theme_path()` accepts absolute paths directly, rejects non-absolute
+  names containing path separators, searches the configured theme locations in
+  order, continues only past `NotFound`, reports IO errors, rejects non-files,
+  and records tried paths for not-found reports.
+- `ConfigThemeLocations::default()` includes the renamed user theme directory
+  from `loader::user_theme_dir()` and the app resources `themes` directory from
+  `resources_dir::resources_dir()`.
+- `roastty/src/config/loader.rs` defines the renamed user theme directory as
+  `$XDG_CONFIG_HOME/roastty/themes` or `$HOME/.config/roastty/themes`.
+- `finalize_scalars()` covers the cross-field/default/clamp tail: font-family
+  inheritance, empty `term` repair, working-directory defaulting, command/home
+  resolution, GTK single-instance detect defaulting, click repeat repair, mouse
+  multiplier clamps, split opacity clamp, minimum contrast clamp, window-size
+  clamps, `link-url` mutation, quit-delay warning report, auto-update-channel
+  defaulting, faint-opacity clamp, and `key_remap.finalize()`.
+- `roastty/src/input/key_mods.rs` has deterministic key-remap finalization tests
+  that prove right-side mappings take precedence before broader mappings.
+
+Focused verification:
+
+- `cargo test -p roastty config_finalize_scalar_tail` — **Pass**, 1 test.
+- `cargo test -p roastty config_working_directory_finalize` — **Pass**, 6 tests.
+- `cargo test -p roastty config_command_home_finalize` — **Pass**, 8 tests.
+- `cargo test -p roastty config_gtk_single_instance_finalize` — **Pass**, 4
+  tests.
+- `cargo test -p roastty config_quit_delay_finalize_warning` — **Pass**, 1 test.
+- `cargo test -p roastty config_link_url_finalize` — **Pass**, 1 test.
+- `cargo test -p roastty key_remap_set_finalize` — **Pass**, 1 test.
+- `cargo test -p roastty config_theme_loading` — **Pass**, 15 tests.
+- `cargo test -p roastty config_conditional_theme` — **Pass**, 7 tests.
+- `cargo test -p roastty palette` — **Pass**, 55 tests.
+- `cargo test -p roastty surface_apply_config_updates_palette` — **Pass**, 1
+  test.
+- `cargo fmt --check -p roastty` — **Pass**.
+
+The two remaining Phase F checklist items can now be checked. Remaining Issue
+802 work is in Phase G and the optional debug overlay.
+
+## Completion Review
+
+Codex-native adversarial subagent `Galileo` reviewed the completed experiment
+with fresh context before the result commit. It inspected the experiment file,
+README update, uncommitted result diff, relevant config/key-remap source, and
+claimed verification. Verdict: **APPROVED**. Findings: none.
+
+## Conclusion
+
+Phase F is complete. The broad `finalize()` roadmap item is covered by the
+current finalize pipeline and focused tests for each upstream-derived slice. The
+theme-loading roadmap item is covered by absolute and named theme lookup, user
+and resource theme directories, file read/report behavior, user-over-theme
+replay priority, light/dark conditional reload, and palette/option application
+through config finalization and runtime palette derivation. This experiment did
+not change production code; it closed stale roadmap proof gaps.
