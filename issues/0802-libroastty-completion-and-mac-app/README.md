@@ -996,8 +996,11 @@ the live app, verified by a Phase-D UI test.)
 
 **Phase C — Live render path (the crux)**
 
-- [ ] `surface_draw` owns a Metal renderer bound to the app `NSView`/`CALayer`;
-      attach the layer and present on-screen
+- [x] `surface_draw` owns a Metal renderer bound to the app `NSView`/`CALayer`;
+      attach the layer and present on-screen — Experiment 180 proves the copied
+      app creates surfaces with its AppKit `NSView`, the Rust `Surface` owns
+      `SurfaceLiveRenderer`, `build_live_renderer` attaches the IOSurface layer
+      to that `NSView`, and live smoke presents on-screen through CoreVideo.
 - [x] Render thread (frame pacing + cursor-blink timer) -
       Display-link/frame-pacing startup rendering is now live-proven by
       Experiment 177: the copied app selected CoreVideo display link and
@@ -1009,7 +1012,11 @@ the live app, verified by a Phase-D UI test.)
       presentation while invisible, requests a live redraw when visible again,
       keeps focus/cursor/custom-shader option updates on one helper path, and
       forces live renderer rebuild/redraw on config changes.
-- [ ] Retire the interim `render_state` pull divergence
+- [x] Retire the interim `render_state` pull divergence — Experiment 180 proves
+      the copied app render loop no longer calls
+      `roastty_surface_render_state_update` or lower-level C render-state
+      row/cell APIs. The public C render-state ABI remains for upstream `lib_vt`
+      parity and tests, not for copied-app rendering.
 - [ ] **Milestone: the app launches and shows a working ASCII terminal**
 
 **Phase D — Automated UI tests for the roastty-backed app**
@@ -1589,7 +1596,7 @@ stays unaltered except for the rename).
 - [Experiment 179: Phase C — renderer options propagation](179-renderer-options-propagation.md)
   — **Pass**
 - [Experiment 180: Phase C — live draw ownership audit](180-live-draw-ownership-audit.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
