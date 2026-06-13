@@ -41494,6 +41494,7 @@ mod tests {
             .unwrap()
             .with_termio(|termio| termio.child_id());
 
+        wait_until(|| roastty_surface_foreground_pid(surface) == u64::from(child_id));
         assert_eq!(roastty_surface_foreground_pid(surface), u64::from(child_id));
 
         roastty_surface_free(surface);

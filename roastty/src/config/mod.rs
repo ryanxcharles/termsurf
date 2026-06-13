@@ -439,6 +439,8 @@ pub(crate) struct Config {
     pub font_shaping_break: FontShapingBreak,
     /// `grapheme-width-method`.
     pub grapheme_width_method: GraphemeWidthMethod,
+    /// `freetype-load-flags`.
+    pub freetype_load_flags: FreetypeLoadFlags,
     /// `osc-color-report-format`.
     pub osc_color_report_format: OscColorReportFormat,
     /// `vt-kam-allowed`.
@@ -688,6 +690,7 @@ impl Default for Config {
             font_thicken_strength: 255,
             font_shaping_break: FontShapingBreak::default(),
             grapheme_width_method: GraphemeWidthMethod::Unicode,
+            freetype_load_flags: FreetypeLoadFlags::default(),
             osc_color_report_format: OscColorReportFormat::Bits16,
             vt_kam_allowed: false,
             custom_shader: RepeatableConfigPath::default(),
@@ -848,6 +851,8 @@ impl Config {
             .entry_optional(self.adjust_icon_height, |v, f| format_metric_modifier(v, f));
         self.grapheme_width_method
             .format_entry(&mut EntryFormatter::new("grapheme-width-method", out));
+        self.freetype_load_flags
+            .format_entry(&mut EntryFormatter::new("freetype-load-flags", out));
         EntryFormatter::new("theme", out)
             .entry_optional(self.theme.clone(), |v, f| v.format_entry(f));
         self.background
@@ -1888,6 +1893,13 @@ impl Config {
                     value,
                     default.grapheme_width_method,
                     GraphemeWidthMethod::from_keyword,
+                )?
+            }
+            "freetype-load-flags" => {
+                self.freetype_load_flags = set_packed_field(
+                    value,
+                    default.freetype_load_flags,
+                    FreetypeLoadFlags::parse_cli,
                 )?
             }
             "osc-color-report-format" => {
@@ -7723,6 +7735,89 @@ impl Default for FontShapingBreak {
     }
 }
 
+/// The `freetype-load-flags` config (upstream `FreetypeLoadFlags`): FreeType
+/// glyph load flags. These are parsed and stored on every platform, but only a
+/// FreeType font backend can consume them at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FreetypeLoadFlags {
+    /// Enable hinting.
+    pub hinting: bool,
+    /// Always use the FreeType auto-hinter instead of the font's native hinter.
+    pub force_autohint: bool,
+    /// Use 1-bit monochrome rendering.
+    pub monochrome: bool,
+    /// Enable the FreeType auto-hinter.
+    pub autohint: bool,
+    /// Use light hinting style.
+    pub light: bool,
+}
+
+impl FreetypeLoadFlags {
+    /// Format as a packed-struct config entry in upstream field order.
+    pub(crate) fn format_entry(self, formatter: &mut EntryFormatter) {
+        formatter.entry_flags(&[
+            ("hinting", self.hinting),
+            ("force-autohint", self.force_autohint),
+            ("monochrome", self.monochrome),
+            ("autohint", self.autohint),
+            ("light", self.light),
+        ]);
+    }
+
+    /// Parse a packed-struct flag value (upstream `cli.args.parsePackedStruct`):
+    /// a standalone bool sets every flag; otherwise a `[no-]flag` comma-list
+    /// sets the named flags, with defaults for the rest.
+    pub(crate) fn parse_cli(value: &str) -> Result<Self, FlagsParseError> {
+        let mut result = FreetypeLoadFlags::default();
+        parse_packed_flags(value, |tok| match tok {
+            FlagToken::All(b) => {
+                result.hinting = b;
+                result.force_autohint = b;
+                result.monochrome = b;
+                result.autohint = b;
+                result.light = b;
+                true
+            }
+            FlagToken::One("hinting", on) => {
+                result.hinting = on;
+                true
+            }
+            FlagToken::One("force-autohint", on) => {
+                result.force_autohint = on;
+                true
+            }
+            FlagToken::One("monochrome", on) => {
+                result.monochrome = on;
+                true
+            }
+            FlagToken::One("autohint", on) => {
+                result.autohint = on;
+                true
+            }
+            FlagToken::One("light", on) => {
+                result.light = on;
+                true
+            }
+            FlagToken::One(_, _) => false,
+        })?;
+        Ok(result)
+    }
+}
+
+impl Default for FreetypeLoadFlags {
+    /// Upstream's field defaults: hinting/autohint/light enabled,
+    /// force-autohint/monochrome disabled.
+    fn default() -> Self {
+        Self {
+            hinting: true,
+            force_autohint: false,
+            monochrome: false,
+            autohint: true,
+            light: true,
+        }
+    }
+}
+
 /// The `scroll-to-bottom` config (upstream `ScrollToBottom`): when the viewport
 /// snaps to the bottom. `keystroke` (default `true`) snaps on a keystroke;
 /// `output` (default `false`) snaps on new output.
@@ -8484,11 +8579,11 @@ mod tests {
         ConfigReplayEntry, ConfigSetError, ConfigSetSource, ConfigThemeLoadReport,
         ConfirmCloseSurface, CopyOnSelect, CursorStyle, CustomShaderAnimation, DefaultConfigPaths,
         Duration, DurationParseError, FlagsParseError, FontShapingBreak, FontStyle,
-        FontStyleParseError, FontSyntheticStyle, FontVariation, Fullscreen, GraphemeWidthMethod,
-        GtkSingleInstance, GtkTabsLocation, GtkTitlebarStyle, GtkToolbarStyle, LinkPreviews,
-        LinuxCgroup, MacAppIcon, MacAppIconFrame, MacHidden, MacOSDockDropBehavior, MacShortcuts,
-        MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError, MetricModifier,
-        MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
+        FontStyleParseError, FontSyntheticStyle, FontVariation, FreetypeLoadFlags, Fullscreen,
+        GraphemeWidthMethod, GtkSingleInstance, GtkTabsLocation, GtkTitlebarStyle, GtkToolbarStyle,
+        LinkPreviews, LinuxCgroup, MacAppIcon, MacAppIconFrame, MacHidden, MacOSDockDropBehavior,
+        MacShortcuts, MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError,
+        MetricModifier, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
         MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
         QuickTerminalDimensions, QuickTerminalKeyboardInteractivity, QuickTerminalLayer,
@@ -8913,6 +9008,7 @@ mod tests {
         assert_eq!(d.font_shaping_break, FontShapingBreak::default());
         // Terminal/render-behavior group (Experiment 471).
         assert_eq!(d.grapheme_width_method, GraphemeWidthMethod::Unicode);
+        assert_eq!(d.freetype_load_flags, FreetypeLoadFlags::default());
         assert_eq!(d.osc_color_report_format, OscColorReportFormat::Bits16);
         assert!(!d.vt_kam_allowed);
         assert!(d.custom_shader.list.is_empty());
@@ -15749,6 +15845,7 @@ mod tests {
             "adjust-box-thickness",
             "adjust-icon-height",
             "grapheme-width-method",
+            "freetype-load-flags",
             "theme",
             "background",
             "foreground",
@@ -17117,6 +17214,17 @@ mod tests {
         );
 
         let mut cfg = Config::default();
+        cfg.set(
+            "freetype-load-flags",
+            Some("no-hinting,force-autohint,monochrome,no-light"),
+        )
+        .unwrap();
+        assert_eq!(
+            line(&cfg, "freetype-load-flags"),
+            "freetype-load-flags = no-hinting,force-autohint,monochrome,autohint,no-light"
+        );
+
+        let mut cfg = Config::default();
         cfg.set("bell-features", Some("system,no-title,border"))
             .unwrap();
         assert_eq!(
@@ -17192,10 +17300,18 @@ mod tests {
             cfg.set("scroll-to-bottom", None),
             Err(ConfigSetError::ValueRequired)
         );
+        assert_eq!(
+            cfg.set("freetype-load-flags", None),
+            Err(ConfigSetError::ValueRequired)
+        );
         // …but the bool's bare flag is `true` (handled above), and an invalid value
         // is `InvalidValue` for both.
         assert_eq!(
             cfg.set("scroll-to-bottom", Some("nope")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("freetype-load-flags", Some("nope")),
             Err(ConfigSetError::InvalidValue)
         );
         assert_eq!(
@@ -17220,6 +17336,145 @@ mod tests {
             line(&cfg, "scroll-to-bottom"),
             "scroll-to-bottom = keystroke,no-output"
         );
+
+        let mut cfg = Config::default();
+        cfg.set("freetype-load-flags", Some("false")).unwrap();
+        cfg.set("freetype-load-flags", Some("")).unwrap(); // reset
+        assert_eq!(
+            line(&cfg, "freetype-load-flags"),
+            "freetype-load-flags = hinting,no-force-autohint,no-monochrome,autohint,light"
+        );
+    }
+
+    #[test]
+    fn freetype_load_flags_config_parse_format_reset_load_and_clone() {
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("freetype-load-flags = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.freetype_load_flags, FreetypeLoadFlags::default());
+        assert_eq!(
+            line(&cfg),
+            "freetype-load-flags = hinting,no-force-autohint,no-monochrome,autohint,light"
+        );
+
+        cfg.set("freetype-load-flags", Some("false")).unwrap();
+        assert_eq!(
+            cfg.freetype_load_flags,
+            FreetypeLoadFlags {
+                hinting: false,
+                force_autohint: false,
+                monochrome: false,
+                autohint: false,
+                light: false,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "freetype-load-flags = no-hinting,no-force-autohint,no-monochrome,no-autohint,no-light"
+        );
+
+        cfg.set("freetype-load-flags", Some("true")).unwrap();
+        assert_eq!(
+            cfg.freetype_load_flags,
+            FreetypeLoadFlags {
+                hinting: true,
+                force_autohint: true,
+                monochrome: true,
+                autohint: true,
+                light: true,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "freetype-load-flags = hinting,force-autohint,monochrome,autohint,light"
+        );
+
+        cfg.set(
+            "freetype-load-flags",
+            Some(" no-hinting , force-autohint , monochrome , no-light "),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.freetype_load_flags,
+            FreetypeLoadFlags {
+                hinting: false,
+                force_autohint: true,
+                monochrome: true,
+                autohint: true,
+                light: false,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "freetype-load-flags = no-hinting,force-autohint,monochrome,autohint,no-light"
+        );
+
+        cfg.set("freetype-load-flags", Some("")).unwrap();
+        assert_eq!(cfg.freetype_load_flags, FreetypeLoadFlags::default());
+        assert_eq!(
+            line(&cfg),
+            "freetype-load-flags = hinting,no-force-autohint,no-monochrome,autohint,light"
+        );
+
+        assert_eq!(
+            cfg.set("freetype-load-flags", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("freetype-load-flags", Some("linear-design")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("freetype-load-flags", Some("force_autohint")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics = cfg.load_str(
+            "freetype-load-flags = no-hinting\n\
+             freetype-load-flags = force_autohint\n\
+             freetype-load-flags\n\
+             freetype-load-flags =\n",
+        );
+        assert_eq!(cfg.freetype_load_flags, FreetypeLoadFlags::default());
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "freetype-load-flags".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "freetype-load-flags".to_string(),
+                    error: ConfigSetError::ValueRequired,
+                },
+            ]
+        );
+
+        let diagnostics = cfg.set_cli_args(["--freetype-load-flags=no-autohint"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.freetype_load_flags,
+            FreetypeLoadFlags {
+                hinting: true,
+                force_autohint: false,
+                monochrome: false,
+                autohint: false,
+                light: true,
+            }
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.freetype_load_flags, cfg.freetype_load_flags);
     }
 
     #[test]

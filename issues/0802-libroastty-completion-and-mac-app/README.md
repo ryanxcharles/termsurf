@@ -244,6 +244,12 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   `grapheme-width-method`, including optional empty resets, absolute integer
   deltas, percent deltas, and upstream `<= -100%` percent clamping. Applying
   these modifiers to live font metrics remains font runtime work.
+- **FreeType load flags config is parser/formatter-only.** Exp 171 wires
+  upstream `freetype-load-flags` packed-struct syntax after
+  `grapheme-width-method`, including `true`/`false` all-flag values,
+  comma-separated `[no-]flag` tokens, empty reset, and upstream defaults.
+  Applying these flags remains FreeType font-backend runtime work; macOS still
+  uses CoreText.
 - **Codepoint width needs more than scalar Rust ranges.** Exp 151 added a
   width-only helper and proved full Unicode-scalar parity with the generated
   table, but the release probe measured only 0.76x versus direct table width
@@ -988,8 +994,7 @@ the live app, verified by a Phase-D UI test.)
 
 **Phase F — Config completeness**
 
-- [ ] The remaining 3 public config options (`freetype-load-flags`, `input`, and
-      `keybind`)
+- [ ] The remaining 2 public config options (`input` and `keybind`)
 - [ ] `finalize()` — cross-field validation / derivation / clamping
 - [ ] Theme loading (themes-dir locator + file read + palette/option
       application)
@@ -1531,7 +1536,7 @@ stays unaltered except for the rename).
 - [Experiment 170: Phase F — font metric adjust config](170-font-metric-adjust-config.md)
   — **Pass**
 - [Experiment 171: Phase F — FreeType load flags config](171-freetype-load-flags-config.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
