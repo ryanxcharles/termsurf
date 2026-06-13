@@ -120,4 +120,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
   — **Partial** (XCTest, bootstrap, screenshots, scroll, and drag pass; external
   keyboard still fails, click/right-click lacks a strong receipt oracle)
 - [Experiment 5: Rerun after Input Monitoring grant](05-rerun-after-input-monitoring-grant.md)
-  — **Designed**
+  — **Partial** (Input Monitoring grant confirmed for Ghostty; System Events and
+  CGEvent keyboard still do not reach Roastty)

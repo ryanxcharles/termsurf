@@ -149,4 +149,109 @@ Overall result:
 
 ## Result
 
-Not run yet.
+**Result:** Partial.
+
+Granting Input Monitoring to Ghostty and restarting Ghostty plus Codex did not
+make either external keyboard path reach Roastty. Both System Events and CGEvent
+keyboard commands returned successfully while Roastty was frontmost and visible,
+but neither marker file was created.
+
+Logs are in `logs/` with the `issue804-exp5-` prefix. Screenshots are in
+`/Users/astrohacker/.cache/termsurf/shots/`.
+
+### Preflight
+
+`logs/issue804-exp5-preflight.log` shows:
+
+- `AXIsProcessTrusted()` printed `true`.
+- Apple Events to `System Events` returned process count `63`.
+- The session is a restarted Ghostty-hosted Codex session:
+  `/Applications/Ghostty.app/Contents/MacOS/ghostty -> login -> zsh -> codex -> zsh`.
+
+`logs/issue804-exp5-tcc-rerun.log` also confirms the relevant Input Monitoring
+TCC service was changed for Ghostty before this rerun:
+
+```text
+Publishing <TCCDEvent: type=Modify, service=kTCCServiceListenEvent,
+identifier_type=Bundle ID, identifier=com.mitchellh.ghostty>
+```
+
+This confirms the new permission under test was present for the responsible host
+app.
+
+### Launch and Focus
+
+`logs/issue804-exp5-launch.log` shows:
+
+- Debug Roastty launched as PID `93603`.
+- Window discovery found the visible terminal window:
+  `id=396 layer=0 bounds=(489,161 800x632) name="👻"`.
+- `winid.swift` selected that same visible window: `396 489 161 800 632`.
+- System Events made Roastty frontmost; the frontmost process was `roastty`.
+- Screenshot capture passed:
+  `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp5-before-keyboard-20260613-134953.png`.
+
+### System Events Keyboard
+
+`logs/issue804-exp5-keyboard-system-events.log` shows:
+
+- The warmup key, `keystroke`, and Return commands returned without tool errors.
+- The marker file was not created:
+  `cat: /tmp/termsurf-issue804-exp5-system-events/marker.txt: No such file or directory`.
+
+Result: **Fail** for System Events keyboard after Input Monitoring grant.
+
+### CGEvent Keyboard
+
+`logs/issue804-exp5-keyboard-cgevent.log` shows:
+
+- `inject.swift key`, `inject.swift type`, and Return commands returned without
+  tool errors.
+- The marker file was not created:
+  `cat: /tmp/termsurf-issue804-exp5-cgevent/marker.txt: No such file or directory`.
+
+Result: **Fail** for CGEvent keyboard after Input Monitoring grant.
+
+### Investigation and Cleanup
+
+`logs/issue804-exp5-investigation-cleanup.log` shows:
+
+- Post-attempt screenshot capture passed:
+  `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp5-after-keyboard-20260613-134955.png`.
+- Roastty was still frontmost and visible after both failed keyboard attempts:
+  `roastty, true, true, missing value`.
+- The checked `ioreg` Secure Input query did not report a Secure Input marker.
+- Cleanup killed debug Roastty PID `93603`.
+- No debug Roastty process remained afterward.
+
+The initial TCC diagnostic in this log used `log` without an absolute path, so
+zsh interpreted it as its `log` builtin and printed
+`zsh:log:61: too many arguments`. The diagnostic was rerun successfully with
+`/usr/bin/log` in `logs/issue804-exp5-tcc-rerun.log`.
+
+The TCC rerun shows many `kTCCServiceListenEvent` preflight queries, plus the
+Ghostty Input Monitoring modify event noted above. It did not reveal an explicit
+TCC denial for the keyboard-posting commands. It did log a separate Roastty
+Accessibility preflight warning:
+
+```text
+identifier=com.mitchellh.roastty.debug ... attempted to call TCCAccessRequest
+for kTCCServiceAccessibility without the recommended entitlement
+```
+
+That warning is from the Roastty process itself checking Accessibility and does
+not explain the external keyboard failure, because the keyboard posting is being
+attempted from the Ghostty-hosted agent path and Roastty stayed frontmost and
+visible.
+
+## Conclusion
+
+Input Monitoring did not fix external keyboard delivery to Roastty in this VM.
+At this point, the likely issue is not a missing Accessibility, Automation, or
+Input Monitoring grant for Ghostty.
+
+The next experiment should instrument Roastty's AppKit event entry points
+(`keyDown`, `insertText`, marked text, and first-responder/focus callbacks) and
+rerun the same two keyboard injections. That will tell us whether the synthetic
+events fail before entering Roastty, enter AppKit but do not reach the terminal
+view, or reach the terminal view and fail during terminal forwarding.
