@@ -307,6 +307,11 @@ experiment files until they are proven.
   wherever possible. Until a later experiment intentionally tests custom
   Roastty-only config options, keep these files aligned so Ghostty and Roastty
   should look nearly identical except for app naming.
+- **App-facing ABI parity must be scoped before diffing.** Roastty's C header is
+  intentionally larger than Ghostty's header, so full symbol-count equality is
+  the wrong oracle. Experiment 4 uses Swift app-source identifiers as the
+  app-facing ABI slice, then separately records non-app header differences as
+  follow-up source-audit rows.
 
 ## Verification
 
@@ -325,4 +330,4 @@ remains open.
   **Pass**
 - [Experiment 3: Parity matrix schema](03-parity-matrix-schema.md) — **Pass**
 - [Experiment 4: Embedded ABI app bridge audit](04-embedded-abi-app-bridge-audit.md)
-  — **Designed**
+  — **Partial**

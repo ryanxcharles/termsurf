@@ -230,3 +230,89 @@ Overall result:
 - **Partial** if the inventory is complete but unresolved `Gap` rows remain.
 - **Fail** if the inventory cannot be reproduced or the audit leaves missing
   symbols unclassified.
+
+## Result
+
+**Result:** Partial
+
+Experiment 4 created the durable app-facing ABI inventory:
+
+- `issues/0805-roastty-ghostty-parity/abi-app-symbols.md`
+
+The app-facing embedded ABI slice passed:
+
+- upstream Swift app sources under `vendor/ghostty/macos/Sources` contain 538
+  `ghostty_*` / `GHOSTTY_*` identifiers;
+- Roastty Swift app sources under `roastty/macos/Sources` contain 539
+  `roastty_*` / `ROASTTY_*` identifiers;
+- after prefix mapping, no upstream Swift app-source identifier is missing from
+  Roastty Swift app sources;
+- the only extra Roastty Swift identifier is `ROASTTY_UI_KEY_TRACE_PATH`, a
+  Roastty-only automation trace key;
+- all Swift-used C ABI identifiers are declared in `roastty/include/roastty.h`;
+- app-facing Roastty header functions are backed by
+  `#[no_mangle] pub extern "C" fn` definitions in `roastty/src/lib.rs`, with
+  `roastty_string_s` classified as a regex false positive from callback typedef
+  return types.
+
+The experiment is Partial because the full-header comparison surfaced a
+non-app-facing unresolved `Gap` row in `source-audit.md`:
+
+- `roastty_app_open_config`
+- `roastty_benchmark_cli`
+- `roastty_inspector_metal_shutdown`
+- `roastty_translate`
+
+These are not referenced by `vendor/ghostty/macos/Sources`, so they do not
+invalidate the app-facing ABI result. They do block final Issue 805 parity until
+later experiments either implement them, mark them not applicable, or record an
+accepted intentional divergence. `roastty_benchmark_cli` is especially concrete
+because `roastty/macos/Tests/BenchmarkTests.swift` references it while
+`roastty/include/roastty.h` does not declare it.
+
+Verification:
+
+- `logs/issue805-exp4-abi-extraction.log`
+  - `mapped_header_missing` contains the four non-app functions listed above.
+  - `swift_mapped_missing` is empty.
+  - `swift_roastty_extra` contains only `ROASTTY_UI_KEY_TRACE_PATH`.
+  - `swift_mapped_missing_from_roastty_header` contains only environment-string
+    or Swift-local identifiers, not C ABI declarations.
+  - `roastty_header_missing_export` contains only the `roastty_string_s` typedef
+    false positive.
+- `cargo test -p roastty` initially reported one failure in
+  `tests::config_cli_keybind_chain_without_parent_reports_diagnostic`.
+- `cargo test -p roastty tests::config_cli_keybind_chain_without_parent_reports_diagnostic -- --exact`
+  passed, proving the failing test passes in isolation.
+- `cargo test -p roastty -- --test-threads=1` passed:
+  `4896 passed; 0 failed; 4 ignored`; the C ABI harness also passed with 10
+  existing enum-cast warnings.
+- The planned app build script path,
+  `scripts/roastty-app/build-macos-app.sh Debug`, does not exist in this
+  checkout. The correct app build command is
+  `cd roastty && nu macos/build.nu --configuration Debug`.
+- `cd roastty && nu macos/build.nu --configuration Debug` passed with
+  `** BUILD SUCCEEDED **`; Xcode emitted stale-file warnings outside allowed
+  root paths.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+The reviewer reported no findings. It verified that the result is correctly
+marked `Partial`, the app-facing ABI pass and full-header non-app `SRC-004` gap
+are accurately documented, the inventory matches
+`logs/issue805-exp4-abi-extraction.log`, the verification claims match the Rust
+test and app build logs, source-audit rows include evidence and guard fields,
+the result commit had not been made before review, and `git diff --check`
+passes.
+
+## Conclusion
+
+The macOS app-facing embedded ABI bridge has a reproducible static guard and is
+passing for the copied app sources. The next source-audit work should address
+the non-app Ghostty header functions now tracked in `SRC-004`, starting with
+`roastty_benchmark_cli` because a renamed Roastty macOS test already references
+it.
