@@ -331,3 +331,5 @@ remains open.
 - [Experiment 3: Parity matrix schema](03-parity-matrix-schema.md) — **Pass**
 - [Experiment 4: Embedded ABI app bridge audit](04-embedded-abi-app-bridge-audit.md)
   — **Partial**
+- [Experiment 5: Resolve non-app embedded ABI functions](05-resolve-non-app-embedded-abi-functions.md)
+  — **Designed**
