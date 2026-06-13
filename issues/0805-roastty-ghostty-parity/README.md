@@ -311,3 +311,5 @@ remains open.
 ## Experiments
 
 - [Experiment 1: Pinned A/B baseline](01-pinned-ab-baseline.md) — **Partial**
+- [Experiment 2: Keyboard target isolation](02-keyboard-target-isolation.md) —
+  **Designed**
