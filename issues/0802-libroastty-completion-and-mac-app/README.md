@@ -1614,6 +1614,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 182: Phase F — config finalize and theme audit](182-config-finalize-theme-audit.md)
   — **Pass**
+- [Experiment 183: Phase G — key sequence and table audit](183-key-sequence-table-audit.md)
+  — **Designed**
 
 ## Process
 
