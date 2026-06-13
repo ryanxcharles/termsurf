@@ -383,9 +383,10 @@ agent provenance, as long as:
 
 - the reserved workflow keys are preserved: `README.md` always carries `status`
   and `opened` (plus `closed` when closed), unchanged in name and meaning;
-- additive keys are valid TOML between the `+++` delimiters and do not contradict
-  the reserved keys or the index tooling — `scripts/build-issues-index.sh` reads
-  only the reserved README keys and ignores the rest;
+- additive keys are valid TOML between the `+++` delimiters and do not
+  contradict the reserved keys or the index tooling —
+  `scripts/build-issues-index.sh` reads only the reserved README keys and
+  ignores the rest;
 - the issue documents its own added schema in its `README.md`.
 
 #### README.md structure
@@ -505,6 +506,12 @@ stage.
 
 The reviewing agent may be Codex, Claude, or another explicitly requested agent,
 but it must be separate from the implementation pass.
+
+Adversarial reviewers are allowed up to **15 minutes** to complete a review.
+After spawning a reviewer, do not interrupt it, demand a bounded verdict, close
+it, or proceed around it before that time has elapsed unless the user explicitly
+asks you to stop or change direction. If the reviewer finishes earlier, use its
+verdict normally.
 
 #### Experiment commits
 

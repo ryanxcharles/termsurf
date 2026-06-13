@@ -204,6 +204,11 @@ input, not a verdict you must obey blindly.
 5. Respect the commit gates: do not implement after a design review until the
    plan commit exists; do not design the next experiment after a result review
    until the result commit exists.
+6. Give the adversarial reviewer up to **15 minutes** to finish. Do not
+   interrupt it for a bounded verdict, close it, or proceed around the review
+   before that time has elapsed unless the user explicitly asks you to stop or
+   change direction. If it completes earlier, use the completed verdict
+   normally.
 
 ## Self-review caveat (read this)
 
