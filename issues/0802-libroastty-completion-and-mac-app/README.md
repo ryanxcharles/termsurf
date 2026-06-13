@@ -1483,6 +1483,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 163: Phase G — global event tap installation state](163-global-event-tap-installation-state.md)
   — **Pass**
+- [Experiment 164: Phase F — palette config runtime](164-palette-config-runtime.md)
+  — **Designed**
 
 ## Process
 
