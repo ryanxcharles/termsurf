@@ -2671,6 +2671,7 @@ struct App {
     keybind_triggers: Vec<ConfigKeybind>,
     keybind_sequences: ConfigKeybindSet,
     keybind_tables: Vec<ConfigKeybindTable>,
+    initial_surface_pending: bool,
     surfaces: Vec<NonNull<Surface>>,
 }
 
@@ -2819,6 +2820,7 @@ struct Surface {
     userdata: *mut c_void,
     working_directory: Option<String>,
     command: Option<String>,
+    initial_surface: bool,
     env_vars: Vec<(String, String)>,
     initial_input: Option<Vec<u8>>,
     context: c_int,
@@ -3597,39 +3599,55 @@ impl Surface {
         let resource_dir = os::resources_dir::resources_dir()
             .ok()
             .and_then(|resources| resources.host().map(PathBuf::from));
-        let termio = match self
+        let command = self
             .command
             .as_deref()
-            .filter(|command| !command.is_empty())
-        {
-            Some(command) => termio::Termio::spawn_with_options(
+            .filter(|command| !command.is_empty());
+        let initial_command = if command.is_none() && self.initial_surface {
+            config.initial_command.as_ref()
+        } else {
+            None
+        };
+
+        let options = termio::TermioSpawnOptions {
+            cwd,
+            env: self.env_vars.clone(),
+            cursor_visual_style: config.cursor_style.to_terminal(),
+            cursor_blink: config.cursor_style_blink,
+            shell_integration: config.shell_integration,
+            shell_integration_features: config.shell_integration_features,
+            resource_dir: resource_dir.clone(),
+            term: config.term.clone(),
+        };
+
+        let termio = match (command, initial_command) {
+            (Some(command), _) => {
+                termio::Termio::spawn_with_options("/bin/sh", ["-lc", command], options, size)
+            }
+            (None, Some(config::Command::Shell(command))) => termio::Termio::spawn_with_options(
                 "/bin/sh",
-                ["-lc", command],
-                termio::TermioSpawnOptions {
-                    cwd,
-                    env: self.env_vars.clone(),
-                    cursor_visual_style: config.cursor_style.to_terminal(),
-                    cursor_blink: config.cursor_style_blink,
-                    shell_integration: config.shell_integration,
-                    shell_integration_features: config.shell_integration_features,
-                    resource_dir: resource_dir.clone(),
-                    term: config.term.clone(),
-                },
+                ["-lc", command.as_str()],
+                options,
                 size,
             ),
-            None => termio::Termio::spawn_with_options(
+            (None, Some(config::Command::Direct(args))) => match args.split_first() {
+                Some((program, args)) => termio::Termio::spawn_with_options(
+                    program,
+                    args.iter().map(String::as_str),
+                    options,
+                    size,
+                ),
+                None => termio::Termio::spawn_with_options(
+                    default_shell_program(),
+                    std::iter::empty::<&str>(),
+                    options,
+                    size,
+                ),
+            },
+            (None, None) => termio::Termio::spawn_with_options(
                 default_shell_program(),
                 std::iter::empty::<&str>(),
-                termio::TermioSpawnOptions {
-                    cwd,
-                    env: self.env_vars.clone(),
-                    cursor_visual_style: config.cursor_style.to_terminal(),
-                    cursor_blink: config.cursor_style_blink,
-                    shell_integration: config.shell_integration,
-                    shell_integration_features: config.shell_integration_features,
-                    resource_dir,
-                    term: config.term.clone(),
-                },
+                options,
                 size,
             ),
         };
@@ -13696,6 +13714,7 @@ pub extern "C" fn roastty_app_new(
         keybind_triggers,
         keybind_sequences,
         keybind_tables,
+        initial_surface_pending: true,
         surfaces: Vec::new(),
     }))
     .cast()
@@ -17095,12 +17114,20 @@ pub extern "C" fn roastty_surface_new(
         .map(|app| click_repeat_interval_ns(&app.parsed_config))
         .unwrap_or(500_000_000);
 
+    let initial_surface = app_from_handle(app)
+        .map(|app| {
+            let initial_surface = app.initial_surface_pending;
+            app.initial_surface_pending = false;
+            initial_surface
+        })
+        .unwrap_or(false);
     let font_size_points = sanitized_font_size_points(config.font_size);
     let surface = Box::new(Surface {
         app,
         userdata: config.userdata,
         working_directory: copied_config_string(config.working_directory),
         command: copied_config_string(config.command),
+        initial_surface,
         env_vars: copied_env_vars(config.env_vars, config.env_var_count),
         initial_input: copied_config_string(config.initial_input).map(String::into_bytes),
         context: valid_surface_context(config.context).unwrap_or(0),
@@ -19367,6 +19394,36 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn read_surface_screen_text(surface: RoasttySurface) -> String {
+        let mut text = RoasttyText {
+            tl_px_x: 0.0,
+            tl_px_y: 0.0,
+            offset_start: 0,
+            offset_len: 0,
+            text: ptr::null(),
+            text_len: 0,
+        };
+        let selection = RoasttySelection {
+            top_left: RoasttyPoint {
+                tag: ROASTTY_POINT_SCREEN,
+                coord: 0,
+                x: 0,
+                y: 0,
+            },
+            bottom_right: RoasttyPoint {
+                tag: ROASTTY_POINT_SCREEN,
+                coord: 0,
+                x: 200,
+                y: 200,
+            },
+            rectangle: false,
+        };
+        assert!(roastty_surface_read_text(surface, selection, &mut text));
+        let result = unsafe { CStr::from_ptr(text.text).to_string_lossy().into_owned() };
+        roastty_surface_free_text(surface, &mut text);
+        result
+    }
+
     fn test_worker(script: &str) -> termio::TermioWorker {
         test_worker_with_size(script, test_pty_size())
     }
@@ -19973,6 +20030,55 @@ mod tests {
 
         assert_eq!(app_surface_count(app), 0);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn first_surface_uses_app_initial_command() {
+        let _guard = pty_command_lock();
+        let config = roastty_config_new();
+        config_from_handle(config).unwrap().parsed.initial_command =
+            Some(config::Command::Direct(vec![
+                "/usr/bin/printf".to_string(),
+                "%s".to_string(),
+                "ROASTTY DIRECT 160".to_string(),
+            ]));
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| read_surface_screen_text(surface).contains("ROASTTY DIRECT 160"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn later_surface_after_close_ignores_app_initial_command() {
+        let _guard = pty_command_lock();
+        let config = roastty_config_new();
+        config_from_handle(config).unwrap().parsed.initial_command = Some(config::Command::Shell(
+            "printf ROASTTY_INITIAL_160".to_string(),
+        ));
+        let app = roastty_app_new(ptr::null(), config);
+        let first = new_test_surface(app);
+
+        assert!(surface_from_handle(first).unwrap().initial_surface);
+        roastty_surface_free(first);
+
+        let input = CString::new("printf ROASTTY_SECOND_160\n").unwrap();
+        let mut surface_config = roastty_surface_config_new();
+        surface_config.initial_input = input.as_ptr();
+        let second = new_test_surface_with_config(app, &surface_config);
+
+        assert!(!surface_from_handle(second).unwrap().initial_surface);
+        assert_eq!(roastty_surface_start(second), ROASTTY_SUCCESS);
+        wait_until(|| read_surface_screen_text(second).contains("ROASTTY_SECOND_160"));
+        assert!(!read_surface_screen_text(second).contains("ROASTTY_INITIAL_160"));
+
+        roastty_surface_free(second);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     #[test]

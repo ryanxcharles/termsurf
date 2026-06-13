@@ -542,7 +542,13 @@ the earlier "commit a small baseline PNG set" wording in Exp 2.
   which `roastty_surface_ime_point` needs for IME geometry. Exp 159 restores the
   copied-app custom-config title gate, so UI automation now proves
   `ROASTTY_CONFIG_PATH` reaches the visible first window before terminal-output
-  diagnostics continue.
+  diagnostics continue. Exp 160 fixes the embedded Rust first-surface launch
+  path so app-level `initial-command` runs for the initial copied-app surface;
+  the focused terminal-output UI selector now executes one test with 0 skips and
+  proves `TERMSURF_READY_158` through the real terminal accessibility path.
+  Dead-key output is still not app-visible: the route reaches
+  `committedPreeditText text=é`, but the terminal output exposes a replacement
+  character instead of visible `é`.
 - **Live Kitty graphics now draw in the Metal presentation pass.** Exp 141 adds
   persistent `ImageState<MetalTexture>` to the live surface renderer, updates it
   from terminal Kitty render-placement snapshots each frame, uploads pending
@@ -1455,7 +1461,7 @@ stays unaltered except for the rename).
 - [Experiment 159: Phase G — config title UI gate](159-config-title-ui-gate.md)
   — **Pass**
 - [Experiment 160: Phase G — terminal accessibility oracle](160-terminal-accessibility-oracle.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
