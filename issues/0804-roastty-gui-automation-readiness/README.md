@@ -258,3 +258,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
 - [Experiment 9: Trace key forwarding path](09-trace-key-forwarding-path.md) —
   **Partial** (trace identified the loss point: encoded key bytes cannot queue
   because the terminal worker command receiver is disconnected)
+- [Experiment 10: Trace worker disconnect](10-trace-worker-disconnect.md) —
+  **Designed**
