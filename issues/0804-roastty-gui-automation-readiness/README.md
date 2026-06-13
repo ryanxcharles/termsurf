@@ -117,4 +117,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
   — **Partial** (restart did not make CGEvent or System Events keyboard input
   reach Roastty)
 - [Experiment 4: Reproduce Issue 802 input methods against Roastty](04-reproduce-issue-802-methods-against-roastty.md)
-  — **Designed**
+  — **Partial** (XCTest, bootstrap, screenshots, scroll, and drag pass; external
+  keyboard still fails, click/right-click lacks a strong receipt oracle)

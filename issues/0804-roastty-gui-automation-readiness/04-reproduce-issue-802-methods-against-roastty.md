@@ -377,4 +377,190 @@ Overall result:
 
 ## Result
 
-Not run yet.
+**Result:** Partial.
+
+The current VM can build, launch, focus, screenshot, bootstrap, XCTest-drive,
+scroll, and drag-select the real Roastty GUI. The two external keyboard routes
+still fail against Roastty exactly as they did in Experiments 2 and 3: the
+posting commands return successfully while Roastty is frontmost and visible, but
+no marker file is created.
+
+Logs are in `logs/` with the `issue804-exp4-` prefix. Screenshots are in
+`/Users/astrohacker/.cache/termsurf/shots/`.
+
+### Summary Table
+
+| Method                    | Prior Issue 802 target   | Roastty result | Oracle               | Notes                                                                                                                              |
+| ------------------------- | ------------------------ | -------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| System Events keyboard    | Ghostty                  | **Fail**       | marker file          | Commands returned, Roastty stayed frontmost/visible, but `/tmp/termsurf-issue804-exp4-system-events/marker.txt` did not exist.     |
+| CGEvent keyboard          | helper/focus-sensitive   | **Fail**       | marker file          | Commands returned, Roastty stayed frontmost/visible, but `/tmp/termsurf-issue804-exp4-cgevent/marker.txt` did not exist.           |
+| XCTest keyboard           | Roastty                  | **Pass**       | xcodebuild trace     | Terminal-output UI test passed; dead-key UI test passed outright.                                                                  |
+| Launch bootstrap          | Ghostty/Roastty live A/B | **Pass**       | marker + screenshot  | Direct debug app launch with `ZDOTDIR`/`XDG_CONFIG_HOME` created `BOOTSTRAP_MARKER` and displayed `ISSUE804_EXP4_BOOTSTRAP_READY`. |
+| CGEvent click/right-click | Ghostty                  | **Partial**    | screenshot/frontmost | Move, left click, and right click returned; Roastty stayed frontmost. No context menu or byteprobe oracle proved receipt.          |
+| CGEvent scroll            | Roastty                  | **Pass**       | screenshots          | `seq 1 200` viewport moved from tail `178..200` to top `1..24`, then returned to tail.                                             |
+| CGEvent drag selection    | Roastty                  | **Pass**       | screenshot + pbpaste | First drag missed the text row; rerun at `windowY + 72pt` succeeded and `pbpaste` returned `DRAGSELECTME_TARGET_HERE`.             |
+| Window screenshot         | Ghostty/Roastty          | **Pass**       | PNG artifact         | Full-window screenshots captured the actual Roastty terminal window.                                                               |
+
+### Preflight, Build, Launch, and Screenshot
+
+`logs/issue804-exp4-preflight-launch.log` shows:
+
+- `AXIsProcessTrusted()` printed `true`.
+- Apple Events to `System Events` returned process count `61`.
+- `roastty/macos/build.nu --action build` completed with
+  `** BUILD SUCCEEDED **`.
+- Debug Roastty launched as PID `92483`.
+- System Events made Roastty frontmost; the frontmost process name was
+  `roastty`.
+- The screenshot helper captured the visible terminal window:
+  `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-initial-window-20260613-133522.png`.
+
+One initial `list-windows.swift` call printed no window rows immediately after
+launch, and `winid.swift` briefly printed an empty-size candidate (`227 0 0 0`).
+The screenshot helper then selected the real visible window
+`id=230 bounds=800x632pt` and captured a valid `1600x1264px` image. Later
+window-list calls consistently returned the visible `800x632` window after the
+same settle period.
+
+### External Keyboard
+
+System Events keyboard failed:
+
+- `logs/issue804-exp4-keyboard-system-events.log`
+  - Warmup key, text keystroke, and Return commands returned without tool
+    errors.
+  - `cat /tmp/termsurf-issue804-exp4-system-events/marker.txt` failed with
+    `No such file or directory`.
+  - Post-attempt screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-system-events-after-20260613-133542.png`.
+  - Roastty remained frontmost and visible:
+    `roastty, true, true, missing value`.
+
+CGEvent keyboard failed:
+
+- `logs/issue804-exp4-keyboard-cgevent.log`
+  - `inject.swift key`, `inject.swift type`, and Return commands returned
+    without tool errors.
+  - `cat /tmp/termsurf-issue804-exp4-cgevent/marker.txt` failed with
+    `No such file or directory`.
+  - Post-attempt screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-cgevent-after-20260613-133544.png`.
+  - Roastty remained frontmost and visible:
+    `roastty, true, true, missing value`.
+
+This confirms the external-keyboard failure is not caused by the app being in
+the background.
+
+### XCTest Keyboard
+
+Both focused XCTest routes passed:
+
+- `logs/issue804-exp4-xctest-terminal-output.log`
+  - `RoasttyTerminalOutputUITests.testTerminalOutputIsVisibleToUIAutomation`
+    passed in `3.512` seconds.
+  - XCTest found the `TERMSURF_READY_158` text view.
+  - `Executed 1 test, with 0 failures`.
+  - `** TEST SUCCEEDED **`.
+- `logs/issue804-exp4-xctest-dead-key.log`
+  - `RoasttyDeadKeyUITests.testDeadKeyCompositionCommitsText` passed in `6.414`
+    seconds.
+  - `Executed 1 test, with 0 failures`.
+  - `** TEST SUCCEEDED **`.
+
+This is stronger than the Issue 802 route-proof skip: in this VM, XCTest can
+drive the terminal element and observe the committed `é` output.
+
+### Launch-Time Bootstrap
+
+Bootstrap command delivery passed:
+
+- `logs/issue804-exp4-bootstrap.log`
+  - Direct debug app launch created
+    `/tmp/termsurf-issue804-exp4-bootstrap-marker.txt`.
+  - The file contained `BOOTSTRAP_MARKER`.
+  - The visible window was `id=268 layer=0 bounds=(489,161 800x632)`.
+  - Screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-bootstrap-window-20260613-133655.png`.
+
+The experiment design used the stale path
+`roastty/macos/build/Build/Products/Debug/Roastty.app`. The actual build output
+is `roastty/macos/build/Debug/Roastty.app`, matching `start-app.sh`; the run
+used the actual debug app path.
+
+### Mouse
+
+Click/right-click CGEvents were only partially proven:
+
+- `logs/issue804-exp4-mouse-clicks.log`
+  - Window bounds were `id=282 layer=0 bounds=(489,161 800x632)`.
+  - The driver posted move, left click, and right click at `(889,477)`.
+  - Screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-mouse-clicks-20260613-133713.png`.
+  - Roastty remained frontmost.
+
+The screenshot did not show an obvious context menu, and no byteprobe was
+running, so this proves event posting and focus state but not terminal receipt
+for click/right-click.
+
+Scroll passed:
+
+- `logs/issue804-exp4-scroll.log`
+  - Bootstrap content printed `seq 1 200`.
+  - Window bounds were `id=289 layer=0 bounds=(489,161 800x632)`.
+  - `scroll.swift 889 477 20` returned `scrolled 20 ticks at (889,477)`.
+  - `scroll.swift 889 477 -20` returned `scrolled -20 ticks at (889,477)`.
+  - Before screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-scroll-before-20260613-133735.png`
+    showed tail lines `178..200`.
+  - Scroll-up screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-scroll-after-up-20260613-133738.png`
+    showed top/history lines `1..24`.
+  - Scroll-down screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-scroll-after-down-20260613-133740.png`
+    returned to tail lines `178..200`.
+
+Drag selection passed after correcting the vertical coordinate:
+
+- `logs/issue804-exp4-drag.log`
+  - First drag used `(X + 80, Y + 95)` to `(X + 310, Y + 95)`.
+  - Screenshot showed no highlight.
+  - `pbpaste` stayed `CLIPBOARD_PROBE_STALE`.
+- `logs/issue804-exp4-drag-rerun.log`
+  - Rerun used `(X + 8, Y + 72)` to `(X + 390, Y + 72)`, aligned with the text
+    row visible in the screenshot.
+  - `drag.swift` returned `dragged (497,233) -> (879,233)`.
+  - Screenshot:
+    `/Users/astrohacker/.cache/termsurf/shots/issue-804-exp4-drag-selection-rerun-20260613-133840.png`.
+  - Menu-driven Copy returned a System Events menu-item reference without error.
+  - `pbpaste` returned `DRAGSELECTME_TARGET_HERE`, replacing the stale sentinel.
+
+### Cleanup
+
+After the final run:
+
+```bash
+pgrep -fl 'Roastty.app/Contents/MacOS/roastty' || true
+```
+
+printed no debug Roastty process.
+
+## Conclusion
+
+The reproducible Roastty automation set for this VM is:
+
+- XCTest keyboard input and accessibility output observation;
+- launch-time bootstrap command delivery;
+- window screenshots;
+- CGEvent scroll;
+- CGEvent drag selection with `pbpaste` verification.
+
+The external keyboard paths are still not usable against Roastty from this agent
+host, even though they were the successful Ghostty keyboard path in Issue 802
+and even though Roastty remains frontmost and visible during the attempts.
+
+Click/right-click CGEvents can be posted, but this experiment did not prove a
+strong receipt oracle for them against Roastty. A future experiment should not
+spend more time on permission restarts; it should either instrument Roastty's
+AppKit event entry points or use a bootstrap-started in-terminal byteprobe/mouse
+reporting program so keyboard-independent mouse click/right-click receipt can be
+observed deterministically.
