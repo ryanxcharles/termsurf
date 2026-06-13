@@ -1495,6 +1495,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 165: Phase F — macOS tail config](165-macos-tail-config.md) —
   **Pass**
+- [Experiment 166: Phase F — cursor mouse tail config](166-cursor-mouse-tail-config.md)
+  — **Designed**
 
 ## Process
 
