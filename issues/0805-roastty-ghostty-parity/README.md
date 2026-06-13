@@ -383,3 +383,5 @@ remains open.
   — **Pass**
 - [Experiment 11: Default config parser oracle](11-default-config-parser-oracle.md)
   — **Pass**
+- [Experiment 12: Config matrix facet decomposition](12-config-matrix-facet-decomposition.md)
+  — **Designed**
