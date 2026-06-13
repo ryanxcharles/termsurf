@@ -1017,7 +1017,12 @@ the live app, verified by a Phase-D UI test.)
       `roastty_surface_render_state_update` or lower-level C render-state
       row/cell APIs. The public C render-state ABI remains for upstream `lib_vt`
       parity and tests, not for copied-app rendering.
-- [ ] **Milestone: the app launches and shows a working ASCII terminal**
+- [x] **Milestone: the app launches and shows a working ASCII terminal** —
+      Experiment 181 rebuilds the copied app and proves the `ascii-grid` live
+      A/B recipe against Ghostty: Roastty launches, renders the unique marker,
+      uppercase, lowercase, digits, and punctuation in the content screenshot,
+      passes the content-region diff, and presents through CoreVideo display
+      link.
 
 **Phase D — Automated UI tests for the roastty-backed app**
 
@@ -1598,7 +1603,7 @@ stays unaltered except for the rename).
 - [Experiment 180: Phase C — live draw ownership audit](180-live-draw-ownership-audit.md)
   — **Pass**
 - [Experiment 181: Phase C — ASCII terminal milestone](181-ascii-terminal-milestone.md)
-  — **Designed**
+  — **Pass**
 
 ## Process
 
