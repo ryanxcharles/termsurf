@@ -328,6 +328,12 @@ experiment files until they are proven.
   while others are legacy values or removed boolean shims on canonical keys
   (`gtk-tabs-location = hidden`, `macos-dock-drop-behavior = window`, etc.).
   Test the parser effect, not just whether the key name appears.
+- **Default config formatter parity needs an A/B fixture.** Experiment 8 found
+  and fixed non-repeatable formatter order drift by comparing pinned Ghostty
+  `+show-config --default --no-pager` output to Roastty
+  `Config::default().format_config(...)`. After app-name normalization, all 454
+  comparable default lines now match exactly; the remaining default-format gaps
+  are isolated to `keybind` and `command-palette-entry` repeatable surfaces.
 
 ## Verification
 
@@ -354,4 +360,4 @@ remains open.
 - [Experiment 7: Config compatibility alias semantics](07-config-compatibility-alias-semantics.md)
   — **Pass**
 - [Experiment 8: Default config format oracle](08-default-config-format-oracle.md)
-  — **Designed**
+  — **Pass**

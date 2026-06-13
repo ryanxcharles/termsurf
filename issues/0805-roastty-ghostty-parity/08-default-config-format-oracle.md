@@ -114,3 +114,89 @@ Reviewer notes addressed before the plan commit:
 - Reworded the Ghostty command criterion to say the experiment must use the
   resolved pinned executable path, rather than calling the placeholder path
   "preferable".
+
+## Result
+
+**Result:** Pass
+
+The experiment created a fixture-backed default config oracle and used it to fix
+Roastty formatter order drift against the pinned Ghostty output. The durable
+unit guard now compares the pinned Ghostty default fixture with
+`Config::default().format_config(...)` after only app-name normalization.
+
+The exact comparable surface now passes:
+
+- Ghostty raw default output: 635 lines.
+- Roastty raw default output: 628 lines.
+- Comparable lines excluding `keybind` and `command-palette-entry`: 454 on each
+  side.
+- Comparable exact match after app-name normalization: true.
+
+The remaining diffs are recorded as gaps, not accepted divergences:
+
+- Ghostty emits 93 default `keybind` lines; Roastty emits 86.
+- The normalized `keybind` multiset has 135 mismatches.
+- Both apps emit 88 default `command-palette-entry` lines.
+- The normalized `command-palette-entry` multiset has 2 mismatches, representing
+  one escaped-text entry difference.
+
+Code changes:
+
+- `roastty/src/config/mod.rs`
+  - Reordered default config formatter calls to match the pinned Ghostty output
+    for the comparable surface.
+  - Added `config_default_format_oracle`, backed by
+    `roastty/testdata/issue805-ghostty-default-config.txt`.
+  - Kept the known repeatable-surface gaps explicit by asserting their current
+    counts and multiset mismatch totals.
+- `roastty/testdata/issue805-ghostty-default-config.txt`
+  - Added the pinned Ghostty default config fixture captured from
+    `vendor/ghostty/zig-out/Ghostty.app/Contents/MacOS/ghostty`.
+- `issues/0805-roastty-ghostty-parity/default-config-oracle.md`
+  - Added regeneration commands, normalization rules, counts, and remaining
+    gaps.
+- `issues/0805-roastty-ghostty-parity/config-matrix.md`
+  - Added a passing row for the comparable default-format surface.
+  - Added gap rows for default `keybind` and `command-palette-entry` formatting.
+- `issues/0805-roastty-ghostty-parity/README.md`
+  - Recorded the reusable learning and marked Experiment 8 as passing.
+
+Verification:
+
+```bash
+vendor/ghostty/zig-out/Ghostty.app/Contents/MacOS/ghostty \
+  +show-config --default --no-pager \
+  > logs/issue805-exp8-ghostty-default-config.txt
+ROASTTY_DEFAULT_CONFIG_OUT=/Users/astrohacker/dev/termsurf/logs/issue805-exp8-roastty-default-config.txt \
+  cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle -- --nocapture
+cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle -- --nocapture
+cargo test --manifest-path roastty/Cargo.toml config_format_config_emits_fields_in_upstream_order -- --nocapture
+```
+
+Evidence:
+
+- `logs/issue805-exp8-config-default-format-oracle.log`
+- `logs/issue805-exp8-config-format-order.log`
+- `logs/issue805-exp8-config-default-format-oracle-with-output.log`
+- `logs/issue805-exp8-default-config-diff-summary.txt`
+
+## Conclusion
+
+Default config formatting is now proven for the non-`keybind`,
+non-`command-palette-entry` surface by a cheap Tier 1 fixture test. The next
+configuration experiments should fix the default keybinding and command-palette
+format gaps, then decide whether to expand this oracle to parser, diagnostics,
+precedence, reload, and runtime-effect behavior.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no
+findings.
+
+Reviewer verdict:
+
+```text
+VERDICT: APPROVED
+
+No findings.
+```

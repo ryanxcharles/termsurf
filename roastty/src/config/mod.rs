@@ -737,39 +737,6 @@ impl Config {
     /// upstream `Config` declaration order (upstream `FileFormatter.format`,
     /// `config/formatter_file.zig`, the default non-docs / non-changed path).
     pub(crate) fn format_config(&self, out: &mut String) {
-        EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
-        EntryFormatter::new("quit-after-last-window-closed", out)
-            .entry_bool(self.quit_after_last_window_closed);
-        EntryFormatter::new("quit-after-last-window-closed-delay", out)
-            .entry_optional(self.quit_after_last_window_closed_delay, |v, f| {
-                v.format_entry(f)
-            });
-        self.undo_timeout
-            .format_entry(&mut EntryFormatter::new("undo-timeout", out));
-        self.quick_terminal_position
-            .format_entry(&mut EntryFormatter::new("quick-terminal-position", out));
-        self.quick_terminal_size
-            .format_entry(&mut EntryFormatter::new("quick-terminal-size", out));
-        self.gtk_quick_terminal_layer
-            .format_entry(&mut EntryFormatter::new("gtk-quick-terminal-layer", out));
-        EntryFormatter::new("gtk-quick-terminal-namespace", out)
-            .entry_str(&self.gtk_quick_terminal_namespace);
-        self.quick_terminal_screen
-            .format_entry(&mut EntryFormatter::new("quick-terminal-screen", out));
-        EntryFormatter::new("quick-terminal-animation-duration", out)
-            .entry_float(self.quick_terminal_animation_duration);
-        EntryFormatter::new("quick-terminal-autohide", out)
-            .entry_bool(self.quick_terminal_autohide);
-        self.quick_terminal_space_behavior
-            .format_entry(&mut EntryFormatter::new(
-                "quick-terminal-space-behavior",
-                out,
-            ));
-        self.quick_terminal_keyboard_interactivity
-            .format_entry(&mut EntryFormatter::new(
-                "quick-terminal-keyboard-interactivity",
-                out,
-            ));
         EntryFormatter::new("language", out)
             .entry_optional(self.language.clone(), |v, f| f.entry_str(&v));
         self.font_family
@@ -881,6 +848,8 @@ impl Config {
             .entry_optional(self.selection_background, |v, f| v.format_entry(f));
         EntryFormatter::new("selection-clear-on-typing", out)
             .entry_bool(self.selection_clear_on_typing);
+        EntryFormatter::new("selection-clear-on-copy", out)
+            .entry_bool(self.selection_clear_on_copy);
         self.selection_word_chars
             .format_entry(&mut EntryFormatter::new("selection-word-chars", out));
         EntryFormatter::new("minimum-contrast", out).entry_float(self.minimum_contrast);
@@ -907,6 +876,9 @@ impl Config {
         EntryFormatter::new("mouse-reporting", out).entry_bool(self.mouse_reporting);
         self.mouse_scroll_multiplier
             .format_entry(&mut EntryFormatter::new("mouse-scroll-multiplier", out));
+        EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
+        EntryFormatter::new("background-opacity-cells", out)
+            .entry_bool(self.background_opacity_cells);
         self.background_blur
             .format_entry(&mut EntryFormatter::new("background-blur", out));
         EntryFormatter::new("unfocused-split-opacity", out)
@@ -929,22 +901,16 @@ impl Config {
             .entry_optional(self.command.clone(), |v, f| v.format_entry(f));
         EntryFormatter::new("initial-command", out)
             .entry_optional(self.initial_command.clone(), |v, f| v.format_entry(f));
-        EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
-        EntryFormatter::new("background-opacity-cells", out)
-            .entry_bool(self.background_opacity_cells);
-        EntryFormatter::new("bell-audio-path", out)
-            .entry_optional(self.bell_audio_path.clone(), |v, f| v.format_entry(f));
-        EntryFormatter::new("bell-audio-volume", out).entry_float(self.bell_audio_volume);
-        self.notify_on_command_finish_after
-            .format_entry(&mut EntryFormatter::new(
-                "notify-on-command-finish-after",
-                out,
-            ));
         self.notify_on_command_finish
             .format_entry(&mut EntryFormatter::new("notify-on-command-finish", out));
         self.notify_on_command_finish_action
             .format_entry(&mut EntryFormatter::new(
                 "notify-on-command-finish-action",
+                out,
+            ));
+        self.notify_on_command_finish_after
+            .format_entry(&mut EntryFormatter::new(
+                "notify-on-command-finish-after",
                 out,
             ));
         self.env.format_entry(&mut EntryFormatter::new("env", out));
@@ -1042,8 +1008,6 @@ impl Config {
         EntryFormatter::new("image-storage-limit", out).entry_int(self.image_storage_limit);
         self.copy_on_select
             .format_entry(&mut EntryFormatter::new("copy-on-select", out));
-        EntryFormatter::new("selection-clear-on-copy", out)
-            .entry_bool(self.selection_clear_on_copy);
         self.right_click_action
             .format_entry(&mut EntryFormatter::new("right-click-action", out));
         self.middle_click_action
@@ -1054,6 +1018,39 @@ impl Config {
         EntryFormatter::new("config-default-files", out).entry_bool(self.config_default_files);
         self.confirm_close_surface
             .format_entry(&mut EntryFormatter::new("confirm-close-surface", out));
+        EntryFormatter::new("quit-after-last-window-closed", out)
+            .entry_bool(self.quit_after_last_window_closed);
+        EntryFormatter::new("quit-after-last-window-closed-delay", out)
+            .entry_optional(self.quit_after_last_window_closed_delay, |v, f| {
+                v.format_entry(f)
+            });
+        EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
+        self.undo_timeout
+            .format_entry(&mut EntryFormatter::new("undo-timeout", out));
+        self.quick_terminal_position
+            .format_entry(&mut EntryFormatter::new("quick-terminal-position", out));
+        self.quick_terminal_size
+            .format_entry(&mut EntryFormatter::new("quick-terminal-size", out));
+        self.gtk_quick_terminal_layer
+            .format_entry(&mut EntryFormatter::new("gtk-quick-terminal-layer", out));
+        EntryFormatter::new("gtk-quick-terminal-namespace", out)
+            .entry_str(&self.gtk_quick_terminal_namespace);
+        self.quick_terminal_screen
+            .format_entry(&mut EntryFormatter::new("quick-terminal-screen", out));
+        EntryFormatter::new("quick-terminal-animation-duration", out)
+            .entry_float(self.quick_terminal_animation_duration);
+        EntryFormatter::new("quick-terminal-autohide", out)
+            .entry_bool(self.quick_terminal_autohide);
+        self.quick_terminal_space_behavior
+            .format_entry(&mut EntryFormatter::new(
+                "quick-terminal-space-behavior",
+                out,
+            ));
+        self.quick_terminal_keyboard_interactivity
+            .format_entry(&mut EntryFormatter::new(
+                "quick-terminal-keyboard-interactivity",
+                out,
+            ));
         self.shell_integration
             .format_entry(&mut EntryFormatter::new("shell-integration", out));
         self.shell_integration_features
@@ -1069,6 +1066,9 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("custom-shader-animation", out));
         self.bell_features
             .format_entry(&mut EntryFormatter::new("bell-features", out));
+        EntryFormatter::new("bell-audio-path", out)
+            .entry_optional(self.bell_audio_path.clone(), |v, f| v.format_entry(f));
+        EntryFormatter::new("bell-audio-volume", out).entry_float(self.bell_audio_volume);
         self.app_notifications
             .format_entry(&mut EntryFormatter::new("app-notifications", out));
         self.macos_non_native_fullscreen
@@ -16071,18 +16071,6 @@ mod tests {
             .map(|l| l.split(" = ").next().unwrap())
             .collect();
         let mut expected = vec![
-            "initial-window",
-            "quit-after-last-window-closed",
-            "quit-after-last-window-closed-delay",
-            "undo-timeout",
-            "quick-terminal-position",
-            "gtk-quick-terminal-layer",
-            "gtk-quick-terminal-namespace",
-            "quick-terminal-screen",
-            "quick-terminal-animation-duration",
-            "quick-terminal-autohide",
-            "quick-terminal-space-behavior",
-            "quick-terminal-keyboard-interactivity",
             "language",
             "font-family",
             "font-family-bold",
@@ -16131,6 +16119,7 @@ mod tests {
             "selection-foreground",
             "selection-background",
             "selection-clear-on-typing",
+            "selection-clear-on-copy",
             "selection-word-chars",
             "minimum-contrast",
         ];
@@ -16149,6 +16138,8 @@ mod tests {
             "mouse-shift-capture",
             "mouse-reporting",
             "mouse-scroll-multiplier",
+            "background-opacity",
+            "background-opacity-cells",
             "background-blur",
             "unfocused-split-opacity",
             "unfocused-split-fill",
@@ -16160,13 +16151,9 @@ mod tests {
             "search-selected-background",
             "command",
             "initial-command",
-            "background-opacity",
-            "background-opacity-cells",
-            "bell-audio-path",
-            "bell-audio-volume",
-            "notify-on-command-finish-after",
             "notify-on-command-finish",
             "notify-on-command-finish-action",
+            "notify-on-command-finish-after",
             "env",
             "input",
             "wait-after-command",
@@ -16221,13 +16208,24 @@ mod tests {
             "title-report",
             "image-storage-limit",
             "copy-on-select",
-            "selection-clear-on-copy",
             "right-click-action",
             "middle-click-action",
             "click-repeat-interval",
             "config-file",
             "config-default-files",
             "confirm-close-surface",
+            "quit-after-last-window-closed",
+            "quit-after-last-window-closed-delay",
+            "initial-window",
+            "undo-timeout",
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "gtk-quick-terminal-namespace",
+            "quick-terminal-screen",
+            "quick-terminal-animation-duration",
+            "quick-terminal-autohide",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
             "shell-integration",
             "shell-integration-features",
         ]);
@@ -16241,6 +16239,8 @@ mod tests {
             "custom-shader",
             "custom-shader-animation",
             "bell-features",
+            "bell-audio-path",
+            "bell-audio-volume",
             "app-notifications",
             "macos-non-native-fullscreen",
             "macos-window-buttons",
@@ -16307,6 +16307,106 @@ mod tests {
         assert!(out.contains("title = \n"));
         assert!(out.contains("window-position-x = \n"));
         assert!(out.contains("window-position-y = \n"));
+    }
+
+    #[test]
+    fn config_default_format_oracle() {
+        let ghostty = normalize_default_config_fixture(include_str!(
+            "../../testdata/issue805-ghostty-default-config.txt"
+        ));
+
+        let cfg = Config::default();
+        let mut roastty_raw = String::new();
+        cfg.format_config(&mut roastty_raw);
+        if let Ok(path) = std::env::var("ROASTTY_DEFAULT_CONFIG_OUT") {
+            std::fs::write(path, &roastty_raw).unwrap();
+        }
+        let roastty = normalize_default_config_fixture(&roastty_raw);
+
+        let ghostty_comparable = comparable_default_config_lines(&ghostty);
+        let roastty_comparable = comparable_default_config_lines(&roastty);
+        assert_eq!(roastty_comparable, ghostty_comparable);
+
+        let ghostty_keybind_count = default_config_lines_for_key(&ghostty, "keybind").len();
+        let roastty_keybind_count = default_config_lines_for_key(&roastty, "keybind").len();
+        assert_eq!(ghostty_keybind_count, 93);
+        assert_eq!(roastty_keybind_count, 86);
+        assert_eq!(
+            default_config_multiset_mismatch_count(
+                &default_config_lines_for_key(&ghostty, "keybind"),
+                &default_config_lines_for_key(&roastty, "keybind")
+            ),
+            135
+        );
+
+        let ghostty_command_palette =
+            default_config_lines_for_key(&ghostty, "command-palette-entry");
+        let roastty_command_palette =
+            default_config_lines_for_key(&roastty, "command-palette-entry");
+        assert_eq!(ghostty_command_palette.len(), 88);
+        assert_eq!(roastty_command_palette.len(), 88);
+        assert_eq!(
+            default_config_multiset_mismatch_count(
+                &ghostty_command_palette,
+                &roastty_command_palette
+            ),
+            2
+        );
+    }
+
+    fn normalize_default_config_fixture(input: &str) -> String {
+        input
+            .replace("Ghostty", "{App}")
+            .replace("Roastty", "{App}")
+            .replace("ghostty", "{app}")
+            .replace("roastty", "{app}")
+    }
+
+    fn comparable_default_config_lines(input: &str) -> Vec<&str> {
+        input
+            .lines()
+            .filter(|line| {
+                !line.starts_with("keybind = ") && !line.starts_with("command-palette-entry = ")
+            })
+            .collect()
+    }
+
+    fn default_config_lines_for_key<'a>(input: &'a str, key: &str) -> Vec<&'a str> {
+        let prefix = format!("{key} = ");
+        input
+            .lines()
+            .filter(|line| line.starts_with(&prefix))
+            .collect()
+    }
+
+    fn default_config_multiset_mismatch_count(left: &[&str], right: &[&str]) -> usize {
+        let mut left = left.to_vec();
+        let mut right = right.to_vec();
+        left.sort_unstable();
+        right.sort_unstable();
+
+        let mut left_index = 0;
+        let mut right_index = 0;
+        let mut mismatches = 0;
+
+        while left_index < left.len() && right_index < right.len() {
+            match left[left_index].cmp(right[right_index]) {
+                std::cmp::Ordering::Less => {
+                    mismatches += 1;
+                    left_index += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    left_index += 1;
+                    right_index += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    mismatches += 1;
+                    right_index += 1;
+                }
+            }
+        }
+
+        mismatches + (left.len() - left_index) + (right.len() - right_index)
     }
 
     #[test]
