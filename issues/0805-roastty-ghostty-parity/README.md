@@ -353,3 +353,5 @@ remains open.
   **Pass**
 - [Experiment 7: Config compatibility alias semantics](07-config-compatibility-alias-semantics.md)
   — **Pass**
+- [Experiment 8: Default config format oracle](08-default-config-format-oracle.md)
+  — **Designed**
