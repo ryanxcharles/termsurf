@@ -113,3 +113,6 @@ not add the `## Experiments` index until Experiment 1 is designed.
 - [Experiment 2: Rerun after Accessibility grant](02-rerun-after-accessibility-grant.md)
   — **Partial** (build, launch, screenshot, and XCTest pass; external keyboard
   injection still does not reach Roastty)
+- [Experiment 3: Keyboard rerun after Ghostty restart](03-keyboard-rerun-after-ghostty-restart.md)
+  — **Partial** (restart did not make CGEvent or System Events keyboard input
+  reach Roastty)
