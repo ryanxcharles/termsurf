@@ -346,3 +346,5 @@ remains open.
   — **Pass**
 - [Experiment 6: Config option inventory](06-config-option-inventory.md) —
   **Pass**
+- [Experiment 7: Config compatibility alias semantics](07-config-compatibility-alias-semantics.md)
+  — **Designed**
