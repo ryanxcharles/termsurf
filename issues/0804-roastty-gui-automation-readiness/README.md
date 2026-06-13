@@ -249,3 +249,5 @@ not add the `## Experiments` index until Experiment 1 is designed.
 - [Experiment 8: Focus-owned keyboard rerun](08-focus-owned-keyboard-rerun.md) —
   **Partial** (focus ownership and AppKit key entry proven; marker still fails
   because typed text is not displayed or executed by the terminal)
+- [Experiment 9: Trace key forwarding path](09-trace-key-forwarding-path.md) —
+  **Designed**
