@@ -1582,6 +1582,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 178: Phase C — live cursor blink parity](178-live-cursor-blink.md)
   — **Pass**
+- [Experiment 179: Phase C — renderer options propagation](179-renderer-options-propagation.md)
+  — **Designed**
 
 ## Process
 
