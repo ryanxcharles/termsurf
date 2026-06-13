@@ -1530,6 +1530,8 @@ stays unaltered except for the rename).
   — **Pass**
 - [Experiment 170: Phase F — font metric adjust config](170-font-metric-adjust-config.md)
   — **Pass**
+- [Experiment 171: Phase F — FreeType load flags config](171-freetype-load-flags-config.md)
+  — **Designed**
 
 ## Process
 
