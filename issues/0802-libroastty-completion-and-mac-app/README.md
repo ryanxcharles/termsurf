@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-08"
+closed = "2026-06-13"
 +++
 
 # Issue 802: Complete libroastty and prove it with a copied, renamed Ghostty macOS app
@@ -1671,3 +1672,33 @@ ABI and the remaining subsystems, **and** the copied, `ghostty→roastty`-rename
 macOS app builds, runs, and passes automated UI tests covering all features
 against `libroastty` — i.e. a complete Zig→Rust reimplementation, proven by a
 lightly modified real app that fully works.
+
+## Conclusion
+
+Issue 802 is complete. Across 185 gated experiments, `libroastty` was brought to
+the embedded app shape needed by the copied, lightly renamed Ghostty macOS app,
+and the remaining renderer, config, input/keybinding, native-key, shell,
+terminal, clipboard, palette, update, and hosted-app integration gaps were
+closed or narrowed to explicit non-blocking boundaries.
+
+The final required roadmap items were closed by Experiments 181–185:
+
+- Experiment 181 proved the live copied app renders a real ASCII terminal
+  milestone through the display-link/live draw path.
+- Experiment 182 proved config finalization and theme loading/application.
+- Experiment 183 proved configured key sequences, key tables, chains, fanout,
+  and file-loaded keybinds.
+- Experiment 184 proved trigger-prefix behavior from config parsing through
+  surface/app dispatch and event-tap state.
+- Experiment 185 proved native keycodes/remaps, option-as-alt/layout/keymap
+  state, AppKit text/preedit handoff, app-key dispatch, captured global-event
+  dispatch, and event-tap installation state.
+
+The only remaining unchecked roadmap line is the Debug `Overlay`, which this
+issue explicitly labels optional. It is suitable as a follow-up enhancement, not
+a blocker for completing Issue 802.
+
+Closure review: Codex-native adversarial reviewer `Chandrasekhar the 2nd`
+approved the closure with no findings. The reviewer independently confirmed that
+only the optional Debug `Overlay` remains unchecked, the close date and index
+placement are correct, and Prettier plus `git diff --check` pass.
