@@ -143,3 +143,54 @@ Fixes made before re-review:
 
 Fresh-context adversarial re-review approved the revised design with no
 findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented the bounded config inventory helper and generated the inventory
+artifacts.
+
+Verification results:
+
+- `logs/issue805-exp6-config-inventory.log` records:
+  - `ghostty_canonical=203`
+  - `ghostty_aliases=8`
+  - `ghostty_internal=6`
+  - `roastty=203`
+  - `represented=203`
+  - `missing=0`
+  - `extra=0`
+- `config-inventory.md` records the sorted canonical option list, compatibility
+  alias list, private/internal field list, Roastty option list, and
+  missing/extra sets.
+- `config-matrix.md` now has 212 rows total: `CFG-001`, 203 canonical option
+  rows, and 8 compatibility alias rows.
+- `logs/issue805-exp6-config-spot-checks.log` records manual spot checks for:
+  - all eight Ghostty compatibility aliases;
+  - all six private/internal Ghostty fields;
+  - representative canonical fields from both Ghostty and Roastty;
+  - matrix row counts.
+- `python3 -m py_compile issues/0805-roastty-ghostty-parity/config_inventory.py`
+  passed.
+- `prettier --write --prose-wrap always --print-width 80` passed for the edited
+  markdown files.
+- `git diff --check` passed.
+
+The config matrix rows intentionally remain `Gap` except for `CFG-001`. This
+experiment proves only name-level inventory coverage, not defaults, parsing,
+formatting, diagnostics, precedence, runtime effects, or compatibility alias
+semantics.
+
+## Conclusion
+
+Roastty has documented names for all 203 canonical Ghostty config options at the
+pinned commit, and Ghostty's 8 compatibility aliases are now explicitly tracked.
+The next config experiments should prove behavior by coherent groups, starting
+with parser/default/formatter behavior or compatibility alias handling, rather
+than relying on name presence.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no required
+findings.

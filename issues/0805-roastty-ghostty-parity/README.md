@@ -317,6 +317,12 @@ experiment files until they are proven.
   declaration/export level while still recording honest semantic divergences for
   unsupported helpers. Do not hide unsupported behavior behind a passing symbol
   check; put it in `divergences.md` with a guard.
+- **Config inventory needs bounded extraction.** Ghostty's `Config.zig` contains
+  the real top-level config fields, compatibility aliases, private/internal
+  fields, and many later nested enum/helper values in one file. Broad scans
+  produce false positives. Use the Experiment 6 helper to inventory only the
+  top-level fields before the first `pub fn`, the static compatibility map, and
+  Roastty's `pub(crate) struct Config`.
 
 ## Verification
 
@@ -339,4 +345,4 @@ remains open.
 - [Experiment 5: Resolve non-app embedded ABI functions](05-resolve-non-app-embedded-abi-functions.md)
   — **Pass**
 - [Experiment 6: Config option inventory](06-config-option-inventory.md) —
-  **Designed**
+  **Pass**
