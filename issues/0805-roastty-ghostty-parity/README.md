@@ -407,3 +407,5 @@ remains open.
   — **Pass**
 - [Experiment 14: Link parser recognition](14-link-parser-recognition.md) —
   **Pass**
+- [Experiment 15: Boolean parser oracle](15-boolean-parser-oracle.md) —
+  **Designed**
