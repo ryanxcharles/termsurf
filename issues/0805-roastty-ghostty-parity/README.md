@@ -710,3 +710,5 @@ remains open.
   — **Pass**
 - [Experiment 53: Window padding formatter oracle](53-window-padding-formatter-oracle.md)
   — **Pass**
+- [Experiment 54: Repeatable path formatter oracle](54-repeatable-path-formatter-oracle.md)
+  — **Designed**
