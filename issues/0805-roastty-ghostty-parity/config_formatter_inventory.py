@@ -28,6 +28,7 @@ WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
 COLOR_KEYWORD_ORACLE_TEST = "color_keyword_config_formatter_family_oracle"
 KEY_REMAP_ORACLE_TEST = "key_remap_config_formatter_family_oracle"
+KEYBIND_ORACLE_TEST = "keybind_config_formatter_family_oracle"
 LINK_NO_OUTPUT_ORACLE_TEST = "link_no_output_config_formatter_oracle"
 COMMAND_PALETTE_ORACLE_TEST = "command_palette_entry_config_parse_format_reset_and_diagnose"
 PRIMITIVE_FAMILIES = {"boolean", "integer", "float", "string"}
@@ -264,6 +265,7 @@ def build_rows(
     repeatable_path_oracle_present: bool,
     color_keyword_oracle_present: bool,
     key_remap_oracle_present: bool,
+    keybind_oracle_present: bool,
     link_no_output_oracle_present: bool,
     command_palette_oracle_present: bool,
 ) -> tuple[list[FormatterRow], list[str], list[str]]:
@@ -372,6 +374,16 @@ def build_rows(
                 "and raw-empty resets, and representative order checks"
             )
             missing_evidence = "None for key remap formatter rows."
+        elif keybind_oracle_present and family == "key binding":
+            status = "Oracle complete"
+            evidence = (
+                "Keybind formatter oracle covers empty output, default reset, "
+                "direct root bindings, chained actions, root key sequences, table "
+                "bindings, Ghostty-compatible cleared-table silence, slash key "
+                "disambiguation, flag-prefix normalization, exact formatted lines, "
+                "and representative order checks"
+            )
+            missing_evidence = "None for key binding formatter rows."
         elif command_palette_oracle_present and family == "command palette":
             status = "Oracle complete"
             evidence = (
@@ -426,6 +438,7 @@ def main() -> int:
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
     color_keyword_oracle_present = COLOR_KEYWORD_ORACLE_TEST in roastty_source
     key_remap_oracle_present = KEY_REMAP_ORACLE_TEST in roastty_source
+    keybind_oracle_present = KEYBIND_ORACLE_TEST in roastty_source
     link_no_output_oracle_present = LINK_NO_OUTPUT_ORACLE_TEST in roastty_source
     command_palette_oracle_present = COMMAND_PALETTE_ORACLE_TEST in roastty_source
     rows, missing, extra = build_rows(
@@ -437,6 +450,7 @@ def main() -> int:
         repeatable_path_oracle_present,
         color_keyword_oracle_present,
         key_remap_oracle_present,
+        keybind_oracle_present,
         link_no_output_oracle_present,
         command_palette_oracle_present,
     )
@@ -446,7 +460,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        58
+        59
+        if keybind_oracle_present
+        else 58
         if command_palette_oracle_present
         else 57
         if link_no_output_oracle_present

@@ -120,7 +120,6 @@ impl Keybinds {
                 && table.sequences.bindings.is_empty()
                 && table.sequences.leaders.is_empty()
             {
-                formatter.entry_str(&format!("{table_name}/"));
                 continue;
             }
             for entry in format_set(&table.sequences, Some(&table_name)) {
@@ -143,7 +142,7 @@ impl Keybinds {
                     && table.sequences.bindings.is_empty()
                     && table.sequences.leaders.is_empty()
                 {
-                    1
+                    0
                 } else {
                     format_set(
                         &table.sequences,

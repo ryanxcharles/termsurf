@@ -497,6 +497,11 @@ experiment files until they are proven.
   existing focused tests that already prove default entries, clear output,
   custom entries, quoted comma values, shorthand actions, reset behavior,
   diagnostics, and exact formatted output.
+- **Cleared keybind tables are formatter-silent in pinned Ghostty.** Experiment
+  59 found that `foo/` clears a key table, but Ghostty's formatter emits no
+  empty `keybind = foo/` line afterward. Roastty now matches that behavior and
+  the single `keybind` formatter row is promoted by a dedicated formatter
+  oracle.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -746,4 +751,4 @@ remains open.
 - [Experiment 58: Command palette formatter oracle](58-command-palette-formatter-oracle.md)
   — **Pass**
 - [Experiment 59: Keybind formatter oracle](59-keybind-formatter-oracle.md) —
-  **Designed**
+  **Pass**

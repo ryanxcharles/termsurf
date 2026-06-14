@@ -23123,7 +23123,6 @@ mod tests {
                 "keybind = chain=text:child",
                 "keybind = ctrl+a>n=new_window",
                 "keybind = chain=goto_split:left",
-                "keybind = nav/",
             ]
         );
 
@@ -23213,6 +23212,119 @@ mod tests {
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.keybind, cfg.keybind);
+    }
+
+    #[test]
+    fn keybind_config_formatter_family_oracle() {
+        let lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .filter(|line| line.starts_with("keybind = "))
+                .map(str::to_string)
+                .collect()
+        };
+
+        let mut cfg = Config::default();
+        let default_lines = lines(&cfg);
+        assert!(!default_lines.is_empty());
+        assert!(default_lines
+            .iter()
+            .any(|line| line == "keybind = super+,=open_config"));
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        assert_eq!(lines(&cfg), vec!["keybind = "]);
+        cfg.set("keybind", Some("")).unwrap();
+        assert_eq!(lines(&cfg), default_lines);
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("x=text:parent")).unwrap();
+        cfg.set("keybind", Some("chain=text:child")).unwrap();
+        cfg.set("keybind", Some("ctrl+a>n=new_window")).unwrap();
+        cfg.set("keybind", Some("chain=goto_split:left")).unwrap();
+        cfg.set("keybind", Some("nav/a=quit")).unwrap();
+        cfg.set("keybind", Some("chain=new_window")).unwrap();
+        cfg.set("keybind", Some("nav/c>d=toggle_fullscreen"))
+            .unwrap();
+        cfg.set("keybind", Some("chain=close_surface")).unwrap();
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "keybind = x=text:parent",
+                "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
+                "keybind = nav/a=quit",
+                "keybind = chain=new_window",
+                "keybind = nav/c>d=toggle_fullscreen",
+                "keybind = chain=close_surface",
+            ]
+        );
+
+        cfg.set("keybind", Some("nav/")).unwrap();
+        let after_table_clear = lines(&cfg);
+        assert_eq!(
+            after_table_clear,
+            vec![
+                "keybind = x=text:parent",
+                "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
+            ]
+        );
+        assert!(!after_table_clear
+            .iter()
+            .any(|line| line == "keybind = nav/"));
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("foo/a=quit")).unwrap();
+        cfg.set("keybind", Some("foo/")).unwrap();
+        let after_foo_clear = lines(&cfg);
+        assert!(after_foo_clear.is_empty());
+        assert!(!after_foo_clear.iter().any(|line| line == "keybind = foo/"));
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        for value in [
+            "/=text:slash",
+            "ctrl+/=text:ctrlslash",
+            "shift+/=ignore",
+            "ctrl+a>ctrl+/=new_window",
+            "mytable//=text:table-slash",
+            "mytable/a>/=new_window",
+        ] {
+            cfg.set("keybind", Some(value)).unwrap();
+        }
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "keybind = /=text:slash",
+                "keybind = ctrl+/=text:ctrlslash",
+                "keybind = shift+/=ignore",
+                "keybind = ctrl+a>ctrl+/=new_window",
+                "keybind = mytable//=text:table-slash",
+                "keybind = mytable/a>/=new_window",
+            ]
+        );
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("global:all:unconsumed:a=quit"))
+            .unwrap();
+        cfg.set("keybind", Some("performable:b=new_window"))
+            .unwrap();
+        assert_eq!(
+            lines(&cfg),
+            vec!["keybind = a=quit", "keybind = b=new_window"]
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let keys: Vec<&str> = out
+            .lines()
+            .map(|line| line.split(" = ").next().unwrap())
+            .collect();
+        let keybind = keys.iter().position(|key| *key == "keybind").unwrap();
+        let key_remap = keys.iter().position(|key| *key == "key-remap").unwrap();
+        assert_eq!(key_remap, keybind + cfg.keybind.format_entry_count());
     }
 
     #[test]
