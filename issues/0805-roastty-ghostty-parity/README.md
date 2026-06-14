@@ -313,6 +313,12 @@ experiment files until they are proven.
   drives parsed app config or config loading. Future CFG-223 experiments should
   keep parsed-config runtime effects separate from direct surface-config
   behavior.
+- **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
+  currently models scrollback capacity in rows, while pinned Ghostty documents
+  `scrollback-limit` as a byte quota. A focused experiment may prove the
+  important `scrollback-limit = 0` no-history behavior, but exact nonzero
+  byte-quota parity must remain a separate gap until Roastty has a byte-accurate
+  oracle.
 - **App-facing ABI parity must be scoped before diffing.** Roastty's C header is
   intentionally larger than Ghostty's header, so full symbol-count equality is
   the wrong oracle. Experiment 4 uses Swift app-source identifiers as the
@@ -1199,3 +1205,5 @@ remains open.
   — **Pass**
 - [Experiment 116: Process command input runtime split](116-process-command-input-runtime-split.md)
   — **Pass**
+- [Experiment 117: Scrollback limit runtime split](117-scrollback-limit-runtime-split.md)
+  — **Designed**
