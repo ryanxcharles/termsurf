@@ -1271,3 +1271,5 @@ remains open.
   — **Pass**
 - [Experiment 125: Renderer control runtime split](125-renderer-control-runtime-split.md)
   — **Pass**
+- [Experiment 126: Surface title runtime split](126-surface-title-runtime-split.md)
+  — **Designed**
