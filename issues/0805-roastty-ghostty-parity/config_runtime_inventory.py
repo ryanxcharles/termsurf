@@ -410,20 +410,43 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml wait_after_command_runtime && cargo test --manifest-path roastty/Cargo.toml close_surface && cargo test --manifest-path roastty/Cargo.toml process_exited`",
     ),
     RuntimeRow(
-        id="RUNTIME-010B2B",
-        behavior="PTY/process abnormal-command-exit-runtime, quit-after-last-window-closed, quit-after-last-window-closed-delay, and remaining lifecycle policy effects",
+        id="RUNTIME-010B2B1",
+        behavior="PTY/process child-exit exit-code/runtime payload capture and show_child_exited action dispatch",
+        ghostty_reference="`vendor/ghostty/src/termio/Termio.zig` child-exit payload; `vendor/ghostty/src/Surface.zig::childExited` `.show_child_exited` action dispatch",
+        roastty_reference="`roastty/src/termio.rs` child-exit payload capture; `roastty/src/lib.rs` `ROASTTY_ACTION_SHOW_CHILD_EXITED` dispatch",
+        family="process",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 119 adds `child_exited_payload_runtime_*` tests proving "
+            "PTY child exit status is captured as exit code plus runtime "
+            "milliseconds, the typed `ROASTTY_ACTION_SHOW_CHILD_EXITED` payload "
+            "reaches the app action callback before default close handling, "
+            "wait-after-command surfaces still hold after dispatch, false "
+            "action results do not suppress existing close/hold behavior, and "
+            "representative above-threshold and at-or-below-threshold runtime "
+            "cases both dispatch the payload."
+        ),
+        missing_evidence="None for child-exit payload capture and show_child_exited action dispatch covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml child_exited_payload_runtime && cargo test --manifest-path roastty/Cargo.toml wait_after_command_runtime && cargo test --manifest-path roastty/Cargo.toml process_exited && cargo test --manifest-path roastty/Cargo.toml close_surface`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-010B2B2",
+        behavior="PTY/process terminal fallback child-exit text, abnormal-exit close/hold policy, quit-after-last-window-closed, quit-after-last-window-closed-delay, and remaining lifecycle policy effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` `abnormal-command-exit-runtime` and quit policy fields; `vendor/ghostty/src/Surface.zig::childExited`; app lifecycle quit policy paths",
-        roastty_reference="`roastty/src/lib.rs::start_termio`, app lifecycle callbacks, process exit handling, and macOS app lifecycle",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, app lifecycle callbacks, process exit handling, terminal fallback text, and macOS app lifecycle",
         family="process",
         status="Gap",
         evidence=(
-            "Experiment 118 split out normal `wait-after-command` child-exit "
-            "close/hold behavior. Abnormal-exit presentation, "
+            "Experiments 118 and 119 split out normal `wait-after-command` "
+            "child-exit close/hold behavior and child-exit payload/action "
+            "dispatch. Terminal fallback child-exit text, abnormal-exit "
+            "close/hold policy after handled or unhandled actions, "
             "`quit-after-last-window-closed`, `quit-after-last-window-closed-delay`, "
             "and remaining app lifecycle policy behavior still need focused "
             "runtime or GUI proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for abnormal-command-exit-runtime, quit-after-last-window-closed, quit-after-last-window-closed-delay, and remaining lifecycle policy behavior.",
+        missing_evidence="Add runtime proof or fixes for terminal fallback child-exit text, abnormal-exit close/hold policy after handled or unhandled actions, quit-after-last-window-closed, quit-after-last-window-closed-delay, and remaining lifecycle policy behavior.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 PTY/process lifecycle experiment.",
     ),
@@ -542,7 +565,8 @@ EXPECTED_IDS = [
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",
-    "RUNTIME-010B2B",
+    "RUNTIME-010B2B1",
+    "RUNTIME-010B2B2",
     "RUNTIME-011",
     "RUNTIME-012A",
     "RUNTIME-012B",

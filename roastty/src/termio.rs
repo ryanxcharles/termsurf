@@ -3,9 +3,11 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 use crate::os::pty::{PtyChild, PtyCommand, PtyReadiness, PtySize};
 use crate::terminal::color;
@@ -20,6 +22,8 @@ mod shell_integration;
 pub(crate) struct Termio {
     terminal: Terminal,
     child: PtyChild,
+    child_started_at: Instant,
+    child_exit: Option<TermioChildExit>,
     output_buf: Vec<u8>,
     pending_write: Vec<u8>,
 }
@@ -70,6 +74,12 @@ pub(crate) enum TermioError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TermioChildExit {
+    pub(crate) exit_code: u32,
+    pub(crate) runtime_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TermioPump {
     pub(crate) readiness: PtyReadiness,
     pub(crate) bytes_read: usize,
@@ -77,6 +87,7 @@ pub(crate) struct TermioPump {
     pub(crate) bytes_written: usize,
     pub(crate) pending_write_bytes: usize,
     pub(crate) child_exited: bool,
+    pub(crate) child_exit: Option<TermioChildExit>,
 }
 
 #[derive(Debug)]
@@ -186,12 +197,15 @@ impl Termio {
         if let Some(cwd) = options.cwd {
             command.cwd(cwd);
         }
+        let child_started_at = Instant::now();
         let child = command.spawn()?;
         child.set_nonblocking()?;
 
         Ok(Self {
             terminal,
             child,
+            child_started_at,
+            child_exit: None,
             output_buf: Vec::new(),
             pending_write: Vec::new(),
         })
@@ -265,7 +279,16 @@ impl Termio {
         }
 
         let bytes_written = self.flush_pending_write()?;
-        let child_exited = self.child.try_wait()?.is_some();
+        if self.child_exit.is_none() {
+            if let Some(status) = self.child.try_wait()? {
+                self.child_exit = Some(TermioChildExit {
+                    exit_code: exit_status_code(status),
+                    runtime_ms: self.child_started_at.elapsed().as_millis() as u64,
+                });
+            }
+        }
+        let child_exit = self.child_exit;
+        let child_exited = child_exit.is_some();
 
         Ok(TermioPump {
             readiness,
@@ -274,6 +297,7 @@ impl Termio {
             bytes_written,
             pending_write_bytes: self.pending_write.len(),
             child_exited,
+            child_exit,
         })
     }
 
@@ -310,6 +334,10 @@ impl Termio {
         }
         Ok(total)
     }
+}
+
+fn exit_status_code(status: ExitStatus) -> u32 {
+    status.code().map(|code| code as u32).unwrap_or(u32::MAX)
 }
 
 fn palette_tuple(palette: color::Palette) -> [(u8, u8, u8); 256] {
@@ -502,7 +530,7 @@ fn run_termio_worker(
                     );
                     break;
                 }
-                if pump.eof || pump.child_exited {
+                if pump.child_exited {
                     crate::append_ui_key_trace(format!(
                         "rust termio_worker_loop exit reason=pump-terminal eof={} child_exited={} bytes_read={} bytes_written={} pending_write={}",
                         pump.eof,
@@ -795,6 +823,43 @@ mod tests {
         let pump = pump_until(&mut termio, |_, pump| pump.child_exited || pump.eof);
 
         assert!(pump.child_exited || pump.eof);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_success_exit_code() {
+        let _guard = pty_command_lock();
+        let mut termio = spawn_shell("exit 0");
+
+        let pump = pump_until(&mut termio, |_, pump| pump.child_exit.is_some());
+        let child_exit = pump.child_exit.expect("child exit payload");
+
+        assert!(pump.child_exited);
+        assert_eq!(child_exit.exit_code, 0);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_failure_exit_code() {
+        let _guard = pty_command_lock();
+        let mut termio = spawn_shell("exit 42");
+
+        let pump = pump_until(&mut termio, |_, pump| pump.child_exit.is_some());
+        let child_exit = pump.child_exit.expect("child exit payload");
+
+        assert!(pump.child_exited);
+        assert_eq!(child_exit.exit_code, 42);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_reports_elapsed_runtime() {
+        let _guard = pty_command_lock();
+        let mut termio = spawn_shell("sleep 0.05; exit 7");
+
+        let pump = pump_until(&mut termio, |_, pump| pump.child_exit.is_some());
+        let child_exit = pump.child_exit.expect("child exit payload");
+
+        assert!(pump.child_exited);
+        assert_eq!(child_exit.exit_code, 7);
+        assert!(child_exit.runtime_ms >= 20, "{child_exit:?}");
     }
 
     #[test]

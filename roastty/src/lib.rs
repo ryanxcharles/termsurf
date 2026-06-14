@@ -1279,6 +1279,13 @@ pub struct RoasttyActionKeySequence {
     trigger: RoasttyInputTrigger,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct RoasttySurfaceMessageChildExited {
+    exit_code: u32,
+    timetime_ms: u64,
+}
+
 /// The embedded `roastty_action_u` — a tagged-union payload (24 bytes / align 8,
 /// matching the upstream `action_u`). Only the data-carrying members are named; `raw`
 /// forces the size/align and carries roastty-only tags (e.g. NAVIGATE_SEARCH).
@@ -1306,6 +1313,7 @@ pub union RoasttyActionU {
     key_table: RoasttyActionKeyTable,
     key_sequence: RoasttyActionKeySequence,
     mouse_visibility: c_int,
+    child_exited: RoasttySurfaceMessageChildExited,
 }
 
 #[repr(C)]
@@ -1367,6 +1375,12 @@ fn action_u_from_storage(tag: c_int, storage: [usize; 8]) -> RoasttyActionU {
         }
         ROASTTY_ACTION_NAVIGATE_SEARCH => u.raw = [storage[0], 0, 0],
         ROASTTY_ACTION_MOUSE_VISIBILITY => u.mouse_visibility = storage[0] as c_int,
+        ROASTTY_ACTION_SHOW_CHILD_EXITED => {
+            u.child_exited = RoasttySurfaceMessageChildExited {
+                exit_code: storage[0] as u32,
+                timetime_ms: storage[1] as u64,
+            }
+        }
         ROASTTY_ACTION_KEY_TABLE => {
             u.key_table = RoasttyActionKeyTable {
                 tag: storage[0] as c_int,
@@ -1431,6 +1445,10 @@ fn action_u_to_storage(tag: c_int, u: &RoasttyActionU) -> [usize; 8] {
             ROASTTY_ACTION_RELOAD_CONFIG => s[0] = usize::from(u.reload_config.soft),
             ROASTTY_ACTION_NAVIGATE_SEARCH => s[0] = u.raw[0],
             ROASTTY_ACTION_MOUSE_VISIBILITY => s[0] = u.mouse_visibility as usize,
+            ROASTTY_ACTION_SHOW_CHILD_EXITED => {
+                s[0] = u.child_exited.exit_code as usize;
+                s[1] = u.child_exited.timetime_ms as usize;
+            }
             ROASTTY_ACTION_KEY_TABLE => {
                 s[0] = u.key_table.tag as usize;
                 if u.key_table.tag == ROASTTY_KEY_TABLE_ACTIVATE {
@@ -4375,6 +4393,13 @@ impl Surface {
         self.perform_targeted_action_result(ROASTTY_TARGET_APP, ptr::null_mut(), tag, storage)
     }
 
+    fn perform_child_exited(&self, child_exit: termio::TermioChildExit) -> bool {
+        let mut storage = [0usize; 8];
+        storage[0] = child_exit.exit_code as usize;
+        storage[1] = child_exit.runtime_ms as usize;
+        self.perform_action_result(ROASTTY_ACTION_SHOW_CHILD_EXITED, storage)
+    }
+
     fn perform_start_search_result(&self, needle: &CStr) -> bool {
         let mut storage = [0usize; 8];
         storage[0] = needle.as_ptr() as usize;
@@ -7150,6 +7175,9 @@ impl Surface {
                     self.process_exited = true;
                     if pump.child_exited && !self.child_exit_handled {
                         self.child_exit_handled = true;
+                        if let Some(child_exit) = pump.child_exit {
+                            self.perform_child_exited(child_exit);
+                        }
                         if !self.wait_after_command {
                             self.request_close();
                         }
@@ -19600,6 +19628,8 @@ mod tests {
         open_url: Option<(c_int, Vec<u8>)>,
         key_table: Option<(c_int, Vec<u8>)>,
         key_sequence: Option<(bool, c_int, usize, c_int)>,
+        child_exited: Option<(u32, u64)>,
+        close_count_at_action: usize,
     }
 
     #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -20054,6 +20084,8 @@ mod tests {
             } else {
                 None
             };
+            let child_exited = (action.tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+                .then_some((storage[0] as u32, storage[1] as u64));
             records.borrow_mut().push(ActionRecord {
                 app,
                 target_tag: target.tag,
@@ -20065,6 +20097,8 @@ mod tests {
                 open_url,
                 key_table,
                 key_sequence,
+                child_exited,
+                close_count_at_action: CLOSE_COUNT.load(Ordering::SeqCst),
             });
         });
         if target.tag == ROASTTY_TARGET_APP && action.tag == ROASTTY_ACTION_QUIT {
@@ -20115,6 +20149,25 @@ mod tests {
             confirm_read_clipboard_cb: None,
             write_clipboard_cb: None,
             close_surface_cb: None,
+        };
+        roastty_app_new(&runtime, config)
+    }
+
+    fn new_test_app_with_action_and_close_config(
+        result: bool,
+        config: RoasttyConfig,
+    ) -> RoasttyApp {
+        reset_action_records(result);
+        reset_close_records();
+        let runtime = RoasttyRuntimeConfig {
+            userdata: ptr::null_mut(),
+            supports_selection_clipboard: false,
+            wakeup_cb: None,
+            action_cb: Some(split_action_cb),
+            read_clipboard_cb: None,
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: None,
+            close_surface_cb: Some(close_surface_cb),
         };
         roastty_app_new(&runtime, config)
     }
@@ -20772,6 +20825,10 @@ mod tests {
             bytes_written,
             pending_write_bytes,
             child_exited,
+            child_exit: child_exited.then_some(termio::TermioChildExit {
+                exit_code: 0,
+                runtime_ms: 1,
+            }),
         }
     }
 
@@ -21596,6 +21653,130 @@ mod tests {
 
         roastty_surface_free(surface);
         roastty_app_free(app);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_dispatches_normal_exit_before_close() {
+        let _pty_guard = pty_command_lock();
+        let _close_guard = CLOSE_LOCK.lock().unwrap();
+        let config = new_test_config_from_str(
+            "abnormal-command-exit-runtime = 1\ncommand = sleep 0.05; exit 7\n",
+        );
+        let app = new_test_app_with_action_and_close_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            CLOSE_COUNT.load(Ordering::SeqCst) == 1
+        });
+        let records = action_records();
+        let record = records
+            .iter()
+            .find(|record| record.action_tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+            .expect("show child exited action");
+
+        assert_eq!(record.target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(record.surface, surface);
+        let (exit_code, runtime_ms) = record.child_exited.expect("child exited payload");
+        assert_eq!(exit_code, 7);
+        assert!(runtime_ms > 1, "{record:?}");
+        assert_eq!(record.close_count_at_action, 0);
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 1);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_dispatches_abnormal_threshold_exit() {
+        let _pty_guard = pty_command_lock();
+        let _close_guard = CLOSE_LOCK.lock().unwrap();
+        let threshold_ms = 60_000;
+        let config = new_test_config_from_str(&format!(
+            "abnormal-command-exit-runtime = {threshold_ms}\ncommand = exit 13\n",
+        ));
+        let app = new_test_app_with_action_and_close_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            action_records()
+                .iter()
+                .any(|record| record.action_tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+        });
+        let records = action_records();
+        let record = records
+            .iter()
+            .find(|record| record.action_tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+            .expect("show child exited action");
+        let (exit_code, runtime_ms) = record.child_exited.expect("child exited payload");
+
+        assert_eq!(exit_code, 13);
+        assert!(runtime_ms <= threshold_ms, "{record:?}");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_wait_after_command_holds_after_dispatch() {
+        let _pty_guard = pty_command_lock();
+        let _close_guard = CLOSE_LOCK.lock().unwrap();
+        let config = new_test_config_from_str(
+            "abnormal-command-exit-runtime = 1\nwait-after-command = true\ncommand = sleep 0.05; exit 3\n",
+        );
+        let app = new_test_app_with_action_and_close_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            roastty_surface_process_exited(surface)
+                && action_records()
+                    .iter()
+                    .any(|record| record.action_tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+        });
+
+        let records = action_records();
+        let record = records
+            .iter()
+            .find(|record| record.action_tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+            .expect("show child exited action");
+        assert_eq!(record.child_exited.expect("child exited payload").0, 3);
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn child_exited_payload_runtime_false_action_result_still_closes_default_surface() {
+        let _pty_guard = pty_command_lock();
+        let _close_guard = CLOSE_LOCK.lock().unwrap();
+        let config = new_test_config_from_str(
+            "abnormal-command-exit-runtime = 1\ncommand = sleep 0.05; exit 5\n",
+        );
+        let app = new_test_app_with_action_and_close_config(false, config);
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        wait_until(|| {
+            roastty_app_tick(app);
+            CLOSE_COUNT.load(Ordering::SeqCst) == 1
+        });
+        let records = action_records();
+        let record = records
+            .iter()
+            .find(|record| record.action_tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
+            .expect("show child exited action");
+
+        assert_eq!(record.child_exited.expect("child exited payload").0, 5);
+        assert_eq!(CLOSE_COUNT.load(Ordering::SeqCst), 1);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     #[test]

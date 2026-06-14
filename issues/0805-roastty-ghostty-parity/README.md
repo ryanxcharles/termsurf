@@ -318,6 +318,10 @@ experiment files until they are proven.
   and uses a `<=` runtime threshold. Future process lifecycle experiments must
   either prove the abnormal-exit branch directly or run commands beyond the
   configured threshold when proving the normal child-exit branch.
+- **Child-exit parity has separable layers.** Roastty now proves the PTY
+  child-exit exit-code/runtime payload reaches the app as `show_child_exited`,
+  but terminal fallback text, abnormal-exit close/hold policy after
+  handled/unhandled actions, and app quit policy remain separate lifecycle gaps.
 - **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
   currently models scrollback capacity in rows, while pinned Ghostty documents
   `scrollback-limit` as a byte quota. A focused experiment may prove the
@@ -1215,4 +1219,4 @@ remains open.
 - [Experiment 118: Wait after command runtime split](118-wait-after-command-runtime-split.md)
   — **Pass**
 - [Experiment 119: Child exited action payload split](119-child-exited-action-payload-split.md)
-  — **Designed**
+  — **Pass**
