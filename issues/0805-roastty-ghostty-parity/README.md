@@ -1089,3 +1089,5 @@ remains open.
   — **Pass**
 - [Experiment 101: Recursive replay suffix placement](101-recursive-replay-suffix.md)
   — **Pass**
+- [Experiment 102: Full load pipeline order](102-full-load-pipeline-order.md) —
+  **Designed**
