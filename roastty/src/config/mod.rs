@@ -20245,6 +20245,161 @@ mod tests {
     }
 
     #[test]
+    fn color_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .unwrap()
+                .to_string()
+        }
+
+        let default = Config::default();
+        let mut cfg = Config::default();
+
+        cfg.set("background", Some("ForestGreen")).unwrap();
+        assert_eq!(
+            cfg.background,
+            Color {
+                r: 0x22,
+                g: 0x8b,
+                b: 0x22,
+            }
+        );
+        assert_eq!(line(&cfg, "background"), "background = #228b22");
+
+        cfg.set("foreground", Some(" #AABBCC\t")).unwrap();
+        assert_eq!(
+            cfg.foreground,
+            Color {
+                r: 0xaa,
+                g: 0xbb,
+                b: 0xcc,
+            }
+        );
+        assert_eq!(line(&cfg, "foreground"), "foreground = #aabbcc");
+        assert_eq!(
+            cfg.set("foreground", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("background", Some("cell-foreground")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("background", Some("#12")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("background", Some("")).unwrap();
+        assert_eq!(cfg.background, default.background);
+        assert_eq!(line(&cfg, "background"), line(&default, "background"));
+
+        cfg.set("macos-icon-ghost-color", Some("#0a0b0c")).unwrap();
+        assert_eq!(
+            cfg.macos_icon_ghost_color,
+            Some(Color {
+                r: 10,
+                g: 11,
+                b: 12,
+            })
+        );
+        assert_eq!(
+            line(&cfg, "macos-icon-ghost-color"),
+            "macos-icon-ghost-color = #0a0b0c"
+        );
+        assert_eq!(
+            cfg.set("macos-icon-ghost-color", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("macos-icon-ghost-color", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon_ghost_color, default.macos_icon_ghost_color);
+
+        cfg.set("search-foreground", Some("cell-foreground"))
+            .unwrap();
+        assert_eq!(cfg.search_foreground, TerminalColor::CellForeground);
+        assert_eq!(
+            line(&cfg, "search-foreground"),
+            "search-foreground = cell-foreground"
+        );
+        cfg.set("search-background", Some("cell-background"))
+            .unwrap();
+        assert_eq!(cfg.search_background, TerminalColor::CellBackground);
+        assert_eq!(
+            line(&cfg, "search-background"),
+            "search-background = cell-background"
+        );
+        cfg.set("search-background", Some("black")).unwrap();
+        assert_eq!(
+            cfg.search_background,
+            TerminalColor::Color(Color { r: 0, g: 0, b: 0 })
+        );
+        assert_eq!(
+            cfg.set("search-foreground", Some(" cell-foreground")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("search-foreground", Some("")).unwrap();
+        assert_eq!(cfg.search_foreground, default.search_foreground);
+
+        cfg.set("cursor-color", Some("cell-background")).unwrap();
+        assert_eq!(cfg.cursor_color, Some(TerminalColor::CellBackground));
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = cell-background");
+        cfg.set("cursor-color", Some("#010203")).unwrap();
+        assert_eq!(
+            cfg.cursor_color,
+            Some(TerminalColor::Color(Color { r: 1, g: 2, b: 3 }))
+        );
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = #010203");
+        cfg.set("cursor-color", Some("")).unwrap();
+        assert_eq!(cfg.cursor_color, default.cursor_color);
+
+        cfg.set("bold-color", Some("bright")).unwrap();
+        assert_eq!(cfg.bold_color, Some(BoldColor::Bright));
+        assert_eq!(line(&cfg, "bold-color"), "bold-color = bright");
+        cfg.set("bold-color", Some("#040506")).unwrap();
+        assert_eq!(
+            cfg.bold_color,
+            Some(BoldColor::Color(Color { r: 4, g: 5, b: 6 }))
+        );
+        assert_eq!(line(&cfg, "bold-color"), "bold-color = #040506");
+        assert_eq!(
+            cfg.set("bold-color", Some(" bright")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("bold-color", Some("")).unwrap();
+        assert_eq!(cfg.bold_color, default.bold_color);
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str(
+            "background = #0a0b0c\nbackground = cell-foreground\nsearch-foreground = cell-background\nsearch-foreground = wrong-sentinel\n",
+        );
+        assert_eq!(
+            cfg.background,
+            Color {
+                r: 10,
+                g: 11,
+                b: 12,
+            }
+        );
+        assert_eq!(cfg.search_foreground, TerminalColor::CellBackground);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "background".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "search-foreground".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn command_config_parse_format_reset_and_diagnose() {
         let line = |cfg: &Config, key: &str| -> String {
             let mut out = String::new();

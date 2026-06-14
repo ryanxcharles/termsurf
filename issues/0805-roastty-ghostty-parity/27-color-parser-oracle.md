@@ -174,3 +174,125 @@ VERDICT: APPROVED
 
 No Required findings remain.
 ```
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a focused color parser family oracle for the 16 color parser
+rows. The oracle proves the shared color option boundary:
+
+- required `Color` dispatch accepts named colors and hex values;
+- optional `Color` dispatch accepts values and raw-empty resets to default;
+- required and optional `TerminalColor` dispatch accepts normal colors plus
+  `cell-foreground` and `cell-background` sentinels;
+- plain `Color` rows reject terminal sentinels;
+- optional `BoldColor` dispatch accepts `bright` and normal colors;
+- missing values are `ValueRequired`;
+- raw empty required and optional values reset to defaults;
+- invalid names, malformed hex, wrong sentinel keywords, and invalid
+  whitespace-padded sentinel keywords are rejected as `InvalidValue`;
+- formatter output is canonical for representative color, terminal color, and
+  bold-color fields;
+- load-string diagnostics preserve valid earlier values while reporting invalid
+  later color lines.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml color_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::color_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4917 filtered out; finished in 0.01s
+```
+
+Existing color parser and formatter regression tests also passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml color_parse_cli
+cargo test --manifest-path roastty/Cargo.toml terminal_color_parse_cli
+cargo test --manifest-path roastty/Cargo.toml bold_color_parse_cli
+cargo test --manifest-path roastty/Cargo.toml color_format_entry
+```
+
+Output summaries:
+
+```text
+running 2 tests
+test config::tests::bold_color_parse_cli_parses_keyword_and_colors ... ok
+test config::tests::terminal_color_parse_cli_parses_sentinels_and_colors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4916 filtered out; finished in 0.00s
+```
+
+```text
+running 1 test
+test config::tests::terminal_color_parse_cli_parses_sentinels_and_colors ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4917 filtered out; finished in 0.00s
+```
+
+```text
+running 1 test
+test config::tests::bold_color_parse_cli_parses_keyword_and_colors ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4917 filtered out; finished in 0.00s
+```
+
+```text
+running 2 tests
+test config::tests::terminal_and_bold_color_format_entry ... ok
+test config::tests::color_format_entry_writes_hex_string ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4916 filtered out; finished in 0.00s
+```
+
+The parser inventory generator passed and moved all 16 color rows to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=156
+audit_covered=47
+gap=0
+```
+
+Matrix assertion output:
+
+```text
+parser_rows=203 color_oracle=16 cfg217=Gap
+```
+
+## Conclusion
+
+The color parser family is now `Oracle complete`. CFG-217 remains `Gap` because
+47 parser rows are still audit-covered only. The next parser-family experiment
+should continue reducing that count with another bounded family.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no
+findings.

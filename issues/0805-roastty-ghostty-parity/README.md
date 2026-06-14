@@ -445,6 +445,14 @@ experiment files until they are proven.
   branches for `macos-dock-drop-behavior = window`,
   `gtk-single-instance = desktop`, and `gtk-tabs-location = hidden` are part of
   the enum-family oracle.
+- **Color parser rows share color, terminal-color, and bold-color semantics.**
+  Experiment 27 proved the 16 color rows: named colors and hex values parse
+  through `Color`, required and optional `TerminalColor` rows accept
+  `cell-foreground` and `cell-background`, plain `Color` rows reject those
+  sentinels, `BoldColor` accepts `bright`, missing values are required,
+  raw-empty values reset to defaults, invalid colors and padded sentinel
+  keywords are rejected, diagnostics preserve earlier valid values, and
+  formatter output canonicalizes colors to lowercase hex or sentinel keywords.
 
 ## Verification
 
@@ -502,4 +510,4 @@ remains open.
 - [Experiment 25: Unsupported parser oracle](25-unsupported-parser-oracle.md) —
   **Pass**
 - [Experiment 26: Enum parser oracle](26-enum-parser-oracle.md) — **Pass**
-- [Experiment 27: Color parser oracle](27-color-parser-oracle.md) — **Designed**
+- [Experiment 27: Color parser oracle](27-color-parser-oracle.md) — **Pass**
