@@ -27,6 +27,7 @@ KEY_RE = re.compile(r'"([^"]+)"')
 BOOLEAN_ORACLE_TEST = "boolean_config_parser_family_oracle"
 INTEGER_ORACLE_TEST = "integer_config_parser_family_oracle"
 FLOAT_ORACLE_TEST = "float_config_parser_family_oracle"
+STRING_ORACLE_TEST = "string_config_parser_family_oracle"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -259,7 +260,7 @@ def update_cfg217(
                 "All parser rows are Oracle complete."
                 if incomplete_count == 0
                 else (
-                    f"Experiment 17 proves {oracle_count} parser rows Oracle "
+                    f"Experiment 18 proves {oracle_count} parser rows Oracle "
                     f"complete; {incomplete_count} parser rows are not Oracle "
                     f"complete and {gap_count} parser rows are dispatch gaps."
                 )
@@ -279,7 +280,7 @@ def update_cfg217(
                 "issues/0805-roastty-ghostty-parity/config-matrix.md` | Before closing "
                 "Issue 805 and when config parser dispatch changes. | CFG-217 only "
                 "passes when every parser inventory row is `Oracle complete`; audit "
-                f"coverage alone is insufficient. | Experiment 17 | {notes} |"
+                f"coverage alone is insufficient. | Experiment 18 | {notes} |"
             )
         updated.append(line)
     matrix.write_text("\n".join(updated) + "\n")
@@ -292,6 +293,7 @@ def build_rows(
     boolean_oracle_present: bool,
     integer_oracle_present: bool,
     float_oracle_present: bool,
+    string_oracle_present: bool,
 ) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
     arm_by_key: dict[str, ParserArm] = {}
     for arm in arms:
@@ -345,6 +347,14 @@ def build_rows(
                 "syntax, and overflow semantics"
             )
             missing_evidence = "None for direct float parser semantics."
+        elif string_oracle_present and family == "string":
+            status = "Oracle complete"
+            evidence = (
+                "Shared string parser oracle covers exact byte-preserving copy, "
+                "embedded NULs, missing values, explicit empty strings, and "
+                "required/optional empty-reset semantics"
+            )
+            missing_evidence = "None for direct string parser semantics."
         elif option == "config-default-files":
             missing_evidence = (
                 "Direct parser and effective default-file load-order semantics must "
@@ -387,6 +397,7 @@ def main() -> int:
     boolean_oracle_present = BOOLEAN_ORACLE_TEST in roastty_source
     integer_oracle_present = INTEGER_ORACLE_TEST in roastty_source
     float_oracle_present = FLOAT_ORACLE_TEST in roastty_source
+    string_oracle_present = STRING_ORACLE_TEST in roastty_source
     rows, missing, compatibility_only, noncanonical = build_rows(
         upstream,
         aliases,
@@ -394,6 +405,7 @@ def main() -> int:
         boolean_oracle_present,
         integer_oracle_present,
         float_oracle_present,
+        string_oracle_present,
     )
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]

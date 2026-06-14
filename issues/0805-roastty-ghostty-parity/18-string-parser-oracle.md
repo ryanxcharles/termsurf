@@ -142,3 +142,77 @@ distinguish parsing an explicit empty string from taking the empty-reset branch.
 The design now requires `term` for the required string-field reset assertion
 because its default is non-empty, and keeps explicit empty-string preservation
 at the direct `parse_string_field(Some(""))` helper level.
+
+## Result
+
+**Result:** Pass
+
+Roastty's direct string parser now copies any provided `&str` exactly, including
+embedded NUL bytes, matching Ghostty's byte-slice copy behavior at this parser
+layer. The focused oracle proves missing values, explicit empty strings, NUL
+preservation, required string fields, optional string fields, and empty-reset
+dispatch using `term` and `title`.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml string_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::string_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4908 filtered out; finished in 0.00s
+```
+
+The parser inventory generator passed and moved the 9 string scalar rows to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=67
+audit_covered=136
+gap=0
+```
+
+CFG-217 remains `Gap` because 136 parser rows are still audit-only, but there
+are still no parser dispatch gaps.
+
+## Conclusion
+
+String scalar parser semantics are now proven for the pinned Ghostty target. The
+experiment also found and fixed a real parser parity issue: embedded NUL bytes
+were incorrectly rejected by Roastty's direct string helper.
+
+## Completion Review
+
+Fresh-context adversarial completion review initially found one required issue:
+existing tests for string rows still expected embedded NUL values to be
+rejected, which contradicted the new oracle. The stale tests and load-string
+diagnostic expectations were updated so embedded NUL string values are accepted
+and preserved consistently across the existing config parser test coverage.
+
+Focused re-review approved the completed result with no remaining findings. The
+reviewer independently verified the focused string oracle, the broader
+`config_parse_format_reset_and_diagnose` subset, generator/matrix assertions,
+Rust fmt check, and `git diff --check`.

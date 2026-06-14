@@ -386,6 +386,11 @@ experiment files until they are proven.
   exponentless hex floats, mixed-case signed `nan`/`inf`/`infinity`, and
   overflow to infinities. Roastty now uses a shared Zig-compatible float helper
   for the 9 float scalar parser rows.
+- **Direct string parser rows copy bytes exactly.** Experiment 18 matched
+  Ghostty's `[]const u8` / `[:0]const u8` type-magic behavior for the 9 string
+  scalar rows: missing values are required, explicit empty strings are accepted
+  at the child parser level, `key =` resets through the surrounding dispatch
+  helper, and embedded NUL bytes are preserved instead of rejected.
 
 ## Verification
 
@@ -428,5 +433,4 @@ remains open.
 - [Experiment 15: Boolean parser oracle](15-boolean-parser-oracle.md) — **Pass**
 - [Experiment 16: Integer parser oracle](16-integer-parser-oracle.md) — **Pass**
 - [Experiment 17: Float parser oracle](17-float-parser-oracle.md) — **Pass**
-- [Experiment 18: String parser oracle](18-string-parser-oracle.md) —
-  **Designed**
+- [Experiment 18: String parser oracle](18-string-parser-oracle.md) — **Pass**

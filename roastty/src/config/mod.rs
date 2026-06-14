@@ -5610,7 +5610,6 @@ pub(crate) fn parse_bool_field(value: Option<&str>) -> Result<bool, MagicParseEr
 pub(crate) fn parse_string_field(value: Option<&str>) -> Result<String, MagicParseError> {
     match value {
         None => Err(MagicParseError::ValueRequired),
-        Some(v) if v.as_bytes().contains(&0) => Err(MagicParseError::InvalidValue),
         Some(v) => Ok(v.to_string()),
     }
 }
@@ -11262,10 +11261,8 @@ mod tests {
             cfg.set("macos-custom-icon", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("macos-custom-icon", Some("bad\0path")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("macos-custom-icon", Some("bad\0path")).unwrap();
+        assert_eq!(cfg.macos_custom_icon.as_deref(), Some("bad\0path"));
 
         cfg.set("macos-icon-ghost-color", Some("ForestGreen"))
             .unwrap();
@@ -15426,14 +15423,10 @@ mod tests {
             cfg.set("enquiry-response", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("term", Some("bad\0term")),
-            Err(ConfigSetError::InvalidValue)
-        );
-        assert_eq!(
-            cfg.set("enquiry-response", Some("bad\0response")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("term", Some("bad\0term")).unwrap();
+        assert_eq!(cfg.term, "bad\0term");
+        cfg.set("enquiry-response", Some("bad\0response")).unwrap();
+        assert_eq!(cfg.enquiry_response, "bad\0response");
 
         let diagnostics = cfg.load_str(
             "term = xterm-roastty\n\
@@ -15442,21 +15435,14 @@ mod tests {
              enquiry-response = bad\0pong\n",
         );
         assert_eq!(cfg.term, "xterm-roastty");
-        assert_eq!(cfg.enquiry_response, "pong");
+        assert_eq!(cfg.enquiry_response, "bad\0pong");
         assert_eq!(
             diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "term".to_string(),
-                    error: ConfigSetError::ValueRequired,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "enquiry-response".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "term".to_string(),
+                error: ConfigSetError::ValueRequired,
+            }]
         );
 
         let cloned = cfg.clone();
@@ -18588,7 +18574,7 @@ mod tests {
             keys[position_index + 8],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[position_index + 9], "language");
+        assert_eq!(keys[position_index + 9], "shell-integration");
 
         cfg.set("quick-terminal-size", Some("")).unwrap();
         assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
@@ -18712,11 +18698,6 @@ mod tests {
             cfg.set("gtk-quick-terminal-namespace", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("gtk-quick-terminal-namespace", Some("bad\0namespace")),
-            Err(ConfigSetError::InvalidValue)
-        );
-
         cfg.set("quick-terminal-size", Some("50%")).unwrap();
         let mut out = String::new();
         cfg.format_config(&mut out);
@@ -18738,7 +18719,11 @@ mod tests {
             keys[size_index + 7],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[size_index + 8], "language");
+        assert_eq!(keys[size_index + 8], "shell-integration");
+
+        cfg.set("gtk-quick-terminal-namespace", Some("bad\0namespace"))
+            .unwrap();
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "bad\0namespace");
 
         let diagnostics = cfg.load_str(
             "gtk-quick-terminal-layer = bottom\n\
@@ -18748,28 +18733,21 @@ mod tests {
              quick-terminal-position = right\n",
         );
         assert_eq!(cfg.gtk_quick_terminal_layer, QuickTerminalLayer::Bottom);
-        assert_eq!(cfg.gtk_quick_terminal_namespace, "roastty-quick");
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "bad\0namespace");
         assert_eq!(cfg.quick_terminal_position, QuickTerminalPosition::Right);
         assert_eq!(
             diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "gtk-quick-terminal-layer".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "gtk-quick-terminal-namespace".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "gtk-quick-terminal-layer".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
         );
 
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.gtk_quick_terminal_layer, QuickTerminalLayer::Bottom);
-        assert_eq!(cloned.gtk_quick_terminal_namespace, "roastty-quick");
+        assert_eq!(cloned.gtk_quick_terminal_namespace, "bad\0namespace");
     }
 
     #[test]
@@ -18898,7 +18876,7 @@ mod tests {
             keys[namespace_index + 5],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[namespace_index + 6], "language");
+        assert_eq!(keys[namespace_index + 6], "shell-integration");
 
         let diagnostics = cfg.load_str(
             "quick-terminal-screen = mouse\n\
@@ -19049,7 +19027,7 @@ mod tests {
             keys[autohide_index + 2],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[autohide_index + 3], "language");
+        assert_eq!(keys[autohide_index + 3], "shell-integration");
 
         let diagnostics = cfg.load_str(
             "quick-terminal-space-behavior = remain\n\
@@ -20757,6 +20735,35 @@ mod tests {
     }
 
     #[test]
+    fn string_config_parser_family_oracle() {
+        assert_eq!(
+            parse_string_field(None),
+            Err(MagicParseError::ValueRequired)
+        );
+        assert_eq!(parse_string_field(Some("")), Ok(String::new()));
+        assert_eq!(
+            parse_string_field(Some("hello\0world")),
+            Ok("hello\0world".to_string())
+        );
+
+        let mut cfg = Config::default();
+
+        assert_eq!(cfg.set("term", None), Err(ConfigSetError::ValueRequired));
+        cfg.set("term", Some("xterm-roastty-\u{2603}\0suffix"))
+            .unwrap();
+        assert_eq!(cfg.term, "xterm-roastty-\u{2603}\0suffix");
+        cfg.set("term", Some("changed")).unwrap();
+        cfg.set("term", Some("")).unwrap();
+        assert_eq!(cfg.term, Config::default().term);
+
+        assert_eq!(cfg.set("title", None), Err(ConfigSetError::ValueRequired));
+        cfg.set("title", Some("title\0suffix")).unwrap();
+        assert_eq!(cfg.title, Some("title\0suffix".to_string()));
+        cfg.set("title", Some("")).unwrap();
+        assert_eq!(cfg.title, None);
+    }
+
+    #[test]
     fn config_link_url_finalize() {
         let cfg = Config::default();
         assert_eq!(cfg.link.len(), 1);
@@ -20934,10 +20941,8 @@ mod tests {
         assert_eq!(line(&cfg), "title = ");
 
         assert_eq!(cfg.set("title", None), Err(ConfigSetError::ValueRequired));
-        assert_eq!(
-            cfg.set("title", Some("bad\0title")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("title", Some("bad\0title")).unwrap();
+        assert_eq!(cfg.title.as_deref(), Some("bad\0title"));
 
         assert_eq!(
             cfg.set("title", Some("Clone title")).map(|_| {
@@ -20948,15 +20953,8 @@ mod tests {
         );
 
         let diagnostics = cfg.load_str("title = \" \"\ntitle =\ntitle = bad\0title\n");
-        assert_eq!(cfg.title, None);
-        assert_eq!(
-            diagnostics,
-            vec![ConfigDiagnostic {
-                line: 3,
-                key: "title".to_string(),
-                error: ConfigSetError::InvalidValue,
-            }]
-        );
+        assert_eq!(cfg.title.as_deref(), Some("bad\0title"));
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -20990,21 +20988,12 @@ mod tests {
             cfg.set("language", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("language", Some("bad\0language")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("language", Some("bad\0language")).unwrap();
+        assert_eq!(cfg.language.as_deref(), Some("bad\0language"));
 
         let diagnostics = cfg.load_str("language = fr\nlanguage =\nlanguage = bad\0language\n");
-        assert_eq!(cfg.language, None);
-        assert_eq!(
-            diagnostics,
-            vec![ConfigDiagnostic {
-                line: 3,
-                key: "language".to_string(),
-                error: ConfigSetError::InvalidValue,
-            }]
-        );
+        assert_eq!(cfg.language.as_deref(), Some("bad\0language"));
+        assert!(diagnostics.is_empty());
 
         cfg.set("language", Some("ja")).unwrap();
         let cloned = cfg.clone();
@@ -21049,40 +21038,22 @@ mod tests {
             cfg.set("x11-instance-name", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("class", Some("bad\0class")),
-            Err(ConfigSetError::InvalidValue)
-        );
-        assert_eq!(
-            cfg.set("x11-instance-name", Some("bad\0instance")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("class", Some("bad\0class")).unwrap();
+        assert_eq!(cfg.class.as_deref(), Some("bad\0class"));
+        cfg.set("x11-instance-name", Some("bad\0instance")).unwrap();
+        assert_eq!(cfg.x11_instance_name.as_deref(), Some("bad\0instance"));
 
         let diagnostics = cfg.load_str(
             "class = com.example.Valid\nclass = bad\0class\nx11-instance-name = roastty\nx11-instance-name = bad\0instance\n",
         );
-        assert_eq!(cfg.class.as_deref(), Some("com.example.Valid"));
-        assert_eq!(cfg.x11_instance_name.as_deref(), Some("roastty"));
-        assert_eq!(
-            diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "class".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "x11-instance-name".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
-        );
+        assert_eq!(cfg.class.as_deref(), Some("bad\0class"));
+        assert_eq!(cfg.x11_instance_name.as_deref(), Some("bad\0instance"));
+        assert!(diagnostics.is_empty());
 
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
-        assert_eq!(cloned.class.as_deref(), Some("com.example.Valid"));
-        assert_eq!(cloned.x11_instance_name.as_deref(), Some("roastty"));
+        assert_eq!(cloned.class.as_deref(), Some("bad\0class"));
+        assert_eq!(cloned.x11_instance_name.as_deref(), Some("bad\0instance"));
     }
 
     #[test]
@@ -21638,10 +21609,9 @@ mod tests {
             cfg.set("window-title-font-family", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("window-title-font-family", Some("bad\0font")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("window-title-font-family", Some("bad\0font"))
+            .unwrap();
+        assert_eq!(cfg.window_title_font_family.as_deref(), Some("bad\0font"));
 
         let diagnostics = cfg.load_str(
             "window-vsync = false\n\
@@ -21651,22 +21621,15 @@ mod tests {
              tab-inherit-working-directory = false\n",
         );
         assert!(!cfg.window_vsync);
-        assert_eq!(cfg.window_title_font_family.as_deref(), Some("System Font"));
+        assert_eq!(cfg.window_title_font_family.as_deref(), Some("bad\0font"));
         assert!(!cfg.tab_inherit_working_directory);
         assert_eq!(
             diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "window-vsync".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "window-title-font-family".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "window-vsync".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
         );
 
         let cloned = cfg.clone();
@@ -21674,7 +21637,7 @@ mod tests {
         assert!(!cloned.window_vsync);
         assert_eq!(
             cloned.window_title_font_family.as_deref(),
-            Some("System Font")
+            Some("bad\0font")
         );
         assert!(!cloned.tab_inherit_working_directory);
     }
