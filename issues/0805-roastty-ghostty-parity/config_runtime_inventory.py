@@ -311,19 +311,40 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml vt_kam_allowed`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B",
-        behavior="scrollback, alternate screen, shell integration, terminfo, title reporting, and remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` scrollback, shell integration, terminfo, title-report, and related terminal behavior fields",
+        id="RUNTIME-009B1",
+        behavior="scrollback-limit zero/no-history and alternate-screen no-scrollback terminal effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `scrollback-limit`; `vendor/ghostty/src/termio/Termio.zig` terminal init; alternate-screen terminal behavior",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, `roastty/src/termio.rs`, and `roastty/src/terminal` scrollback/alternate-screen behavior",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 117 adds `config_scrollback_limit_runtime_*` tests "
+            "proving parsed config `scrollback-limit = 0` disables "
+            "scrollback rows on PTY-backed surfaces while default/nonzero "
+            "behavior still allows history. "
+            "`terminal_stream_alt_screen_has_no_scrollback_and_formatter_reads_active_screen` "
+            "proves the terminal-core alternate-screen no-scrollback behavior."
+        ),
+        missing_evidence="None for parsed config scrollback-limit = 0 no-history behavior and alternate-screen no-scrollback terminal-core behavior covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml config_scrollback_limit_runtime && cargo test --manifest-path roastty/Cargo.toml terminal_stream_alt_screen_has_no_scrollback_and_formatter_reads_active_screen`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2",
+        behavior="exact nonzero scrollback byte quota, shell integration, terminfo, title reporting, and remaining terminal behavior effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`, shell integration, terminfo, title-report, and related terminal behavior fields",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiment 114 split out the proven `vt-kam-allowed` key-gating "
-            "slice. Runtime effects for scrollback, alternate screen, shell "
-            "integration, terminfo, title reporting, and other terminal "
-            "behavior toggles still need focused CFG-223 runtime proof or fixes."
+            "Experiment 117 split out the proven zero/no-history scrollback "
+            "slice and alternate-screen no-scrollback terminal-core behavior. "
+            "Exact nonzero `scrollback-limit` byte quota parity, shell "
+            "integration, terminfo, title reporting, and other remaining "
+            "terminal behavior toggles still need focused CFG-223 runtime "
+            "proof or fixes."
         ),
-        missing_evidence="Add runtime proof for scrollback, alternate screen, shell integration, terminfo, title reporting, and remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, shell integration, terminfo, title reporting, and remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -496,7 +517,8 @@ EXPECTED_IDS = [
     "RUNTIME-007",
     "RUNTIME-008",
     "RUNTIME-009A",
-    "RUNTIME-009B",
+    "RUNTIME-009B1",
+    "RUNTIME-009B2",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2",

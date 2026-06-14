@@ -1206,4 +1206,4 @@ remains open.
 - [Experiment 116: Process command input runtime split](116-process-command-input-runtime-split.md)
   — **Pass**
 - [Experiment 117: Scrollback limit runtime split](117-scrollback-limit-runtime-split.md)
-  — **Designed**
+  — **Pass**

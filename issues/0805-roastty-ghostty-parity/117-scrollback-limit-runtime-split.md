@@ -170,3 +170,109 @@ The reviewer confirmed the README links Experiment 117 as `Designed`, the
 required sections are present, the source and upstream claims are grounded, and
 the verification criteria cover the scoped runtime behavior. No required
 findings were reported.
+
+## Result
+
+**Result:** Pass
+
+Roastty now wires parsed config `scrollback-limit = 0` into PTY-backed surface
+startup as a no-history terminal. The implementation adds `max_scrollback_rows`
+to `TermioSpawnOptions`, passes it to terminal initialization, and maps only the
+parsed zero value to `Some(0)`. Nonzero values still use the existing unlimited
+row behavior and remain in the next terminal gap because pinned Ghostty
+documents `scrollback-limit` as a byte quota.
+
+The focused runtime tests prove:
+
+- parsed config `scrollback-limit = 0` disables scrollback rows on a PTY-backed
+  surface;
+- default parsed config still allows scrollback rows in the same surface
+  scenario;
+- explicit nonzero parsed config still allows scrollback rows in the same
+  surface scenario;
+- the existing alternate-screen terminal-core behavior still has no scrollback.
+
+The runtime inventory now splits the old `RUNTIME-009B` row:
+
+- `RUNTIME-009B1` is `Oracle complete` for the parsed config
+  `scrollback-limit = 0` no-history effect and terminal-core alternate-screen
+  no-scrollback behavior.
+- `RUNTIME-009B2` remains `Gap` for exact nonzero scrollback byte quota, shell
+  integration, terminfo, title reporting, and remaining terminal behavior.
+
+Verification run:
+
+```sh
+cargo test --manifest-path roastty/Cargo.toml config_scrollback_limit_runtime
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_alt_screen_has_no_scrollback_and_formatter_reads_active_screen
+cargo fmt --manifest-path roastty/Cargo.toml -- --check
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+from pathlib import Path
+
+inventory = Path("issues/0805-roastty-ghostty-parity/config-runtime-inventory.md").read_text()
+matrix = Path("issues/0805-roastty-ghostty-parity/config-matrix.md").read_text()
+
+rows = {}
+for line in inventory.splitlines():
+    if not line.startswith("| RUNTIME-"):
+        continue
+    cells = [cell.strip() for cell in line.strip("|").split("|")]
+    rows[cells[0]] = cells
+
+assert "RUNTIME-009B" not in rows, rows.get("RUNTIME-009B")
+assert len(rows) == 26, len(rows)
+assert rows["RUNTIME-009B1"][5] == "Oracle complete", rows["RUNTIME-009B1"]
+for term in (
+    "config_scrollback_limit_runtime",
+    "scrollback-limit = 0",
+    "alternate-screen no-scrollback",
+):
+    assert term in rows["RUNTIME-009B1"][6] or term in rows["RUNTIME-009B1"][9], (
+        term,
+        rows["RUNTIME-009B1"],
+    )
+assert rows["RUNTIME-009B1"][7].startswith("None"), rows["RUNTIME-009B1"]
+assert rows["RUNTIME-009B2"][5] == "Gap", rows["RUNTIME-009B2"]
+behavior = rows["RUNTIME-009B2"][1]
+for term in ("byte quota", "shell integration", "terminfo", "title reporting", "remaining terminal"):
+    assert term in behavior, (term, rows["RUNTIME-009B2"])
+cfg223 = next(line for line in matrix.splitlines() if line.startswith("| CFG-223 "))
+assert "| Gap " in cfg223, cfg223
+PY
+prettier --check issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/117-scrollback-limit-runtime-split.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md \
+  issues/0805-roastty-ghostty-parity/config-runtime-inventory.md
+git diff --check
+```
+
+Initial completion review: **Changes required**.
+
+The reviewer found that the first result overclaimed explicit nonzero
+`scrollback-limit` behavior because the tests covered only
+`scrollback-limit = 0` and default config. That was accepted as a real finding.
+The result now includes an explicit `scrollback-limit = 1` PTY-backed surface
+test to prove nonzero config remains history-enabled while exact byte-quota
+parity remains in `RUNTIME-009B2`.
+
+Final completion re-review: **Approved**.
+
+The reviewer confirmed the prior finding is resolved by
+`config_scrollback_limit_runtime_nonzero_allows_surface_history`, which uses
+`scrollback-limit = 1` and asserts the PTY-backed surface still has scrollback
+rows. The reviewer also confirmed the result and inventory leave exact nonzero
+byte-quota parity in `RUNTIME-009B2` as a gap, and independently verified the
+focused tests, Rust format check, markdown format check, inventory assertions,
+and `git diff --check`.
+
+All commands passed after formatting the regenerated markdown tables.
+
+## Conclusion
+
+The `scrollback-limit = 0` runtime effect is no longer part of the terminal
+runtime gap. The remaining terminal gap is exact nonzero scrollback byte quota,
+shell integration, terminfo, title reporting, and other terminal behavior
+effects not yet covered by a focused runtime oracle.

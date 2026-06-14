@@ -34,6 +34,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) shell_integration_features: crate::config::ShellIntegrationFeatures,
     pub(crate) resource_dir: Option<PathBuf>,
     pub(crate) term: String,
+    pub(crate) max_scrollback_rows: Option<usize>,
     pub(crate) palette: color::Palette,
 }
 
@@ -48,6 +49,7 @@ impl Default for TermioSpawnOptions {
             shell_integration_features: crate::config::ShellIntegrationFeatures::default(),
             resource_dir: None,
             term: "xterm-roastty".to_string(),
+            max_scrollback_rows: None,
             palette: color::DEFAULT_PALETTE,
         }
     }
@@ -167,7 +169,7 @@ impl Termio {
         let mut terminal = Terminal::init_with_options(
             size.cols,
             size.rows,
-            None,
+            options.max_scrollback_rows,
             TerminalInitOptions {
                 cursor_visual_style: options.cursor_visual_style,
                 cursor_blink: options.cursor_blink,

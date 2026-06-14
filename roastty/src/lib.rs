@@ -3918,6 +3918,7 @@ impl Surface {
             shell_integration_features: config.shell_integration_features,
             resource_dir: resource_dir.clone(),
             term: config.term.clone(),
+            max_scrollback_rows: scrollback_limit_to_rows(config.scrollback_limit),
             palette: derived_config_palette(&config),
         };
 
@@ -7382,6 +7383,10 @@ fn config_startup_input_bytes(input: &config::RepeatableReadableIo) -> Option<Ve
         }
     }
     Some(bytes)
+}
+
+fn scrollback_limit_to_rows(limit: usize) -> Option<usize> {
+    (limit == 0).then_some(0)
 }
 
 fn valid_env_key(key: &str) -> bool {
@@ -21439,6 +21444,78 @@ mod tests {
         assert!(text.contains("surface:surface-116"));
         assert!(!text.contains("ROASTTY_CONFIG_SHOULD_NOT_RUN_116"));
         assert!(!text.contains("surface:config"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_scrollback_limit_runtime_zero_disables_surface_history() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "scrollback-limit = 0\ncommand = i=0; while [ $i -lt 40 ]; do printf 'zero-%02d\\n' \"$i\"; i=$((i + 1)); done\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text = surface_snapshot_text_after_start_until(app, surface, "zero-39");
+        let scrollback_rows = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.terminal().scrollback_rows());
+
+        assert!(text.contains("zero-39"));
+        assert_eq!(scrollback_rows, 0);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_scrollback_limit_runtime_default_allows_surface_history() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "command = i=0; while [ $i -lt 40 ]; do printf 'default-%02d\\n' \"$i\"; i=$((i + 1)); done\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text = surface_snapshot_text_after_start_until(app, surface, "default-39");
+        let scrollback_rows = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.terminal().scrollback_rows());
+
+        assert!(text.contains("default-39"));
+        assert!(scrollback_rows > 0, "{scrollback_rows}");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_scrollback_limit_runtime_nonzero_allows_surface_history() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "scrollback-limit = 1\ncommand = i=0; while [ $i -lt 40 ]; do printf 'nonzero-%02d\\n' \"$i\"; i=$((i + 1)); done\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text = surface_snapshot_text_after_start_until(app, surface, "nonzero-39");
+        let scrollback_rows = surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.terminal().scrollback_rows());
+
+        assert!(text.contains("nonzero-39"));
+        assert!(scrollback_rows > 0, "{scrollback_rows}");
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);
