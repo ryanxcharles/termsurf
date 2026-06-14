@@ -149,17 +149,23 @@ ROWS = [
         id="RUNTIME-004E",
         behavior="cursor-click-to-move runtime prompt movement effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` `cursor-click-to-move`; `vendor/ghostty/src/Surface.zig` prompt click movement",
-        roastty_reference="`roastty/src/lib.rs` mouse handlers and terminal prompt tracking",
+        roastty_reference="`roastty/src/lib.rs` mouse handlers and terminal prompt tracking; `roastty/src/terminal/terminal.rs` prompt click action",
         family="mouse",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
-            "`cursor-click-to-move` is parsed and formatted, but CFG-223 still "
-            "needs a runtime oracle showing prompt click movement matches "
-            "pinned Ghostty behavior."
+            "`cursor_click_to_move_click_events_writes_sgr_mouse_press`, "
+            "`cursor_click_to_move_line_mode_writes_cursor_keys`, and "
+            "`cursor_click_to_move_line_mode_same_cell_consumes_release` "
+            "prove eligible prompt clicks write Ghostty-style SGR click-event "
+            "bytes or cursor-key movement bytes, including eligible no-op "
+            "line clicks. `cursor_click_to_move_surface_gates_ineligible_clicks` "
+            "proves disabled config, missing prompt-click support, active "
+            "selection, dragged clicks, and clicks before the prompt are not "
+            "handled."
         ),
-        missing_evidence="Add a prompt-aware runtime test for cursor-click-to-move enabled and disabled behavior.",
+        missing_evidence="None for cursor-click-to-move prompt click-event and line-movement runtime behavior.",
         guard_tier="Tier 2",
-        guard_command="TBD by future CFG-223 cursor-click-to-move runtime experiment.",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml cursor_click_to_move`",
     ),
     RuntimeRow(
         id="RUNTIME-004F",

@@ -531,6 +531,11 @@ experiment files until they are proven.
   `Oracle complete`; `cursor-click-to-move`, `mouse-hide-while-typing`,
   `right-click-action`, and `middle-click-action` remain explicit runtime/UI
   gaps.
+- **OSC 133 prompt-click options belong to prompt-start commands.** Experiment
+  108 found that `OSC 133;B` starts input but must not clear the prompt-click
+  mode from `OSC 133;A;click_events=1` or `OSC 133;A;cl=line`. Roastty now
+  persists prompt-click mode across input/output semantic markers and guards
+  `cursor-click-to-move` with pty-backed surface mouse tests.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1136,4 +1141,4 @@ remains open.
 - [Experiment 107: Mouse runtime subinventory](107-mouse-runtime-subinventory.md)
   — **Partial**
 - [Experiment 108: Cursor click to move runtime](108-cursor-click-to-move-runtime.md)
-  — **Designed**
+  — **Pass**

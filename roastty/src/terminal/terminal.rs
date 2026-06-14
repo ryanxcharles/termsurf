@@ -22,7 +22,7 @@ use super::osc;
 use super::page::SemanticPrompt;
 use super::page_list::{
     CodepointMapEntry, DragGeometry, GridRef, GridRefPointError, PageListAllocError,
-    PageOutputFormat, PageStringWithPinMap, Pin, RenderRowSnapshot,
+    PageOutputFormat, PageStringWithPinMap, Pin, PromptClickMode, RenderRowSnapshot,
 };
 use super::screen::{
     BasicPrintError, EraseDisplayError, Screen, ScreenCursorHyperlinkId, ScreenFormatter,
@@ -67,6 +67,11 @@ pub(crate) struct Terminal {
     pending_clipboard_events: Vec<TerminalClipboardEvent>,
     default_cursor_visual_style: cursor::VisualStyle,
     default_cursor_blink: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PromptClickAction {
+    Bytes(Vec<u8>),
 }
 
 #[derive(Debug)]
@@ -1894,6 +1899,52 @@ impl Terminal {
     /// emits `\x1bO…` vs `\x1b[…`).
     pub(crate) fn cursor_keys_enabled(&self) -> bool {
         self.modes.get(modes::Mode::CursorKeys)
+    }
+
+    pub(crate) fn prompt_click_action(
+        &self,
+        viewport: super::point::Coordinate,
+    ) -> Option<PromptClickAction> {
+        if self.screens.active_key() == TerminalScreenKey::Alternate {
+            return None;
+        }
+        let screen = self.screens.active();
+        let mode = screen.prompt_click_mode();
+        if mode == PromptClickMode::None || !screen.cursor_is_at_prompt() || screen.has_selection()
+        {
+            return None;
+        }
+
+        match mode {
+            PromptClickMode::None => None,
+            PromptClickMode::ClickEvents => Some(PromptClickAction::Bytes(
+                format!("\x1b[<0;{};{}M", viewport.x + 1, viewport.y + 1).into_bytes(),
+            )),
+            PromptClickMode::Line
+            | PromptClickMode::Multiple
+            | PromptClickMode::ConservativeVertical
+            | PromptClickMode::SmartVertical => {
+                let movement = screen.prompt_click_move_for_viewport(viewport)?;
+                let left = if self.cursor_keys_enabled() {
+                    b"\x1bOD".as_slice()
+                } else {
+                    b"\x1b[D".as_slice()
+                };
+                let right = if self.cursor_keys_enabled() {
+                    b"\x1bOC".as_slice()
+                } else {
+                    b"\x1b[C".as_slice()
+                };
+                let mut bytes = Vec::new();
+                for _ in 0..movement.left {
+                    bytes.extend_from_slice(left);
+                }
+                for _ in 0..movement.right {
+                    bytes.extend_from_slice(right);
+                }
+                Some(PromptClickAction::Bytes(bytes))
+            }
+        }
     }
 
     pub(crate) fn scroll_viewport_to_top(&mut self) {
@@ -4146,6 +4197,15 @@ impl TerminalStreamHandler<'_> {
     ) -> Result<(), TerminalStreamError> {
         use super::semantic_prompt::Action;
 
+        if matches!(
+            prompt.action,
+            Action::FreshLineNewPrompt | Action::NewCommand | Action::PromptStart
+        ) {
+            self.screens
+                .active_mut()
+                .set_prompt_click_mode(prompt_click_mode(prompt));
+        }
+
         match prompt.action {
             Action::FreshLine => self.semantic_prompt_fresh_line(),
             Action::FreshLineNewPrompt => {
@@ -4686,6 +4746,21 @@ fn palette_html_string(palette: &color::Palette) -> String {
 
 fn rgb_tuple(rgb: color::Rgb) -> (u8, u8, u8) {
     (rgb.r, rgb.g, rgb.b)
+}
+
+fn prompt_click_mode(prompt: super::semantic_prompt::SemanticPrompt<'_>) -> PromptClickMode {
+    if prompt.click_events() == Some(true) {
+        return PromptClickMode::ClickEvents;
+    }
+    match prompt.click() {
+        Some(super::semantic_prompt::Click::Line) => PromptClickMode::Line,
+        Some(super::semantic_prompt::Click::Multiple) => PromptClickMode::Multiple,
+        Some(super::semantic_prompt::Click::ConservativeVertical) => {
+            PromptClickMode::ConservativeVertical
+        }
+        Some(super::semantic_prompt::Click::SmartVertical) => PromptClickMode::SmartVertical,
+        None => PromptClickMode::None,
+    }
 }
 
 fn rgb_from_tuple(rgb: (u8, u8, u8)) -> color::Rgb {

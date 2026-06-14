@@ -37,11 +37,11 @@ use terminal::selection_gesture::{
     SelectionGestureGeometry, SelectionGesturePress, SelectionGestureRelease, DEFAULT_BEHAVIORS,
 };
 use terminal::terminal::{
-    ClearScreenResult, EmbeddedPointCoord, KittyImageMedium, Terminal as InnerTerminal,
-    TerminalBellCallback, TerminalClipboardEvent, TerminalColorKind, TerminalColorSchemeCallback,
-    TerminalDeviceAttributesCallback, TerminalEnquiryCallback, TerminalFormatterExtra,
-    TerminalGridRef, TerminalGridRefPointError, TerminalPointTag, TerminalScreen,
-    TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
+    ClearScreenResult, EmbeddedPointCoord, KittyImageMedium, PromptClickAction,
+    Terminal as InnerTerminal, TerminalBellCallback, TerminalClipboardEvent, TerminalColorKind,
+    TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
+    TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError, TerminalPointTag,
+    TerminalScreen, TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
     TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
     TerminalTitleChangedCallback, TerminalTrackedGridRef, TerminalWritePtyCallback,
     TerminalXtversionCallback,
@@ -2656,6 +2656,7 @@ struct Surface {
     vt_kam_allowed: bool,
     key_remaps: key_mods::RemapSet,
     macos_option_as_alt: Option<key_mods::OptionAsAlt>,
+    cursor_click_to_move: bool,
     mouse_scroll_multiplier: config::MouseScrollMultiplier,
     click_repeat_interval_ns: u64,
     preedit: Option<String>,
@@ -3632,6 +3633,7 @@ impl Surface {
         self.vt_kam_allowed = parsed.vt_kam_allowed;
         self.key_remaps = parsed.key_remap.clone();
         self.macos_option_as_alt = parsed.macos_option_as_alt;
+        self.cursor_click_to_move = parsed.cursor_click_to_move;
         self.mouse_reporting = parsed.mouse_reporting;
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
         self.click_repeat_interval_ns = click_repeat_interval_ns(&parsed);
@@ -5617,6 +5619,13 @@ impl Surface {
         // `Surface.zig:3882`): when reporting + shift + the terminal isn't shift-capturing, run the
         // selection (and suppress the report) instead of clearing.
         let shift_override = reporting && self.mouse.mods.shift && !self.mouse_shift_capture();
+        if matches!(
+            (button, state),
+            (mouse::MouseButton::Left, SurfaceMouseButtonState::Release)
+        ) && self.maybe_prompt_click()
+        {
+            return true;
+        }
         if reporting && !shift_override {
             // Reporting (no override): clear+reset on ANY button + press/release (Exp 32).
             self.selection_clear_and_reset();
@@ -6035,6 +6044,31 @@ impl Surface {
             self.selection_gesture.reset(Some(termio.terminal_mut()));
         });
         self.dirty = true;
+    }
+
+    fn maybe_prompt_click(&mut self) -> bool {
+        if !self.cursor_click_to_move || self.selection_gesture.dragged() {
+            return false;
+        }
+        let Some((x, y)) = self.mouse.position else {
+            return false;
+        };
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+
+        let action = worker.with_termio(|termio| {
+            let terminal = termio.terminal();
+            let viewport = self.position_to_cell(terminal, x, y)?;
+            terminal.prompt_click_action(viewport)
+        });
+        let Some(PromptClickAction::Bytes(bytes)) = action else {
+            return false;
+        };
+        if bytes.is_empty() {
+            return true;
+        }
+        worker.queue_write(&bytes).is_ok()
     }
 
     fn dispatch_mouse_report(
@@ -17556,6 +17590,7 @@ pub extern "C" fn roastty_surface_new(
         vt_kam_allowed,
         key_remaps,
         macos_option_as_alt,
+        cursor_click_to_move,
         mouse_reporting,
         mouse_scroll_multiplier,
         click_repeat_interval_ns,
@@ -17578,6 +17613,7 @@ pub extern "C" fn roastty_surface_new(
                 parsed.vt_kam_allowed,
                 parsed.key_remap.clone(),
                 parsed.macos_option_as_alt,
+                parsed.cursor_click_to_move,
                 parsed.mouse_reporting,
                 parsed.mouse_scroll_multiplier,
                 click_repeat_interval_ns(&parsed),
@@ -17596,6 +17632,7 @@ pub extern "C" fn roastty_surface_new(
             false,
             key_mods::RemapSet::default(),
             None,
+            true,
             true,
             config::MouseScrollMultiplier::default(),
             500_000_000,
@@ -17649,6 +17686,7 @@ pub extern "C" fn roastty_surface_new(
         vt_kam_allowed,
         key_remaps,
         macos_option_as_alt,
+        cursor_click_to_move,
         mouse_scroll_multiplier,
         click_repeat_interval_ns,
         preedit: None,
@@ -19442,6 +19480,15 @@ mod tests {
         handle
     }
 
+    fn new_test_config_with_cursor_click_to_move(cursor_click_to_move: bool) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        config_from_handle(handle)
+            .unwrap()
+            .parsed
+            .cursor_click_to_move = cursor_click_to_move;
+        handle
+    }
+
     fn new_test_config_with_font_size(font_size: f32) -> RoasttyConfig {
         let handle = roastty_config_new();
         config_from_handle(handle).unwrap().parsed.font_size = font_size;
@@ -20621,6 +20668,41 @@ mod tests {
         });
     }
 
+    fn set_surface_worker_semantic_prompt(surface: RoasttySurface, options: &str, input: &str) {
+        let prompt = if options.is_empty() {
+            "\x1b]133;A\x07".to_string()
+        } else {
+            format!("\x1b]133;A;{options}\x07")
+        };
+        let bytes = format!("{prompt}> \x1b]133;B\x07{input}");
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio
+                    .terminal_mut()
+                    .next_slice(bytes.as_bytes())
+                    .expect("write semantic prompt");
+            });
+    }
+
+    fn release_left_at_cell(surface: RoasttySurface, column: u16, row: u32) -> bool {
+        roastty_surface_mouse_pos(
+            surface,
+            f64::from(column) * 10.0 + 5.0,
+            f64::from(row) * 20.0 + 5.0,
+            ROASTTY_MODS_NONE,
+        );
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_RELEASE,
+            mouse_button_to_int(mouse::MouseButton::Left),
+            ROASTTY_MODS_NONE,
+        )
+    }
+
     fn take_roastty_text(mut text: RoasttyText) -> Vec<u8> {
         if text.text.is_null() {
             return Vec::new();
@@ -21643,6 +21725,112 @@ mod tests {
 
         roastty_surface_free(surface);
         roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn cursor_click_to_move_click_events_writes_sgr_mouse_press() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_cursor_click_to_move(true);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "printf ready; stty raw -echo min 1 time 20; bytes=$(dd bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \n'); printf out:%s \"$bytes\"; sleep 1",
+        ));
+        set_surface_test_geometry(surface, 10, 5, 10, 20);
+        wait_for_surface_plain_screen(app, surface, "ready");
+        set_surface_worker_semantic_prompt(surface, "click_events=1", "abc");
+
+        assert!(release_left_at_cell(surface, 3, 1));
+
+        wait_for_surface_plain_screen(app, surface, "out:1b5b3c303b343b324d");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn cursor_click_to_move_line_mode_writes_cursor_keys() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_cursor_click_to_move(true);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker(
+            "printf ready; stty raw -echo min 1 time 20; bytes=$(dd bs=1 count=9 2>/dev/null | od -An -tx1 | tr -d ' \n'); printf out:%s \"$bytes\"; sleep 1",
+        ));
+        set_surface_test_geometry(surface, 10, 5, 10, 20);
+        wait_for_surface_plain_screen(app, surface, "ready");
+        set_surface_worker_semantic_prompt(surface, "cl=line", "abc");
+
+        assert!(release_left_at_cell(surface, 2, 1));
+
+        wait_for_surface_plain_screen(app, surface, "out:1b5b441b5b441b5b44");
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn cursor_click_to_move_line_mode_same_cell_consumes_release() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_cursor_click_to_move(true);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 10, 5, 10, 20);
+        set_surface_worker_semantic_prompt(surface, "cl=line", "abc");
+
+        assert!(release_left_at_cell(surface, 5, 0));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn cursor_click_to_move_surface_gates_ineligible_clicks() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_cursor_click_to_move(true);
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 10, 5, 10, 20);
+
+        set_surface_worker_semantic_prompt(surface, "", "abc");
+        assert!(!release_left_at_cell(surface, 2, 1));
+
+        set_surface_worker_semantic_prompt(surface, "cl=line", "abc");
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (2, 1), (3, 1))),
+        );
+        assert!(!release_left_at_cell(surface, 2, 1));
+        set_surface_worker_active_selection(surface, None);
+
+        assert!(!release_left_at_cell(surface, 0, 0));
+
+        roastty_surface_mouse_pos(surface, 45.0, 25.0, ROASTTY_MODS_NONE);
+        assert!(!roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            mouse_button_to_int(mouse::MouseButton::Left),
+            ROASTTY_MODS_NONE
+        ));
+        roastty_surface_mouse_pos(surface, 25.0, 25.0, ROASTTY_MODS_NONE);
+        assert!(!roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_RELEASE,
+            mouse_button_to_int(mouse::MouseButton::Left),
+            ROASTTY_MODS_NONE
+        ));
+
+        let disabled = new_test_config_with_cursor_click_to_move(false);
+        roastty_surface_update_config(surface, disabled);
+        assert!(!release_left_at_cell(surface, 2, 1));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(disabled);
         roastty_config_free(config);
     }
 
