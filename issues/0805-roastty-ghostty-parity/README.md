@@ -374,6 +374,12 @@ experiment files until they are proven.
   reset, and invalid values. `config-default-files` remains `Audit covered`
   because its direct parser and effective default-file load-order semantics must
   be proven together under CFG-221.
+- **Integer scalar parser rows share one upstream oracle.** Experiment 16 proved
+  the direct parser semantics for all 10 integer scalar rows using
+  representative `u32`, `usize`, `u64`, `i16`, and `u8` fields: base-0 decimal,
+  lowercase and uppercase prefixes, accepted signs, interior underscores,
+  set-but-empty reset, missing values, invalid bare signs/prefixes,
+  prefix-adjacent underscores, and overflow/range failures.
 
 ## Verification
 
@@ -414,5 +420,4 @@ remains open.
 - [Experiment 14: Link parser recognition](14-link-parser-recognition.md) —
   **Pass**
 - [Experiment 15: Boolean parser oracle](15-boolean-parser-oracle.md) — **Pass**
-- [Experiment 16: Integer parser oracle](16-integer-parser-oracle.md) —
-  **Designed**
+- [Experiment 16: Integer parser oracle](16-integer-parser-oracle.md) — **Pass**

@@ -20442,6 +20442,105 @@ mod tests {
     }
 
     #[test]
+    fn integer_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+
+        cfg.set("image-storage-limit", Some("42")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 42);
+        cfg.set("image-storage-limit", Some("0xFF")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 255);
+        cfg.set("image-storage-limit", Some("0X10")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 16);
+        cfg.set("image-storage-limit", Some("0b101")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 5);
+        cfg.set("image-storage-limit", Some("0B111")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 7);
+        cfg.set("image-storage-limit", Some("0o17")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 15);
+        cfg.set("image-storage-limit", Some("0O11")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 9);
+        cfg.set("image-storage-limit", Some("+1_024")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 1024);
+        cfg.set("image-storage-limit", Some("-0")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 0);
+        cfg.set("image-storage-limit", Some("7")).unwrap();
+        cfg.set("image-storage-limit", Some("")).unwrap();
+        assert_eq!(
+            cfg.image_storage_limit,
+            Config::default().image_storage_limit
+        );
+
+        cfg.set("scrollback-limit", Some("0x20")).unwrap();
+        assert_eq!(cfg.scrollback_limit, 32);
+        cfg.set("linux-cgroup-memory-limit", Some("0x1_000"))
+            .unwrap();
+        assert_eq!(cfg.linux_cgroup_memory_limit, Some(4096));
+        cfg.set("linux-cgroup-memory-limit", Some("")).unwrap();
+        assert_eq!(cfg.linux_cgroup_memory_limit, None);
+
+        cfg.set("window-position-x", Some("-0X10")).unwrap();
+        assert_eq!(cfg.window_position_x, Some(-16));
+        cfg.set("window-position-x", Some("+0B111")).unwrap();
+        assert_eq!(cfg.window_position_x, Some(7));
+        cfg.set("window-position-x", Some("")).unwrap();
+        assert_eq!(cfg.window_position_x, None);
+
+        cfg.set("font-thicken-strength", Some("0xff")).unwrap();
+        assert_eq!(cfg.font_thicken_strength, 255);
+        cfg.set("font-thicken-strength", Some("0")).unwrap();
+        assert_eq!(cfg.font_thicken_strength, 0);
+        cfg.set("font-thicken-strength", Some("")).unwrap();
+        assert_eq!(
+            cfg.font_thicken_strength,
+            Config::default().font_thicken_strength
+        );
+
+        assert_eq!(
+            cfg.set("image-storage-limit", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for value in [
+            "-1",
+            "+",
+            "-",
+            "0x",
+            "0X",
+            "0b",
+            "0B",
+            "0o",
+            "0O",
+            "_1",
+            "1_",
+            "0x_FF",
+            "0b_101",
+            "0o_17",
+            "4294967296",
+        ] {
+            assert_eq!(
+                cfg.set("image-storage-limit", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "image-storage-limit rejects {value:?}"
+            );
+        }
+
+        for value in ["-32769", "32768", "-0X8001", "0x8000"] {
+            assert_eq!(
+                cfg.set("window-position-x", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "window-position-x rejects {value:?}"
+            );
+        }
+
+        for value in ["-1", "256", "0x100"] {
+            assert_eq!(
+                cfg.set("font-thicken-strength", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "font-thicken-strength rejects {value:?}"
+            );
+        }
+    }
+
+    #[test]
     fn config_link_url_finalize() {
         let cfg = Config::default();
         assert_eq!(cfg.link.len(), 1);

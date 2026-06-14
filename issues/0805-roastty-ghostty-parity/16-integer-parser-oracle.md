@@ -129,6 +129,80 @@ prettier --write --prose-wrap always --print-width 80 \
 git diff --check
 ```
 
+## Result
+
+**Result:** Pass
+
+The integer parser oracle is now implemented in
+`integer_config_parser_family_oracle`. It verifies the shared integer parser
+semantics through representative `u32`, `usize`, `u64`, `i16`, and `u8` config
+fields, including base-0 prefixes, signs, underscores, empty reset, missing
+values, invalid syntax, and overflow/range failures.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml integer_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::integer_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4906 filtered out; finished in 0.01s
+```
+
+The parser inventory generator passed and moved the 10 integer scalar rows to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=49
+audit_covered=154
+gap=0
+```
+
+CFG-217 remains `Gap` because 154 parser rows are still audit-only, but there
+are still no parser dispatch gaps.
+
+## Conclusion
+
+Integer scalar parser semantics are now proven for the pinned Ghostty target.
+The next parser-facet experiment should choose another bounded parser family and
+promote only the rows whose accepted/rejected value space has an
+upstream-derived oracle.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no required
+findings. The reviewer independently verified the focused Rust test, Rust fmt
+check, generator output using `/tmp` destinations, matrix/parser assertions, and
+`git diff --check`.
+
+Because the first review response only cited the committed range diff, a focused
+re-review explicitly inspected the uncommitted working-tree diff. The re-review
+again approved with no findings and confirmed the result stayed within
+Experiment 16 scope.
+
 ## Design Review
 
 Fresh-context adversarial design review found one required issue and one
