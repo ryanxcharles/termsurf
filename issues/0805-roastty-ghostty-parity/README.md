@@ -703,3 +703,5 @@ remains open.
   — **Pass**
 - [Experiment 52: Metric modifier formatter oracle](52-metric-modifier-formatter-oracle.md)
   — **Pass**
+- [Experiment 53: Window padding formatter oracle](53-window-padding-formatter-oracle.md)
+  — **Designed**
