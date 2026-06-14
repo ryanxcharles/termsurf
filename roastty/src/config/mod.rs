@@ -18223,6 +18223,65 @@ mod tests {
     }
 
     #[test]
+    fn optional_command_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(line(&default_lines, "command"), "command = ");
+        assert_eq!(
+            line(&default_lines, "initial-command"),
+            "initial-command = "
+        );
+
+        cfg.set("command", Some(" echo hello ")).unwrap();
+        cfg.set("initial-command", Some("direct:nvim main.rs"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "command"), "command = echo hello");
+        assert_eq!(
+            line(&lines, "initial-command"),
+            "initial-command = direct:nvim main.rs"
+        );
+
+        cfg.set("command", Some("shell:\techo\t")).unwrap();
+        cfg.set("initial-command", Some("direct:")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "command"), "command = \techo\t");
+        assert_eq!(line(&lines, "initial-command"), "initial-command = direct:");
+
+        cfg.set("command", Some("")).unwrap();
+        cfg.set("initial-command", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(line(&reset_lines, "command"), "command = ");
+        assert_eq!(line(&reset_lines, "initial-command"), "initial-command = ");
+
+        assert!(index(&lines, "command") < index(&lines, "initial-command"));
+        assert!(index(&lines, "initial-command") < index(&lines, "input"));
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

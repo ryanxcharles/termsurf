@@ -520,6 +520,11 @@ experiment files until they are proven.
   format with `?`, quoted literal `?path` values remain required paths, parsed
   empty values are no-ops, and raw-empty values reset to void output. Repeatable
   path rows remain covered by Experiment 54.
+- **Optional command rows share shell/direct command formatting.** Experiment 63
+  promoted `command` and `initial-command`. Shell commands format as their shell
+  string, explicit `shell:` prefixes normalize away, direct commands format as
+  `direct:` plus space-joined argv items, direct empty payloads format as
+  `direct:`, and raw-empty values reset to void output.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -777,4 +782,4 @@ remains open.
 - [Experiment 62: Optional path formatter oracle](62-optional-path-formatter-oracle.md)
   — **Pass**
 - [Experiment 63: Optional command formatter oracle](63-optional-command-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

@@ -116,3 +116,80 @@ Findings: none.
 
 The reviewer verified the README link, required sections, limited two-row scope,
 plausible 105/98/0 count movement, and verification criteria.
+
+## Result
+
+**Result:** Pass
+
+Added `optional_command_config_formatter_family_oracle`, split the two optional
+command rows into an `optional command` formatter family, and promoted only that
+family.
+
+The new oracle proves:
+
+- optional command defaults format as void lines (`key = `);
+- shell commands format as the shell command string;
+- explicit `shell:` prefixes normalize away in formatted output;
+- direct commands format as `direct:` plus single-space-joined argv items;
+- direct empty payloads format as `direct:`;
+- raw-empty values reset both optional command rows back to void output;
+- representative row order is stable within upstream declaration order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=105
+audit_covered=98
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 98 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml optional_command_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml command_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 105 `Oracle complete`, 98 `Audit covered`,
+  and 0 `Gap`.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`; all
+  previously promoted formatter families remain `Oracle complete`; the two
+  optional command formatter rows are `Oracle complete`; optional custom
+  non-command rows and font rows remain `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80` completed on the
+  changed Markdown files.
+- `git diff --check` passed.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer independently reran the focused optional command formatter oracle,
+the existing command parser oracle, the default formatter oracle,
+`cargo fmt --check`, `git diff --check`, `prettier --check`, and the matrix
+assertion. The reviewer also confirmed that only `command` and `initial-command`
+are promoted as `optional command`, that the formatter matrix reports 105
+`Oracle complete` rows and 98 `Audit covered` rows, and that the result commit
+had not been made before review.
+
+## Conclusion
+
+The optional command formatter rows are now oracle-complete. The remaining
+optional custom `format_entry` rows are now theme, working-directory,
+color-list, duration, and enum-like values. CFG-218 remains open with 98
+audit-covered formatter rows.
