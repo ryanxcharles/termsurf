@@ -113,6 +113,10 @@ PATH_DIAGNOSTIC_ORACLE_OPTIONS = {
     "config-file",
 }
 
+COMMAND_PALETTE_DIAGNOSTIC_ORACLE_OPTIONS = {
+    "command-palette-entry",
+}
+
 
 @dataclasses.dataclass(frozen=True)
 class ParserInventoryRow:
@@ -238,6 +242,20 @@ def diagnostic_override_evidence(option: str, row: ParserInventoryRow) -> str | 
                 "missing-value diagnostics with argument position/key/error, and "
                 "missing-value state retention; "
                 "`roastty/src/config/mod.rs::config_path_diagnostic_family_oracle`"
+            )
+        if option in COMMAND_PALETTE_DIAGNOSTIC_ORACLE_OPTIONS:
+            if row.family != "command palette":
+                raise ValueError(
+                    f"{option} is listed in the Experiment 93 command-palette "
+                    f"diagnostic oracle but parser family is {row.family!r}"
+                )
+            return (
+                "Experiment 93 command-palette diagnostic oracle covers clear, "
+                "valid structured entries, empty/default resets, malformed direct "
+                "values, config-file invalid-value diagnostics with line/key/error "
+                "and continued loading, CLI invalid-value diagnostics with argument "
+                "position/key/error, and invalid-value state retention; "
+                "`roastty/src/config/mod.rs::config_command_palette_diagnostic_oracle`"
             )
         if option in STRING_DIAGNOSTIC_ORACLE_OPTIONS:
             if row.family != "string":
@@ -370,6 +388,7 @@ def build_rows(
         | DURATION_DIAGNOSTIC_ORACLE_OPTIONS
         | WORKING_DIRECTORY_DIAGNOSTIC_ORACLE_OPTIONS
         | PATH_DIAGNOSTIC_ORACLE_OPTIONS
+        | COMMAND_PALETTE_DIAGNOSTIC_ORACLE_OPTIONS
     )
     missing_overrides = sorted(override_options - set(canonical_options))
     if missing_overrides:

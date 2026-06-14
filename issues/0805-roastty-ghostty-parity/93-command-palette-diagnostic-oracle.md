@@ -123,3 +123,56 @@ Reviewer summary:
   inventory progression matches the current files.
 - Confirmed the generator and hygiene checks are specific enough for the claimed
   progress.
+
+## Result
+
+**Result:** Pass
+
+The command-palette diagnostic oracle now covers the only parser-family
+`command palette` row. The oracle verifies `clear`, valid structured entries,
+action canonicalization, empty direct reset, missing direct reset, malformed
+direct values, config-file invalid-value diagnostics with line/key/error,
+continued config-file loading after invalid entries, CLI invalid-value
+diagnostics with argument position/key/error, and invalid-value state retention
+around prior and later valid CLI entries.
+
+The diagnostic inventory generator now has an exact Experiment 93 override for
+`command-palette-entry` and validates that the override still maps to parser
+family `command palette`. Regeneration moved `command-palette-entry` to
+`Oracle complete`. CFG-219 remains `Gap` because 5 font diagnostic rows are
+still incomplete.
+
+Verification output:
+
+```text
+test config::tests::config_command_palette_diagnostic_oracle ... ok
+ghostty_canonical=203
+diagnostic_rows=203
+missing_canonical_diagnostic_rows=0
+extra_diagnostic_rows=0
+oracle_complete=198
+audit_covered=5
+gap=0
+```
+
+Additional checks passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml config_command_palette_diagnostic_oracle
+```
+
+## Conclusion
+
+Command-palette diagnostic parity is now proven for CFG-219. The useful lesson
+is that `command-palette-entry` is an invalid-value diagnostic row for malformed
+structured entries, while empty and missing direct values restore defaults
+instead of reporting required-value diagnostics.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Verdict: Approved.
+
+Findings: None.

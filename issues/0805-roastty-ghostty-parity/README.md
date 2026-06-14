@@ -439,6 +439,13 @@ experiment files until they are proven.
   state. CLI parsing can expand existing relative path state, so diagnostic
   state-retention tests should use absolute setup paths. CFG-219 now has 197
   `Oracle complete` rows and 6 remaining incomplete diagnostic rows.
+- **Command-palette diagnostics are structured invalid-value checks.**
+  Experiment 93 promoted `command-palette-entry` and confirmed that malformed
+  structured entries report `ConfigSetError::InvalidValue`, config-file
+  diagnostics preserve line/key/error while later valid entries still load, and
+  CLI diagnostics preserve argument position/key/error while retaining prior and
+  later valid entries. Empty and missing direct values restore defaults. CFG-219
+  now has 198 `Oracle complete` rows and 5 remaining incomplete diagnostic rows.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1015,4 +1022,4 @@ remains open.
 - [Experiment 92: Path diagnostic oracle](92-path-diagnostic-oracle.md) —
   **Pass**
 - [Experiment 93: Command palette diagnostic oracle](93-command-palette-diagnostic-oracle.md)
-  — **Designed**
+  — **Pass**

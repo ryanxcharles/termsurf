@@ -21923,6 +21923,132 @@ mod tests {
     }
 
     #[test]
+    fn config_command_palette_diagnostic_oracle() {
+        fn command_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .filter(|line| line.starts_with("command-palette-entry = "))
+                .map(str::to_string)
+                .collect()
+        }
+
+        let default = Config::default().command_palette_entry;
+        assert_eq!(default.entries.len(), 88);
+
+        let mut cfg = Config::default();
+        cfg.set("command-palette-entry", Some("clear")).unwrap();
+        assert!(cfg.command_palette_entry.entries.is_empty());
+        assert_eq!(command_lines(&cfg), vec!["command-palette-entry = "]);
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Reset,description:\"Reset font\",action:csi:0m"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Copy,action:copy_to_clipboard"),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Reset", "Reset font", "csi:0m"),
+                CommandPaletteEntry::new("Copy", "", "copy_to_clipboard:mixed"),
+            ]
+        );
+        assert_eq!(
+            command_lines(&cfg),
+            vec![
+                "command-palette-entry = title:\"Reset\",description:\"Reset font\",action:\"csi:0m\"",
+                "command-palette-entry = title:\"Copy\",action:\"copy_to_clipboard:mixed\"",
+            ]
+        );
+
+        let before = cfg.command_palette_entry.clone();
+        for bad in [
+            "title:Only Title",
+            "action:ignore",
+            "title:x,action:no_such_action",
+            "title:x,unknown:y,action:ignore",
+            "title:\"unterminated,action:ignore",
+            "title:\"bad\\q\",action:ignore",
+        ] {
+            assert_eq!(
+                cfg.set("command-palette-entry", Some(bad)),
+                Err(ConfigSetError::InvalidValue),
+                "{bad}"
+            );
+            assert_eq!(
+                cfg.command_palette_entry, before,
+                "direct invalid command-palette value preserves state for {bad}"
+            );
+        }
+
+        cfg.set("command-palette-entry", Some("")).unwrap();
+        assert_eq!(cfg.command_palette_entry, default);
+        cfg.set("command-palette-entry", Some("clear")).unwrap();
+        assert!(cfg.command_palette_entry.entries.is_empty());
+        cfg.set("command-palette-entry", None).unwrap();
+        assert_eq!(cfg.command_palette_entry, default);
+
+        let mut file_cfg = Config::default();
+        let diagnostics = file_cfg.load_str(
+            "command-palette-entry = clear\n\
+             command-palette-entry = title:Valid,action:reset\n\
+             command-palette-entry = title:Invalid,action:nope\n\
+             command-palette-entry = title:Also Valid,action:goto_split:right\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 3,
+                key: "command-palette-entry".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }],
+            "config-file invalid command-palette value preserves line/key/error"
+        );
+        assert_eq!(
+            file_cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Valid", "", "reset"),
+                CommandPaletteEntry::new("Also Valid", "", "goto_split:right"),
+            ],
+            "config-file loading continues after invalid command-palette value"
+        );
+
+        let mut cli_cfg = Config::default();
+        cli_cfg.set("command-palette-entry", Some("clear")).unwrap();
+        cli_cfg
+            .set("command-palette-entry", Some("title:Prior,action:reset"))
+            .unwrap();
+        let diagnostics = cli_cfg.set_cli_args([
+            "--command-palette-entry=title:First,action:csi:0m",
+            "--command-palette-entry=title:Bad,action:nope",
+            "--command-palette-entry=title:Last,action:goto_split:left",
+        ]);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "command-palette-entry".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }],
+            "CLI invalid command-palette value preserves argument position/key/error"
+        );
+        assert_eq!(
+            cli_cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Prior", "", "reset"),
+                CommandPaletteEntry::new("First", "", "csi:0m"),
+                CommandPaletteEntry::new("Last", "", "goto_split:left"),
+            ],
+            "CLI invalid command-palette value preserves prior state and later valid args"
+        );
+    }
+
+    #[test]
     fn command_palette_entry_config_parse_format_reset_and_diagnose() {
         let mut cfg = Config::default();
         assert_eq!(cfg.command_palette_entry.entries.len(), 88);
