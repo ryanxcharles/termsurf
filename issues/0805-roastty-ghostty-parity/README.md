@@ -1198,4 +1198,4 @@ remains open.
 - [Experiment 115: Link open URL runtime split](115-link-open-url-runtime-split.md)
   — **Pass**
 - [Experiment 116: Process command input runtime split](116-process-command-input-runtime-split.md)
-  — **Designed**
+  — **Pass**

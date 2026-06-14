@@ -5,7 +5,7 @@ use std::collections::HashSet;
 #[cfg(test)]
 use std::collections::VecDeque;
 use std::ffi::{CStr, CString, OsStr, OsString};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::raw::{c_char, c_int, c_short, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -3873,19 +3873,30 @@ impl Surface {
         let resource_dir = os::resources_dir::resources_dir()
             .ok()
             .and_then(|resources| resources.host().map(PathBuf::from));
-        let command = self
+        let surface_command = self
             .command
             .as_deref()
             .filter(|command| !command.is_empty());
-        let initial_command = if command.is_none() && self.initial_surface {
+        let initial_command = if surface_command.is_none() && self.initial_surface {
             config.initial_command.as_ref()
         } else {
             None
         };
+        let config_command = if surface_command.is_none() && initial_command.is_none() {
+            config.command.as_ref()
+        } else {
+            None
+        };
         append_ui_key_trace(format!(
-            "rust surface_start_termio command={} initial_command={} cwd={} env_count={} term={}",
-            command.unwrap_or("<default-shell>"),
+            "rust surface_start_termio surface_command={} initial_command={} config_command={} cwd={} env_count={} term={}",
+            surface_command.unwrap_or("<none>"),
             initial_command
+                .map(|command| match command {
+                    config::Command::Shell(_) => "shell",
+                    config::Command::Direct(_) => "direct",
+                })
+                .unwrap_or("none"),
+            config_command
                 .map(|command| match command {
                     config::Command::Shell(_) => "shell",
                     config::Command::Direct(_) => "direct",
@@ -3910,17 +3921,21 @@ impl Surface {
             palette: derived_config_palette(&config),
         };
 
-        let termio = match (command, initial_command) {
-            (Some(command), _) => {
+        let termio = match (surface_command, initial_command, config_command) {
+            (Some(command), _, _) => {
                 termio::Termio::spawn_with_options("/bin/sh", ["-lc", command], options, size)
             }
-            (None, Some(config::Command::Shell(command))) => termio::Termio::spawn_with_options(
-                "/bin/sh",
-                ["-lc", command.as_str()],
-                options,
-                size,
-            ),
-            (None, Some(config::Command::Direct(args))) => match args.split_first() {
+            (None, Some(config::Command::Shell(command)), _)
+            | (None, None, Some(config::Command::Shell(command))) => {
+                termio::Termio::spawn_with_options(
+                    "/bin/sh",
+                    ["-lc", command.as_str()],
+                    options,
+                    size,
+                )
+            }
+            (None, Some(config::Command::Direct(args)), _)
+            | (None, None, Some(config::Command::Direct(args))) => match args.split_first() {
                 Some((program, args)) => termio::Termio::spawn_with_options(
                     program,
                     args.iter().map(String::as_str),
@@ -3934,7 +3949,7 @@ impl Surface {
                     size,
                 ),
             },
-            (None, None) => termio::Termio::spawn_with_options(
+            (None, None, None) => termio::Termio::spawn_with_options(
                 default_shell_program(),
                 std::iter::empty::<&str>(),
                 options,
@@ -3955,7 +3970,16 @@ impl Surface {
             );
             return ROASTTY_INVALID_VALUE;
         };
-        if let Some(initial_input) = &self.initial_input {
+        let config_initial_input = self
+            .initial_input
+            .is_none()
+            .then(|| config_startup_input_bytes(&config.input))
+            .flatten();
+        let initial_input = self
+            .initial_input
+            .as_deref()
+            .or(config_initial_input.as_deref());
+        if let Some(initial_input) = initial_input {
             append_ui_key_trace(format!(
                 "rust surface_start_termio initial_input_len={}",
                 initial_input.len()
@@ -7324,6 +7348,40 @@ fn copied_config_string(ptr: *const c_char) -> Option<String> {
         .to_str()
         .ok()
         .map(str::to_owned)
+}
+
+fn config_startup_input_bytes(input: &config::RepeatableReadableIo) -> Option<Vec<u8>> {
+    if input.list.is_empty() {
+        return None;
+    }
+
+    const MAX_INPUT_FILE_BYTES: u64 = 10 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    for item in &input.list {
+        match item {
+            config::ReadableIo::Raw(value) => {
+                bytes.extend(config::string::parse_string_literal(value.as_bytes()).ok()?);
+            }
+            config::ReadableIo::Path(path) => {
+                let path = config::string::parse_string_literal(path.as_bytes()).ok()?;
+                let path = PathBuf::from(OsStr::from_bytes(&path));
+                let metadata = std::fs::metadata(&path).ok()?;
+                if !metadata.is_file() || metadata.len() > MAX_INPUT_FILE_BYTES {
+                    return None;
+                }
+                let file = std::fs::File::open(&path).ok()?;
+                let mut file_bytes = Vec::new();
+                file.take(MAX_INPUT_FILE_BYTES + 1)
+                    .read_to_end(&mut file_bytes)
+                    .ok()?;
+                if file_bytes.len() > MAX_INPUT_FILE_BYTES as usize {
+                    return None;
+                }
+                bytes.extend(file_bytes);
+            }
+        }
+    }
+    Some(bytes)
 }
 
 fn valid_env_key(key: &str) -> bool {
@@ -19752,6 +19810,15 @@ mod tests {
         (dir, path)
     }
 
+    fn new_test_config_from_str(body: &str) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        let config = config_from_handle(handle).unwrap();
+        let diagnostics = config.parsed.load_str(body);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        config.sync_from_parsed_config();
+        handle
+    }
+
     fn new_test_config_with_light_dark_theme(
         name: &str,
         light_body: &str,
@@ -20633,6 +20700,28 @@ mod tests {
         }
     }
 
+    struct TempInputFile {
+        path: PathBuf,
+    }
+
+    impl TempInputFile {
+        fn new(body: &[u8]) -> Self {
+            let id = SCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "roastty-config-input-{}-{id}.txt",
+                std::process::id()
+            ));
+            std::fs::write(&path, body).expect("write input file");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempInputFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     fn test_pump(
         bytes_read: usize,
         bytes_written: usize,
@@ -21230,6 +21319,126 @@ mod tests {
         assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
         wait_until(|| read_surface_screen_text(surface).contains("ROASTTY DIRECT 160"));
 
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_command_input_runtime_first_surface_uses_config_command() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str("command = printf ROASTTY_CONFIG_COMMAND_116\n");
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text =
+            surface_snapshot_text_after_start_until(app, surface, "ROASTTY_CONFIG_COMMAND_116");
+
+        assert!(text.contains("ROASTTY_CONFIG_COMMAND_116"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_command_input_runtime_initial_command_wins_on_first_surface() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "command = printf ROASTTY_CONFIG_COMMAND_116\ninitial-command = printf ROASTTY_CONFIG_INITIAL_116\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text =
+            surface_snapshot_text_after_start_until(app, surface, "ROASTTY_CONFIG_INITIAL_116");
+
+        assert!(text.contains("ROASTTY_CONFIG_INITIAL_116"));
+        assert!(!text.contains("ROASTTY_CONFIG_COMMAND_116"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_command_input_runtime_later_surface_uses_config_command() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "command = printf ROASTTY_CONFIG_LATER_116\ninitial-command = printf ROASTTY_CONFIG_INITIAL_116\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let first = new_test_surface(app);
+
+        assert!(surface_from_handle(first).unwrap().initial_surface);
+        roastty_surface_free(first);
+        let second = new_test_surface(app);
+
+        assert!(!surface_from_handle(second).unwrap().initial_surface);
+        let text = surface_snapshot_text_after_start_until(app, second, "ROASTTY_CONFIG_LATER_116");
+
+        assert!(text.contains("ROASTTY_CONFIG_LATER_116"));
+        assert!(!text.contains("ROASTTY_CONFIG_INITIAL_116"));
+        roastty_surface_free(second);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_command_input_runtime_decodes_raw_input_escapes() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "command = stty -echo; IFS= read line; printf 'raw:%s' \"$line\"\ninput = raw:hello\\x41\\n\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text = surface_snapshot_text_after_start_until(app, surface, "raw:helloA");
+
+        assert!(text.contains("raw:helloA"));
+        assert!(!text.contains("raw:hello\\x41"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_command_input_runtime_reads_path_input() {
+        let _guard = pty_command_lock();
+        let input = TempInputFile::new(b"from-path-116\n");
+        let config = new_test_config_from_str(&format!(
+            "command = stty -echo; IFS= read line; printf 'path:%s' \"$line\"\ninput = path:{}\n",
+            input.path.display()
+        ));
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+
+        let text = surface_snapshot_text_after_start_until(app, surface, "path:from-path-116");
+
+        assert!(text.contains("path:from-path-116"));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_command_input_runtime_surface_launch_fields_override_config() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str(
+            "command = printf ROASTTY_CONFIG_SHOULD_NOT_RUN_116\ninput = raw:config\\n\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let command =
+            CString::new("stty -echo; IFS= read line; printf 'surface:%s' \"$line\"").unwrap();
+        let input = CString::new("surface-116\n").unwrap();
+        let mut surface_config = roastty_surface_config_new();
+        surface_config.command = command.as_ptr();
+        surface_config.initial_input = input.as_ptr();
+        let surface = new_test_surface_with_config(app, &surface_config);
+
+        let text = surface_snapshot_text_after_start_until(app, surface, "surface:surface-116");
+
+        assert!(text.contains("surface:surface-116"));
+        assert!(!text.contains("ROASTTY_CONFIG_SHOULD_NOT_RUN_116"));
+        assert!(!text.contains("surface:config"));
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);

@@ -350,20 +350,39 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml first_surface_uses_app_initial_command && cargo test --manifest-path roastty/Cargo.toml later_surface_after_close_ignores_app_initial_command && cargo test --manifest-path roastty/Cargo.toml surface_inherited_config && cargo test --manifest-path roastty/Cargo.toml spawn_with_cwd && cargo test --manifest-path roastty/Cargo.toml termio_env`",
     ),
     RuntimeRow(
-        id="RUNTIME-010B",
-        behavior="PTY/process command, startup input, wait, abnormal-exit, and quit policy effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `command`, `input`, `wait-after-command`, `abnormal-command-exit-runtime`, and quit policy fields",
-        roastty_reference="`roastty/src/lib.rs::start_termio`, surface launch fields, app lifecycle callbacks, and process exit handling",
+        id="RUNTIME-010B1",
+        behavior="PTY/process config command, config input, and default-shell launch effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `command` and `input` fields; `vendor/ghostty/src/Surface.zig` command selection; `vendor/ghostty/src/termio/Termio.zig` startup input queuing",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, `config_startup_input_bytes`, and surface launch fields",
+        family="process",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 116 adds `config_command_input_runtime_*` tests proving "
+            "parsed config command precedence, parsed config input delivery, "
+            "decoded raw input escape handling, config input path reads, and "
+            "explicit surface command/input override behavior. Existing "
+            "`surface_start_without_command_*` guards prove the no-command "
+            "default-shell and idempotent-start fallback slice."
+        ),
+        missing_evidence="None for config command, config input, decoded raw input, path input, explicit surface override, and default-shell/no-command launch effects covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml config_command_input_runtime && cargo test --manifest-path roastty/Cargo.toml surface_start_without_command`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-010B2",
+        behavior="PTY/process wait-after-command, abnormal-command-exit-runtime, quit-after-last-window-closed, and lifecycle policy effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `wait-after-command`, `abnormal-command-exit-runtime`, and quit policy fields",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, app lifecycle callbacks, and process exit handling",
         family="process",
         status="Gap",
         evidence=(
-            "Experiment 113 split out the proven initial-command, environment, "
-            "and working-directory launch slice. Config-level `command`, "
-            "config-level startup `input`, wait-after-command, "
-            "abnormal-command-exit-runtime, and quit policy effects still need "
-            "focused runtime proof or fixes."
+            "Experiment 116 split out the proven parsed config command/input "
+            "launch slice. Runtime effects for `wait-after-command`, "
+            "`abnormal-command-exit-runtime`, `quit-after-last-window-closed`, "
+            "and related lifecycle policy behavior still need focused runtime "
+            "proof or fixes."
         ),
-        missing_evidence="Add runtime proof for config-level command/input launch behavior and process lifecycle/quit policy effects.",
+        missing_evidence="Add runtime proof for wait-after-command, abnormal-command-exit-runtime, quit-after-last-window-closed, and related process lifecycle policy effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 PTY/process lifecycle experiment.",
     ),
@@ -479,7 +498,8 @@ EXPECTED_IDS = [
     "RUNTIME-009A",
     "RUNTIME-009B",
     "RUNTIME-010A",
-    "RUNTIME-010B",
+    "RUNTIME-010B1",
+    "RUNTIME-010B2",
     "RUNTIME-011",
     "RUNTIME-012A",
     "RUNTIME-012B",

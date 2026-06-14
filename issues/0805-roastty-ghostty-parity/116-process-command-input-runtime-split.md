@@ -191,3 +191,97 @@ The reviewer confirmed the raw `input` finding is resolved because the design
 now requires decoded startup bytes, including newline and non-newline escapes,
 and the matrix assertion requires `RUNTIME-010B1` evidence or guard cells to
 name decoded raw `input` escape delivery.
+
+## Result
+
+**Result:** Pass
+
+Roastty now applies parsed app config `command` and `input` when starting new
+terminal surfaces:
+
+- per-surface `RoasttySurfaceConfig.command` remains highest priority;
+- first-surface `initial-command` wins over config `command`;
+- later surfaces use config `command`;
+- config `input` raw entries are Zig-string-decoded before delivery, including
+  newline and `\xNN` escapes;
+- config `input` path entries are read and delivered;
+- explicit per-surface `initial_input` overrides config `input`;
+- no-command/default-shell startup and idempotent surface start still pass.
+
+The runtime inventory now splits the old `RUNTIME-010B` row:
+
+- `RUNTIME-010B1` is `Oracle complete` for parsed config command/input and
+  default-shell launch effects.
+- `RUNTIME-010B2` remains `Gap` for `wait-after-command`,
+  `abnormal-command-exit-runtime`, `quit-after-last-window-closed`, and related
+  process lifecycle policy behavior.
+
+Verification run:
+
+```sh
+cargo test --manifest-path roastty/Cargo.toml config_command_input_runtime
+cargo test --manifest-path roastty/Cargo.toml surface_start_without_command
+cargo fmt --manifest-path roastty/Cargo.toml -- --check
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+from pathlib import Path
+
+inventory = Path("issues/0805-roastty-ghostty-parity/config-runtime-inventory.md").read_text()
+matrix = Path("issues/0805-roastty-ghostty-parity/config-matrix.md").read_text()
+
+rows = {}
+for line in inventory.splitlines():
+    if not line.startswith("| RUNTIME-"):
+        continue
+    cells = [cell.strip() for cell in line.strip("|").split("|")]
+    rows[cells[0]] = cells
+
+assert "RUNTIME-010B" not in rows, rows.get("RUNTIME-010B")
+assert len(rows) == 25, len(rows)
+assert rows["RUNTIME-010B1"][5] == "Oracle complete", rows["RUNTIME-010B1"]
+for term in (
+    "config_command_input_runtime",
+    "config command",
+    "config input",
+    "decoded raw input",
+    "surface_start_without_command",
+):
+    assert term in rows["RUNTIME-010B1"][6] or term in rows["RUNTIME-010B1"][9], (
+        term,
+        rows["RUNTIME-010B1"],
+    )
+assert "RoasttySurfaceConfig-only" not in rows["RUNTIME-010B1"][6], rows["RUNTIME-010B1"]
+assert rows["RUNTIME-010B1"][7].startswith("None"), rows["RUNTIME-010B1"]
+assert rows["RUNTIME-010B2"][5] == "Gap", rows["RUNTIME-010B2"]
+behavior = rows["RUNTIME-010B2"][1]
+for term in ("wait-after-command", "abnormal-command-exit-runtime", "quit-after-last-window-closed", "lifecycle"):
+    assert term in behavior, (term, rows["RUNTIME-010B2"])
+cfg223 = next(line for line in matrix.splitlines() if line.startswith("| CFG-223 "))
+assert "| Gap " in cfg223, cfg223
+PY
+prettier --check issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/116-process-command-input-runtime-split.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md \
+  issues/0805-roastty-ghostty-parity/config-runtime-inventory.md
+git diff --check
+```
+
+All commands passed after formatting the regenerated markdown tables.
+
+Completion review: **Approved**.
+
+The reviewer reran the focused command/input tests, no-command fallback tests,
+Rust fmt check, matrix assertion, markdown check, and diff hygiene check. It
+confirmed the generated outputs are internally consistent: 25 runtime rows, 18
+`Oracle complete`, one intentional divergence, six gaps, old `RUNTIME-010B`
+absent, `RUNTIME-010B1` `Oracle complete`, `RUNTIME-010B2` `Gap`, and `CFG-223`
+still `Gap`.
+
+## Conclusion
+
+Parsed config `command` and `input` are no longer part of the process runtime
+gap. The remaining process gap is specifically lifecycle policy: wait after
+command, abnormal-exit handling, quit-after-last-window-closed behavior, and
+related process-exit UI/app effects.
