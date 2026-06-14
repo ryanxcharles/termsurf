@@ -474,3 +474,5 @@ remains open.
   — **Pass**
 - [Experiment 23: Window padding parser oracle](23-window-padding-parser-oracle.md)
   — **Pass**
+- [Experiment 24: Packed flags parser oracle](24-packed-flags-parser-oracle.md)
+  — **Designed**
