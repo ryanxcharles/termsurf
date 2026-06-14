@@ -696,3 +696,5 @@ remains open.
   — **Pass**
 - [Experiment 51: Primitive formatter oracle](51-primitive-formatter-oracle.md)
   — **Pass**
+- [Experiment 52: Metric modifier formatter oracle](52-metric-modifier-formatter-oracle.md)
+  — **Designed**
