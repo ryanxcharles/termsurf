@@ -1142,3 +1142,5 @@ remains open.
   — **Partial**
 - [Experiment 108: Cursor click to move runtime](108-cursor-click-to-move-runtime.md)
   — **Pass**
+- [Experiment 109: Middle click action runtime](109-middle-click-action-runtime.md)
+  — **Designed**
