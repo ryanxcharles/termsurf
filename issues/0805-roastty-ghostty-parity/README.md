@@ -978,3 +978,5 @@ remains open.
   **Pass**
 - [Experiment 88: Float diagnostic oracle](88-float-diagnostic-oracle.md) —
   **Pass**
+- [Experiment 89: String diagnostic oracle](89-string-diagnostic-oracle.md) —
+  **Designed**
