@@ -717,3 +717,5 @@ remains open.
   — **Pass**
 - [Experiment 54: Repeatable path formatter oracle](54-repeatable-path-formatter-oracle.md)
   — **Pass**
+- [Experiment 55: Color keyword formatter oracle](55-color-keyword-formatter-oracle.md)
+  — **Designed**
