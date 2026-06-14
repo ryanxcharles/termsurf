@@ -1150,3 +1150,5 @@ remains open.
   — **Pass**
 - [Experiment 109: Middle click action runtime](109-middle-click-action-runtime.md)
   — **Pass**
+- [Experiment 110: Right click action runtime](110-right-click-action-runtime.md)
+  — **Designed**
