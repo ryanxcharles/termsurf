@@ -311,23 +311,44 @@ ROWS = [
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
     RuntimeRow(
-        id="RUNTIME-010",
-        behavior="PTY/process launch effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` command, working-directory, env, wait-after-command, and quit policy fields",
-        roastty_reference="`roastty/src/lib.rs::start_termio`, inherited config, surface config launch fields",
+        id="RUNTIME-010A",
+        behavior="PTY/process initial-command, environment, and working-directory launch effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `initial-command`, `env`, and `working-directory` fields",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, inherited config helpers, and `roastty/src/termio.rs` spawn options",
         family="process",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
             "`first_surface_uses_app_initial_command`, "
             "`later_surface_after_close_ignores_app_initial_command`, and "
-            "`surface_inherited_config_*` tests prove initial command and "
-            "working-directory inheritance behavior, but this row also covers "
-            "environment, wait-after-command, abnormal-command-exit-runtime, and "
-            "quit policy effects, which do not yet have generated runtime proof."
+            "`surface_inherited_config_*` tests prove initial-command and "
+            "working-directory inheritance behavior. `spawn_with_cwd_*` and "
+            "`termio_env_*` tests prove the PTY boundary runs children in the "
+            "requested working directory, passes explicit env values, inherits "
+            "process env values, tolerates non-Unicode inherited env values, "
+            "and lets explicit env values override inherited/identity/shell "
+            "integration env values."
         ),
-        missing_evidence="Split proven command/working-directory behavior into narrower rows or add runtime proof for the full PTY/process scope.",
+        missing_evidence="None for initial-command, environment, and working-directory launch effects covered by these guards.",
         guard_tier="Tier 2",
-        guard_command="TBD by future CFG-223 PTY/process runtime experiment.",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml first_surface_uses_app_initial_command && cargo test --manifest-path roastty/Cargo.toml later_surface_after_close_ignores_app_initial_command && cargo test --manifest-path roastty/Cargo.toml surface_inherited_config && cargo test --manifest-path roastty/Cargo.toml spawn_with_cwd && cargo test --manifest-path roastty/Cargo.toml termio_env`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-010B",
+        behavior="PTY/process command, startup input, wait, abnormal-exit, and quit policy effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `command`, `input`, `wait-after-command`, `abnormal-command-exit-runtime`, and quit policy fields",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, surface launch fields, app lifecycle callbacks, and process exit handling",
+        family="process",
+        status="Gap",
+        evidence=(
+            "Experiment 113 split out the proven initial-command, environment, "
+            "and working-directory launch slice. Config-level `command`, "
+            "config-level startup `input`, wait-after-command, "
+            "abnormal-command-exit-runtime, and quit policy effects still need "
+            "focused runtime proof or fixes."
+        ),
+        missing_evidence="Add runtime proof for config-level command/input launch behavior and process lifecycle/quit policy effects.",
+        guard_tier="Tier 2",
+        guard_command="TBD by future CFG-223 PTY/process lifecycle experiment.",
     ),
     RuntimeRow(
         id="RUNTIME-011",
@@ -417,7 +438,8 @@ EXPECTED_IDS = [
     "RUNTIME-007",
     "RUNTIME-008",
     "RUNTIME-009",
-    "RUNTIME-010",
+    "RUNTIME-010A",
+    "RUNTIME-010B",
     "RUNTIME-011",
     "RUNTIME-012",
     "RUNTIME-013",

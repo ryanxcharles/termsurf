@@ -559,6 +559,10 @@ experiment files until they are proven.
   `gtk-*`, `linux-*`, and `macos-*` canonical option. GTK/Linux rows are not
   applicable to Roastty's macOS runtime, `macos-option-as-alt` is covered by
   input guards, and remaining macOS app behavior stays owned by `RUNTIME-011`.
+- **Broad runtime rows should split proven slices from real gaps.** Experiment
+  113 split PTY/process launch coverage so initial-command, environment, and
+  working-directory behavior are guarded separately while config-level command,
+  startup input, wait/abnormal-exit, and quit policy remain explicit gaps.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1174,4 +1178,4 @@ remains open.
 - [Experiment 112: Platform runtime classification](112-platform-runtime-classification.md)
   — **Pass**
 - [Experiment 113: PTY process runtime split](113-pty-process-runtime-split.md)
-  — **Designed**
+  — **Pass**

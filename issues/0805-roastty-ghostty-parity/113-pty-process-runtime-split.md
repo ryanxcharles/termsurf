@@ -134,3 +134,74 @@ Fix:
 Re-review verdict: **Approved**. Fresh-context reviewer `Hooke` confirmed the
 required overclaim was resolved, the assertion command was added, and no new
 required findings were introduced.
+
+## Result
+
+**Result:** Pass
+
+Split the broad PTY/process runtime row into two rows:
+
+- `RUNTIME-010A` is `Oracle complete` for initial-command, environment, and
+  working-directory launch behavior.
+- `RUNTIME-010B` remains `Gap` for config-level command, config-level startup
+  input, wait-after-command, abnormal-command-exit-runtime,
+  quit-after-last-window-closed, and related lifecycle/quit policy behavior.
+
+The regenerated runtime inventory now reports 22 runtime rows, 15
+oracle-complete rows, 16 closed rows, and 6 gap rows. `CFG-223` remains `Gap`,
+as intended.
+
+Verification passed:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+# runtime_rows=22 oracle_complete=15 closed=16 audit_covered=0 incomplete=6 gap=6 cfg223=Gap
+
+cargo test --manifest-path roastty/Cargo.toml first_surface_uses_app_initial_command
+# 1 passed
+
+cargo test --manifest-path roastty/Cargo.toml later_surface_after_close_ignores_app_initial_command
+# 1 passed
+
+cargo test --manifest-path roastty/Cargo.toml surface_inherited_config
+# 6 passed
+
+cargo test --manifest-path roastty/Cargo.toml spawn_with_cwd
+# 2 passed
+
+cargo test --manifest-path roastty/Cargo.toml termio_env
+# 6 passed
+```
+
+## Conclusion
+
+The PTY/process runtime coverage is now more honest and more useful for future
+work. Existing guards prove the initial-command, environment, and
+working-directory launch slice, while the remaining process row names the
+unproven command/input/lifecycle behavior that still blocks `CFG-223`.
+
+## Completion Review
+
+Fresh-context Codex reviewer `Nietzsche` returned **Approved** with no required
+findings.
+
+The reviewer verified:
+
+- the README records Experiment 113 as **Pass**;
+- this experiment file has `## Result` and `## Conclusion`;
+- `RUNTIME-010A` is limited to initial-command, environment, and
+  working-directory launch behavior;
+- `RUNTIME-010B` remains `Gap` for command, startup input, wait, abnormal-exit,
+  and quit-policy behavior;
+- `CFG-223` remains `Gap`;
+- generated counts are consistent;
+- `HEAD` was still the plan commit before the result commit;
+- `prettier --check`, `git diff --check`, and the focused cargo tests passed.
+
+The reviewer also noted an optional issue: running `config_runtime_inventory.py`
+with a brand-new `/tmp` matrix path fails because the script updates an existing
+matrix row rather than creating a matrix from scratch. I accepted this as
+non-blocking because the documented workflow updates the existing Issue 805
+`config-matrix.md`; no implementation change was made.
