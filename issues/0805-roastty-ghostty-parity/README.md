@@ -567,6 +567,10 @@ experiment files until they are proven.
   Experiment 114 split `vt-kam-allowed` into its own guarded runtime row while
   scrollback, alternate screen, shell integration, terminfo, title reporting,
   and remaining terminal behavior stay explicit gaps.
+- **Deterministic link/open-url behavior can be guarded separately from GUI link
+  UX.** Experiment 115 split URL link finalization, renderer link ranges,
+  explicit open-url dispatch, and OSC8 copy-url bindings from the bell,
+  notification, hover, preview, and context/menu gaps.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1186,4 +1190,4 @@ remains open.
 - [Experiment 114: Terminal VT KAM runtime split](114-terminal-vt-kam-runtime-split.md)
   — **Pass**
 - [Experiment 115: Link open URL runtime split](115-link-open-url-runtime-split.md)
-  — **Designed**
+  — **Pass**

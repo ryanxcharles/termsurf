@@ -134,3 +134,75 @@ Nit:
 - The row-count assertion is hard-coded. This is acceptable for this matrix
   assertion, but it must be updated if nearby inventory rows change before
   implementation.
+
+## Result
+
+**Result:** Pass
+
+Split the broad notification/link runtime row into two rows:
+
+- `RUNTIME-012A` is `Oracle complete` for link URL matching, renderer
+  highlighting, explicit open-url dispatch, and copy-url binding effects.
+- `RUNTIME-012B` remains `Gap` for bell, command-finish notifications,
+  app-notifications, hover/cursor UI, link previews, and context/menu link
+  flows.
+
+The regenerated runtime inventory now reports 24 runtime rows, 17
+oracle-complete rows, 18 closed rows, and 6 gap rows. `CFG-223` remains `Gap`,
+as intended.
+
+Verification passed:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+# runtime_rows=24 oracle_complete=17 closed=18 audit_covered=0 incomplete=6 gap=6 cfg223=Gap
+
+cargo test --manifest-path roastty/Cargo.toml surface_open_url
+# 4 passed
+
+cargo test --manifest-path roastty/Cargo.toml surface_binding_action_copy_url_to_clipboard
+# 3 passed
+
+cargo test --manifest-path roastty/Cargo.toml renderer_link
+# 4 passed
+
+cargo test --manifest-path roastty/Cargo.toml config_link_url_finalize
+# 1 passed
+```
+
+The matrix assertion also passed, proving old `RUNTIME-012` is absent,
+`RUNTIME-012A` names the open-url/copy-url/renderer-link guard families in its
+evidence and guard cells, `RUNTIME-012B` remains `Gap`, and `CFG-223` remains
+`Gap`.
+
+## Conclusion
+
+The deterministic link/open-url runtime slice is now guarded separately. The
+remaining notification/link gap is narrower and explicitly limited to bell,
+command-finish notifications, app notifications, hover/cursor UI, link previews,
+and context/menu link flows.
+
+## Completion Review
+
+Fresh-context Codex reviewer `Pascal` initially returned **CHANGES REQUIRED**:
+
+- **Required:** `RUNTIME-004G` still referenced old `RUNTIME-012` for
+  link-specific context-menu behavior after the split.
+- **Optional:** `RUNTIME-012A` named `link-previews` in its Ghostty reference,
+  which could be misread as preview UI coverage even though preview UI remains
+  in `RUNTIME-012B`.
+
+Fix:
+
+- Updated the `RUNTIME-004G` missing-evidence cross-reference to `RUNTIME-012B`.
+- Removed `link-previews` from `RUNTIME-012A`'s Ghostty reference so the
+  oracle-complete row stays limited to deterministic link/open-url behavior.
+- Regenerated the runtime inventory and config matrix, and strengthened the
+  matrix assertion to check the cross-reference and preview wording.
+
+Re-review verdict: **Approved**. Fresh-context reviewer `James` confirmed the
+`RUNTIME-004G` cross-reference now points to `RUNTIME-012B`, `RUNTIME-012A` no
+longer names `link-previews`, preview ownership remains in `RUNTIME-012B`, and
+no result commit had been made before approval.

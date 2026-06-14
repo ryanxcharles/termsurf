@@ -200,7 +200,7 @@ ROWS = [
             "semantics; refreshes existing surfaces on config update; and "
             "does not bypass terminal mouse reporting."
         ),
-        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012.",
+        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012B.",
         guard_tier="Tier 3",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml right_click_action`",
     ),
@@ -385,21 +385,43 @@ ROWS = [
         guard_command="TBD by future CFG-223 macOS app walkthrough experiment.",
     ),
     RuntimeRow(
-        id="RUNTIME-012",
-        behavior="notifications, bell, command-finish, and URL/link opening effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification/bell/link fields; app runtime actions",
-        roastty_reference="`roastty/src/lib.rs` bell/link/open-url actions; `roastty/macos/Sources` notification handling",
+        id="RUNTIME-012A",
+        behavior="link URL matching, renderer highlighting, open-url dispatch, and copy-url binding effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `link` and `link-url`; `vendor/ghostty/src/Surface.zig` link action dispatch",
+        roastty_reference="`roastty/src/config/mod.rs` default URL link; `roastty/src/renderer/link.rs`; `roastty/src/lib.rs` open-url and copy-url actions",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "`config_link_url_finalize` proves the configured default URL link "
+            "is enabled or removed by `link-url`. `renderer_link_*` tests prove "
+            "link highlight matching, modifier-gated ranges, and contiguous "
+            "range merging. `surface_open_url_*` tests prove explicit open-url "
+            "runtime action dispatch preserves kind, pointer, length, callback "
+            "result, and detached/no-callback false paths. "
+            "`surface_binding_action_copy_url_to_clipboard_*` tests prove OSC8 "
+            "copy-url-to-clipboard binding behavior and false paths."
+        ),
+        missing_evidence="None for this narrow link/open-url action and renderer matching slice.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml surface_open_url && cargo test --manifest-path roastty/Cargo.toml surface_binding_action_copy_url_to_clipboard && cargo test --manifest-path roastty/Cargo.toml renderer_link && cargo test --manifest-path roastty/Cargo.toml config_link_url_finalize`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-012B",
+        behavior="bell, command-finish notifications, app-notifications, hover/cursor UI, link previews, and context/menu link flows",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification, bell, link preview, and app-notification fields; `vendor/ghostty/src/Surface.zig` bell/link hover/menu paths",
+        roastty_reference="`roastty/src/lib.rs` bell/link/open-url actions; `roastty/macos/Sources` notification, pointer, preview, and context/menu handling",
         family="notifications",
         status="Gap",
         evidence=(
-            "Parser/formatter/default coverage exists for notification, bell, "
-            "and link options, but CFG-223 still needs runtime proof for bell "
-            "actions, command-finish notifications, app-notifications, URL "
-            "opening, hover/cursor behavior, and context/menu link flows."
+            "Experiment 115 split out the proven deterministic link/open-url "
+            "runtime slice. Bell actions, command-finish notifications, "
+            "app-notifications, link hover/cursor UI, link previews in the "
+            "real app, and context/menu link flows still need focused runtime "
+            "or GUI proof."
         ),
-        missing_evidence="Add notification/bell/link runtime or GUI walkthrough guards.",
+        missing_evidence="Add bell, notification, app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
         guard_tier="Tier 3",
-        guard_command="TBD by future CFG-223 notification/link runtime experiment.",
+        guard_command="TBD by future CFG-223 notification/link GUI or runtime experiment.",
     ),
     RuntimeRow(
         id="RUNTIME-013",
@@ -459,7 +481,8 @@ EXPECTED_IDS = [
     "RUNTIME-010A",
     "RUNTIME-010B",
     "RUNTIME-011",
-    "RUNTIME-012",
+    "RUNTIME-012A",
+    "RUNTIME-012B",
     "RUNTIME-013",
     "RUNTIME-014",
 ]
