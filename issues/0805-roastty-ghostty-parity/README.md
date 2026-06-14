@@ -1066,3 +1066,5 @@ remains open.
   — **Pass**
 - [Experiment 98: Click repeat interval finalization](98-click-repeat-interval-finalization.md)
   — **Pass**
+- [Experiment 99: Source precedence load inventory](99-source-precedence-load-inventory.md)
+  — **Designed**
