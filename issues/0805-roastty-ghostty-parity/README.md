@@ -610,3 +610,5 @@ remains open.
 - [Experiment 37: Command parser oracle](37-command-parser-oracle.md) — **Pass**
 - [Experiment 38: Palette parser oracle](38-palette-parser-oracle.md) — **Pass**
 - [Experiment 39: Env parser oracle](39-env-parser-oracle.md) — **Pass**
+- [Experiment 40: Repeatable path parser oracle](40-repeatable-path-parser-oracle.md)
+  — **Designed**
