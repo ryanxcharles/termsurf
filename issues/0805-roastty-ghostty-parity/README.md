@@ -619,3 +619,4 @@ remains open.
 - [Experiment 39: Env parser oracle](39-env-parser-oracle.md) — **Pass**
 - [Experiment 40: Repeatable path parser oracle](40-repeatable-path-parser-oracle.md)
   — **Pass**
+- [Experiment 41: Input parser oracle](41-input-parser-oracle.md) — **Designed**
