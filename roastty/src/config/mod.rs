@@ -15420,6 +15420,187 @@ mod tests {
     }
 
     #[test]
+    fn quick_terminal_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+        let maybe_index = |lines: &[String], key: &str| -> Option<usize> {
+            let prefix = format!("{key} = ");
+            lines.iter().position(|line| line.starts_with(&prefix))
+        };
+
+        for (variant, kw) in [
+            (QuickTerminalPosition::Top, "top"),
+            (QuickTerminalPosition::Bottom, "bottom"),
+            (QuickTerminalPosition::Left, "left"),
+            (QuickTerminalPosition::Right, "right"),
+            (QuickTerminalPosition::Center, "center"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalLayer::Overlay, "overlay"),
+            (QuickTerminalLayer::Top, "top"),
+            (QuickTerminalLayer::Bottom, "bottom"),
+            (QuickTerminalLayer::Background, "background"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalScreen::Main, "main"),
+            (QuickTerminalScreen::Mouse, "mouse"),
+            (QuickTerminalScreen::MacosMenuBar, "macos-menu-bar"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalSpaceBehavior::Remain, "remain"),
+            (QuickTerminalSpaceBehavior::Move, "move"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalKeyboardInteractivity::None, "none"),
+            (QuickTerminalKeyboardInteractivity::OnDemand, "on-demand"),
+            (QuickTerminalKeyboardInteractivity::Exclusive, "exclusive"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "quick-terminal-position"),
+            "quick-terminal-position = top"
+        );
+        assert_eq!(maybe_index(&default_lines, "quick-terminal-size"), None);
+        assert_eq!(
+            line(&default_lines, "gtk-quick-terminal-layer"),
+            "gtk-quick-terminal-layer = top"
+        );
+        assert_eq!(
+            line(&default_lines, "quick-terminal-screen"),
+            "quick-terminal-screen = main"
+        );
+        assert_eq!(
+            line(&default_lines, "quick-terminal-space-behavior"),
+            "quick-terminal-space-behavior = move"
+        );
+        assert_eq!(
+            line(&default_lines, "quick-terminal-keyboard-interactivity"),
+            "quick-terminal-keyboard-interactivity = on-demand"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        cfg.set("quick-terminal-position", Some("center")).unwrap();
+        cfg.set("gtk-quick-terminal-layer", Some("bottom")).unwrap();
+        cfg.set("quick-terminal-screen", Some("macos-menu-bar"))
+            .unwrap();
+        cfg.set("quick-terminal-space-behavior", Some("remain"))
+            .unwrap();
+        cfg.set("quick-terminal-keyboard-interactivity", Some("exclusive"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "quick-terminal-position"),
+            "quick-terminal-position = center"
+        );
+        assert_eq!(
+            line(&lines, "gtk-quick-terminal-layer"),
+            "gtk-quick-terminal-layer = bottom"
+        );
+        assert_eq!(
+            line(&lines, "quick-terminal-screen"),
+            "quick-terminal-screen = macos-menu-bar"
+        );
+        assert_eq!(
+            line(&lines, "quick-terminal-space-behavior"),
+            "quick-terminal-space-behavior = remain"
+        );
+        assert_eq!(
+            line(&lines, "quick-terminal-keyboard-interactivity"),
+            "quick-terminal-keyboard-interactivity = exclusive"
+        );
+
+        for key in [
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "quick-terminal-screen",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "quick-terminal-screen",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "undo-timeout") < index(&lines, "quick-terminal-position"));
+        assert!(index(&lines, "quick-terminal-position") < index(&lines, "quick-terminal-size"));
+        assert!(index(&lines, "quick-terminal-size") < index(&lines, "gtk-quick-terminal-layer"));
+        assert!(
+            index(&lines, "gtk-quick-terminal-layer")
+                < index(&lines, "gtk-quick-terminal-namespace")
+        );
+        assert!(
+            index(&lines, "gtk-quick-terminal-namespace") < index(&lines, "quick-terminal-screen")
+        );
+        assert!(
+            index(&lines, "quick-terminal-screen")
+                < index(&lines, "quick-terminal-animation-duration")
+        );
+        assert!(
+            index(&lines, "quick-terminal-animation-duration")
+                < index(&lines, "quick-terminal-autohide")
+        );
+        assert!(
+            index(&lines, "quick-terminal-autohide")
+                < index(&lines, "quick-terminal-space-behavior")
+        );
+        assert!(
+            index(&lines, "quick-terminal-space-behavior")
+                < index(&lines, "quick-terminal-keyboard-interactivity")
+        );
+        assert!(
+            index(&lines, "quick-terminal-keyboard-interactivity")
+                < index(&lines, "shell-integration")
+        );
+    }
+
+    #[test]
     fn enum_format_entries_shader_mouse() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();

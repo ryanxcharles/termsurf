@@ -145,3 +145,72 @@ Reviewed by a fresh-context Codex adversarial subagent.
 Verdict: **Approved**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Experiment 77 promoted exactly the five planned quick-terminal enum formatter
+rows: `quick-terminal-position`, `gtk-quick-terminal-layer`,
+`quick-terminal-screen`, `quick-terminal-space-behavior`, and
+`quick-terminal-keyboard-interactivity`.
+
+Implementation:
+
+- Added `quick_terminal_enum_config_formatter_family_oracle` in
+  `roastty/src/config/mod.rs`.
+- Classified exactly those five rows as the `quick terminal enum` formatter
+  family in `config_formatter_inventory.py`.
+- Regenerated `config-formatter-inventory.md` and `config-matrix.md`.
+
+Verification completed:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml`
+- `cargo test --manifest-path roastty/Cargo.toml quick_terminal_enum_config_formatter_family_oracle`
+  passed with 1 test.
+- Representative existing tests passed:
+  - `cargo test --manifest-path roastty/Cargo.toml quick_terminal_position_config_parse_format_reset_and_diagnose`
+  - `cargo test --manifest-path roastty/Cargo.toml gtk_quick_terminal_config_parse_format_reset_and_diagnose`
+  - `cargo test --manifest-path roastty/Cargo.toml quick_terminal_screen_animation_config_parse_format_reset_and_diagnose`
+  - `cargo test --manifest-path roastty/Cargo.toml quick_terminal_space_keyboard_config_parse_format_reset_and_diagnose`
+  - `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+- The formatter inventory generator reported:
+  - `ghostty_canonical=203`
+  - `roastty_formatter_rows=203`
+  - `missing_canonical_formatter_rows=0`
+  - `extra_formatter_rows=0`
+  - `oracle_complete=161`
+  - `audit_covered=42`
+  - `gap=0`
+  - `no_output_rows=1`
+- The matrix assertion passed and verified:
+  - CFG-218 remains `Gap`.
+  - The CFG-218 count text is now 161 Oracle complete rows, 42 not Oracle
+    complete rows, and 0 formatter gaps.
+  - Exactly the five planned rows have family `quick terminal enum`.
+  - Exactly the five planned rows cite `Quick terminal enum formatter oracle`
+    evidence.
+  - `quick-terminal-size`, `gtk-quick-terminal-namespace`,
+    `quick-terminal-animation-duration`, `quick-terminal-autohide`, and
+    `gtk-titlebar-style` were not promoted as `quick terminal enum`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80` was run on changed
+  Markdown files after the generator run.
+- `prettier --check --prose-wrap always --print-width 80` passed on changed
+  Markdown files.
+- `git diff --check` passed.
+
+## Conclusion
+
+The simple quick-terminal enum formatter slice is now independently guarded.
+CFG-218 remains open because 42 formatter rows still need non-default formatter
+oracles, but the quick-terminal enum family has no remaining formatter evidence
+gap.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.

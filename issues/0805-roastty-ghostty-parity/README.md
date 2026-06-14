@@ -343,6 +343,12 @@ experiment files until they are proven.
   `resize-overlay-position`, and `resize-overlay-duration` together because they
   are one adjacent UI cluster, while keeping unrelated duration rows such as
   `notify-on-command-finish-after` and `undo-timeout` outside the promotion.
+- **Quick-terminal enum formatter rows are separable from quick-terminal
+  scalars.** Experiment 77 promoted the five simple quick-terminal enum rows
+  while using order checks around `quick-terminal-size`,
+  `gtk-quick-terminal-namespace`, `quick-terminal-animation-duration`, and
+  `quick-terminal-autohide` to keep those custom formatter rows unpromoted until
+  they have their own proof.
 - **Full-header ABI gaps must be split into symbol and semantic outcomes.**
   Experiment 5 proved the mapped Ghostty header can be closed at the
   declaration/export level while still recording honest semantic divergences for
@@ -884,4 +890,4 @@ remains open.
 - [Experiment 76: Resize overlay formatter oracle](76-resize-overlay-formatter-oracle.md)
   — **Pass**
 - [Experiment 77: Quick terminal enum formatter oracle](77-quick-terminal-enum-formatter-oracle.md)
-  — **Designed**
+  — **Pass**
