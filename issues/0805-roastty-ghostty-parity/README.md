@@ -861,3 +861,5 @@ remains open.
   — **Pass**
 - [Experiment 73: Direct color formatter oracle](73-direct-color-formatter-oracle.md)
   — **Pass**
+- [Experiment 74: Click action formatter oracle](74-click-action-formatter-oracle.md)
+  — **Designed**
