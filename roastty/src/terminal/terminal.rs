@@ -62,6 +62,7 @@ pub(crate) struct Terminal {
     title: TerminalTitle,
     pwd: TerminalPwd,
     mouse_shape: mouse::MouseShape,
+    title_report: bool,
     next_implicit_hyperlink_id: u32,
     previous_char: Option<char>,
     pending_clipboard_events: Vec<TerminalClipboardEvent>,
@@ -783,6 +784,7 @@ pub(crate) enum TerminalInitError {
 pub(crate) struct TerminalInitOptions {
     pub(crate) cursor_visual_style: cursor::VisualStyle,
     pub(crate) cursor_blink: Option<bool>,
+    pub(crate) title_report: bool,
 }
 
 impl Default for TerminalInitOptions {
@@ -790,6 +792,7 @@ impl Default for TerminalInitOptions {
         Self {
             cursor_visual_style: cursor::VisualStyle::Block,
             cursor_blink: None,
+            title_report: false,
         }
     }
 }
@@ -806,6 +809,7 @@ struct TerminalStreamHandler<'a> {
     title: &'a mut TerminalTitle,
     pwd: &'a mut TerminalPwd,
     mouse_shape: &'a mut mouse::MouseShape,
+    title_report: &'a bool,
     next_implicit_hyperlink_id: &'a mut u32,
     previous_char: &'a mut Option<char>,
     dcs: &'a mut dcs::Handler,
@@ -1069,6 +1073,7 @@ impl Terminal {
             title: TerminalTitle::default(),
             pwd: TerminalPwd::default(),
             mouse_shape: mouse::MouseShape::Text,
+            title_report: options.title_report,
             next_implicit_hyperlink_id: 0,
             previous_char: None,
             pending_clipboard_events: Vec::new(),
@@ -1096,6 +1101,7 @@ impl Terminal {
             title,
             pwd,
             mouse_shape,
+            title_report,
             next_implicit_hyperlink_id,
             previous_char,
             pending_clipboard_events,
@@ -1116,6 +1122,7 @@ impl Terminal {
             title,
             pwd,
             mouse_shape,
+            title_report,
             next_implicit_hyperlink_id,
             previous_char,
             dcs,
@@ -1196,6 +1203,10 @@ impl Terminal {
         callback: Option<TerminalTitleChangedCallback>,
     ) {
         self.effects.title_changed = callback;
+    }
+
+    pub(crate) fn set_title_report(&mut self, enabled: bool) {
+        self.title_report = enabled;
     }
 
     pub(crate) fn set_size_callback(&mut self, callback: Option<TerminalSizeCallback>) {
@@ -3819,6 +3830,9 @@ impl TerminalStreamHandler<'_> {
 
     fn size_report(&mut self, request: size_report::Request) {
         if request == size_report::Request::Csi21T {
+            if !*self.title_report {
+                return;
+            }
             self.write_pty_response(&format!("\x1b]l{}\x1b\\", self.title.as_str()));
             return;
         }
@@ -7691,6 +7705,7 @@ mod tests {
             TerminalInitOptions {
                 cursor_visual_style: cursor::VisualStyle::Bar,
                 cursor_blink: Some(false),
+                ..TerminalInitOptions::default()
             },
         )
         .unwrap();
@@ -7711,6 +7726,7 @@ mod tests {
             TerminalInitOptions {
                 cursor_visual_style: cursor::VisualStyle::Underline,
                 cursor_blink: Some(false),
+                ..TerminalInitOptions::default()
             },
         )
         .unwrap();
@@ -7735,6 +7751,7 @@ mod tests {
                 TerminalInitOptions {
                     cursor_visual_style: cursor::VisualStyle::Block,
                     cursor_blink: configured,
+                    ..TerminalInitOptions::default()
                 },
             )
             .unwrap();
@@ -7753,6 +7770,7 @@ mod tests {
             TerminalInitOptions {
                 cursor_visual_style: cursor::VisualStyle::Block,
                 cursor_blink: None,
+                ..TerminalInitOptions::default()
             },
         )
         .unwrap();
@@ -9491,6 +9509,62 @@ mod tests {
 
         terminal.next_slice(b"\x1b]8;;\x1b\\").unwrap();
         assert_eq!(terminal.cursor_hyperlink_for_tests(), None);
+    }
+
+    #[test]
+    fn terminal_stream_title_report_disabled_by_default() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]0;secret title\x07\x1b[21t")
+            .unwrap();
+
+        assert_eq!(terminal.title_for_tests(), "secret title");
+        assert!(terminal.pty_response_for_tests().is_empty());
+    }
+
+    #[test]
+    fn terminal_stream_title_report_enabled_reports_current_osc_title() {
+        let mut terminal = Terminal::init_with_options(
+            10,
+            2,
+            None,
+            TerminalInitOptions {
+                title_report: true,
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal
+            .next_slice(b"\x1b]2;visible title\x1b\\\x1b[21t")
+            .unwrap();
+
+        assert_eq!(terminal.title_for_tests(), "visible title");
+        assert_eq!(
+            terminal.take_pty_response_for_tests(),
+            b"\x1b]lvisible title\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_title_report_runtime_toggle_preserves_title() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+        terminal.next_slice(b"\x1b]0;toggle title\x07").unwrap();
+
+        terminal.next_slice(b"\x1b[21t").unwrap();
+        assert!(terminal.pty_response_for_tests().is_empty());
+
+        terminal.set_title_report(true);
+        terminal.next_slice(b"\x1b[21t").unwrap();
+        assert_eq!(
+            terminal.take_pty_response_for_tests(),
+            b"\x1b]ltoggle title\x1b\\"
+        );
+
+        terminal.set_title_report(false);
+        terminal.next_slice(b"\x1b[21t").unwrap();
+        assert!(terminal.pty_response_for_tests().is_empty());
     }
 
     #[test]

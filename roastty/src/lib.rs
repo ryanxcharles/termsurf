@@ -3713,9 +3713,9 @@ impl Surface {
         let palette = derived_config_palette(&parsed);
         if let Some(worker) = &self.termio_worker {
             worker.with_termio_mut(|termio| {
-                termio
-                    .terminal_mut()
-                    .set_palette_default(Some(palette_color_tuples(palette)));
+                let terminal = termio.terminal_mut();
+                terminal.set_palette_default(Some(palette_color_tuples(palette)));
+                terminal.set_title_report(parsed.title_report);
             });
             self.dirty = true;
         }
@@ -3971,6 +3971,7 @@ impl Surface {
             term: config.term.clone(),
             max_scrollback_rows: scrollback_limit_to_rows(config.scrollback_limit),
             palette: derived_config_palette(&config),
+            title_report: config.title_report,
         };
 
         let termio = match (surface_command, initial_command, config_command) {
@@ -22124,6 +22125,63 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);
+    }
+
+    fn surface_title_report_response(surface: RoasttySurface, bytes: &[u8]) -> Vec<u8> {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                let terminal = termio.terminal_mut();
+                terminal.clear_pty_response();
+                terminal.next_slice(bytes).unwrap();
+                terminal.pty_response().to_vec()
+            })
+    }
+
+    #[test]
+    fn config_title_report_runtime_startup_and_update_gate() {
+        let _guard = pty_command_lock();
+
+        let default_config = new_test_config_from_str("command = sleep 5\n");
+        let default_app = roastty_app_new(ptr::null(), default_config);
+        let default_surface = new_test_surface(default_app);
+        assert_eq!(roastty_surface_start(default_surface), ROASTTY_SUCCESS);
+        assert_eq!(
+            surface_title_report_response(default_surface, b"\x1b]0;default secret\x07\x1b[21t"),
+            b""
+        );
+        roastty_surface_free(default_surface);
+        roastty_app_free(default_app);
+        roastty_config_free(default_config);
+
+        let enabled_config = new_test_config_from_str("title-report = true\ncommand = sleep 5\n");
+        let app = roastty_app_new(ptr::null(), enabled_config);
+        let surface = new_test_surface(app);
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert_eq!(
+            surface_title_report_response(surface, b"\x1b]0;visible title\x07\x1b[21t"),
+            b"\x1b]lvisible title\x1b\\"
+        );
+
+        let disabled_config = new_test_config_from_str("title-report = false\n");
+        roastty_app_update_config(app, disabled_config);
+        assert_eq!(surface_title_report_response(surface, b"\x1b[21t"), b"");
+
+        let reenabled_config = new_test_config_from_str("title-report = true\n");
+        roastty_app_update_config(app, reenabled_config);
+        assert_eq!(
+            surface_title_report_response(surface, b"\x1b[21t"),
+            b"\x1b]lvisible title\x1b\\"
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(reenabled_config);
+        roastty_config_free(disabled_config);
+        roastty_config_free(enabled_config);
     }
 
     #[test]

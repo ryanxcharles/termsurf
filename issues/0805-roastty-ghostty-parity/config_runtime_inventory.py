@@ -330,21 +330,46 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml config_scrollback_limit_runtime && cargo test --manifest-path roastty/Cargo.toml terminal_stream_alt_screen_has_no_scrollback_and_formatter_reads_active_screen`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2",
-        behavior="exact nonzero scrollback byte quota, shell integration, terminfo, title reporting, and remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`, shell integration, terminfo, title-report, and related terminal behavior fields",
-        roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
+        id="RUNTIME-009B2A",
+        behavior="title-report CSI 21t gate for OSC-driven terminal titles",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `title-report`; `vendor/ghostty/src/Surface.zig` `report_title` gate and CSI 21t response",
+        roastty_reference="`roastty/src/terminal/terminal.rs` title-report gate; `roastty/src/termio.rs` startup options; `roastty/src/lib.rs` surface config update wiring",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 122 adds `terminal_stream_title_report_*` tests proving "
+            "CSI `21t` produces no PTY response by default, reports "
+            "`ESC ] l <title> ESC \\\\` when enabled, and can be disabled and "
+            "re-enabled without losing the stored OSC title. "
+            "`config_title_report_runtime_startup_and_update_gate` proves "
+            "parsed `title-report` reaches PTY-backed surfaces at startup and "
+            "through `roastty_app_update_config`. "
+            "`title_report_runtime_parity.py` checks pinned Ghostty's disabled "
+            "default and Surface gate plus Roastty's parser, terminal gate, "
+            "`TermioSpawnOptions` startup wiring, and live config update wiring."
+        ),
+        missing_evidence="None for the title-report CSI 21t gate for OSC-driven terminal titles covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_report && cargo test --manifest-path roastty/Cargo.toml config_title_report_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_report_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B",
+        behavior="exact nonzero scrollback byte quota, shell integration, terminfo, configured/static title-report surface-title behavior, and remaining terminal behavior effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`, shell integration, terminfo, title/title-report, and related terminal behavior fields",
+        roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`; macOS surface title wiring",
         family="terminal",
         status="Gap",
         evidence=(
             "Experiment 117 split out the proven zero/no-history scrollback "
             "slice and alternate-screen no-scrollback terminal-core behavior. "
+            "Experiment 122 split out the OSC-driven CSI `21t` title-report "
+            "gate. "
             "Exact nonzero `scrollback-limit` byte quota parity, shell "
-            "integration, terminfo, title reporting, and other remaining "
-            "terminal behavior toggles still need focused CFG-223 runtime "
-            "proof or fixes."
+            "integration, terminfo, configured/static title-report "
+            "surface-title behavior, and other remaining terminal behavior "
+            "toggles still need focused CFG-223 runtime proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, shell integration, terminfo, title reporting, and remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, shell integration, terminfo, configured/static title-report surface-title behavior, and remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -605,7 +630,8 @@ EXPECTED_IDS = [
     "RUNTIME-008",
     "RUNTIME-009A",
     "RUNTIME-009B1",
-    "RUNTIME-009B2",
+    "RUNTIME-009B2A",
+    "RUNTIME-009B2B",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

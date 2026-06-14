@@ -332,6 +332,11 @@ experiment files until they are proven.
   `quit-after-last-window-closed-delay` is documented and implemented upstream
   as Linux/GTK-only. Keep broad macOS app/window/menu lifecycle walkthrough work
   separate from this narrow quit-after-last-window bridge.
+- **`title-report` is a gated runtime disclosure.** Pinned Ghostty defaults
+  `title-report` to `false` and drops CSI `21t` report-title requests at the
+  surface config layer unless enabled. Roastty must keep OSC-driven title
+  reports off by default and refresh the gate when config updates, while
+  configured/static surface-title reporting remains a separate UI/runtime gap.
 - **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
   currently models scrollback capacity in rows, while pinned Ghostty documents
   `scrollback-limit` as a byte quota. A focused experiment may prove the
@@ -1235,4 +1240,4 @@ remains open.
 - [Experiment 121: macOS quit lifecycle policy split](121-macos-quit-lifecycle-policy-split.md)
   — **Pass**
 - [Experiment 122: Title report runtime split](122-title-report-runtime-split.md)
-  — **Designed**
+  — **Pass**

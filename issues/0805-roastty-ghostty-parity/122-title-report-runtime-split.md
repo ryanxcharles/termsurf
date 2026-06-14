@@ -206,3 +206,112 @@ Initial verdict: changes required.
 Re-review verdict: approved.
 
 Findings after fixes: none.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the split and runtime gate:
+
+- added `Terminal.title_report`, initialization through `TerminalInitOptions`,
+  and a `set_title_report` live-update setter;
+- changed CSI `21t` handling so it writes no PTY response unless title reporting
+  is enabled;
+- threaded `title_report` through `TermioSpawnOptions` into PTY-backed terminal
+  startup;
+- refreshed the terminal title-report gate from parsed config in
+  `Surface::apply_config`;
+- added terminal-core guards for disabled-by-default, enabled response, and
+  runtime toggling behavior;
+- added a PTY-backed parsed-config guard proving startup config and
+  `roastty_app_update_config` both control future CSI `21t` reports;
+- added `title_report_runtime_parity.py` to pin the Ghostty default/gate and
+  Roastty parser, terminal, startup, and live-update wiring;
+- split `RUNTIME-009B2` into `RUNTIME-009B2A` as `Oracle complete` for the
+  OSC-driven CSI `21t` gate and `RUNTIME-009B2B` as the remaining terminal gap.
+
+Verification passed:
+
+```sh
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_report
+cargo test --manifest-path roastty/Cargo.toml config_title_report_runtime
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  issues/0805-roastty-ghostty-parity/title_report_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_report_runtime_parity.py
+cargo fmt --manifest-path roastty/Cargo.toml -- --check
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+from pathlib import Path
+
+inventory = Path("issues/0805-roastty-ghostty-parity/config-runtime-inventory.md").read_text()
+matrix = Path("issues/0805-roastty-ghostty-parity/config-matrix.md").read_text()
+
+rows = {}
+for line in inventory.splitlines():
+    if not line.startswith("| RUNTIME-"):
+        continue
+    cells = [cell.strip() for cell in line.strip("|").split("|")]
+    rows[cells[0]] = cells
+
+assert "RUNTIME-009B2" not in rows, rows.get("RUNTIME-009B2")
+assert rows["RUNTIME-009B2A"][5] == "Oracle complete", rows["RUNTIME-009B2A"]
+assert "terminal_stream_title_report" in (
+    rows["RUNTIME-009B2A"][6] + rows["RUNTIME-009B2A"][9]
+), rows["RUNTIME-009B2A"]
+assert "config_title_report_runtime" in (
+    rows["RUNTIME-009B2A"][6] + rows["RUNTIME-009B2A"][9]
+), rows["RUNTIME-009B2A"]
+assert "title_report_runtime_parity.py" in (
+    rows["RUNTIME-009B2A"][6] + rows["RUNTIME-009B2A"][9]
+), rows["RUNTIME-009B2A"]
+assert rows["RUNTIME-009B2A"][7].startswith("None"), rows["RUNTIME-009B2A"]
+assert rows["RUNTIME-009B2B"][5] == "Gap", rows["RUNTIME-009B2B"]
+remaining = rows["RUNTIME-009B2B"][1]
+assert "shell integration" in remaining, remaining
+assert "terminfo" in remaining, remaining
+assert "scrollback" in remaining, remaining
+assert "configured/static" in (
+    rows["RUNTIME-009B2B"][1] + rows["RUNTIME-009B2B"][7]
+), rows["RUNTIME-009B2B"]
+cfg223 = next(line for line in matrix.splitlines() if line.startswith("| CFG-223 "))
+assert "| Gap " in cfg223, cfg223
+PY
+prettier --check issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/122-title-report-runtime-split.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md \
+  issues/0805-roastty-ghostty-parity/config-runtime-inventory.md
+git diff --check
+```
+
+The inventory generator reported:
+
+```text
+runtime_rows=31
+oracle_complete=24
+closed=26
+audit_covered=0
+incomplete=5
+gap=5
+cfg223=Gap
+```
+
+## Conclusion
+
+Roastty now matches pinned Ghostty's default-off `title-report` behavior for the
+OSC-driven CSI `21t` title-report path and keeps the gate live-updatable for
+existing PTY-backed surfaces. Configured/static surface-title reporting remains
+in `RUNTIME-009B2B` because pinned Ghostty reports the runtime surface title,
+not merely the terminal's OSC title state.
+
+## Completion Review
+
+Adversarial Codex subagent, fresh context, read-only review of the completed
+experiment, implementation diff, recorded result, and issue README status.
+
+**Verdict:** Approved.
+
+- Optional: The result verification log listed `prettier --write` and omitted
+  `git diff --check`. Fixed by recording the hygiene commands as
+  `prettier --check` plus `git diff --check`.

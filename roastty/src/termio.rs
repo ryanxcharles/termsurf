@@ -40,6 +40,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) term: String,
     pub(crate) max_scrollback_rows: Option<usize>,
     pub(crate) palette: color::Palette,
+    pub(crate) title_report: bool,
 }
 
 impl Default for TermioSpawnOptions {
@@ -55,6 +56,7 @@ impl Default for TermioSpawnOptions {
             term: "xterm-roastty".to_string(),
             max_scrollback_rows: None,
             palette: color::DEFAULT_PALETTE,
+            title_report: false,
         }
     }
 }
@@ -184,6 +186,7 @@ impl Termio {
             TerminalInitOptions {
                 cursor_visual_style: options.cursor_visual_style,
                 cursor_blink: options.cursor_blink,
+                title_report: options.title_report,
             },
         )?;
         terminal.set_palette_default(Some(palette_tuple(options.palette)));
