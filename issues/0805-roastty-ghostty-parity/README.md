@@ -995,3 +995,5 @@ remains open.
   **Pass**
 - [Experiment 90: Duration diagnostic oracle](90-duration-diagnostic-oracle.md)
   — **Pass**
+- [Experiment 91: Working directory diagnostic oracle](91-working-directory-diagnostic-oracle.md)
+  — **Designed**
