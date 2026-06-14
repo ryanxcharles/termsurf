@@ -1049,3 +1049,5 @@ remains open.
   — **Pass**
 - [Experiment 96: Unfocused split opacity finalization](96-unfocused-split-opacity-finalization.md)
   — **Pass**
+- [Experiment 97: Auto-update channel finalization](97-auto-update-channel-finalization.md)
+  — **Designed**
