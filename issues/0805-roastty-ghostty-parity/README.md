@@ -1057,3 +1057,5 @@ remains open.
   — **Pass**
 - [Experiment 97: Auto-update channel finalization](97-auto-update-channel-finalization.md)
   — **Pass**
+- [Experiment 98: Click repeat interval finalization](98-click-repeat-interval-finalization.md)
+  — **Designed**
