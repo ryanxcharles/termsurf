@@ -342,6 +342,11 @@ experiment files until they are proven.
   title changes should travel through `TermioPump`. Configured static titles and
   direct command argv[0] startup titles are now proven separately from
   empty-title/PWD fallback semantics, which remain a CFG-223 gap.
+- **Empty title reset is an event, not just a string diff.** Pinned Ghostty
+  sends title messages for empty-title resets even when the effective title is
+  blank or unchanged. Roastty now drains explicit pending title events through
+  `TermioPump`; full OSC 7 URI parsing, hostname validation, and path
+  normalization remain separate terminal gaps.
 - **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
   currently models scrollback capacity in rows, while pinned Ghostty documents
   `scrollback-limit` as a byte quota. A focused experiment may prove the
@@ -1279,4 +1284,4 @@ remains open.
 - [Experiment 126: Surface title runtime split](126-surface-title-runtime-split.md)
   — **Pass**
 - [Experiment 127: Title PWD fallback runtime](127-title-pwd-fallback-runtime.md)
-  — **Designed**
+  — **Pass**

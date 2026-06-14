@@ -7271,14 +7271,14 @@ impl Surface {
                 if pump.bell_count > 0 {
                     self.ring_bell(std::time::Instant::now());
                 }
-                if let Some(title) = pump.title.as_deref() {
-                    if !title.is_empty() && self.static_title.is_none() {
+                if self.static_title.is_none() {
+                    for title in &pump.titles {
                         self.set_title(ROASTTY_ACTION_SET_TITLE, title.as_bytes());
                     }
                 }
                 if pump.bytes_read > 0
                     || pump.bell_count > 0
-                    || pump.title.is_some()
+                    || !pump.titles.is_empty()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
@@ -20982,7 +20982,7 @@ mod tests {
             readiness: PtyReadiness::default(),
             bytes_read,
             bell_count,
-            title: None,
+            titles: Vec::new(),
             eof,
             bytes_written,
             pending_write_bytes,
@@ -20992,11 +20992,15 @@ mod tests {
     }
 
     fn test_pump_with_title(title: &str) -> termio::TermioPump {
+        test_pump_with_titles([title])
+    }
+
+    fn test_pump_with_titles<'a>(titles: impl IntoIterator<Item = &'a str>) -> termio::TermioPump {
         termio::TermioPump {
             readiness: PtyReadiness::default(),
             bytes_read: 1,
             bell_count: 0,
-            title: Some(title.to_string()),
+            titles: titles.into_iter().map(ToOwned::to_owned).collect(),
             eof: false,
             bytes_written: 0,
             pending_write_bytes: 0,
@@ -22343,6 +22347,63 @@ mod tests {
         reset_action_records(true);
 
         apply_test_pump(surface, test_pump_with_title("ignored osc title"));
+        assert!(action_records().is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_title_pwd_fallback_empty_title_dispatches() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(surface, test_pump_with_title(""));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some(""));
+
+        reset_action_records(true);
+        apply_test_pump(surface, test_pump_with_title("file://host/fallback"));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some("file://host/fallback"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_title_pwd_fallback_dispatches_multiple_titles_in_order() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(
+            surface,
+            test_pump_with_titles(["file://host/one", "two", "file://host/one"]),
+        );
+        let records = action_records();
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].title.as_deref(), Some("file://host/one"));
+        assert_eq!(records[1].title.as_deref(), Some("two"));
+        assert_eq!(records[2].title.as_deref(), Some("file://host/one"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_title_pwd_fallback_static_title_suppresses_empty_and_fallback() {
+        let config = new_test_config_from_str("title = Static Title\n");
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        reset_action_records(true);
+
+        apply_test_pump(surface, test_pump_with_title(""));
+        apply_test_pump(surface, test_pump_with_title("file://host/fallback"));
         assert!(action_records().is_empty());
 
         roastty_surface_free(surface);

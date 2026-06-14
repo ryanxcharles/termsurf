@@ -86,7 +86,7 @@ pub(crate) struct TermioPump {
     pub(crate) readiness: PtyReadiness,
     pub(crate) bytes_read: usize,
     pub(crate) bell_count: usize,
-    pub(crate) title: Option<String>,
+    pub(crate) titles: Vec<String>,
     pub(crate) eof: bool,
     pub(crate) bytes_written: usize,
     pub(crate) pending_write_bytes: usize,
@@ -260,7 +260,6 @@ impl Termio {
 
         let mut bytes_read = 0;
         let mut eof = false;
-        let title_before = self.terminal.title().to_string();
         if readiness.readable || readiness.hangup || readiness.error {
             self.output_buf.clear();
             let read = self
@@ -284,8 +283,7 @@ impl Termio {
             self.collect_terminal_response();
         }
         let bell_count = self.terminal.take_pending_bell_count();
-        let title_after = self.terminal.title();
-        let title = (title_after != title_before).then(|| title_after.to_string());
+        let titles = self.terminal.take_pending_title_updates();
 
         let bytes_written = self.flush_pending_write()?;
         if self.child_exit.is_none() {
@@ -303,7 +301,7 @@ impl Termio {
             readiness,
             bytes_read,
             bell_count,
-            title,
+            titles,
             eof,
             bytes_written,
             pending_write_bytes: self.pending_write.len(),
@@ -532,7 +530,7 @@ fn run_termio_worker(
                 }
                 let should_emit = pump.bytes_read > 0
                     || pump.bell_count > 0
-                    || pump.title.is_some()
+                    || !pump.titles.is_empty()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
@@ -1544,16 +1542,85 @@ mod tests {
 
         let event = worker_event_until(
             &worker,
-            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.title.as_deref() == Some("termio title")),
+            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.titles.iter().any(|title| title == "termio title")),
         );
 
         assert!(matches!(
             event,
-            TermioWorkerEvent::Pump(pump) if pump.title.as_deref() == Some("termio title")
+            TermioWorkerEvent::Pump(pump) if pump.titles.iter().any(|title| title == "termio title")
         ));
         assert_eq!(
             worker.with_termio(|termio| termio.terminal().title().to_string()),
             "termio title"
+        );
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
+    fn termio_title_pwd_fallback_worker_emits_empty_title_pump() {
+        let _guard = pty_command_lock();
+        let mut worker = spawn_worker("printf '\\033]0;\\007'");
+
+        let event = worker_event_until(
+            &worker,
+            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.titles.iter().any(|title| title.is_empty())),
+        );
+
+        assert!(matches!(
+            event,
+            TermioWorkerEvent::Pump(pump) if pump.titles.iter().any(|title| title.is_empty())
+        ));
+        assert_eq!(
+            worker.with_termio(|termio| termio.terminal().title().to_string()),
+            ""
+        );
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
+    fn termio_title_pwd_fallback_worker_emits_pwd_title_pump() {
+        let _guard = pty_command_lock();
+        let mut worker = spawn_worker("printf '\\033]7;file://host/termio-pwd\\007\\033]0;\\007'");
+
+        let event = worker_event_until(
+            &worker,
+            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.titles.iter().any(|title| title == "file://host/termio-pwd")),
+        );
+
+        assert!(matches!(
+            event,
+            TermioWorkerEvent::Pump(pump) if pump.titles.iter().any(|title| title == "file://host/termio-pwd")
+        ));
+        assert_eq!(
+            worker.with_termio(|termio| termio.terminal().title().to_string()),
+            "file://host/termio-pwd"
+        );
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
+    fn termio_title_pwd_fallback_worker_preserves_multiple_title_events() {
+        let _guard = pty_command_lock();
+        let mut worker =
+            spawn_worker("printf '\\033]7;file://host/one\\007\\033]0;two\\007\\033]0;\\007'");
+
+        let expected = vec![
+            "file://host/one".to_string(),
+            "two".to_string(),
+            "file://host/one".to_string(),
+        ];
+        let event = worker_event_until(
+            &worker,
+            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.titles == expected),
+        );
+
+        assert!(matches!(
+            event,
+            TermioWorkerEvent::Pump(pump) if pump.titles == expected
+        ));
+        assert_eq!(
+            worker.with_termio(|termio| termio.terminal().title().to_string()),
+            "file://host/one"
         );
         worker.shutdown().expect("shutdown worker");
     }

@@ -433,24 +433,55 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml surface_title_runtime && cargo test --manifest-path roastty/Cargo.toml termio_title && cargo test --manifest-path roastty/Cargo.toml worker_rejects_terminal_with_callbacks && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/surface_title_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2B",
-        behavior="exact nonzero scrollback byte quota, empty-title/PWD fallback semantics, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback; `vendor/ghostty/src/termio/stream_handler.zig` empty-title/PWD fallback and remaining shell/title behavior; shell integration startup paths",
+        id="RUNTIME-009B2B2B1",
+        behavior="stored-PWD title fallback state machine and empty title app dispatch",
+        ghostty_reference="`vendor/ghostty/src/termio/stream_handler.zig` `seen_title`, empty title reset, PWD fallback, and PWD clear title paths; `vendor/ghostty/src/Surface.zig` static-title suppression",
+        roastty_reference="`roastty/src/terminal/terminal.rs` title/PWD fallback state; `roastty/src/termio.rs` title pump field; `roastty/src/lib.rs` surface title app dispatch and static-title gate",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 127 split out the stored-PWD title fallback state "
+            "machine. `terminal_stream_title_pwd_fallback_*` tests prove PWD "
+            "updates become the title until a non-empty explicit title is "
+            "seen, explicit titles suppress later PWD title changes, empty "
+            "title resets fall back to stored PWD or blank, PWD clear blanks "
+            "the fallback title, and blank/same-string empty-title events are "
+            "queued even when the effective title string is unchanged. The "
+            "same guards prove multiple title messages in one parse/read cycle "
+            "are preserved in order instead of being coalesced. "
+            "`termio_title_pwd_fallback_*` tests prove those title messages "
+            "travel through `TermioPump` without terminal callbacks. "
+            "`surface_title_pwd_fallback_*` tests prove empty title and "
+            "stored-PWD fallback app dispatch when no static title is "
+            "configured, and static configured titles suppress empty/fallback "
+            "title app actions. `title_pwd_fallback_runtime_parity.py` "
+            "statically checks pinned Ghostty's corresponding `seen_title` "
+            "branches and Roastty's runtime/test markers."
+        ),
+        missing_evidence="None for stored-PWD title fallback state and empty title app dispatch behavior covered by these guards. Full OSC 7 URI parsing, hostname validation, and path normalization remain in RUNTIME-009B2B2B2.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml surface_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml worker_rejects_terminal_with_callbacks && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_pwd_fallback_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B2",
+        behavior="exact nonzero scrollback byte quota, OSC 7 URI parsing/hostname/path normalization, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback; `vendor/ghostty/src/termio/stream_handler.zig` OSC 7 URI parsing, hostname validation, path normalization, and remaining shell/title behavior; shell integration startup paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiments 117, 122, 124, and 126 split out zero/no-history "
-            "scrollback, alternate-screen no-scrollback, CSI `21t` "
-            "title-report gating, shell-integration feature env and terminal "
-            "identity, zsh bootstrap, and configured/static non-empty surface "
-            "title behavior. Exact nonzero `scrollback-limit` byte quota "
-            "parity, empty-title/PWD fallback semantics, remaining "
+            "Experiments 117, 122, 124, 126, and 127 split out "
+            "zero/no-history scrollback, alternate-screen no-scrollback, CSI "
+            "`21t` title-report gating, shell-integration feature env and "
+            "terminal identity, zsh bootstrap, configured/static non-empty "
+            "surface title behavior, and stored-PWD title fallback/empty "
+            "title app dispatch. Exact nonzero `scrollback-limit` byte quota "
+            "parity, OSC 7 URI parsing/hostname/path normalization, remaining "
             "shell-specific startup rewrite coverage, and other remaining "
             "terminal behavior toggles still need focused CFG-223 runtime "
             "proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, empty-title/PWD fallback semantics, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, OSC 7 URI parsing/hostname/path normalization, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -739,7 +770,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2A",
     "RUNTIME-009B2B1",
     "RUNTIME-009B2B2A",
-    "RUNTIME-009B2B2B",
+    "RUNTIME-009B2B2B1",
+    "RUNTIME-009B2B2B2",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

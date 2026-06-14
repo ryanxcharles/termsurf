@@ -38,15 +38,16 @@ This experiment will split a narrow title fallback row out of
 
 - `roastty/src/terminal/terminal.rs`
   - Add title state equivalent to Ghostty's `seen_title` flag.
-  - Add an explicit pending title-update event that records each Ghostty-style
-    surface title message, even when the effective title string is unchanged.
+  - Add explicit pending title-update events that record each Ghostty-style
+    surface title message in order, even when the effective title string is
+    unchanged.
   - Make non-empty OSC title mark the title as explicitly seen.
   - Make empty OSC title clear the explicit-title flag and fall back to the
     current stored PWD, or blank if no PWD exists.
   - Make PWD updates drive the title only while no explicit title is active.
   - Make PWD clear blank the title only while no explicit title is active.
-  - Expose a drain method for the pending title update so Termio can emit title
-    events without installing callbacks on worker-owned terminals.
+  - Expose a drain method for pending title updates so Termio can emit title
+    events in order without installing callbacks on worker-owned terminals.
   - Reset the explicit-title flag on full terminal reset.
   - Add terminal-core tests for PWD-before-title fallback, explicit-title
     suppression of later PWD changes, empty-title reset back to PWD, and PWD
@@ -57,11 +58,11 @@ This experiment will split a narrow title fallback row out of
     when the stored title already equals that PWD.
 - `roastty/src/termio.rs`
   - Replace the current title-string diff pump signal with the terminal's
-    explicit pending title event so empty/no-op title messages still emit
-    `TermioPump.title`.
+    explicit pending title events so empty/no-op title messages still emit
+    through `TermioPump.titles`.
   - Add worker/PTY tests proving empty title and PWD/title fallback messages,
-    including blank and same-string fallback dispatches, still emit
-    `TermioPump.title` without terminal callbacks.
+    including blank, same-string fallback, and multiple-message dispatches,
+    still emit through `TermioPump.titles` without terminal callbacks.
 - `roastty/src/lib.rs`
   - Update the surface pump title path so empty title resets dispatch
     `ROASTTY_ACTION_SET_TITLE` when no static `title` config is set.
@@ -138,11 +139,95 @@ resets even when the resulting title is blank or equal to the current title,
 while Roastty's current pump signal is based on before/after title string
 differences.
 
-The design was updated to require an explicit pending title-update event in
-terminal state, drained through `TermioPump.title`, and tests for blank
+The design was updated to require explicit pending title-update events in
+terminal state, drained through `TermioPump.titles`, and tests for blank
 empty-title dispatch plus same-string PWD fallback dispatch.
 
 Re-review verdict: **Approved**.
 
 The reviewer confirmed the required finding was resolved and reported no new
 required findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now matches the pinned Ghostty title/PWD fallback state machine for the
+stored terminal PWD slice covered by this experiment:
+
+- PWD updates become the surface title until an explicit non-empty title is
+  seen;
+- explicit non-empty titles suppress later PWD title changes;
+- empty OSC title resets explicit-title state and falls back to the stored PWD
+  or blank;
+- clearing PWD blanks the title while no explicit title is active;
+- blank and same-string empty-title reset messages still queue explicit title
+  events instead of relying on title string changes;
+- multiple title messages in one parse/read cycle are preserved in order instead
+  of being coalesced;
+- `TermioPump.titles` drains the explicit pending title events without
+  installing terminal callbacks;
+- empty title resets dispatch `ROASTTY_ACTION_SET_TITLE` when no static title is
+  configured;
+- configured static titles suppress empty-title and PWD-fallback title app
+  actions.
+
+Verification passed:
+
+- `cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback`
+  — 3 passed.
+- `cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback` — 3
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml surface_title_pwd_fallback` — 3
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml worker_rejects_terminal_with_callbacks`
+  — 1 passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_pwd_fallback_runtime_parity.py`
+  — passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/surface_title_runtime_parity.py`
+  — passed after updating the prior guard for the explicit title-event pump
+  path.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  — regenerated 36 runtime rows: 29 Oracle complete, 31 closed, 5 incomplete, 5
+  gaps; CFG-223 remains Gap.
+- `cargo fmt --manifest-path roastty/Cargo.toml -- --check` — passed.
+- `git diff --check` — passed.
+
+`RUNTIME-009B2B2B` is split into `RUNTIME-009B2B2B1` and `RUNTIME-009B2B2B2`.
+`RUNTIME-009B2B2B1` is `Oracle complete` for the stored-PWD title fallback state
+machine and empty title app dispatch. `RUNTIME-009B2B2B2` remains `Gap` for
+exact nonzero scrollback byte quota, OSC 7 URI parsing/hostname/path
+normalization, remaining shell-specific startup rewrite coverage, and other
+remaining terminal behavior effects.
+
+## Conclusion
+
+Empty-title/PWD fallback is no longer part of the broad terminal leftovers gap
+for Roastty's stored terminal PWD value. Full Ghostty OSC 7 URI parsing,
+local-host validation, and path normalization are still unproven and remain in
+the follow-up terminal gap.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+Initial verdict: **Changes required**.
+
+The reviewer found one required issue: pending title updates were stored as a
+single `Option<String>`, so multiple Ghostty-style title messages in one
+parse/read cycle would be coalesced. That contradicted the design requirement to
+record each title message.
+
+The implementation was updated to store pending title updates as an ordered
+`Vec<String>`, propagate them through `TermioPump.titles`, dispatch every title
+event at the surface, and add terminal, Termio, and surface tests for multiple
+title messages in one parse/read cycle.
+
+Re-review verdict: **Approved**.
+
+The reviewer confirmed the prior required finding was resolved and reported no
+new required findings. It verified the ordered pending title update storage,
+`TermioPump.titles` propagation, ordered surface dispatch, the three focused
+multi-event regression tests, the static guard, prettier check, Rust format
+check, and `git diff --check`.

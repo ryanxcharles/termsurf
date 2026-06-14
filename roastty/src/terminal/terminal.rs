@@ -61,6 +61,7 @@ pub(crate) struct Terminal {
     flags: TerminalFlags,
     title: TerminalTitle,
     pwd: TerminalPwd,
+    pending_title_updates: Vec<String>,
     mouse_shape: mouse::MouseShape,
     title_report: bool,
     next_implicit_hyperlink_id: u32,
@@ -754,6 +755,7 @@ impl KittyGraphicsConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct TerminalTitle {
     text: String,
+    seen_explicit: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -809,6 +811,7 @@ struct TerminalStreamHandler<'a> {
     effects: &'a mut TerminalEffects,
     title: &'a mut TerminalTitle,
     pwd: &'a mut TerminalPwd,
+    pending_title_updates: &'a mut Vec<String>,
     mouse_shape: &'a mut mouse::MouseShape,
     title_report: &'a bool,
     next_implicit_hyperlink_id: &'a mut u32,
@@ -1074,6 +1077,7 @@ impl Terminal {
             flags: TerminalFlags::default(),
             title: TerminalTitle::default(),
             pwd: TerminalPwd::default(),
+            pending_title_updates: Vec::new(),
             mouse_shape: mouse::MouseShape::Text,
             title_report: options.title_report,
             next_implicit_hyperlink_id: 0,
@@ -1103,6 +1107,7 @@ impl Terminal {
             kitty_config,
             title,
             pwd,
+            pending_title_updates,
             mouse_shape,
             title_report,
             next_implicit_hyperlink_id,
@@ -1125,6 +1130,7 @@ impl Terminal {
             effects,
             title,
             pwd,
+            pending_title_updates,
             mouse_shape,
             title_report,
             next_implicit_hyperlink_id,
@@ -1165,6 +1171,10 @@ impl Terminal {
 
     pub(crate) fn take_pending_bell_count(&mut self) -> usize {
         std::mem::take(&mut self.pending_bell_count)
+    }
+
+    pub(crate) fn take_pending_title_updates(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_title_updates)
     }
 
     pub(crate) fn title(&self) -> &str {
@@ -3280,11 +3290,10 @@ impl Handler for TerminalStreamHandler<'_> {
     fn osc(&mut self, action: stream::OscAction<'_>) -> Result<(), Self::Error> {
         match action {
             stream::OscAction::WindowTitle { title } => {
-                self.title.set(title);
-                self.title_changed();
+                self.window_title(title);
             }
             stream::OscAction::ReportPwd { url } => {
-                self.pwd.set(url);
+                self.report_pwd(url);
             }
             stream::OscAction::ClipboardContents { value } => {
                 self.pending_clipboard_events
@@ -3787,6 +3796,41 @@ impl TerminalStreamHandler<'_> {
         }
     }
 
+    fn queue_title_update(&mut self, title: &str) {
+        self.pending_title_updates.push(title.to_string());
+        self.title_changed();
+    }
+
+    fn window_title(&mut self, title: &str) {
+        if title.is_empty() {
+            let fallback = self.pwd.logical_str().unwrap_or("").to_string();
+            self.title.set_fallback(&fallback);
+            self.queue_title_update(&fallback);
+            return;
+        }
+
+        self.title.set_explicit(title);
+        self.queue_title_update(title);
+    }
+
+    fn report_pwd(&mut self, url: &str) {
+        if url.is_empty() {
+            self.pwd.clear();
+            if !self.title.seen_explicit {
+                self.title.set_fallback("");
+                self.queue_title_update("");
+            }
+            return;
+        }
+
+        self.pwd.set(url);
+        if !self.title.seen_explicit {
+            let fallback = self.pwd.logical_str().unwrap_or("").to_string();
+            self.title.set_fallback(&fallback);
+            self.queue_title_update(&fallback);
+        }
+    }
+
     fn device_attributes(
         &mut self,
         _request: device_attributes::Request,
@@ -3919,6 +3963,7 @@ impl TerminalStreamHandler<'_> {
         self.tabstops.reset(TABSTOP_INTERVAL);
         self.title.clear();
         self.pwd.clear();
+        self.pending_title_updates.clear();
         *self.dcs = dcs::Handler::new();
         self.clear_tmux_state();
         self.kitty_graphics.reset();
@@ -4469,6 +4514,18 @@ impl ScrollingRegion {
 }
 
 impl TerminalTitle {
+    fn set_explicit(&mut self, title: &str) {
+        self.text.clear();
+        self.text.push_str(title);
+        self.seen_explicit = true;
+    }
+
+    fn set_fallback(&mut self, title: &str) {
+        self.text.clear();
+        self.text.push_str(title);
+        self.seen_explicit = false;
+    }
+
     fn set(&mut self, title: &str) {
         self.text.clear();
         self.text.push_str(title);
@@ -4476,6 +4533,7 @@ impl TerminalTitle {
 
     fn clear(&mut self) {
         self.text.clear();
+        self.seen_explicit = false;
     }
 
     fn as_str(&self) -> &str {
@@ -9548,6 +9606,87 @@ mod tests {
 
         terminal.next_slice(b"\x1b]8;;\x1b\\").unwrap();
         assert_eq!(terminal.cursor_hyperlink_for_tests(), None);
+    }
+
+    #[test]
+    fn terminal_stream_title_pwd_fallback_state_machine() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b]7;file://host/home\x07").unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(terminal.title_for_tests(), "file://host/home");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["file://host/home".to_string()]
+        );
+
+        terminal.next_slice(b"\x1b]0;explicit\x07").unwrap();
+        assert_eq!(terminal.title_for_tests(), "explicit");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["explicit".to_string()]
+        );
+
+        terminal
+            .next_slice(b"\x1b]7;file://host/ignored\x07")
+            .unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("file://host/ignored"));
+        assert_eq!(terminal.title_for_tests(), "explicit");
+        assert!(terminal.take_pending_title_updates().is_empty());
+
+        terminal.next_slice(b"\x1b]0;\x07").unwrap();
+        assert_eq!(terminal.title_for_tests(), "file://host/ignored");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["file://host/ignored".to_string()]
+        );
+
+        terminal.next_slice(b"\x1b]7;\x07").unwrap();
+        assert_eq!(terminal.pwd_for_tests(), None);
+        assert_eq!(terminal.title_for_tests(), "");
+        assert_eq!(terminal.take_pending_title_updates(), vec!["".to_string()]);
+    }
+
+    #[test]
+    fn terminal_stream_title_pwd_fallback_queues_noop_title_events() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b]0;\x07").unwrap();
+        assert_eq!(terminal.title_for_tests(), "");
+        assert_eq!(terminal.take_pending_title_updates(), vec!["".to_string()]);
+
+        terminal.next_slice(b"\x1b]7;file://host/same\x07").unwrap();
+        assert_eq!(terminal.title_for_tests(), "file://host/same");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["file://host/same".to_string()]
+        );
+
+        terminal.next_slice(b"\x1b]0;\x07").unwrap();
+        assert_eq!(terminal.title_for_tests(), "file://host/same");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["file://host/same".to_string()]
+        );
+    }
+
+    #[test]
+    fn terminal_stream_title_pwd_fallback_preserves_multiple_events_in_one_slice() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]7;file://host/one\x07\x1b]0;two\x07\x1b]0;\x07")
+            .unwrap();
+
+        assert_eq!(terminal.title_for_tests(), "file://host/one");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec![
+                "file://host/one".to_string(),
+                "two".to_string(),
+                "file://host/one".to_string()
+            ]
+        );
     }
 
     #[test]
