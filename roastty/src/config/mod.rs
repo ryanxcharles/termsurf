@@ -18132,6 +18132,97 @@ mod tests {
     }
 
     #[test]
+    fn optional_path_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&default_lines, "background-image"),
+            "background-image = "
+        );
+        assert_eq!(
+            line(&default_lines, "bell-audio-path"),
+            "bell-audio-path = "
+        );
+
+        cfg.set("background-image", Some("backdrop.png")).unwrap();
+        cfg.set("bell-audio-path", Some("?bell.wav")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image"),
+            "background-image = backdrop.png"
+        );
+        assert_eq!(
+            line(&lines, "bell-audio-path"),
+            "bell-audio-path = ?bell.wav"
+        );
+
+        cfg.set("background-image", Some("?optional.png")).unwrap();
+        cfg.set("bell-audio-path", Some("\"?literal.wav\""))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image"),
+            "background-image = ?optional.png"
+        );
+        assert_eq!(
+            line(&lines, "bell-audio-path"),
+            "bell-audio-path = ?literal.wav"
+        );
+
+        cfg.set("background-image", Some("bad\0path.png")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image"),
+            "background-image = bad\0path.png"
+        );
+
+        let prior_background = cfg.background_image.clone();
+        cfg.set("background-image", Some("?")).unwrap();
+        cfg.set("background-image", Some("\"\"")).unwrap();
+        cfg.set("background-image", Some("?\"\"")).unwrap();
+        assert_eq!(cfg.background_image, prior_background);
+        assert_eq!(
+            line(&formatted_lines(&cfg), "background-image"),
+            "background-image = bad\0path.png"
+        );
+
+        cfg.set("background-image", Some("")).unwrap();
+        cfg.set("bell-audio-path", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "background-image"),
+            "background-image = "
+        );
+        assert_eq!(line(&reset_lines, "bell-audio-path"), "bell-audio-path = ");
+
+        assert!(index(&lines, "background-image") < index(&lines, "config-file"));
+        assert!(index(&lines, "config-file") < index(&lines, "bell-audio-path"));
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

@@ -126,3 +126,84 @@ Findings: none.
 The reviewer verified the README link, required sections, narrow scope, two-row
 target set, exclusion of already promoted repeatable path rows, plausible
 103/100/0 count movement, and verification criteria.
+
+## Result
+
+**Result:** Pass
+
+Added `optional_path_config_formatter_family_oracle`, split the two optional
+single-path rows into an `optional path` formatter family, and promoted only
+that family.
+
+The new oracle proves:
+
+- optional path defaults format as void lines (`key = `);
+- required paths format as raw path strings;
+- optional paths format with a leading `?`;
+- quoted literal `?path` values format as required paths beginning with `?`;
+- parsed-empty values (`?`, `""`, `?""`) are no-ops and preserve the previous
+  formatted path;
+- raw-empty values reset the optional paths back to void output;
+- embedded NUL bytes are preserved in formatted path output;
+- representative row order is stable within upstream declaration order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=103
+audit_covered=100
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 100 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml optional_path_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml path_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml repeatable_path_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 103 `Oracle complete`, 100
+  `Audit covered`, and 0 `Gap`.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`; all
+  previously promoted formatter families remain `Oracle complete`; the two
+  optional path formatter rows are `Oracle complete`; optional custom non-path
+  rows and font rows remain `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/62-optional-path-formatter-oracle.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-formatter-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  completed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The optional single-path formatter rows are now oracle-complete. Repeatable path
+rows remain covered by Experiment 54, and the remaining optional custom
+`format_entry` rows are now command, theme, working-directory, color-list,
+duration, and enum-like values. CFG-218 remains open with 100 audit-covered
+formatter rows.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer independently verified that the result commit had not been made,
+README status is `Pass`, the experiment has Result and Conclusion sections, the
+optional path oracle covers the claimed cases, inventory promotion is limited to
+`background-image` and `bell-audio-path`, repeatable path rows remain separate,
+CFG-218 remains `Gap` with 103/100/0 counts, the requested Rust tests pass, the
+matrix assertion passes, and `cargo fmt --check` plus `git diff --check` pass.
