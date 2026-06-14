@@ -635,3 +635,5 @@ remains open.
 - [Experiment 41: Input parser oracle](41-input-parser-oracle.md) — **Pass**
 - [Experiment 42: Repeatable string font parser oracle](42-repeatable-string-font-parser-oracle.md)
   — **Pass**
+- [Experiment 43: Font style parser oracle](43-font-style-parser-oracle.md) —
+  **Designed**
