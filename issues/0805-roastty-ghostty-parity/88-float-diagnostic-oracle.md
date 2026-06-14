@@ -132,3 +132,63 @@ contains the required sections, scope is limited to the nine CFG-219 float
 scalar diagnostic rows, CFG-219 remains explicitly `Gap`, the expected 180/23/0
 counts are coherent, and the required cargo fmt, targeted cargo test, Prettier,
 and `git diff --check` hygiene checks are present.
+
+## Result
+
+**Result:** Pass
+
+The shared float diagnostic oracle now covers the nine float scalar options that
+were still `Audit covered` after Experiment 87. The oracle verifies every
+option's representative non-default parse and formatted output, empty reset to
+the option's default, missing-value `ValueRequired` behavior, config-file
+invalid-value diagnostics with line/key/error, CLI invalid-value diagnostics
+with argument position/key/error, and invalid-value state retention.
+
+The diagnostic inventory generator now has an exact Experiment 88 override list
+for those nine options and validates that every override still maps to a
+canonical float-scalar parser-family row. Regeneration moved the float
+diagnostic rows to `Oracle complete`. CFG-219 remains `Gap` because 23 non-float
+diagnostic rows are still incomplete.
+
+Verification output:
+
+```text
+test config::tests::config_float_diagnostic_family_oracle ... ok
+ghostty_canonical=203
+diagnostic_rows=203
+missing_canonical_diagnostic_rows=0
+extra_diagnostic_rows=0
+oracle_complete=180
+audit_covered=23
+gap=0
+```
+
+Additional checks passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml config_float_diagnostic_family_oracle
+```
+
+## Conclusion
+
+Float scalar diagnostic parity is now proven for CFG-219. The integer scalar
+pattern transfers cleanly to float scalars when the oracle uses finite
+non-default values and formatted output as the state surface, keeping parser
+edge cases in the existing float parser-family oracle.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Final verdict: Approved.
+
+Findings: None.
+
+The reviewer confirmed the diff from plan commit `d4829990e` is scoped to
+Experiment 88 artifacts and the Rust oracle, the result commit had not been
+made, the targeted float diagnostic test and format checks passed, the generated
+inventory has 203 rows with 180 `Oracle complete`, 23 `Audit covered`, and 0
+`Gap`, exactly nine float rows cite Experiment 88 evidence, CFG-217 and CFG-218
+are unchanged from the plan commit, and CFG-219 remains `Gap` with the 180/23/0
+counts.

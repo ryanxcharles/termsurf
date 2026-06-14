@@ -27690,6 +27690,190 @@ mod tests {
     }
 
     #[test]
+    fn config_float_diagnostic_family_oracle() {
+        struct FloatDiagnosticCase {
+            key: &'static str,
+            valid: &'static str,
+            invalid: &'static str,
+            expected_valid_line: &'static str,
+            get_line: fn(&Config) -> Option<String>,
+        }
+
+        fn config_line(cfg: &Config, key: &str) -> Option<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .map(str::to_string)
+        }
+
+        let cases = [
+            FloatDiagnosticCase {
+                key: "background-image-opacity",
+                valid: "0.25",
+                invalid: "abc",
+                expected_valid_line: "background-image-opacity = 0.25",
+                get_line: |cfg| config_line(cfg, "background-image-opacity"),
+            },
+            FloatDiagnosticCase {
+                key: "background-opacity",
+                valid: "0.25",
+                invalid: "abc",
+                expected_valid_line: "background-opacity = 0.25",
+                get_line: |cfg| config_line(cfg, "background-opacity"),
+            },
+            FloatDiagnosticCase {
+                key: "bell-audio-volume",
+                valid: "0.125",
+                invalid: "abc",
+                expected_valid_line: "bell-audio-volume = 0.125",
+                get_line: |cfg| config_line(cfg, "bell-audio-volume"),
+            },
+            FloatDiagnosticCase {
+                key: "cursor-opacity",
+                valid: "0.5",
+                invalid: "abc",
+                expected_valid_line: "cursor-opacity = 0.5",
+                get_line: |cfg| config_line(cfg, "cursor-opacity"),
+            },
+            FloatDiagnosticCase {
+                key: "faint-opacity",
+                valid: "0.25",
+                invalid: "abc",
+                expected_valid_line: "faint-opacity = 0.25",
+                get_line: |cfg| config_line(cfg, "faint-opacity"),
+            },
+            FloatDiagnosticCase {
+                key: "font-size",
+                valid: "13.5",
+                invalid: "abc",
+                expected_valid_line: "font-size = 13.5",
+                get_line: |cfg| config_line(cfg, "font-size"),
+            },
+            FloatDiagnosticCase {
+                key: "minimum-contrast",
+                valid: "2.5",
+                invalid: "abc",
+                expected_valid_line: "minimum-contrast = 2.5",
+                get_line: |cfg| config_line(cfg, "minimum-contrast"),
+            },
+            FloatDiagnosticCase {
+                key: "quick-terminal-animation-duration",
+                valid: "0.75",
+                invalid: "abc",
+                expected_valid_line: "quick-terminal-animation-duration = 0.75",
+                get_line: |cfg| config_line(cfg, "quick-terminal-animation-duration"),
+            },
+            FloatDiagnosticCase {
+                key: "unfocused-split-opacity",
+                valid: "0.25",
+                invalid: "abc",
+                expected_valid_line: "unfocused-split-opacity = 0.25",
+                get_line: |cfg| config_line(cfg, "unfocused-split-opacity"),
+            },
+        ];
+        assert_eq!(cases.len(), 9);
+
+        for case in cases {
+            let default_line = (case.get_line)(&Config::default());
+
+            let mut cfg = Config::default();
+            cfg.set(case.key, Some(case.valid)).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg).as_deref(),
+                Some(case.expected_valid_line),
+                "{} accepts representative non-default value",
+                case.key
+            );
+
+            cfg.set(case.key, Some("")).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg),
+                default_line,
+                "{} empty value resets to default",
+                case.key
+            );
+
+            assert_eq!(
+                cfg.set(case.key, None),
+                Err(ConfigSetError::ValueRequired),
+                "{} bare missing value is required",
+                case.key
+            );
+
+            let mut file_cfg = Config::default();
+            file_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&file_cfg);
+            let diagnostics = file_cfg.load_str(&format!("\n{} = {}\n", case.key, case.invalid));
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 2,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::InvalidValue,
+                }],
+                "{} file diagnostic preserves line/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&file_cfg),
+                before,
+                "{} invalid file value preserves previous state",
+                case.key
+            );
+
+            let mut file_cfg = Config::default();
+            let diagnostics = file_cfg.load_str(&format!("\n{}\n", case.key));
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 2,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::ValueRequired,
+                }],
+                "{} file missing-value diagnostic preserves line/key/error",
+                case.key
+            );
+
+            let mut cli_cfg = Config::default();
+            cli_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&cli_cfg);
+            let arg = format!("--{}={}", case.key, case.invalid);
+            let diagnostics = cli_cfg.set_cli_args([arg.as_str()]);
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 1,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::InvalidValue,
+                }],
+                "{} CLI diagnostic preserves argument position/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&cli_cfg),
+                before,
+                "{} invalid CLI value preserves previous state",
+                case.key
+            );
+
+            let mut cli_cfg = Config::default();
+            let arg = format!("--{}", case.key);
+            let diagnostics = cli_cfg.set_cli_args([arg.as_str()]);
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 1,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::ValueRequired,
+                }],
+                "{} CLI missing-value diagnostic preserves argument position/key/error",
+                case.key
+            );
+        }
+    }
+
+    #[test]
     fn string_config_parser_family_oracle() {
         assert_eq!(
             parse_string_field(None),

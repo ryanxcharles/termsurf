@@ -72,6 +72,18 @@ INTEGER_DIAGNOSTIC_ORACLE_OPTIONS = {
     "window-width",
 }
 
+FLOAT_DIAGNOSTIC_ORACLE_OPTIONS = {
+    "background-image-opacity",
+    "background-opacity",
+    "bell-audio-volume",
+    "cursor-opacity",
+    "faint-opacity",
+    "font-size",
+    "minimum-contrast",
+    "quick-terminal-animation-duration",
+    "unfocused-split-opacity",
+}
+
 
 @dataclasses.dataclass(frozen=True)
 class ParserInventoryRow:
@@ -151,6 +163,20 @@ def diagnostic_family(row: ParserInventoryRow) -> str:
 
 def diagnostic_override_evidence(option: str, row: ParserInventoryRow) -> str | None:
     if option not in BOOLEAN_DIAGNOSTIC_ORACLE_OPTIONS:
+        if option in FLOAT_DIAGNOSTIC_ORACLE_OPTIONS:
+            if row.family != "float scalar":
+                raise ValueError(
+                    f"{option} is listed in the Experiment 88 float diagnostic oracle "
+                    f"but parser family is {row.family!r}"
+                )
+            return (
+                "Experiment 88 shared float diagnostic oracle covers representative "
+                "non-default values, empty resets, missing-value diagnostics, "
+                "config-file invalid-value diagnostics with line/key/error, CLI "
+                "invalid-value diagnostics with argument position/key/error, and "
+                "invalid-value state retention; "
+                "`roastty/src/config/mod.rs::config_float_diagnostic_family_oracle`"
+            )
         if option not in INTEGER_DIAGNOSTIC_ORACLE_OPTIONS:
             return None
         if row.family != "integer scalar":
@@ -236,7 +262,11 @@ def build_rows(
         )
 
     extra = sorted(set(parser_rows) - set(canonical_options))
-    override_options = BOOLEAN_DIAGNOSTIC_ORACLE_OPTIONS | INTEGER_DIAGNOSTIC_ORACLE_OPTIONS
+    override_options = (
+        BOOLEAN_DIAGNOSTIC_ORACLE_OPTIONS
+        | INTEGER_DIAGNOSTIC_ORACLE_OPTIONS
+        | FLOAT_DIAGNOSTIC_ORACLE_OPTIONS
+    )
     missing_overrides = sorted(override_options - set(canonical_options))
     if missing_overrides:
         raise ValueError(
