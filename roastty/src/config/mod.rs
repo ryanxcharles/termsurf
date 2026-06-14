@@ -16807,6 +16807,102 @@ mod tests {
     }
 
     #[test]
+    fn command_palette_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+        assert!(cfg.command_palette_entry.entries.iter().all(|entry| {
+            crate::canonical_config_binding_action(entry.action.as_bytes()).is_some()
+        }));
+
+        cfg.set("command-palette-entry", Some("clear")).unwrap();
+        assert!(cfg.command_palette_entry.entries.is_empty());
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|line| line == "command-palette-entry = "));
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Reset Font Style, action:csi:0m"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:\"Focus, Split\",description:\"Go, right\",action:goto_split:right"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:first,title:second,description:old,description:new,action:ignore,action:text:hello"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Shorthand,action:copy_to_clipboard"),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Reset Font Style", "", "csi:0m"),
+                CommandPaletteEntry::new("Focus, Split", "Go, right", "goto_split:right"),
+                CommandPaletteEntry::new("second", "new", "text:hello"),
+                CommandPaletteEntry::new("Shorthand", "", "copy_to_clipboard:mixed"),
+            ]
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let lines: Vec<&str> = out
+            .lines()
+            .filter(|line| line.starts_with("command-palette-entry = "))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                "command-palette-entry = title:\"Reset Font Style\",action:\"csi:0m\"",
+                "command-palette-entry = title:\"Focus, Split\",description:\"Go, right\",action:\"goto_split:right\"",
+                "command-palette-entry = title:\"second\",description:\"new\",action:\"text:hello\"",
+                "command-palette-entry = title:\"Shorthand\",action:\"copy_to_clipboard:mixed\"",
+            ]
+        );
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:\"A\\nB\",description:\"tab\\tq\",action:\"text:\\xf0\\x9f\\x91\\xbb\""),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries.last(),
+            Some(&CommandPaletteEntry::new(
+                "A\nB",
+                "tab\tq",
+                "text:\\xf0\\x9f\\x91\\xbb",
+            ))
+        );
+
+        cfg.set("command-palette-entry", Some("")).unwrap();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+        cfg.set("command-palette-entry", None).unwrap();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+
+        for bad in [
+            "title:Only Title",
+            "action:ignore",
+            "title:x,action:no_such_action",
+            "title:x,unknown:y,action:ignore",
+            "title:\"unterminated,action:ignore",
+            "title:\"bad\\q\",action:ignore",
+        ] {
+            assert_eq!(
+                cfg.set("command-palette-entry", Some(bad)),
+                Err(ConfigSetError::InvalidValue),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
     fn command_palette_entry_config_parse_format_reset_and_diagnose() {
         let mut cfg = Config::default();
         assert_eq!(cfg.command_palette_entry.entries.len(), 88);

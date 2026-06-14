@@ -409,6 +409,13 @@ experiment files until they are proven.
   `home`/`inherit` keywords, path fallback for all other strings, embedded NUL
   acceptance, raw-empty optional reset, and formatter output. Home expansion and
   probable-CLI defaults remain separate non-parser facets.
+- **`command-palette-entry` parser parity is repeatable auto-struct parity.**
+  Experiment 22 proved the direct parser boundary for `command-palette-entry`:
+  missing/raw-empty values restore the default list, exact `clear` empties it,
+  valid entries append through auto-struct parsing, quoted commas are preserved,
+  duplicate fields use the last value, actions are canonicalized, invalid
+  fields/actions/quotes/escapes are rejected, and formatter output repeats one
+  line per entry.
 
 ## Verification
 
@@ -458,4 +465,4 @@ remains open.
 - [Experiment 21: Working directory parser oracle](21-working-directory-parser-oracle.md)
   — **Pass**
 - [Experiment 22: Command palette parser oracle](22-command-palette-parser-oracle.md)
-  — **Designed**
+  — **Pass**

@@ -144,3 +144,109 @@ prettier --write --prose-wrap always --print-width 80 \
   issues/0805-roastty-ghostty-parity/config-matrix.md
 git diff --check
 ```
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a focused command-palette parser family oracle for the single
+`command-palette-entry` parser row. The oracle proves pinned Ghostty's
+`RepeatableCommand.parseCLI` boundary:
+
+- the default command list is present and stores canonical actions;
+- exact `clear` empties the list;
+- raw empty and missing values restore the default list;
+- valid entries append after clear;
+- `title` and `action` are required, while `description` is optional;
+- whitespace around auto-struct keys and values is accepted;
+- quoted values can contain commas;
+- duplicate fields are accepted with the last value winning;
+- action aliases are canonicalized, such as `copy_to_clipboard` becoming
+  `copy_to_clipboard:mixed`;
+- quoted string escapes are decoded before action parsing;
+- formatter output is proven for empty, single, described, and multiple entries;
+- invalid title-only, action-only, unknown-action, unknown-field, unterminated
+  quote, and invalid-escape values are rejected.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml command_palette_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::command_palette_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4912 filtered out; finished in 0.01s
+```
+
+The existing command-palette option-level regression test also passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml command_palette_entry_config_parse_format_reset_and_diagnose
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::command_palette_entry_config_parse_format_reset_and_diagnose ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4912 filtered out; finished in 0.00s
+```
+
+The parser inventory generator passed and moved the 1 command-palette row to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=76
+audit_covered=127
+gap=0
+```
+
+The matrix assertion passed:
+
+```text
+parser_rows=203 command_palette_oracle=1 cfg217=Gap
+```
+
+CFG-217 remains `Gap` because 127 parser rows are still audit-only, but the
+command-palette parser family is now oracle-complete.
+
+## Conclusion
+
+Command-palette parser semantics are now proven for the pinned Ghostty target at
+the direct parser boundary. The key shape is repeatable auto-struct parsing:
+missing/raw-empty restores defaults, exact `clear` empties entries, valid
+auto-struct commands append, and the formatter emits one `command-palette-entry`
+line per stored command.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no
+findings. The reviewer independently verified the focused command-palette
+oracle, the existing command-palette regression test, Rust fmt check,
+`git diff --check`, and the matrix assertion: 203 parser rows, exactly 1
+command-palette row, 76 `Oracle complete`, CFG-217 still `Gap`, and owner
+`Experiment 22`.
