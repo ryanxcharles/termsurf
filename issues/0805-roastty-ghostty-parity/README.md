@@ -1241,3 +1241,5 @@ remains open.
   — **Pass**
 - [Experiment 122: Title report runtime split](122-title-report-runtime-split.md)
   — **Pass**
+- [Experiment 123: Bell runtime dispatch split](123-bell-runtime-dispatch-split.md)
+  — **Designed**
