@@ -313,6 +313,11 @@ experiment files until they are proven.
   drives parsed app config or config loading. Future CFG-223 experiments should
   keep parsed-config runtime effects separate from direct surface-config
   behavior.
+- **Process lifecycle parity needs branch-specific oracles.** Ghostty handles
+  abnormal child exit before normal `wait-after-command` close/hold behavior,
+  and uses a `<=` runtime threshold. Future process lifecycle experiments must
+  either prove the abnormal-exit branch directly or run commands beyond the
+  configured threshold when proving the normal child-exit branch.
 - **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
   currently models scrollback capacity in rows, while pinned Ghostty documents
   `scrollback-limit` as a byte quota. A focused experiment may prove the
@@ -1208,4 +1213,4 @@ remains open.
 - [Experiment 117: Scrollback limit runtime split](117-scrollback-limit-runtime-split.md)
   — **Pass**
 - [Experiment 118: Wait after command runtime split](118-wait-after-command-runtime-split.md)
-  — **Designed**
+  — **Pass**

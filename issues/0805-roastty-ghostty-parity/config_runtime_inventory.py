@@ -390,20 +390,40 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml config_command_input_runtime && cargo test --manifest-path roastty/Cargo.toml surface_start_without_command`",
     ),
     RuntimeRow(
-        id="RUNTIME-010B2",
-        behavior="PTY/process wait-after-command, abnormal-command-exit-runtime, quit-after-last-window-closed, and lifecycle policy effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `wait-after-command`, `abnormal-command-exit-runtime`, and quit policy fields",
-        roastty_reference="`roastty/src/lib.rs::start_termio`, app lifecycle callbacks, and process exit handling",
+        id="RUNTIME-010B2A",
+        behavior="PTY/process wait-after-command child-exit close/hold effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `wait-after-command`; `vendor/ghostty/src/Surface.zig::childExited`; `vendor/ghostty/src/apprt/embedded.zig` embedded surface options",
+        roastty_reference="`roastty/src/lib.rs` surface wait-after-command state, child-exit handling, and close callback dispatch",
+        family="process",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 118 adds `wait_after_command_runtime_*` tests proving "
+            "normal child-exit close/hold behavior for default parsed config, "
+            "parsed `wait-after-command = true`, embedded "
+            "`RoasttySurfaceConfig.wait_after_command = true`, and explicit "
+            "surface commands that force hold behavior. The tests run commands "
+            "beyond a configured abnormal-exit threshold and prove EOF-only "
+            "events do not close or suppress a later child-exit close."
+        ),
+        missing_evidence="None for normal wait-after-command child-exit close/hold behavior covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml wait_after_command_runtime && cargo test --manifest-path roastty/Cargo.toml close_surface && cargo test --manifest-path roastty/Cargo.toml process_exited`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-010B2B",
+        behavior="PTY/process abnormal-command-exit-runtime, quit-after-last-window-closed, quit-after-last-window-closed-delay, and remaining lifecycle policy effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `abnormal-command-exit-runtime` and quit policy fields; `vendor/ghostty/src/Surface.zig::childExited`; app lifecycle quit policy paths",
+        roastty_reference="`roastty/src/lib.rs::start_termio`, app lifecycle callbacks, process exit handling, and macOS app lifecycle",
         family="process",
         status="Gap",
         evidence=(
-            "Experiment 116 split out the proven parsed config command/input "
-            "launch slice. Runtime effects for `wait-after-command`, "
-            "`abnormal-command-exit-runtime`, `quit-after-last-window-closed`, "
-            "and related lifecycle policy behavior still need focused runtime "
-            "proof or fixes."
+            "Experiment 118 split out normal `wait-after-command` child-exit "
+            "close/hold behavior. Abnormal-exit presentation, "
+            "`quit-after-last-window-closed`, `quit-after-last-window-closed-delay`, "
+            "and remaining app lifecycle policy behavior still need focused "
+            "runtime or GUI proof or fixes."
         ),
-        missing_evidence="Add runtime proof for wait-after-command, abnormal-command-exit-runtime, quit-after-last-window-closed, and related process lifecycle policy effects.",
+        missing_evidence="Add runtime proof or fixes for abnormal-command-exit-runtime, quit-after-last-window-closed, quit-after-last-window-closed-delay, and remaining lifecycle policy behavior.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 PTY/process lifecycle experiment.",
     ),
@@ -521,7 +541,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2",
     "RUNTIME-010A",
     "RUNTIME-010B1",
-    "RUNTIME-010B2",
+    "RUNTIME-010B2A",
+    "RUNTIME-010B2B",
     "RUNTIME-011",
     "RUNTIME-012A",
     "RUNTIME-012B",

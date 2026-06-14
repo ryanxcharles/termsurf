@@ -210,3 +210,107 @@ accounts for Ghostty's `<=` predicate and requires focused tests to configure a
 bounded abnormal-exit threshold and run child commands that outlive it. The
 reviewer also confirmed the EOF-only finding remains resolved, the README links
 Experiment 118 as `Designed`, and no plan commit had been made before approval.
+
+## Result
+
+**Result:** Pass
+
+Roastty now tracks the effective wait-after-command state per surface and uses
+it when terminal worker child-exit events arrive:
+
+- parsed app config `wait-after-command = true` holds a surface open after the
+  child exits;
+- embedded `RoasttySurfaceConfig.wait_after_command = true` holds a surface open
+  after the child exits;
+- explicit embedded per-surface commands force hold behavior, matching pinned
+  Ghostty's embedded option path;
+- default parsed config requests surface close on normal child exit;
+- EOF-only worker events do not request close and do not suppress a later
+  child-exit close request;
+- repeated child-exit events request close only once.
+
+The PTY-backed command-exit tests configure `abnormal-command-exit-runtime = 1`
+and use commands that sleep before exiting, so the assertions prove the normal
+child-exit close/hold branch rather than Ghostty's earlier abnormal-exit branch.
+
+The runtime inventory now splits `RUNTIME-010B2`:
+
+- `RUNTIME-010B2A` is `Oracle complete` for normal `wait-after-command`
+  child-exit close/hold behavior.
+- `RUNTIME-010B2B` remains `Gap` for `abnormal-command-exit-runtime`,
+  `quit-after-last-window-closed`, `quit-after-last-window-closed-delay`, and
+  remaining lifecycle policy behavior.
+
+Verification run:
+
+```sh
+cargo test --manifest-path roastty/Cargo.toml wait_after_command_runtime
+cargo test --manifest-path roastty/Cargo.toml close_surface
+cargo test --manifest-path roastty/Cargo.toml process_exited
+cargo fmt --manifest-path roastty/Cargo.toml -- --check
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+from pathlib import Path
+
+inventory = Path("issues/0805-roastty-ghostty-parity/config-runtime-inventory.md").read_text()
+matrix = Path("issues/0805-roastty-ghostty-parity/config-matrix.md").read_text()
+
+rows = {}
+for line in inventory.splitlines():
+    if not line.startswith("| RUNTIME-"):
+        continue
+    cells = [cell.strip() for cell in line.strip("|").split("|")]
+    rows[cells[0]] = cells
+
+assert "RUNTIME-010B2" not in rows, rows.get("RUNTIME-010B2")
+assert len(rows) == 27, len(rows)
+assert rows["RUNTIME-010B2A"][5] == "Oracle complete", rows["RUNTIME-010B2A"]
+assert (
+    "wait_after_command_runtime" in rows["RUNTIME-010B2A"][6]
+    or "wait_after_command_runtime" in rows["RUNTIME-010B2A"][9]
+), rows["RUNTIME-010B2A"]
+assert rows["RUNTIME-010B2A"][7].startswith("None"), rows["RUNTIME-010B2A"]
+assert rows["RUNTIME-010B2B"][5] == "Gap", rows["RUNTIME-010B2B"]
+behavior = rows["RUNTIME-010B2B"][1]
+for term in (
+    "abnormal-command-exit-runtime",
+    "quit-after-last-window-closed",
+    "quit-after-last-window-closed-delay",
+    "lifecycle",
+):
+    assert term in behavior, (term, rows["RUNTIME-010B2B"])
+cfg223 = next(line for line in matrix.splitlines() if line.startswith("| CFG-223 "))
+assert "| Gap " in cfg223, cfg223
+PY
+prettier --check issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/118-wait-after-command-runtime-split.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md \
+  issues/0805-roastty-ghostty-parity/config-runtime-inventory.md
+git diff --check
+```
+
+All commands passed after formatting the regenerated markdown tables.
+
+Initial completion review: **Changes required**.
+
+The reviewer found that the regenerated `config-matrix.md` and
+`config-runtime-inventory.md` files were not Prettier-clean in the reviewed
+working tree. That was accepted as a real workflow finding. The regenerated
+markdown tables were formatted with Prettier again, and `prettier --check` now
+passes for the README, this experiment file, `config-matrix.md`, and
+`config-runtime-inventory.md`.
+
+Completion re-review: **Approved**.
+
+The reviewer confirmed the Prettier finding is resolved, the experiment file
+records the initial completion-review finding and fix, and no result commit had
+been made before the re-review approval. No required findings remain.
+
+## Conclusion
+
+The normal `wait-after-command` child-exit close/hold branch is no longer part
+of the process lifecycle runtime gap. The remaining process lifecycle gap is
+abnormal-exit presentation, quit-after-last-window-closed policy, quit delay,
+and other app lifecycle behavior that needs focused runtime or GUI proof.
