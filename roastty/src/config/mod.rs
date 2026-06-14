@@ -18038,6 +18038,91 @@ mod tests {
     }
 
     #[test]
+    fn repeatable_path_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(lines_for(&lines, "config-file"), vec!["config-file = "]);
+        assert_eq!(lines_for(&lines, "custom-shader"), vec!["custom-shader = "]);
+        assert_eq!(
+            lines_for(&lines, "gtk-custom-css"),
+            vec!["gtk-custom-css = "]
+        );
+
+        cfg.set("config-file", Some("base.conf")).unwrap();
+        cfg.set("config-file", Some("?optional.conf")).unwrap();
+        cfg.set("config-file", Some("\"?literal.conf\"")).unwrap();
+        cfg.set("custom-shader", Some("base.glsl")).unwrap();
+        cfg.set("custom-shader", Some("?optional.glsl")).unwrap();
+        cfg.set("custom-shader", Some("\"?literal.glsl\"")).unwrap();
+        cfg.set("gtk-custom-css", Some("base.css")).unwrap();
+        cfg.set("gtk-custom-css", Some("?optional.css")).unwrap();
+        cfg.set("gtk-custom-css", Some("\"?literal.css\"")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "config-file"),
+            vec![
+                "config-file = base.conf",
+                "config-file = ?optional.conf",
+                "config-file = ?literal.conf"
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "custom-shader"),
+            vec![
+                "custom-shader = base.glsl",
+                "custom-shader = ?optional.glsl",
+                "custom-shader = ?literal.glsl"
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "gtk-custom-css"),
+            vec![
+                "gtk-custom-css = base.css",
+                "gtk-custom-css = ?optional.css",
+                "gtk-custom-css = ?literal.css"
+            ]
+        );
+
+        cfg.set("config-file", Some("")).unwrap();
+        cfg.set("custom-shader", Some("")).unwrap();
+        cfg.set("gtk-custom-css", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(lines_for(&lines, "config-file"), vec!["config-file = "]);
+        assert_eq!(lines_for(&lines, "custom-shader"), vec!["custom-shader = "]);
+        assert_eq!(
+            lines_for(&lines, "gtk-custom-css"),
+            vec!["gtk-custom-css = "]
+        );
+
+        assert!(index(&lines, "config-file") < index(&lines, "custom-shader"));
+        assert!(index(&lines, "custom-shader") < index(&lines, "gtk-custom-css"));
+    }
+
+    #[test]
     fn config_default_parser_oracle() {
         let fixture = include_str!("../../testdata/issue805-ghostty-default-config.txt");
         let lines: Vec<&str> = fixture.lines().collect();

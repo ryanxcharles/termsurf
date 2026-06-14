@@ -87,3 +87,76 @@ Reviewed by a fresh-context Codex adversarial subagent.
 Verdict: **Approved**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Fixed the formatter inventory classifier so `custom-shader-animation` is no
+longer treated as a repeatable path, added
+`repeatable_path_config_formatter_family_oracle`, and promoted only formatter
+inventory rows whose corrected family is `repeatable path`.
+
+The oracle proves representative repeatable path formatter behavior through
+`Config::format_config`:
+
+- empty `config-file`, `custom-shader`, and `gtk-custom-css` lists format as a
+  single void line;
+- required paths format without `?`;
+- optional paths format with a leading `?`;
+- quoted literal `?path` values format as required paths without the optional
+  marker;
+- raw-empty values reset each list back to the single void line;
+- the three rows remain in representative formatter order: `config-file`,
+  `custom-shader`, `gtk-custom-css`.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=74
+audit_covered=129
+gap=0
+no_output_rows=1
+```
+
+The corrected family counts include 3 `repeatable path` rows, and
+`custom-shader-animation` remains `Audit covered` under a non-repeatable family.
+
+CFG-218 remains `Gap`, as intended, because 129 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml repeatable_path_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`;
+  primitive, metric modifier, window padding, and corrected repeatable path
+  formatter families are `Oracle complete`; `custom-shader-animation` is not
+  classified as `repeatable path` and remains `Audit covered`; representative
+  non-target formatter families remain `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/54-repeatable-path-formatter-oracle.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-formatter-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  completed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The repeatable path formatter family is now oracle-complete after correcting the
+`custom-shader-animation` classifier false positive. CFG-218 remains open with
+129 audit-covered formatter rows. The next formatter experiments should target
+another coherent family such as colors, key remap, key binding, command palette,
+or optional values.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.

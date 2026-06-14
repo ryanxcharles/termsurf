@@ -472,6 +472,11 @@ experiment files until they are proven.
   must cover both compact padding forms (`N` and `left,right`), every balance
   keyword, every padding color keyword, empty resets, and the local order of the
   four rows.
+- **Repeatable path formatter classification must use exact options.**
+  Experiment 54 found that `custom-shader-animation` was a classifier false
+  positive because its Rust identifier contains `custom_shader`; the actual
+  repeatable path formatter family is `config-file`, `custom-shader`, and
+  `gtk-custom-css`.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -711,4 +716,4 @@ remains open.
 - [Experiment 53: Window padding formatter oracle](53-window-padding-formatter-oracle.md)
   — **Pass**
 - [Experiment 54: Repeatable path formatter oracle](54-repeatable-path-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

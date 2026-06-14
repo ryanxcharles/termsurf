@@ -25,7 +25,9 @@ ENTRY_FORMATTER_RE = re.compile(r'EntryFormatter::new\(\s*"(?P<key>[^"]+)"', re.
 PRIMITIVE_ORACLE_TEST = "primitive_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
+REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
 PRIMITIVE_FAMILIES = {"boolean", "integer", "float", "string"}
+REPEATABLE_PATH_OPTIONS = {"config-file", "custom-shader", "gtk-custom-css"}
 
 NO_OUTPUT_FORMATTERS = {
     "link": (
@@ -101,14 +103,14 @@ def formatter_path(text: str) -> str:
     return "custom inline formatter"
 
 
-def formatter_family(path_text: str, call_text: str) -> str:
+def formatter_family(option: str, path_text: str, call_text: str) -> str:
     if "keybind" in call_text:
         return "key binding"
     if "key-remap" in call_text:
         return "key remap"
     if "command_palette_entry" in call_text:
         return "command palette"
-    if "config_file" in call_text or "custom_shader" in call_text or "gtk_custom_css" in call_text:
+    if option in REPEATABLE_PATH_OPTIONS:
         return "repeatable path"
     if "font_" in call_text or "Font" in call_text:
         return "font"
@@ -255,6 +257,7 @@ def build_rows(
     primitive_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
+    repeatable_path_oracle_present: bool,
 ) -> tuple[list[FormatterRow], list[str], list[str]]:
     call_by_key = {call.key: call for call in calls}
     canonical = set(upstream)
@@ -299,7 +302,7 @@ def build_rows(
             continue
 
         path_text = formatter_path(call.text)
-        family = formatter_family(path_text, call.text)
+        family = formatter_family(option, path_text, call.text)
         status = "Audit covered"
         evidence = "Formatter dispatch path identified; non-default oracle still required"
         missing_evidence = (
@@ -332,6 +335,14 @@ def build_rows(
                 "keyword, empty resets, and representative order checks"
             )
             missing_evidence = "None for window padding formatter rows."
+        elif repeatable_path_oracle_present and family == "repeatable path":
+            status = "Oracle complete"
+            evidence = (
+                "Repeatable path formatter oracle covers empty-list void output, "
+                "required paths, optional paths with `?`, quoted literal `?path` "
+                "values, raw-empty resets, and representative order checks"
+            )
+            missing_evidence = "None for repeatable path formatter rows."
         rows.append(
             FormatterRow(
                 option=option,
@@ -375,12 +386,14 @@ def main() -> int:
     primitive_oracle_present = PRIMITIVE_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
+    repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
     rows, missing, extra = build_rows(
         upstream,
         calls,
         primitive_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
+        repeatable_path_oracle_present,
     )
     emit_inventory(rows, extra, args.output)
 
@@ -388,7 +401,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        53
+        54
+        if repeatable_path_oracle_present
+        else 53
         if window_padding_oracle_present
         else 52
         if metric_modifier_oracle_present
