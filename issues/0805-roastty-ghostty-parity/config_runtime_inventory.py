@@ -407,25 +407,50 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml termio_env && cargo test --manifest-path roastty/Cargo.toml spawn_with_options_sets_shell_feature_env_even_when_integration_is_none && cargo test --manifest-path roastty/Cargo.toml zsh_integration_spawn_with_options && cargo test --manifest-path roastty/Cargo.toml shell_integration && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/shell_integration_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2",
-        behavior="exact nonzero scrollback byte quota, configured/static title-report surface-title behavior, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`, title/title-report, shell integration, and related terminal behavior fields",
-        roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`; macOS surface title wiring",
+        id="RUNTIME-009B2B2A",
+        behavior="configured/static surface-title startup/update and non-empty OSC title dispatch/suppression effects",
+        ghostty_reference="`vendor/ghostty/src/Surface.zig` configured title, direct-command title, static-title suppression, and config-update title paths; `vendor/ghostty/src/termio/stream_handler.zig` non-empty title messages",
+        roastty_reference="`roastty/src/lib.rs` surface title app actions and static-title gate; `roastty/src/termio.rs` title pump field",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 126 split out configured/static surface-title runtime "
+            "behavior. `surface_title_runtime_*` tests prove configured "
+            "titles dispatch `ROASTTY_ACTION_SET_TITLE` at startup and config "
+            "update, direct command argv[0] dispatches as the title, shell "
+            "commands do not dispatch command-derived titles, non-empty OSC "
+            "titles dispatch through the surface action path when no static "
+            "title is configured, and static configured titles suppress later "
+            "non-empty OSC title app actions. `termio_title_*` proves live "
+            "PTY title changes travel through `TermioPump` without terminal "
+            "callbacks, and `worker_rejects_terminal_with_callbacks` keeps "
+            "callback rejection guarded. `surface_title_runtime_parity.py` "
+            "statically checks pinned Ghostty's corresponding title branches "
+            "and Roastty's runtime/test markers."
+        ),
+        missing_evidence="None for configured/static surface-title startup/update and non-empty OSC title dispatch/suppression behavior covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml surface_title_runtime && cargo test --manifest-path roastty/Cargo.toml termio_title && cargo test --manifest-path roastty/Cargo.toml worker_rejects_terminal_with_callbacks && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/surface_title_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B",
+        behavior="exact nonzero scrollback byte quota, empty-title/PWD fallback semantics, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback; `vendor/ghostty/src/termio/stream_handler.zig` empty-title/PWD fallback and remaining shell/title behavior; shell integration startup paths",
+        roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiment 117 split out the proven zero/no-history scrollback "
-            "slice and alternate-screen no-scrollback terminal-core behavior. "
-            "Experiment 122 split out the OSC-driven CSI `21t` title-report "
-            "gate. Experiment 124 split out shell-integration feature env, "
-            "terminal identity, resource-backed `TERMINFO`, env override order, "
-            "and zsh bootstrap behavior. Exact nonzero `scrollback-limit` byte "
-            "quota parity, configured/static title-report surface-title "
-            "behavior, remaining shell-specific startup rewrite coverage, and "
-            "other remaining terminal behavior toggles still need focused "
-            "CFG-223 runtime proof or fixes."
+            "Experiments 117, 122, 124, and 126 split out zero/no-history "
+            "scrollback, alternate-screen no-scrollback, CSI `21t` "
+            "title-report gating, shell-integration feature env and terminal "
+            "identity, zsh bootstrap, and configured/static non-empty surface "
+            "title behavior. Exact nonzero `scrollback-limit` byte quota "
+            "parity, empty-title/PWD fallback semantics, remaining "
+            "shell-specific startup rewrite coverage, and other remaining "
+            "terminal behavior toggles still need focused CFG-223 runtime "
+            "proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, configured/static title-report surface-title behavior, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, empty-title/PWD fallback semantics, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -713,7 +738,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B1",
     "RUNTIME-009B2A",
     "RUNTIME-009B2B1",
-    "RUNTIME-009B2B2",
+    "RUNTIME-009B2B2A",
+    "RUNTIME-009B2B2B",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

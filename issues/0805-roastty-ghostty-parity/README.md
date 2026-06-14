@@ -337,6 +337,11 @@ experiment files until they are proven.
   surface config layer unless enabled. Roastty must keep OSC-driven title
   reports off by default and refresh the gate when config updates, while
   configured/static surface-title reporting remains a separate UI/runtime gap.
+- **Surface titles must avoid terminal callbacks in worker PTYs.** Roastty's
+  Termio worker rejects terminals with callbacks installed, so non-empty OSC/PTY
+  title changes should travel through `TermioPump`. Configured static titles and
+  direct command argv[0] startup titles are now proven separately from
+  empty-title/PWD fallback semantics, which remain a CFG-223 gap.
 - **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
   currently models scrollback capacity in rows, while pinned Ghostty documents
   `scrollback-limit` as a byte quota. A focused experiment may prove the
@@ -1272,4 +1277,4 @@ remains open.
 - [Experiment 125: Renderer control runtime split](125-renderer-control-runtime-split.md)
   — **Pass**
 - [Experiment 126: Surface title runtime split](126-surface-title-runtime-split.md)
-  — **Designed**
+  — **Pass**

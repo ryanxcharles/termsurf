@@ -119,3 +119,67 @@ Re-review verdict: **Approved**.
 
 The reviewer confirmed the required finding was resolved and reported no new
 required findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now matches the pinned Ghostty surface-title slice covered by this
+experiment:
+
+- configured `title` dispatches `ROASTTY_ACTION_SET_TITLE` at startup;
+- config updates with a new configured `title` dispatch the updated title;
+- direct command argv[0] dispatches as the startup title when no static title is
+  configured;
+- shell commands do not dispatch a command-derived startup title;
+- non-empty OSC/PTY title changes dispatch through the surface app action path
+  when no static title is configured;
+- static configured titles suppress later non-empty OSC title app actions;
+- worker-owned terminals still reject installed effect callbacks, and live title
+  changes travel through `TermioPump` instead of terminal callbacks.
+
+Verification passed:
+
+- `cargo test --manifest-path roastty/Cargo.toml surface_title_runtime` — 3
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml termio_title` — 1 passed.
+- `cargo test --manifest-path roastty/Cargo.toml worker_rejects_terminal_with_callbacks`
+  — 1 passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/surface_title_runtime_parity.py`
+  — passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  — regenerated 35 runtime rows: 28 Oracle complete, 30 closed, 5 incomplete, 5
+  gaps; CFG-223 remains Gap.
+- `prettier --check --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/126-surface-title-runtime-split.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  — passed.
+- `cargo fmt --manifest-path roastty/Cargo.toml -- --check` — passed.
+- `git diff --check` — passed.
+- No generated `__pycache__` directory remains under the issue directory.
+
+`RUNTIME-009B2B2` is split into `RUNTIME-009B2B2A` and `RUNTIME-009B2B2B`.
+`RUNTIME-009B2B2A` is `Oracle complete` for configured/static surface-title
+startup/update and non-empty OSC title dispatch/suppression effects.
+`RUNTIME-009B2B2B` remains `Gap` for exact nonzero scrollback byte quota,
+empty-title/PWD fallback semantics, remaining shell-specific startup rewrite
+coverage, and other remaining terminal behavior effects.
+
+## Conclusion
+
+Configured/static surface-title behavior is no longer part of the broad terminal
+leftovers gap. Future CFG-223 work should keep empty-title/PWD fallback and
+remaining shell/title startup rewrite semantics separate, because this
+experiment intentionally proves only non-empty title dispatch and static-title
+suppression.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+Verdict: **Approved**.
+
+The reviewer reported no findings. It independently verified the targeted
+surface-title tests, Termio title test, callback rejection test, static parity
+guard, prettier check, Rust format check, and `git diff --check`. It also
+confirmed the generated inventory/matrix rows keep `RUNTIME-009B2B2B` and
+CFG-223 as gaps, and that the result remained uncommitted at review time.

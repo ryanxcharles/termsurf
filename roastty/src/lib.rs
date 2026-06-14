@@ -2692,6 +2692,7 @@ struct Surface {
     mouse_hidden: bool,
     mouse_scroll_multiplier: config::MouseScrollMultiplier,
     click_repeat_interval_ns: u64,
+    static_title: Option<String>,
     preedit: Option<String>,
     inspector: Option<NonNull<Inspector>>,
     last_key_event: Option<key::KeyEvent>,
@@ -3704,6 +3705,7 @@ impl Surface {
         self.mouse_reporting = parsed.mouse_reporting;
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
         self.click_repeat_interval_ns = click_repeat_interval_ns(&parsed);
+        self.static_title = parsed.title.clone();
         self.wait_after_command = self.surface_wait_after_command || parsed.wait_after_command;
         self.abnormal_command_exit_runtime_ms = parsed.abnormal_command_exit_runtime;
         let _ = self.deactivate_all_key_tables();
@@ -3720,6 +3722,9 @@ impl Surface {
                 terminal.set_title_report(parsed.title_report);
             });
             self.dirty = true;
+        }
+        if let Some(title) = self.static_title.as_ref() {
+            self.set_title(ROASTTY_ACTION_SET_TITLE, title.as_bytes());
         }
         if self.has_live_view() {
             self.renderer = None;
@@ -3940,6 +3945,13 @@ impl Surface {
         };
         self.launched_command_label =
             effective_command_label(surface_command, initial_command, config_command);
+        if let Some(title) = config.title.as_ref() {
+            self.set_title(ROASTTY_ACTION_SET_TITLE, title.as_bytes());
+        } else if let Some(config::Command::Direct(args)) = initial_command.or(config_command) {
+            if let Some(program) = args.first() {
+                self.set_title(ROASTTY_ACTION_SET_TITLE, program.as_bytes());
+            }
+        }
         append_ui_key_trace(format!(
             "rust surface_start_termio surface_command={} initial_command={} config_command={} cwd={} env_count={} term={}",
             surface_command.unwrap_or("<none>"),
@@ -7259,8 +7271,14 @@ impl Surface {
                 if pump.bell_count > 0 {
                     self.ring_bell(std::time::Instant::now());
                 }
+                if let Some(title) = pump.title.as_deref() {
+                    if !title.is_empty() && self.static_title.is_none() {
+                        self.set_title(ROASTTY_ACTION_SET_TITLE, title.as_bytes());
+                    }
+                }
                 if pump.bytes_read > 0
                     || pump.bell_count > 0
+                    || pump.title.is_some()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
@@ -18072,6 +18090,9 @@ pub extern "C" fn roastty_surface_new(
         mouse_hidden: false,
         mouse_scroll_multiplier,
         click_repeat_interval_ns,
+        static_title: app_from_handle(app)
+            .map(|app| app.parsed_config.title.clone())
+            .unwrap_or_default(),
         preedit: None,
         inspector: None,
         last_key_event: None,
@@ -20961,11 +20982,26 @@ mod tests {
             readiness: PtyReadiness::default(),
             bytes_read,
             bell_count,
+            title: None,
             eof,
             bytes_written,
             pending_write_bytes,
             child_exited: child_exit.is_some(),
             child_exit,
+        }
+    }
+
+    fn test_pump_with_title(title: &str) -> termio::TermioPump {
+        termio::TermioPump {
+            readiness: PtyReadiness::default(),
+            bytes_read: 1,
+            bell_count: 0,
+            title: Some(title.to_string()),
+            eof: false,
+            bytes_written: 0,
+            pending_write_bytes: 0,
+            child_exited: false,
+            child_exit: None,
         }
     }
 
@@ -22227,6 +22263,91 @@ mod tests {
         roastty_config_free(reenabled_config);
         roastty_config_free(disabled_config);
         roastty_config_free(enabled_config);
+    }
+
+    #[test]
+    fn surface_title_runtime_configured_title_dispatches_on_startup_and_update() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str("title = Static One\ncommand = sleep 5\n");
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some("Static One"));
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(records[0].surface, surface);
+
+        reset_action_records(true);
+        let updated = new_test_config_from_str("title = Static Two\n");
+        roastty_app_update_config(app, updated);
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some("Static Two"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(updated);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_title_runtime_direct_command_title_and_shell_noop() {
+        let _guard = pty_command_lock();
+        let direct_config = new_test_config_from_str("command = direct:/bin/echo hello\n");
+        let direct_app = new_test_app_with_action_config(true, direct_config);
+        let direct_surface = new_test_surface(direct_app);
+
+        assert_eq!(roastty_surface_start(direct_surface), ROASTTY_SUCCESS);
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some("/bin/echo"));
+
+        roastty_surface_free(direct_surface);
+        roastty_app_free(direct_app);
+        roastty_config_free(direct_config);
+
+        let shell_config = new_test_config_from_str("command = echo shell-title-noop\n");
+        let shell_app = new_test_app_with_action_config(true, shell_config);
+        let shell_surface = new_test_surface(shell_app);
+
+        assert_eq!(roastty_surface_start(shell_surface), ROASTTY_SUCCESS);
+        assert!(action_records().is_empty());
+
+        roastty_surface_free(shell_surface);
+        roastty_app_free(shell_app);
+        roastty_config_free(shell_config);
+    }
+
+    #[test]
+    fn surface_title_runtime_non_empty_osc_title_dispatch_and_static_suppression() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(surface, test_pump_with_title("osc title"));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
+        assert_eq!(records[0].title.as_deref(), Some("osc title"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+
+        let config = new_test_config_from_str("title = Static Title\n");
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        reset_action_records(true);
+
+        apply_test_pump(surface, test_pump_with_title("ignored osc title"));
+        assert!(action_records().is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     #[test]

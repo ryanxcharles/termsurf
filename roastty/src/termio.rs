@@ -81,11 +81,12 @@ pub(crate) struct TermioChildExit {
     pub(crate) runtime_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TermioPump {
     pub(crate) readiness: PtyReadiness,
     pub(crate) bytes_read: usize,
     pub(crate) bell_count: usize,
+    pub(crate) title: Option<String>,
     pub(crate) eof: bool,
     pub(crate) bytes_written: usize,
     pub(crate) pending_write_bytes: usize,
@@ -259,6 +260,7 @@ impl Termio {
 
         let mut bytes_read = 0;
         let mut eof = false;
+        let title_before = self.terminal.title().to_string();
         if readiness.readable || readiness.hangup || readiness.error {
             self.output_buf.clear();
             let read = self
@@ -282,6 +284,8 @@ impl Termio {
             self.collect_terminal_response();
         }
         let bell_count = self.terminal.take_pending_bell_count();
+        let title_after = self.terminal.title();
+        let title = (title_after != title_before).then(|| title_after.to_string());
 
         let bytes_written = self.flush_pending_write()?;
         if self.child_exit.is_none() {
@@ -299,6 +303,7 @@ impl Termio {
             readiness,
             bytes_read,
             bell_count,
+            title,
             eof,
             bytes_written,
             pending_write_bytes: self.pending_write.len(),
@@ -527,24 +532,30 @@ fn run_termio_worker(
                 }
                 let should_emit = pump.bytes_read > 0
                     || pump.bell_count > 0
+                    || pump.title.is_some()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
                     || pump.child_exited;
+                let child_exited = pump.child_exited;
+                let eof = pump.eof;
+                let bytes_read = pump.bytes_read;
+                let bytes_written = pump.bytes_written;
+                let pending_write_bytes = pump.pending_write_bytes;
                 if should_emit && events.send(TermioWorkerEvent::Pump(pump)).is_err() {
                     crate::append_ui_key_trace(
                         "rust termio_worker_loop exit reason=event-receiver-disconnected",
                     );
                     break;
                 }
-                if pump.child_exited {
+                if child_exited {
                     crate::append_ui_key_trace(format!(
                         "rust termio_worker_loop exit reason=pump-terminal eof={} child_exited={} bytes_read={} bytes_written={} pending_write={}",
-                        pump.eof,
-                        pump.child_exited,
-                        pump.bytes_read,
-                        pump.bytes_written,
-                        pump.pending_write_bytes
+                        eof,
+                        child_exited,
+                        bytes_read,
+                        bytes_written,
+                        pending_write_bytes
                     ));
                     break;
                 }
@@ -1523,6 +1534,27 @@ mod tests {
             event,
             TermioWorkerEvent::Pump(pump) if pump.bell_count == 1
         ));
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
+    fn termio_title_worker_emits_non_empty_osc_title_pump() {
+        let _guard = pty_command_lock();
+        let mut worker = spawn_worker("printf '\\033]0;termio title\\007'");
+
+        let event = worker_event_until(
+            &worker,
+            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.title.as_deref() == Some("termio title")),
+        );
+
+        assert!(matches!(
+            event,
+            TermioWorkerEvent::Pump(pump) if pump.title.as_deref() == Some("termio title")
+        ));
+        assert_eq!(
+            worker.with_termio(|termio| termio.terminal().title().to_string()),
+            "termio title"
+        );
         worker.shutdown().expect("shutdown worker");
     }
 
