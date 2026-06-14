@@ -24,6 +24,7 @@ import config_inventory
 ENTRY_FORMATTER_RE = re.compile(r'EntryFormatter::new\(\s*"(?P<key>[^"]+)"', re.DOTALL)
 PRIMITIVE_ORACLE_TEST = "primitive_config_formatter_family_oracle"
 OPTIONAL_SCALAR_ORACLE_TEST = "optional_scalar_config_formatter_family_oracle"
+OPTIONAL_COLOR_ORACLE_TEST = "optional_color_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
@@ -34,6 +35,18 @@ LINK_NO_OUTPUT_ORACLE_TEST = "link_no_output_config_formatter_oracle"
 COMMAND_PALETTE_ORACLE_TEST = "command_palette_entry_config_parse_format_reset_and_diagnose"
 PRIMITIVE_FAMILIES = {"boolean", "integer", "float", "string"}
 REPEATABLE_PATH_OPTIONS = {"config-file", "custom-shader", "gtk-custom-css"}
+OPTIONAL_COLOR_OPTIONS = {
+    "bold-color",
+    "cursor-color",
+    "cursor-text",
+    "macos-icon-ghost-color",
+    "selection-background",
+    "selection-foreground",
+    "split-divider-color",
+    "unfocused-split-fill",
+    "window-titlebar-background",
+    "window-titlebar-foreground",
+}
 
 NO_OUTPUT_FORMATTERS = {
     "link": (
@@ -118,6 +131,8 @@ def formatter_family(option: str, path_text: str, call_text: str) -> str:
         return "command palette"
     if option in REPEATABLE_PATH_OPTIONS:
         return "repeatable path"
+    if option in OPTIONAL_COLOR_OPTIONS:
+        return "optional color"
     if "font_" in call_text or "Font" in call_text:
         return "font"
     if "window_padding" in call_text:
@@ -266,6 +281,7 @@ def build_rows(
     calls: list[FormatterCall],
     primitive_oracle_present: bool,
     optional_scalar_oracle_present: bool,
+    optional_color_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
@@ -350,6 +366,15 @@ def build_rows(
                 "order checks"
             )
             missing_evidence = "None for optional scalar formatter rows."
+        elif optional_color_oracle_present and family == "optional color":
+            status = "Oracle complete"
+            evidence = (
+                "Optional color formatter oracle covers optional void output, "
+                "lowercase hex output, named-color normalization, terminal color "
+                "sentinel output, bright bold color output, raw-empty resets, "
+                "and representative order checks"
+            )
+            missing_evidence = "None for optional color formatter rows."
         elif metric_modifier_oracle_present and family == "metric modifier":
             status = "Oracle complete"
             evidence = (
@@ -450,6 +475,7 @@ def main() -> int:
     roastty_source = args.roastty.read_text()
     primitive_oracle_present = PRIMITIVE_ORACLE_TEST in roastty_source
     optional_scalar_oracle_present = OPTIONAL_SCALAR_ORACLE_TEST in roastty_source
+    optional_color_oracle_present = OPTIONAL_COLOR_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
@@ -463,6 +489,7 @@ def main() -> int:
         calls,
         primitive_oracle_present,
         optional_scalar_oracle_present,
+        optional_color_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
@@ -478,7 +505,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        60
+        61
+        if optional_color_oracle_present
+        else 60
         if optional_scalar_oracle_present
         else 59
         if keybind_oracle_present

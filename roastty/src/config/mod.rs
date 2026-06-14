@@ -17986,6 +17986,152 @@ mod tests {
     }
 
     #[test]
+    fn optional_color_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "bold-color",
+            "cursor-color",
+            "cursor-text",
+            "macos-icon-ghost-color",
+            "selection-background",
+            "selection-foreground",
+            "split-divider-color",
+            "unfocused-split-fill",
+            "window-titlebar-background",
+            "window-titlebar-foreground",
+        ] {
+            assert_eq!(line(&default_lines, key), format!("{key} = "));
+        }
+
+        cfg.bold_color = Some(BoldColor::Bright);
+        cfg.cursor_color = Some(TerminalColor::CellBackground);
+        cfg.cursor_text = Some(TerminalColor::CellForeground);
+        cfg.macos_icon_ghost_color = Some(Color {
+            r: 0x01,
+            g: 0x02,
+            b: 0x03,
+        });
+        cfg.selection_background = Some(TerminalColor::Color(Color {
+            r: 0x0a,
+            g: 0x0b,
+            b: 0x0c,
+        }));
+        cfg.selection_foreground = Some(TerminalColor::CellForeground);
+        cfg.set("split-divider-color", Some("ForestGreen")).unwrap();
+        cfg.unfocused_split_fill = Some(Color {
+            r: 0xaa,
+            g: 0xbb,
+            b: 0xcc,
+        });
+        cfg.window_titlebar_background = Some(Color {
+            r: 0x10,
+            g: 0x20,
+            b: 0x30,
+        });
+        cfg.window_titlebar_foreground = Some(Color {
+            r: 0xfe,
+            g: 0xdc,
+            b: 0xba,
+        });
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "bold-color"), "bold-color = bright");
+        assert_eq!(
+            line(&lines, "cursor-color"),
+            "cursor-color = cell-background"
+        );
+        assert_eq!(line(&lines, "cursor-text"), "cursor-text = cell-foreground");
+        assert_eq!(
+            line(&lines, "macos-icon-ghost-color"),
+            "macos-icon-ghost-color = #010203"
+        );
+        assert_eq!(
+            line(&lines, "selection-background"),
+            "selection-background = #0a0b0c"
+        );
+        assert_eq!(
+            line(&lines, "selection-foreground"),
+            "selection-foreground = cell-foreground"
+        );
+        assert_eq!(
+            line(&lines, "split-divider-color"),
+            "split-divider-color = #228b22"
+        );
+        assert_eq!(
+            line(&lines, "unfocused-split-fill"),
+            "unfocused-split-fill = #aabbcc"
+        );
+        assert_eq!(
+            line(&lines, "window-titlebar-background"),
+            "window-titlebar-background = #102030"
+        );
+        assert_eq!(
+            line(&lines, "window-titlebar-foreground"),
+            "window-titlebar-foreground = #fedcba"
+        );
+
+        cfg.set("bold-color", Some("")).unwrap();
+        cfg.set("cursor-color", Some("")).unwrap();
+        cfg.set("cursor-text", Some("")).unwrap();
+        cfg.set("macos-icon-ghost-color", Some("")).unwrap();
+        cfg.set("selection-background", Some("")).unwrap();
+        cfg.set("selection-foreground", Some("")).unwrap();
+        cfg.set("split-divider-color", Some("")).unwrap();
+        cfg.set("unfocused-split-fill", Some("")).unwrap();
+        cfg.set("window-titlebar-background", Some("")).unwrap();
+        cfg.set("window-titlebar-foreground", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "bold-color",
+            "cursor-color",
+            "cursor-text",
+            "macos-icon-ghost-color",
+            "selection-background",
+            "selection-foreground",
+            "split-divider-color",
+            "unfocused-split-fill",
+            "window-titlebar-background",
+            "window-titlebar-foreground",
+        ] {
+            assert_eq!(line(&reset_lines, key), format!("{key} = "));
+        }
+
+        assert!(index(&lines, "cursor-color") < index(&lines, "cursor-text"));
+        assert!(index(&lines, "cursor-text") < index(&lines, "bold-color"));
+        assert!(index(&lines, "unfocused-split-fill") < index(&lines, "split-divider-color"));
+        assert!(index(&lines, "window-titlebar-background") < index(&lines, "bold-color"));
+        assert!(
+            index(&lines, "window-titlebar-background")
+                < index(&lines, "window-titlebar-foreground")
+        );
+        assert!(index(&lines, "macos-icon-ghost-color") < index(&lines, "macos-icon-screen-color"));
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

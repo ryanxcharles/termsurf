@@ -508,6 +508,12 @@ experiment files until they are proven.
   rows share void output for `None`, scalar output for `Some`, raw-empty reset
   behavior, and representative declaration-order checks. Optional custom
   `format_entry` rows and font rows remain unpromoted.
+- **Optional single-color rows are distinct from optional color-list rows.**
+  Experiment 61 promoted 10 optional rows backed by `Color`, `TerminalColor`, or
+  `BoldColor`. These rows share void output for `None`, lowercase `#rrggbb`
+  output for colors, sentinel keyword output, `bright` bold output, and
+  raw-empty reset behavior. `macos-icon-screen-color` remains unpromoted because
+  it formats an optional color list.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -761,4 +767,4 @@ remains open.
 - [Experiment 60: Optional scalar formatter oracle](60-optional-scalar-formatter-oracle.md)
   — **Pass**
 - [Experiment 61: Optional color formatter oracle](61-optional-color-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

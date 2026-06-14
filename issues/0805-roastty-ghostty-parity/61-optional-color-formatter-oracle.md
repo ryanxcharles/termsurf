@@ -88,9 +88,11 @@ Pass criteria:
   rows = Path('issues/0805-roastty-ghostty-parity/config-formatter-inventory.md').read_text().splitlines()
 
   def row_for(option: str) -> str:
-      needle = f'| `{option}` |'
       for line in rows:
-          if needle in line:
+          if not line.startswith('| FORMAT-'):
+              continue
+          cells = [cell.strip() for cell in line.strip('|').split('|')]
+          if len(cells) > 1 and cells[1] == f'`{option}`':
               return line
       raise AssertionError(f'missing row for {option}')
 
@@ -148,3 +150,91 @@ Fix:
 
 - Added the exact inline Python matrix assertion snippet to the verification
   section.
+
+## Result
+
+**Result:** Pass
+
+Added `optional_color_config_formatter_family_oracle`, split the 10 optional
+single-color rows into an `optional color` formatter family, and promoted only
+that family.
+
+The new oracle proves:
+
+- optional color defaults format as void lines (`key = `);
+- `Color` values format as lowercase `#rrggbb`;
+- named colors normalize to lowercase hex output;
+- `TerminalColor` sentinels format as `cell-foreground` and `cell-background`;
+- `BoldColor::Bright` formats as `bright`;
+- raw-empty config values reset every target row back to optional void output;
+- representative row order is stable within upstream declaration order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=101
+audit_covered=102
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 102 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml optional_color_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml color_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 101 `Oracle complete`, 102
+  `Audit covered`, and 0 `Gap`.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`; all
+  previously promoted formatter families remain `Oracle complete`; the 10
+  optional color formatter rows are `Oracle complete`;
+  `macos-icon-screen-color`, optional custom non-color rows, and font rows
+  remain `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/61-optional-color-formatter-oracle.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-formatter-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  completed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The optional color formatter rows are now oracle-complete.
+`macos-icon-screen-color` remains intentionally unpromoted because it is an
+optional color-list formatter, not a single optional color. CFG-218 remains open
+with 102 audit-covered formatter rows.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Initial verdict: **Changes required**.
+
+Required findings:
+
+- The recorded matrix assertion was not runnable against the padded Markdown
+  table cells.
+- The oracle claimed named-color normalization but initially assigned the
+  normalized color directly rather than parsing a named input.
+
+Fixes:
+
+- Updated the matrix assertion to parse Markdown columns and compare stripped
+  canonical-option cells.
+- Updated `optional_color_config_formatter_family_oracle` to set
+  `split-divider-color = ForestGreen` through `cfg.set(...)` and assert the
+  normalized `#228b22` output.
+
+Final verdict after re-review: **Approved**.
+
+The reviewer confirmed both required findings were resolved and found no new
+required issues.
