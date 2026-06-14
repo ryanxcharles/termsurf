@@ -1041,3 +1041,5 @@ remains open.
   **Pass**
 - [Experiment 95: Finalization facet inventory](95-finalization-facet-inventory.md)
   — **Pass**
+- [Experiment 96: Unfocused split opacity finalization](96-unfocused-split-opacity-finalization.md)
+  — **Designed**
