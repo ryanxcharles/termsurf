@@ -14796,6 +14796,104 @@ mod tests {
     }
 
     #[test]
+    fn keyword_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (AlphaBlending::Native, "native"),
+            (AlphaBlending::Linear, "linear"),
+            (AlphaBlending::LinearCorrected, "linear-corrected"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (CursorStyle::Block, "block"),
+            (CursorStyle::Bar, "bar"),
+            (CursorStyle::Underline, "underline"),
+            (CursorStyle::BlockHollow, "block_hollow"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MouseShiftCapture::False, "false"),
+            (MouseShiftCapture::True, "true"),
+            (MouseShiftCapture::Always, "always"),
+            (MouseShiftCapture::Never, "never"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [(Scrollbar::System, "system"), (Scrollbar::Never, "never")] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("alpha-blending", Some("linear-corrected")).unwrap();
+        cfg.set("cursor-style", Some("block_hollow")).unwrap();
+        cfg.set("mouse-shift-capture", Some("always")).unwrap();
+        cfg.set("scrollbar", Some("never")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "alpha-blending"),
+            "alpha-blending = linear-corrected"
+        );
+        assert_eq!(line(&lines, "cursor-style"), "cursor-style = block_hollow");
+        assert_eq!(
+            line(&lines, "mouse-shift-capture"),
+            "mouse-shift-capture = always"
+        );
+        assert_eq!(line(&lines, "scrollbar"), "scrollbar = never");
+
+        cfg.set("alpha-blending", Some("")).unwrap();
+        cfg.set("cursor-style", Some("")).unwrap();
+        cfg.set("mouse-shift-capture", Some("")).unwrap();
+        cfg.set("scrollbar", Some("")).unwrap();
+
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "alpha-blending"),
+            "alpha-blending = native"
+        );
+        assert_eq!(line(&reset_lines, "cursor-style"), "cursor-style = block");
+        assert_eq!(
+            line(&reset_lines, "mouse-shift-capture"),
+            "mouse-shift-capture = false"
+        );
+        assert_eq!(line(&reset_lines, "scrollbar"), "scrollbar = system");
+
+        assert!(index(&lines, "font-shaping-break") < index(&lines, "alpha-blending"));
+        assert!(index(&lines, "alpha-blending") < index(&lines, "cursor-style"));
+        assert!(index(&lines, "cursor-style") < index(&lines, "scroll-to-bottom"));
+        assert!(index(&lines, "scroll-to-bottom") < index(&lines, "mouse-shift-capture"));
+        assert!(index(&lines, "mouse-shift-capture") < index(&lines, "scrollbar"));
+    }
+
+    #[test]
     fn enum_format_entries_shader_mouse() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();

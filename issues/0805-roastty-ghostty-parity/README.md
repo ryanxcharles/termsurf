@@ -312,6 +312,11 @@ experiment files until they are proven.
   the wrong oracle. Experiment 4 uses Swift app-source identifiers as the
   app-facing ABI slice, then separately records non-app header differences as
   follow-up source-audit rows.
+- **Direct keyword enum formatters are a cheap CFG-218 slice.** Experiment 71
+  proved that simple enum `format_entry` rows can be promoted by covering every
+  upstream tag keyword, raw-empty reset behavior, and representative
+  `format_config` ordering while leaving unrelated custom formatters
+  audit-covered.
 - **Full-header ABI gaps must be split into symbol and semantic outcomes.**
   Experiment 5 proved the mapped Ghostty header can be closed at the
   declaration/export level while still recording honest semantic divergences for
@@ -841,4 +846,4 @@ remains open.
 - [Experiment 70: Font shaping break formatter oracle](70-font-shaping-break-formatter-oracle.md)
   — **Pass**
 - [Experiment 71: Keyword enum formatter oracle](71-keyword-enum-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

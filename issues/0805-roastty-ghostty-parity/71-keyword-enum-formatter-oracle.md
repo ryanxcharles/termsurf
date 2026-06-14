@@ -122,3 +122,66 @@ Reviewed by a fresh-context Codex adversarial subagent.
 Verdict: **Approved**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Implemented `keyword_enum_config_formatter_family_oracle` and promoted exactly
+the four direct keyword enum formatter rows:
+
+- `alpha-blending`;
+- `cursor-style`;
+- `mouse-shift-capture`;
+- `scrollbar`.
+
+Verification commands:
+
+- `cargo test --manifest-path roastty/Cargo.toml keyword_enum_config_formatter_family_oracle`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml enum_format_entries` passed and
+  ran 7 unit tests, including `enum_format_entries_mac`.
+- `cargo test --manifest-path roastty/Cargo.toml cursor_style_config_keywords_parse_format_and_diagnose`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml scrollbar_config_parse_format_reset_and_diagnose`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed and ran 1 unit test.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported:
+  - `ghostty_canonical=203`;
+  - `roastty_formatter_rows=203`;
+  - `missing_canonical_formatter_rows=0`;
+  - `extra_formatter_rows=0`;
+  - `oracle_complete=138`;
+  - `audit_covered=65`;
+  - `gap=0`.
+- The planned matrix assertion passed.
+
+## Conclusion
+
+The keyword enum formatter family is now proven for the four scoped rows.
+CFG-218 remains `Gap` because 65 custom formatter rows still need non-default
+formatter oracles.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Initial verdict: **Changes required**.
+
+Required finding:
+
+- `config-formatter-inventory.md` and `config-matrix.md` did not pass the
+  requested Prettier check in the reviewer's environment after regeneration.
+
+Fix:
+
+- Ran `prettier --write --prose-wrap always --print-width 80` on the changed
+  Markdown files after the final generator run.
+- Re-ran `prettier --check --prose-wrap always --print-width 80` on the changed
+  Markdown files; it passed.
+
+Final verdict after re-review: **Approved**.
+
+Findings: none remaining.
