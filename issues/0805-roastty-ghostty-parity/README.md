@@ -840,3 +840,5 @@ remains open.
   — **Pass**
 - [Experiment 70: Font shaping break formatter oracle](70-font-shaping-break-formatter-oracle.md)
   — **Pass**
+- [Experiment 71: Keyword enum formatter oracle](71-keyword-enum-formatter-oracle.md)
+  — **Designed**
