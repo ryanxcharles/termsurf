@@ -868,3 +868,5 @@ remains open.
   — **Pass**
 - [Experiment 74: Click action formatter oracle](74-click-action-formatter-oracle.md)
   — **Pass**
+- [Experiment 75: Window enum formatter oracle](75-window-enum-formatter-oracle.md)
+  — **Designed**
