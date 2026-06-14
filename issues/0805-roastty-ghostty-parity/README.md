@@ -731,3 +731,5 @@ remains open.
   — **Pass**
 - [Experiment 56: Key remap formatter oracle](56-key-remap-formatter-oracle.md)
   — **Pass**
+- [Experiment 57: Link no-output formatter oracle](57-link-no-output-formatter-oracle.md)
+  — **Designed**
