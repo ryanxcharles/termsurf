@@ -493,6 +493,12 @@ experiment files until they are proven.
   are accepted, invalid escapes preserve the previous valid list, formatter
   output skips the leading null, invalid Unicode codepoints are skipped, and
   output stops before the upstream 4096-byte buffer cap.
+- **Window decoration parses bools before variants.** Experiment 34 proved
+  canonical `window-decoration`: direct missing parser input is `auto`, bool
+  tokens map true to `auto` and false to `none`, exact variants
+  `auto`/`client`/`server`/`none` are accepted, empty strings, unknown values,
+  whitespace-padded values, and case-changed values are rejected, and formatting
+  emits the canonical keyword.
 
 ## Verification
 
@@ -564,4 +570,4 @@ remains open.
 - [Experiment 33: Selection word chars parser oracle](33-selection-word-chars-parser-oracle.md)
   — **Pass**
 - [Experiment 34: Window decoration parser oracle](34-window-decoration-parser-oracle.md)
-  — **Designed**
+  — **Pass**

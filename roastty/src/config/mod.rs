@@ -10447,6 +10447,78 @@ mod tests {
     }
 
     #[test]
+    fn window_decoration_config_parser_family_oracle() {
+        let line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("window-decoration = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_decoration, WindowDecoration::Auto);
+        assert_eq!(line(&cfg), "window-decoration = auto");
+        assert_eq!(
+            WindowDecoration::parse_cli(None),
+            Ok(WindowDecoration::Auto)
+        );
+
+        for token in ["true", "1", "t", "T"] {
+            cfg.set("window-decoration", Some(token)).unwrap();
+            assert_eq!(cfg.window_decoration, WindowDecoration::Auto, "{token}");
+            assert_eq!(line(&cfg), "window-decoration = auto");
+        }
+        for token in ["false", "0", "f", "F"] {
+            cfg.set("window-decoration", Some(token)).unwrap();
+            assert_eq!(cfg.window_decoration, WindowDecoration::None, "{token}");
+            assert_eq!(line(&cfg), "window-decoration = none");
+        }
+        for (token, expected) in [
+            ("auto", WindowDecoration::Auto),
+            ("client", WindowDecoration::Client),
+            ("server", WindowDecoration::Server),
+            ("none", WindowDecoration::None),
+        ] {
+            cfg.set("window-decoration", Some(token)).unwrap();
+            assert_eq!(cfg.window_decoration, expected);
+            assert_eq!(line(&cfg), format!("window-decoration = {token}"));
+        }
+
+        for invalid in ["", "aaaa", "True", " auto", "auto "] {
+            assert_eq!(
+                cfg.set("window-decoration", Some(invalid)),
+                Err(ConfigSetError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        cfg.set("window-decoration", Some("server")).unwrap();
+        let diagnostics = cfg.load_str("window-decoration = nope\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "window-decoration".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(cfg.window_decoration, WindowDecoration::Server);
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--window-decoration=client"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(cli_cfg.window_decoration, WindowDecoration::Client);
+        assert_eq!(line(&cli_cfg), "window-decoration = client");
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
+    }
+
+    #[test]
     fn repeatable_string_parse_cli_accumulates_and_resets() {
         // Accumulation: each call appends one whole value.
         let mut rs = RepeatableString::default();

@@ -145,3 +145,82 @@ Fresh-context adversarial subagent review completed before implementation.
 **Verdict:** Approved.
 
 No findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented the focused `window_decoration_config_parser_family_oracle` test and
+promoted only canonical `window-decoration` in the CFG-217 parser inventory. The
+generated inventory now reports:
+
+- `ghostty_canonical=203`
+- `roastty_parser_rows=203`
+- `missing_dispatch_rows=0`
+- `extra_parser_rows=0`
+- `oracle_complete=175`
+- `audit_covered=28`
+- `gap=0`
+
+The matrix assertion verified that `window-decoration` is now `Oracle complete`,
+no parser row is `Gap`, and CFG-217 still remains `Gap` with owner
+`Experiment 34`.
+
+Verification commands run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml window_decoration_config_parser_family_oracle
+cargo test --manifest-path roastty/Cargo.toml window_decoration_parse_cli_resolves_bool_and_variants
+cargo test --manifest-path roastty/Cargo.toml enum_config_parser_family_oracle
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+python3 - <<'PY'
+from pathlib import Path
+
+matrix_rows = []
+for line in Path('issues/0805-roastty-ghostty-parity/config-matrix.md').read_text().splitlines():
+    if line.startswith('| CFG-'):
+        matrix_rows.append([cell.strip() for cell in line.strip('|').split('|')])
+cfg217 = next(row for row in matrix_rows if row[0] == 'CFG-217')
+assert cfg217[4] == 'Gap', cfg217
+assert 'config-parser-inventory.md' in cfg217[6], cfg217
+assert cfg217[11] == 'Experiment 34', cfg217
+
+parser_rows = []
+for line in Path('issues/0805-roastty-ghostty-parity/config-parser-inventory.md').read_text().splitlines():
+    if line.startswith('| PARSE-'):
+        parser_rows.append([cell.strip() for cell in line.strip('|').split('|')])
+assert len(parser_rows) == 203, len(parser_rows)
+window_decoration = [row for row in parser_rows if row[1] == '`window-decoration`']
+assert len(window_decoration) == 1, window_decoration
+assert window_decoration[0][4] == 'Oracle complete', window_decoration[0]
+assert sum(row[4] == 'Oracle complete' for row in parser_rows) == 175
+assert all(row[4] != 'Gap' for row in parser_rows)
+print(f'parser_rows={len(parser_rows)} window_decoration={window_decoration[0][4]} cfg217={cfg217[4]}')
+PY
+cargo fmt --manifest-path roastty/Cargo.toml
+```
+
+## Conclusion
+
+`window-decoration` matches the pinned Ghostty direct parser boundary for the
+covered `WindowDecoration` semantics: missing direct parser input selects
+`auto`, bool tokens map true to `auto` and false to `none`, exact variant names
+are accepted, invalid/padded/case-changed values are rejected, file and CLI
+config route through the same helper, diagnostics preserve earlier valid values,
+formatting emits the canonical keyword, and clone semantics preserve the parsed
+value. CFG-217 remains open because 28 parser rows are still only
+`Audit covered`.
+
+## Completion Review
+
+Fresh-context adversarial subagent review completed after implementation and
+verification.
+
+**Verdict:** Approved.
+
+No findings.
