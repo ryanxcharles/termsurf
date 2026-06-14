@@ -45,6 +45,7 @@ MACOS_ICON_SCREEN_COLOR_ORACLE_TEST = "macos_icon_screen_color_config_parser_fam
 SELECTION_WORD_CHARS_ORACLE_TEST = "selection_word_chars_config_parser_family_oracle"
 WINDOW_DECORATION_ORACLE_TEST = "window_decoration_config_parser_family_oracle"
 MOUSE_SCROLL_MULTIPLIER_ORACLE_TEST = "mouse_scroll_multiplier_config_parser_family_oracle"
+QUICK_TERMINAL_SIZE_ORACLE_TEST = "quick_terminal_size_config_parser_family_oracle"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -334,6 +335,7 @@ def build_rows(
     selection_word_chars_oracle_present: bool,
     window_decoration_oracle_present: bool,
     mouse_scroll_multiplier_oracle_present: bool,
+    quick_terminal_size_oracle_present: bool,
 ) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
     arm_by_key: dict[str, ParserArm] = {}
     for arm in arms:
@@ -538,6 +540,15 @@ def build_rows(
                 "formatting, and clone semantics"
             )
             missing_evidence = "None for direct mouse-scroll-multiplier parser semantics."
+        elif quick_terminal_size_oracle_present and option == "quick-terminal-size":
+            status = "Oracle complete"
+            evidence = (
+                "Quick terminal size parser oracle covers unset defaults, pixel "
+                "and percentage values, Zig integer and float syntax, comma "
+                "pairs, invalid values, diagnostics, CLI, formatting, "
+                "calculation, and clone semantics"
+            )
+            missing_evidence = "None for direct quick-terminal-size parser semantics."
         elif option == "config-default-files":
             missing_evidence = (
                 "Direct parser and effective default-file load-order semantics must "
@@ -598,6 +609,7 @@ def main() -> int:
     selection_word_chars_oracle_present = SELECTION_WORD_CHARS_ORACLE_TEST in roastty_source
     window_decoration_oracle_present = WINDOW_DECORATION_ORACLE_TEST in roastty_source
     mouse_scroll_multiplier_oracle_present = MOUSE_SCROLL_MULTIPLIER_ORACLE_TEST in roastty_source
+    quick_terminal_size_oracle_present = QUICK_TERMINAL_SIZE_ORACLE_TEST in roastty_source
     rows, missing, compatibility_only, noncanonical = build_rows(
         upstream,
         aliases,
@@ -623,13 +635,16 @@ def main() -> int:
         selection_word_chars_oracle_present,
         window_decoration_oracle_present,
         mouse_scroll_multiplier_oracle_present,
+        quick_terminal_size_oracle_present,
     )
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        35
+        36
+        if quick_terminal_size_oracle_present
+        else 35
         if mouse_scroll_multiplier_oracle_present
         else 34
         if window_decoration_oracle_present

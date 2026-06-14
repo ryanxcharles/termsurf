@@ -505,6 +505,12 @@ experiment files until they are proven.
   are no-ops, quoted field values are decoded before parsing, Zig float syntax
   such as hex floats, infinities, and NaNs is accepted, malformed structures and
   bad floats are rejected, and finalization/clamping remains a separate facet.
+- **Quick terminal size uses Zig numbers in both units.** Experiment 36 proved
+  canonical `quick-terminal-size`: pixel values use Zig-compatible base-10 `u32`
+  syntax, percentage values use Zig-compatible `f32` syntax, comma-separated
+  primary/secondary values trim CLI whitespace, empty config values reset to
+  default, invalid units and malformed numbers are rejected, and formatter plus
+  representative calculation behavior match the pinned helper.
 
 ## Verification
 
@@ -580,4 +586,4 @@ remains open.
 - [Experiment 35: Mouse scroll multiplier parser oracle](35-mouse-scroll-multiplier-parser-oracle.md)
   — **Pass**
 - [Experiment 36: Quick terminal size parser oracle](36-quick-terminal-size-parser-oracle.md)
-  — **Designed**
+  — **Pass**

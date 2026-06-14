@@ -5092,15 +5092,13 @@ impl QuickTerminalSizeValue {
         }
 
         if let Some(value) = input.strip_suffix("px") {
-            return value
-                .parse::<u32>()
+            return parse_u32_dec(value)
                 .map(QuickTerminalSizeValue::Pixels)
-                .map_err(|_| QuickTerminalSizeParseError::InvalidValue);
+                .ok_or(QuickTerminalSizeParseError::InvalidValue);
         }
 
         if let Some(value) = input.strip_suffix('%') {
-            let percentage = value
-                .parse::<f32>()
+            let percentage = parse_zig_float_f32(value)
                 .map_err(|_| QuickTerminalSizeParseError::InvalidValue)?;
             if percentage < 0.0 {
                 return Err(QuickTerminalSizeParseError::InvalidValue);
@@ -20039,6 +20037,180 @@ mod tests {
                 height: 1766,
             }
         );
+    }
+
+    #[test]
+    fn quick_terminal_size_config_parser_family_oracle() {
+        let line = |cfg: &Config| -> Option<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("quick-terminal-size = "))
+                .map(ToOwned::to_owned)
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
+        assert_eq!(line(&cfg), None);
+
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: None,
+            }
+        );
+        assert_eq!(line(&cfg), Some("quick-terminal-size = 50%".to_string()));
+
+        cfg.set("quick-terminal-size", Some("200px")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
+        assert_eq!(line(&cfg), Some("quick-terminal-size = 200px".to_string()));
+
+        for (input, expected) in [
+            ("1_000px", 1000),
+            ("+5px", 5),
+            ("-0px", 0),
+            ("4294967295px", u32::MAX),
+        ] {
+            cfg.set("quick-terminal-size", Some(input)).unwrap();
+            assert_eq!(
+                cfg.quick_terminal_size.primary,
+                Some(QuickTerminalSizeValue::Pixels(expected)),
+                "{input}"
+            );
+        }
+
+        for invalid in ["4294967296px", "-1px", "_5px", "5_px", "0x10px"] {
+            assert_eq!(
+                cfg.set("quick-terminal-size", Some(invalid)),
+                Err(ConfigSetError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        cfg.set("quick-terminal-size", Some(" 50% , 200px "))
+            .unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(200)),
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            Some("quick-terminal-size = 50%,200px".to_string())
+        );
+
+        cfg.set("quick-terminal-size", Some("0x1p4%")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size.primary,
+            Some(QuickTerminalSizeValue::Percentage(16.0))
+        );
+        cfg.set("quick-terminal-size", Some("+inf%")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size.primary,
+            Some(QuickTerminalSizeValue::Percentage(f32::INFINITY))
+        );
+        cfg.set("quick-terminal-size", Some("nan%")).unwrap();
+        match cfg.quick_terminal_size.primary {
+            Some(QuickTerminalSizeValue::Percentage(v)) => assert!(v.is_nan()),
+            other => panic!("expected nan percentage, got {other:?}"),
+        }
+
+        assert_eq!(
+            cfg.set("quick-terminal-size", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("")),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("69px,")),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("69px,42%,69px")),
+            Err(QuickTerminalSizeParseError::TooManyArguments)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("420")),
+            Err(QuickTerminalSizeParseError::MissingUnit)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("bobr")),
+            Err(QuickTerminalSizeParseError::MissingUnit)
+        );
+        for invalid in ["bobr%", "-32%", "0x1p_%", "0x1p4_%"] {
+            assert_eq!(
+                QuickTerminalSize::parse_cli(Some(invalid)),
+                Err(QuickTerminalSizeParseError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        cfg.set("quick-terminal-size", Some("")).unwrap();
+        assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
+        assert_eq!(line(&cfg), None);
+
+        let diagnostics = cfg.load_str(
+            "quick-terminal-size = 200px\n\
+             quick-terminal-size = bobr\n\
+             quick-terminal-position = right\n",
+        );
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
+        assert_eq!(cfg.quick_terminal_position, QuickTerminalPosition::Right);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "quick-terminal-size".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--quick-terminal-size=69%,420px"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(
+            cli_cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(69.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(420)),
+            }
+        );
+        let landscape = QuickTerminalDimensions {
+            width: 2560,
+            height: 1600,
+        };
+        assert_eq!(
+            cli_cfg
+                .quick_terminal_size
+                .calculate(QuickTerminalPosition::Top, landscape),
+            QuickTerminalDimensions {
+                width: 420,
+                height: 1104,
+            }
+        );
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
     }
 
     #[test]
