@@ -143,9 +143,10 @@ assert not any(row[4] == 'Gap' for row in rows)
 
 matrix = Path('issues/0805-roastty-ghostty-parity/config-matrix.md').read_text()
 cfg217 = next(line for line in matrix.splitlines() if line.startswith('| CFG-217 '))
-assert '| Gap |' in cfg217
-assert 'Experiment 46' in cfg217
-assert 'config-parser-inventory.md' in cfg217
+cfg217_cells = [cell.strip() for cell in cfg217.strip('|').split('|')]
+assert cfg217_cells[4] == 'Gap'
+assert cfg217_cells[11] == 'Experiment 46'
+assert 'config-parser-inventory.md' in cfg217_cells[6]
 PY
 cargo fmt --manifest-path roastty/Cargo.toml
 PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_parser_inventory.py
@@ -171,3 +172,118 @@ Findings:
   `config-matrix.md`.
 - Nit: the suggested `find ... __pycache__` command reported artifacts but did
   not fail automatically. Fixed by wrapping it in a `test -z` assertion.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the key-remap parser oracle and promoted only the canonical
+`key-remap` parser row.
+
+Changes made:
+
+- Renamed and expanded the config-level key-remap test to
+  `key_remap_config_parser_family_oracle`.
+- Covered pinned Ghostty's missing-value reset behavior for `key-remap`, direct
+  empty reset behavior, invalid non-empty values, config-file diagnostics, CLI
+  parsing, formatting, finalize ordering, alias modifiers, and clone equality.
+- Added `key_remap_config_parser_family_oracle` detection to
+  `config_parser_inventory.py`.
+- Regenerated `config-parser-inventory.md` and `config-matrix.md`.
+- Added the README learning that `key-remap` is a missing-value reset special
+  case.
+
+Verification performed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml key_remap_config_parser_family_oracle
+cargo test --manifest-path roastty/Cargo.toml key_remap_set
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+python3 - <<'PY'
+from pathlib import Path
+
+rows = []
+for line in Path('issues/0805-roastty-ghostty-parity/config-parser-inventory.md').read_text().splitlines():
+    if line.startswith('| PARSE-'):
+        cells = [cell.strip() for cell in line.strip('|').split('|')]
+        rows.append(cells)
+
+by_option = {row[1].strip('`'): row for row in rows}
+audit = {row[1].strip('`') for row in rows if row[4] == 'Audit covered'}
+
+assert len(rows) == 203, len(rows)
+assert sum(row[4] == 'Oracle complete' for row in rows) == 200
+assert by_option['key-remap'][4] == 'Oracle complete'
+assert audit == {'config-default-files', 'keybind', 'theme'}, audit
+assert not any(row[4] == 'Gap' for row in rows)
+
+matrix = Path('issues/0805-roastty-ghostty-parity/config-matrix.md').read_text()
+cfg217 = next(line for line in matrix.splitlines() if line.startswith('| CFG-217 '))
+cfg217_cells = [cell.strip() for cell in cfg217.strip('|').split('|')]
+assert cfg217_cells[4] == 'Gap'
+assert cfg217_cells[11] == 'Experiment 46'
+assert 'config-parser-inventory.md' in cfg217_cells[6]
+PY
+cargo fmt --manifest-path roastty/Cargo.toml --check
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_parser_inventory.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+test -z "$(find issues/0805-roastty-ghostty-parity -name __pycache__ -prune -print)"
+git diff --check
+```
+
+The parser inventory reports:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=200
+audit_covered=3
+gap=0
+```
+
+`cargo test --manifest-path roastty/Cargo.toml key_remap_set` passed 9 tests.
+`cargo test --manifest-path roastty/Cargo.toml key_remap_config_parser_family_oracle`
+passed the focused config oracle. The first run of the config oracle exposed
+that finalized left-side mapping order is insertion-preserving after right-side
+mappings are sorted first; the oracle was corrected to that pinned behavior.
+
+## Conclusion
+
+`key-remap` parser parity is now Oracle complete for CFG-217. The remaining
+audit-only parser rows are `config-default-files`, `keybind`, and `theme`, so
+CFG-217 correctly remains `Gap` at 200 Oracle complete rows, 3 Audit covered
+rows, and 0 dispatch gaps.
+
+## Completion Review
+
+Reviewed by fresh-context Codex adversarial subagents.
+
+Initial completion review verdict: Changes required.
+
+Findings:
+
+- Required: the recorded matrix assertion used an exact `| Gap |` substring and
+  failed against padded Markdown table cells. Fixed by parsing the CFG-217 row
+  into stripped cells and comparing the status, owner, and evidence cells.
+- Optional: bare `--key-remap` reset behavior was documented but not directly
+  asserted by the oracle. Fixed by adding a `set_cli_args(["--key-remap"])`
+  assertion that clears the remap set.
+- The reviewer accidentally created
+  `issues/0805-roastty-ghostty-parity/__pycache__/`. Removed the artifact and
+  verified no `__pycache__` remains.
+
+Re-review verdict: Approved.
+
+The re-review confirmed the assertion fix, the bare CLI reset assertion, and the
+absence of `__pycache__`; it also reran the focused config oracle and
+`git diff --check` successfully.

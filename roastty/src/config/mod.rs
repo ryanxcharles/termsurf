@@ -17143,12 +17143,13 @@ mod tests {
     }
 
     #[test]
-    fn config_key_remap_routes_formats_resets_and_finalizes() {
+    fn key_remap_config_parser_family_oracle() {
         let mut cfg = Config::default();
         assert_eq!(cfg.key_remap.format_entries(), vec![String::new()]);
 
         cfg.set("key-remap", Some("ctrl=super")).unwrap();
         cfg.set("key-remap", Some("right_ctrl=alt")).unwrap();
+        cfg.set("key-remap", Some("left_alt=right_ctrl")).unwrap();
         cfg.finalize();
 
         assert_eq!(
@@ -17159,10 +17160,25 @@ mod tests {
             key_mods::Mods::for_mod(key_mods::Mod::Alt, key_mods::Side::Left)
         );
         assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Ctrl,
+                key_mods::Side::Left
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Super, key_mods::Side::Left)
+        );
+        assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Alt,
+                key_mods::Side::Left
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Ctrl, key_mods::Side::Right)
+        );
+        assert_eq!(
             cfg.key_remap.format_entries(),
             vec![
                 "right_ctrl=left_alt".to_string(),
                 "left_ctrl=left_super".to_string(),
+                "left_alt=right_ctrl".to_string(),
             ]
         );
 
@@ -17177,7 +17193,30 @@ mod tests {
             vec![
                 "key-remap = right_ctrl=left_alt",
                 "key-remap = left_ctrl=left_super",
+                "key-remap = left_alt=right_ctrl",
             ]
+        );
+
+        cfg.set("key-remap", None).unwrap();
+        assert_eq!(cfg.key_remap.format_entries(), vec![String::new()]);
+
+        cfg.set("key-remap", Some("control=command")).unwrap();
+        cfg.set("key-remap", Some("right_option=left_control"))
+            .unwrap();
+        cfg.finalize();
+        assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Ctrl,
+                key_mods::Side::Right
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Super, key_mods::Side::Left)
+        );
+        assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Alt,
+                key_mods::Side::Right
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Ctrl, key_mods::Side::Left)
         );
 
         cfg.set("key-remap", Some("")).unwrap();
@@ -17186,11 +17225,7 @@ mod tests {
         let mut out = String::new();
         cfg.format_config(&mut out);
         assert!(out.lines().any(|line| line == "key-remap = "));
-    }
 
-    #[test]
-    fn config_key_remap_invalid_values_are_invalid_value() {
-        let mut cfg = Config::default();
         assert_eq!(
             cfg.set("key-remap", Some("ctrl")),
             Err(ConfigSetError::InvalidValue)
@@ -17199,6 +17234,49 @@ mod tests {
             cfg.set("key-remap", Some("hyper=ctrl")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        cfg.set("key-remap", Some("left_ctrl=super")).unwrap();
+        let diagnostics = cfg.load_str("key-remap = hyper=ctrl\nkey-remap\nkey-remap = ctrl\n");
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "key-remap".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "key-remap".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+        assert_eq!(cfg.key_remap.format_entries(), vec![String::new()]);
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--key-remap=opt=cmd", "--key-remap=left_control=right_alt"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        cli_cfg.finalize();
+        assert_eq!(
+            cli_cfg.key_remap.format_entries(),
+            vec![
+                "right_alt=left_super".to_string(),
+                "left_alt=left_super".to_string(),
+                "left_ctrl=right_alt".to_string(),
+            ]
+        );
+
+        assert_eq!(
+            cli_cfg.set_cli_args(["--key-remap"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(cli_cfg.key_remap.format_entries(), vec![String::new()]);
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned.key_remap, cli_cfg.key_remap);
     }
 
     #[test]

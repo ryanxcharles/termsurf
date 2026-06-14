@@ -55,6 +55,7 @@ REPEATABLE_STRING_FONT_ORACLE_TEST = "repeatable_string_font_config_parser_famil
 FONT_STYLE_ORACLE_TEST = "font_style_config_parser_family_oracle"
 FONT_VARIATION_ORACLE_TEST = "font_variation_config_parser_family_oracle"
 CODEPOINT_MAP_ORACLE_TEST = "codepoint_map_config_parser_family_oracle"
+KEY_REMAP_ORACLE_TEST = "key_remap_config_parser_family_oracle"
 
 REPEATABLE_STRING_FONT_OPTIONS = {
     "font-family",
@@ -381,6 +382,7 @@ def build_rows(
     font_style_oracle_present: bool,
     font_variation_oracle_present: bool,
     codepoint_map_oracle_present: bool,
+    key_remap_oracle_present: bool,
 ) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
     arm_by_key: dict[str, ParserArm] = {}
     for arm in arms:
@@ -679,6 +681,16 @@ def build_rows(
                 "semantics"
             )
             missing_evidence = "None for direct codepoint-map parser semantics."
+        elif key_remap_oracle_present and option == "key-remap":
+            status = "Oracle complete"
+            evidence = (
+                "Key remap parser oracle covers missing and empty resets, "
+                "first-equals splitting, canonical and aliased modifiers, "
+                "unsided source expansion, target side defaults, finalize "
+                "ordering, invalid values, diagnostics, CLI, formatting, and "
+                "clone semantics"
+            )
+            missing_evidence = "None for direct key-remap parser semantics."
         elif option == "config-default-files":
             missing_evidence = (
                 "Direct parser and effective default-file load-order semantics must "
@@ -749,6 +761,7 @@ def main() -> int:
     font_style_oracle_present = FONT_STYLE_ORACLE_TEST in roastty_source
     font_variation_oracle_present = FONT_VARIATION_ORACLE_TEST in roastty_source
     codepoint_map_oracle_present = CODEPOINT_MAP_ORACLE_TEST in roastty_source
+    key_remap_oracle_present = KEY_REMAP_ORACLE_TEST in roastty_source
     rows, missing, compatibility_only, noncanonical = build_rows(
         upstream,
         aliases,
@@ -784,13 +797,16 @@ def main() -> int:
         font_style_oracle_present,
         font_variation_oracle_present,
         codepoint_map_oracle_present,
+        key_remap_oracle_present,
     )
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        45
+        46
+        if key_remap_oracle_present
+        else 45
         if codepoint_map_oracle_present
         else 44
         if font_variation_oracle_present

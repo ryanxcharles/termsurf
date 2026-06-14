@@ -328,6 +328,11 @@ experiment files until they are proven.
   while others are legacy values or removed boolean shims on canonical keys
   (`gtk-tabs-location = hidden`, `macos-dock-drop-behavior = window`, etc.).
   Test the parser effect, not just whether the key name appears.
+- **`key-remap` missing values intentionally reset.** Unlike many config
+  options, pinned Ghostty's `RemapSet.parseCLI` treats `null`/missing input as
+  an empty reset. For Roastty, `key-remap`, `key-remap =`, and `--key-remap`
+  should clear the remap set; invalid non-empty remaps should report diagnostics
+  without inventing a `ValueRequired` branch.
 - **Default config formatter parity needs an A/B fixture.** Experiment 8 found
   and fixed non-repeatable formatter order drift by comparing pinned Ghostty
   `+show-config --default --no-pager` output to Roastty
@@ -661,4 +666,4 @@ remains open.
 - [Experiment 45: Codepoint map parser oracle](45-codepoint-map-parser-oracle.md)
   — **Pass**
 - [Experiment 46: Key remap parser oracle](46-key-remap-parser-oracle.md) —
-  **Designed**
+  **Pass**
