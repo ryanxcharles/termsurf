@@ -512,6 +512,12 @@ experiment files until they are proven.
   existing deactivate-all notification when a stack was active. CFG-222 now has
   one remaining reload gap: configured font-size reload behavior with manual
   adjustment preservation.
+- **Config reload parity is now complete.** Experiment 105 matched pinned
+  Ghostty's reload font-size rule: unadjusted surfaces adopt the reloaded
+  configured font size, manual font-size adjustments are preserved across
+  reload, and reset-font-size targets the newly reloaded configured font size.
+  All 14 CFG-222 reload rows are now `Oracle complete`, so config reload
+  behavior is `Pass`.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1111,4 +1117,4 @@ remains open.
   **Partial**
 - [Experiment 104: Reload clears key tables](104-reload-clears-key-tables.md) —
   **Pass**
-- [Experiment 105: Reload font size](105-reload-font-size.md) — **Designed**
+- [Experiment 105: Reload font size](105-reload-font-size.md) — **Pass**

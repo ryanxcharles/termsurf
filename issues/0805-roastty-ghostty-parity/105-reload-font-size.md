@@ -107,3 +107,59 @@ Adversarial design review by fresh-context Codex subagent `Nash`:
 - **Re-review verdict:** Approved. The reviewer confirmed the fixed design now
   matches Ghostty's updated `DerivedConfig.original_font_size` behavior and
   introduced no new required findings.
+
+## Result
+
+**Result:** Pass
+
+`Surface::apply_config` now matches pinned Ghostty's reload font-size behavior:
+
+- it updates `original_font_size_points` from the reloaded configured
+  `font-size`, clamped to `1.0..255.0`;
+- unadjusted surfaces adopt the reloaded configured font size immediately;
+- manually adjusted surfaces preserve their current font size across reload;
+- reset-font-size resets to the newly reloaded configured font size and clears
+  the manual adjustment flag;
+- after reset-font-size clears the manual flag, later reloads adopt configured
+  font size again.
+
+`RELOAD-013` is now `Oracle complete` in the generated reload inventory. CFG-222
+is now `Pass` with all 14 reload rows closed.
+
+Verification passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml surface_reload_font_size
+cargo test --manifest-path roastty/Cargo.toml surface_key_table_uses_updated_app_table_storage
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_reload_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-reload-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+# reload_rows=14 oracle_complete=14 closed=14 audit_covered=0 incomplete=0 gap=0 cfg222=Pass
+```
+
+## Conclusion
+
+CFG-222 is closed. Config reload behavior now has a generated inventory, 14
+Oracle-complete reload rows, Tier 1/2 guards, and a passing matrix row. The
+remaining config parity work moves to CFG-223 runtime and UI effects.
+
+## Completion Review
+
+Adversarial completion review by fresh-context Codex subagent `Arendt`:
+
+- **Verdict:** Approved.
+- **Findings:** None.
+- **Verification:** The reviewer confirmed scope is limited to `RELOAD-013`,
+  pinned Ghostty replaces derived config and uses the updated
+  `original_font_size` for reset-font-size, Roastty now implements the matching
+  behavior in `Surface::apply_config`, the test covers the old missing behavior,
+  `RELOAD-013` is `Oracle complete`, CFG-222 is `Pass`, and the required result
+  docs are present.
+- **Independent checks:**
+  `cargo fmt --manifest-path roastty/Cargo.toml --check`,
+  `cargo test --manifest-path roastty/Cargo.toml surface_reload_font_size`,
+  `cargo test --manifest-path roastty/Cargo.toml surface_key_table_uses_updated_app_table_storage`,
+  `prettier --check`, static inventory/matrix assertions, and `git diff --check`
+  passed.

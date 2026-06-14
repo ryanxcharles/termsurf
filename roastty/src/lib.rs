@@ -3636,6 +3636,11 @@ impl Surface {
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
         self.click_repeat_interval_ns = click_repeat_interval_ns(&parsed);
         let _ = self.deactivate_all_key_tables();
+        let configured_font_size = parsed.font_size.clamp(1.0, 255.0);
+        self.original_font_size_points = configured_font_size;
+        if !self.font_size_adjusted {
+            self.set_font_size_points(configured_font_size);
+        }
         let palette = derived_config_palette(&parsed);
         if let Some(worker) = &self.termio_worker {
             worker.with_termio_mut(|termio| {
@@ -19437,6 +19442,12 @@ mod tests {
         handle
     }
 
+    fn new_test_config_with_font_size(font_size: f32) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        config_from_handle(handle).unwrap().parsed.font_size = font_size;
+        handle
+    }
+
     fn new_test_config_with_key_remap_and_keybind(
         remap: Option<&str>,
         keybind: Option<&[u8]>,
@@ -24408,6 +24419,73 @@ mod tests {
         roastty_app_free(app);
         roastty_config_free(new_config);
         roastty_config_free(old_config);
+    }
+
+    #[test]
+    fn surface_reload_font_size_updates_unadjusted_and_preserves_manual() {
+        let app = new_test_app();
+        let mut surface_config = roastty_surface_config_new();
+        surface_config.font_size = 12.0;
+        let surface = new_test_surface_with_config(app, &surface_config);
+
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert_eq!(surface_ref.font_size_points, 12.0);
+            assert_eq!(surface_ref.original_font_size_points, 12.0);
+            assert!(!surface_ref.font_size_adjusted);
+        }
+
+        let reload_18 = new_test_config_with_font_size(18.0);
+        roastty_surface_update_config(surface, reload_18);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert_eq!(surface_ref.font_size_points, 18.0);
+            assert_eq!(surface_ref.original_font_size_points, 18.0);
+            assert!(!surface_ref.font_size_adjusted);
+        }
+
+        let reload_large = new_test_config_with_font_size(999.0);
+        roastty_surface_update_config(surface, reload_large);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert_eq!(surface_ref.font_size_points, 255.0);
+            assert_eq!(surface_ref.original_font_size_points, 255.0);
+            assert!(!surface_ref.font_size_adjusted);
+        }
+
+        assert!(surface_binding_action(surface, b"set_font_size:20"));
+        let reload_15 = new_test_config_with_font_size(15.0);
+        roastty_surface_update_config(surface, reload_15);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert_eq!(surface_ref.font_size_points, 20.0);
+            assert_eq!(surface_ref.original_font_size_points, 15.0);
+            assert!(surface_ref.font_size_adjusted);
+        }
+
+        assert!(surface_binding_action(surface, b"reset_font_size"));
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert_eq!(surface_ref.font_size_points, 15.0);
+            assert_eq!(surface_ref.original_font_size_points, 15.0);
+            assert!(!surface_ref.font_size_adjusted);
+        }
+
+        let reload_small = new_test_config_with_font_size(0.25);
+        roastty_surface_update_config(surface, reload_small);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            assert_eq!(surface_ref.font_size_points, 1.0);
+            assert_eq!(surface_ref.original_font_size_points, 1.0);
+            assert!(!surface_ref.font_size_adjusted);
+        }
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(reload_small);
+        roastty_config_free(reload_15);
+        roastty_config_free(reload_large);
+        roastty_config_free(reload_18);
     }
 
     #[test]

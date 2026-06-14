@@ -243,20 +243,19 @@ ROWS = [
         ghostty_reference="`vendor/ghostty/src/Surface.zig::updateConfig` `setFontSize` branch",
         roastty_reference="`roastty/src/lib.rs::Surface::apply_config`",
         family="surface reload",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
-            "Source audit found `Surface::apply_config` does not update "
-            "`font_size_points` from `config.parsed.font_size` on reload and "
-            "therefore cannot yet prove Ghostty's manual-adjustment preservation "
-            "rule."
+            "`surface_reload_font_size_updates_unadjusted_and_preserves_manual` "
+            "proves unadjusted surfaces adopt reloaded configured font size, "
+            "reload font sizes clamp to 1.0..255.0, manually adjusted surfaces "
+            "preserve their current size, `original_font_size_points` updates "
+            "to the reloaded config target, reset-font-size resets to that new "
+            "target and clears manual state, and later reloads adopt configured "
+            "size again."
         ),
-        missing_evidence=(
-            "Add Roastty behavior matching pinned Ghostty: unadjusted surfaces "
-            "should adopt the configured font size on reload, while manually "
-            "adjusted surfaces keep their current font size."
-        ),
+        missing_evidence="None for reload font-size selection behavior.",
         guard_tier="Tier 1",
-        guard_command="TBD by follow-up reload gap experiment.",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml surface_reload_font_size`",
     ),
     ReloadRow(
         id="RELOAD-014",
