@@ -353,9 +353,35 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_report && cargo test --manifest-path roastty/Cargo.toml config_title_report_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_report_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B",
-        behavior="exact nonzero scrollback byte quota, shell integration, terminfo, configured/static title-report surface-title behavior, and remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`, shell integration, terminfo, title/title-report, and related terminal behavior fields",
+        id="RUNTIME-009B2B1",
+        behavior="shell-integration feature env, terminal identity, resource-backed TERMINFO, env override order, and zsh bootstrap runtime effects",
+        ghostty_reference="`vendor/ghostty/src/termio/Exec.zig` terminal identity env setup; `vendor/ghostty/src/termio/shell_integration.zig` shell feature and zsh/XDG setup",
+        roastty_reference="`roastty/src/termio.rs` Termio spawn env setup; `roastty/src/termio/shell_integration.rs` shell feature and zsh/XDG setup",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 124 split out the proven Termio shell-integration and "
+            "terminal identity slice. `termio_env_*` tests prove fallback "
+            "`TERM=xterm-256color`/`COLORTERM=truecolor`, resource-backed "
+            "configured `TERM`, `TERMINFO`, `ROASTTY_RESOURCES_DIR`, stale "
+            "env overwrites, and explicit env override order. "
+            "`spawn_with_options_sets_shell_feature_env_even_when_integration_is_none` "
+            "proves configured shell feature env, including cursor blink/steady, "
+            "reaches child processes. `zsh_integration_spawn_with_options_*` "
+            "proves forced zsh integration reaches child env and sources an "
+            "inherited `ZDOTDIR` bootstrap. `shell_integration` tests guard "
+            "the helper rewrites for supported shells, and "
+            "`shell_integration_runtime_parity.py` statically checks pinned "
+            "Ghostty's corresponding terminal identity and shell setup markers."
+        ),
+        missing_evidence="None for this shell-integration feature env, terminal identity, resource-backed TERMINFO, env override order, and zsh bootstrap runtime slice.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml termio_env && cargo test --manifest-path roastty/Cargo.toml spawn_with_options_sets_shell_feature_env_even_when_integration_is_none && cargo test --manifest-path roastty/Cargo.toml zsh_integration_spawn_with_options && cargo test --manifest-path roastty/Cargo.toml shell_integration && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/shell_integration_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2",
+        behavior="exact nonzero scrollback byte quota, configured/static title-report surface-title behavior, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`, title/title-report, shell integration, and related terminal behavior fields",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`; macOS surface title wiring",
         family="terminal",
         status="Gap",
@@ -363,13 +389,15 @@ ROWS = [
             "Experiment 117 split out the proven zero/no-history scrollback "
             "slice and alternate-screen no-scrollback terminal-core behavior. "
             "Experiment 122 split out the OSC-driven CSI `21t` title-report "
-            "gate. "
-            "Exact nonzero `scrollback-limit` byte quota parity, shell "
-            "integration, terminfo, configured/static title-report "
-            "surface-title behavior, and other remaining terminal behavior "
-            "toggles still need focused CFG-223 runtime proof or fixes."
+            "gate. Experiment 124 split out shell-integration feature env, "
+            "terminal identity, resource-backed `TERMINFO`, env override order, "
+            "and zsh bootstrap behavior. Exact nonzero `scrollback-limit` byte "
+            "quota parity, configured/static title-report surface-title "
+            "behavior, remaining shell-specific startup rewrite coverage, and "
+            "other remaining terminal behavior toggles still need focused "
+            "CFG-223 runtime proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, shell integration, terminfo, configured/static title-report surface-title behavior, and remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, configured/static title-report surface-title behavior, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -655,7 +683,8 @@ EXPECTED_IDS = [
     "RUNTIME-009A",
     "RUNTIME-009B1",
     "RUNTIME-009B2A",
-    "RUNTIME-009B2B",
+    "RUNTIME-009B2B1",
+    "RUNTIME-009B2B2",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

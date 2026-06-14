@@ -613,6 +613,13 @@ experiment files until they are proven.
   Live PTY-backed BEL parity therefore flows through terminal pending bell
   counts, `TermioPump::bell_count`, and surface `ROASTTY_ACTION_RING_BELL`
   dispatch with a 100ms repeated-BEL throttle.
+- **Shell integration parity has a proven Termio env slice.** Experiment 124
+  split terminal identity, resource-backed `TERMINFO`, explicit env override
+  ordering, shell feature env, and zsh bootstrap behavior out of the broader
+  terminal runtime gap. Those behaviors are guarded by child-visible Termio
+  runtime tests plus a static Ghostty/Roastty marker check; exact nonzero
+  scrollback byte quota and configured/static surface-title reporting remain
+  separate terminal gaps.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1250,4 +1257,4 @@ remains open.
 - [Experiment 123: Bell runtime dispatch split](123-bell-runtime-dispatch-split.md)
   — **Pass**
 - [Experiment 124: Shell integration runtime split](124-shell-integration-runtime-split.md)
-  — **Designed**
+  — **Pass**

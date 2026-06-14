@@ -104,3 +104,54 @@ parity, or exhaustive shell-specific startup rewrite parity, and the
 verification includes focused runtime tests, a static parity guard, inventory
 regeneration, matrix assertions, `git diff --check`, and no-`__pycache__`
 criteria.
+
+## Result
+
+**Result:** Pass
+
+Added `shell_integration_runtime_parity.py` and split the runtime terminal
+inventory so the already-proven shell-integration/terminal identity slice is
+tracked separately from the remaining terminal gap. `RUNTIME-009B2B1` is now
+`Oracle complete` for shell-integration feature env, terminal identity,
+resource-backed `TERMINFO`, explicit env override order, and zsh bootstrap
+runtime effects. `RUNTIME-009B2B2` remains `Gap` for exact nonzero scrollback
+byte quota, configured/static title-report surface-title behavior, remaining
+shell-specific startup rewrite coverage, and other remaining terminal behavior
+effects. CFG-223 remains `Gap`.
+
+Verification passed:
+
+- `cargo test --manifest-path roastty/Cargo.toml termio_env`
+- `cargo test --manifest-path roastty/Cargo.toml spawn_with_options_sets_shell_feature_env_even_when_integration_is_none`
+- `cargo test --manifest-path roastty/Cargo.toml zsh_integration_spawn_with_options`
+- `cargo test --manifest-path roastty/Cargo.toml shell_integration`
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/shell_integration_runtime_parity.py`
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+- Matrix assertion for `RUNTIME-009B2B1`, `RUNTIME-009B2B2`, and CFG-223
+- `git diff --check`
+- No generated `__pycache__` remained under the issue directory.
+
+## Conclusion
+
+The terminal shell-integration gap is smaller than the broad `RUNTIME-009B2B`
+row implied. Roastty already has runtime tests that launch children through
+Termio and inspect child-visible env for terminal identity, resource-backed
+`TERMINFO`, explicit env override ordering, shell feature env, and zsh bootstrap
+behavior. Exact byte-quota scrollback, configured/static surface-title
+reporting, and broader shell-specific startup rewrite coverage remain open.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+Verdict: **Approved**.
+
+The reviewer reported no required findings. It independently reran the targeted
+Termio env tests, shell feature env test, zsh integration tests, shell
+integration tests, static shell integration parity guard, read-only matrix
+assertion, `git diff --check`, and no-`__pycache__` check. It did not rerun the
+exact inventory regeneration command because that command writes generated
+markdown and updates the matrix under the reviewer's read-only discipline, but
+it inspected the generated output and found the counts and statuses internally
+consistent. It also confirmed the result commit had not yet been made.
