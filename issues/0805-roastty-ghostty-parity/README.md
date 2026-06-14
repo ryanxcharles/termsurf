@@ -643,3 +643,5 @@ remains open.
   — **Pass**
 - [Experiment 43: Font style parser oracle](43-font-style-parser-oracle.md) —
   **Pass**
+- [Experiment 44: Font variation parser oracle](44-font-variation-parser-oracle.md)
+  — **Designed**
