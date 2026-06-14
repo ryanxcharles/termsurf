@@ -27903,6 +27903,174 @@ mod tests {
     }
 
     #[test]
+    fn config_string_diagnostic_family_oracle() {
+        struct StringDiagnosticCase {
+            key: &'static str,
+            valid: &'static str,
+            nul_value: &'static str,
+            expected_valid_line: &'static str,
+            expected_nul_line: &'static str,
+            get_line: fn(&Config) -> Option<String>,
+        }
+
+        fn config_line(cfg: &Config, key: &str) -> Option<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .map(str::to_string)
+        }
+
+        let cases = [
+            StringDiagnosticCase {
+                key: "class",
+                valid: "com.example.Roastty",
+                nul_value: "class\0suffix",
+                expected_valid_line: "class = com.example.Roastty",
+                expected_nul_line: "class = class\0suffix",
+                get_line: |cfg| config_line(cfg, "class"),
+            },
+            StringDiagnosticCase {
+                key: "enquiry-response",
+                valid: "hello",
+                nul_value: "hello\0suffix",
+                expected_valid_line: "enquiry-response = hello",
+                expected_nul_line: "enquiry-response = hello\0suffix",
+                get_line: |cfg| config_line(cfg, "enquiry-response"),
+            },
+            StringDiagnosticCase {
+                key: "gtk-quick-terminal-namespace",
+                valid: "roastty-panel",
+                nul_value: "namespace\0suffix",
+                expected_valid_line: "gtk-quick-terminal-namespace = roastty-panel",
+                expected_nul_line: "gtk-quick-terminal-namespace = namespace\0suffix",
+                get_line: |cfg| config_line(cfg, "gtk-quick-terminal-namespace"),
+            },
+            StringDiagnosticCase {
+                key: "language",
+                valid: "en_US.UTF-8",
+                nul_value: "lang\0suffix",
+                expected_valid_line: "language = en_US.UTF-8",
+                expected_nul_line: "language = lang\0suffix",
+                get_line: |cfg| config_line(cfg, "language"),
+            },
+            StringDiagnosticCase {
+                key: "macos-custom-icon",
+                valid: "/tmp/Roastty.icns",
+                nul_value: "icon\0suffix",
+                expected_valid_line: "macos-custom-icon = /tmp/Roastty.icns",
+                expected_nul_line: "macos-custom-icon = icon\0suffix",
+                get_line: |cfg| config_line(cfg, "macos-custom-icon"),
+            },
+            StringDiagnosticCase {
+                key: "term",
+                valid: "xterm-roastty-test",
+                nul_value: "term\0suffix",
+                expected_valid_line: "term = xterm-roastty-test",
+                expected_nul_line: "term = term\0suffix",
+                get_line: |cfg| config_line(cfg, "term"),
+            },
+            StringDiagnosticCase {
+                key: "title",
+                valid: "TermSurf",
+                nul_value: "title\0suffix",
+                expected_valid_line: "title = TermSurf",
+                expected_nul_line: "title = title\0suffix",
+                get_line: |cfg| config_line(cfg, "title"),
+            },
+            StringDiagnosticCase {
+                key: "window-title-font-family",
+                valid: "SF Pro",
+                nul_value: "font\0suffix",
+                expected_valid_line: "window-title-font-family = SF Pro",
+                expected_nul_line: "window-title-font-family = font\0suffix",
+                get_line: |cfg| config_line(cfg, "window-title-font-family"),
+            },
+            StringDiagnosticCase {
+                key: "x11-instance-name",
+                valid: "roastty-dev",
+                nul_value: "instance\0suffix",
+                expected_valid_line: "x11-instance-name = roastty-dev",
+                expected_nul_line: "x11-instance-name = instance\0suffix",
+                get_line: |cfg| config_line(cfg, "x11-instance-name"),
+            },
+        ];
+        assert_eq!(cases.len(), 9);
+
+        for case in cases {
+            let default_line = (case.get_line)(&Config::default());
+
+            let mut cfg = Config::default();
+            cfg.set(case.key, Some(case.valid)).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg).as_deref(),
+                Some(case.expected_valid_line),
+                "{} accepts representative non-empty string",
+                case.key
+            );
+
+            cfg.set(case.key, Some(case.nul_value)).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg).as_deref(),
+                Some(case.expected_nul_line),
+                "{} accepts explicit NUL-containing string",
+                case.key
+            );
+
+            cfg.set(case.key, Some("")).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg),
+                default_line,
+                "{} empty value resets to default",
+                case.key
+            );
+
+            let mut file_cfg = Config::default();
+            file_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&file_cfg);
+            let diagnostics = file_cfg.load_str(&format!("\n{}\n", case.key));
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 2,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::ValueRequired,
+                }],
+                "{} file missing-value diagnostic preserves line/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&file_cfg),
+                before,
+                "{} missing file value preserves previous state",
+                case.key
+            );
+
+            let mut cli_cfg = Config::default();
+            cli_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&cli_cfg);
+            let arg = format!("--{}", case.key);
+            let diagnostics = cli_cfg.set_cli_args([arg.as_str()]);
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 1,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::ValueRequired,
+                }],
+                "{} CLI missing-value diagnostic preserves argument position/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&cli_cfg),
+                before,
+                "{} missing CLI value preserves previous state",
+                case.key
+            );
+        }
+    }
+
+    #[test]
     fn duration_config_parser_family_oracle() {
         let dur = |duration| Ok(Duration { duration });
 

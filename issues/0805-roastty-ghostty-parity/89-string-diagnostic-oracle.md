@@ -153,3 +153,57 @@ Fixes:
 Final verdict: Approved.
 
 Re-review confirmed the required finding is resolved.
+
+## Result
+
+**Result:** Pass
+
+The shared string diagnostic oracle now covers the nine string options that were
+still `Audit covered` after Experiment 88. The oracle verifies every option's
+representative non-empty string acceptance and formatted output, NUL-containing
+string acceptance, empty reset to the option's default, missing-value
+config-file diagnostics with line/key/error, missing-value CLI diagnostics with
+argument position/key/error, and missing-value state retention.
+
+The diagnostic inventory generator now has an exact Experiment 89 override list
+for those nine options, validates that every override still maps to a canonical
+string parser-family row, and reclassifies parser-family `string` rows as
+`required-value diagnostic`. Regeneration moved the string diagnostic rows to
+`Oracle complete`. CFG-219 remains `Gap` because 14 non-string diagnostic rows
+are still incomplete.
+
+Verification output:
+
+```text
+test config::tests::config_string_diagnostic_family_oracle ... ok
+ghostty_canonical=203
+diagnostic_rows=203
+missing_canonical_diagnostic_rows=0
+extra_diagnostic_rows=0
+oracle_complete=189
+audit_covered=14
+gap=0
+```
+
+Additional checks passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml config_string_diagnostic_family_oracle
+```
+
+## Conclusion
+
+String diagnostic parity is now proven for CFG-219. The useful lesson is that
+string diagnostics are missing-value diagnostics, not invalid explicit-value
+diagnostics: explicit string payloads, including NUL-containing strings, are
+accepted and copied, while missing values produce
+`ConfigSetError::ValueRequired` and must preserve the prior configured state.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Verdict: Approved.
+
+Required findings: None.

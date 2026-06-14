@@ -411,6 +411,12 @@ experiment files until they are proven.
   diagnostics, and state-retention checks through `format_config` output.
   CFG-219 now has 180 `Oracle complete` rows and 23 remaining incomplete
   diagnostic rows.
+- **String diagnostics are missing-value diagnostics.** Experiment 89 promoted
+  the nine string diagnostic rows and corrected the diagnostic inventory family
+  from invalid-value wording to required-value wording. Explicit string values,
+  including NUL-containing strings, are accepted; missing values report
+  `ConfigSetError::ValueRequired` and preserve prior state. CFG-219 now has 189
+  `Oracle complete` rows and 14 remaining incomplete diagnostic rows.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -979,4 +985,4 @@ remains open.
 - [Experiment 88: Float diagnostic oracle](88-float-diagnostic-oracle.md) —
   **Pass**
 - [Experiment 89: String diagnostic oracle](89-string-diagnostic-oracle.md) —
-  **Designed**
+  **Pass**
