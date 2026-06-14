@@ -135,3 +135,78 @@ such as `600y` saturates to `u64::MAX`, while an over-wide decimal literal such
 as `18446744073709551616ns` is `InvalidValue`.
 
 The design now requires both cases.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a focused duration parser family oracle that ties the shared
+`Duration::parse_cli` helper to both required and optional config dispatch
+shapes. It covers the upstream units, longest-unit matching, adjacent and
+whitespace-separated segments, trailing whitespace, bare zero, missing values,
+malformed values, product-overflow saturation, over-wide decimal literal
+rejection, and empty-reset behavior.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml duration_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::duration_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4909 filtered out; finished in 0.00s
+```
+
+The parser inventory generator passed and moved the 4 duration rows to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=71
+audit_covered=132
+gap=0
+```
+
+CFG-217 remains `Gap` because 132 parser rows are still audit-only, but there
+are still no parser dispatch gaps.
+
+## Conclusion
+
+Duration parser semantics are now proven for the pinned Ghostty target. The
+oracle explicitly records the overflow distinction found during design review:
+product overflow saturates, while over-wide decimal literals are invalid.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no required
+findings. The reviewer independently verified the focused duration oracle, Rust
+fmt check, generator counts after seeding a temporary matrix copy, matrix/parser
+assertions, and `git diff --check`.
+
+The reviewer noted one optional issue: the generator updates an existing matrix
+file in place, so a `/tmp` matrix verification path must be seeded from the repo
+matrix before running the generator. This experiment leaves that existing
+generator contract unchanged; the documented repo command remains the canonical
+verification command.

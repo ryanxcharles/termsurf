@@ -20764,6 +20764,94 @@ mod tests {
     }
 
     #[test]
+    fn duration_config_parser_family_oracle() {
+        let dur = |duration| Ok(Duration { duration });
+
+        assert_eq!(
+            Duration::parse_cli(Some("1y")),
+            dur(365 * 24 * 60 * 60 * NS_PER_S)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("1w")),
+            dur(7 * 24 * 60 * 60 * NS_PER_S)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("1d")),
+            dur(24 * 60 * 60 * NS_PER_S)
+        );
+        assert_eq!(Duration::parse_cli(Some("1h")), dur(60 * 60 * NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("1m")), dur(60 * NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("1s")), dur(NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("1ms")), dur(NS_PER_MS));
+        assert_eq!(Duration::parse_cli(Some("1us")), dur(1_000));
+        assert_eq!(Duration::parse_cli(Some("1µs")), dur(1_000));
+        assert_eq!(Duration::parse_cli(Some("1ns")), dur(1));
+
+        assert_eq!(
+            Duration::parse_cli(Some("1m1ms")),
+            dur(60 * NS_PER_S + NS_PER_MS)
+        );
+        assert_eq!(Duration::parse_cli(Some("1h 30m")), dur(90 * 60 * NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some(" 1s ")), dur(NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("0")), dur(0));
+        assert_eq!(Duration::parse_cli(Some("600y")), dur(u64::MAX));
+
+        for value in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                Duration::parse_cli(value),
+                Err(DurationParseError::ValueRequired),
+                "duration requires {value:?}"
+            );
+        }
+        for value in [
+            "1",
+            "s",
+            "1x",
+            "1 ",
+            "0 ",
+            "18446744073709551616ns",
+            "18446744073709551616",
+        ] {
+            assert_eq!(
+                Duration::parse_cli(Some(value)),
+                Err(DurationParseError::InvalidValue),
+                "duration rejects {value:?}"
+            );
+        }
+
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.set("undo-timeout", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("undo-timeout", Some("1m 30s")).unwrap();
+        assert_eq!(
+            cfg.undo_timeout,
+            Duration {
+                duration: 90 * NS_PER_S
+            }
+        );
+        cfg.set("undo-timeout", Some("")).unwrap();
+        assert_eq!(cfg.undo_timeout, Config::default().undo_timeout);
+
+        assert_eq!(
+            cfg.set("quit-after-last-window-closed-delay", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("quit-after-last-window-closed-delay", Some("250ms"))
+            .unwrap();
+        assert_eq!(
+            cfg.quit_after_last_window_closed_delay,
+            Some(Duration {
+                duration: 250 * NS_PER_MS
+            })
+        );
+        cfg.set("quit-after-last-window-closed-delay", Some(""))
+            .unwrap();
+        assert_eq!(cfg.quit_after_last_window_closed_delay, None);
+    }
+
+    #[test]
     fn config_link_url_finalize() {
         let cfg = Config::default();
         assert_eq!(cfg.link.len(), 1);

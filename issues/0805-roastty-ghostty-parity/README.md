@@ -391,6 +391,12 @@ experiment files until they are proven.
   scalar rows: missing values are required, explicit empty strings are accepted
   at the child parser level, `key =` resets through the surrounding dispatch
   helper, and embedded NUL bytes are preserved instead of rejected.
+- **Duration parser rows share one upstream grammar.** Experiment 19 proved the
+  4 duration parser rows against Ghostty's `Duration.parseCLI` shape: all units,
+  longest-unit matching, adjacent and whitespace-separated segments, trailing
+  whitespace, bare zero, malformed values, missing values, required/optional
+  empty-reset behavior, product-overflow saturation, and over-wide decimal
+  literal rejection.
 
 ## Verification
 
@@ -435,4 +441,4 @@ remains open.
 - [Experiment 17: Float parser oracle](17-float-parser-oracle.md) — **Pass**
 - [Experiment 18: String parser oracle](18-string-parser-oracle.md) — **Pass**
 - [Experiment 19: Duration parser oracle](19-duration-parser-oracle.md) —
-  **Designed**
+  **Pass**
