@@ -18397,6 +18397,97 @@ mod tests {
     }
 
     #[test]
+    fn font_scalar_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&default_lines, "adjust-font-baseline"),
+            "adjust-font-baseline = "
+        );
+        assert_eq!(
+            line(&default_lines, "window-title-font-family"),
+            "window-title-font-family = "
+        );
+
+        cfg.set("adjust-font-baseline", Some("12")).unwrap();
+        cfg.set("font-size", Some("13.5")).unwrap();
+        cfg.set("font-thicken", Some("true")).unwrap();
+        cfg.set("font-thicken-strength", Some("0x80")).unwrap();
+        cfg.set("window-inherit-font-size", Some("false")).unwrap();
+        cfg.set("window-title-font-family", Some("Title\0Font"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "adjust-font-baseline"),
+            "adjust-font-baseline = 12"
+        );
+        assert_eq!(line(&lines, "font-size"), "font-size = 13.5");
+        assert_eq!(line(&lines, "font-thicken"), "font-thicken = true");
+        assert_eq!(
+            line(&lines, "font-thicken-strength"),
+            "font-thicken-strength = 128"
+        );
+        assert_eq!(
+            line(&lines, "window-inherit-font-size"),
+            "window-inherit-font-size = false"
+        );
+        assert_eq!(
+            line(&lines, "window-title-font-family"),
+            "window-title-font-family = Title\0Font"
+        );
+
+        cfg.set("adjust-font-baseline", Some("25%")).unwrap();
+        cfg.set("window-title-font-family", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "adjust-font-baseline"),
+            "adjust-font-baseline = 25%"
+        );
+        assert_eq!(
+            line(&lines, "window-title-font-family"),
+            "window-title-font-family = "
+        );
+
+        cfg.set("adjust-font-baseline", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "adjust-font-baseline"),
+            "adjust-font-baseline = "
+        );
+
+        assert!(index(&lines, "font-size") < index(&lines, "font-thicken"));
+        assert!(index(&lines, "font-thicken") < index(&lines, "font-thicken-strength"));
+        assert!(index(&lines, "font-thicken-strength") < index(&lines, "adjust-font-baseline"));
+        assert!(index(&lines, "adjust-font-baseline") < index(&lines, "window-inherit-font-size"));
+        assert!(
+            index(&lines, "window-inherit-font-size") < index(&lines, "window-title-font-family")
+        );
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

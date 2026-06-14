@@ -532,6 +532,13 @@ experiment files until they are proven.
   formatters emit enum keywords, comma-joined lowercase color lists, decomposed
   duration strings, single or light/dark theme names, and working-directory
   keywords or paths.
+- **Font scalar rows are distinct from complex font rows.** Experiment 65
+  promoted `adjust-font-baseline`, `font-size`, `font-thicken`,
+  `font-thicken-strength`, `window-inherit-font-size`, and
+  `window-title-font-family`. These rows use metric, float, bool, integer, and
+  optional string formatter paths; repeatable font families, font features, font
+  variations, font styles, font synthetic style, shaping breaks, and codepoint
+  maps remain unpromoted.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -793,4 +800,4 @@ remains open.
 - [Experiment 64: Optional value formatter oracle](64-optional-value-formatter-oracle.md)
   — **Pass**
 - [Experiment 65: Font scalar formatter oracle](65-font-scalar-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

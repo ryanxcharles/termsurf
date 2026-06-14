@@ -28,6 +28,7 @@ OPTIONAL_COLOR_ORACLE_TEST = "optional_color_config_formatter_family_oracle"
 OPTIONAL_PATH_ORACLE_TEST = "optional_path_config_formatter_family_oracle"
 OPTIONAL_COMMAND_ORACLE_TEST = "optional_command_config_formatter_family_oracle"
 OPTIONAL_VALUE_ORACLE_TEST = "optional_value_config_formatter_family_oracle"
+FONT_SCALAR_ORACLE_TEST = "font_scalar_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
@@ -40,6 +41,14 @@ PRIMITIVE_FAMILIES = {"boolean", "integer", "float", "string"}
 REPEATABLE_PATH_OPTIONS = {"config-file", "custom-shader", "gtk-custom-css"}
 OPTIONAL_PATH_OPTIONS = {"background-image", "bell-audio-path"}
 OPTIONAL_COMMAND_OPTIONS = {"command", "initial-command"}
+FONT_SCALAR_OPTIONS = {
+    "adjust-font-baseline",
+    "font-size",
+    "font-thicken",
+    "font-thicken-strength",
+    "window-inherit-font-size",
+    "window-title-font-family",
+}
 OPTIONAL_COLOR_OPTIONS = {
     "bold-color",
     "cursor-color",
@@ -142,6 +151,8 @@ def formatter_family(option: str, path_text: str, call_text: str) -> str:
         return "optional command"
     if option in OPTIONAL_COLOR_OPTIONS:
         return "optional color"
+    if option in FONT_SCALAR_OPTIONS:
+        return "font scalar"
     if "font_" in call_text or "Font" in call_text:
         return "font"
     if "window_padding" in call_text:
@@ -294,6 +305,7 @@ def build_rows(
     optional_path_oracle_present: bool,
     optional_command_oracle_present: bool,
     optional_value_oracle_present: bool,
+    font_scalar_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
@@ -415,6 +427,18 @@ def build_rows(
                 "resets, and representative order checks"
             )
             missing_evidence = "None for optional value formatter rows."
+        elif font_scalar_oracle_present and family == "font scalar":
+            status = "Oracle complete"
+            evidence = (
+                "Font scalar formatter oracle covers optional metric modifier "
+                "void, absolute, percent, and raw-empty reset output; font-size "
+                "float output; font-thicken boolean output; font-thicken-strength "
+                "integer output; window-inherit-font-size boolean output; "
+                "window-title-font-family optional void, string, raw-empty "
+                "reset, byte-preserving string output, and representative "
+                "order checks"
+            )
+            missing_evidence = "None for font scalar formatter rows."
         elif metric_modifier_oracle_present and family == "metric modifier":
             status = "Oracle complete"
             evidence = (
@@ -519,6 +543,7 @@ def main() -> int:
     optional_path_oracle_present = OPTIONAL_PATH_ORACLE_TEST in roastty_source
     optional_command_oracle_present = OPTIONAL_COMMAND_ORACLE_TEST in roastty_source
     optional_value_oracle_present = OPTIONAL_VALUE_ORACLE_TEST in roastty_source
+    font_scalar_oracle_present = FONT_SCALAR_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
@@ -536,6 +561,7 @@ def main() -> int:
         optional_path_oracle_present,
         optional_command_oracle_present,
         optional_value_oracle_present,
+        font_scalar_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
@@ -551,7 +577,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        64
+        65
+        if font_scalar_oracle_present
+        else 64
         if optional_value_oracle_present
         else 63
         if optional_command_oracle_present

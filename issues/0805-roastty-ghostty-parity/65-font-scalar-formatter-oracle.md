@@ -142,3 +142,81 @@ experiment has the required sections, the scope is exactly the six current font
 scalar rows, complex font formatter families remain unpromoted, and the
 verification criteria cover counts, CFG-218 status, target promotion, adjacent
 unpromoted families, existing/new test filters, and hygiene checks.
+
+## Result
+
+**Result:** Pass
+
+Added `font_scalar_config_formatter_family_oracle`, split the six scalar-shaped
+font rows into a `font scalar` formatter family, and promoted only that family.
+
+The new oracle proves:
+
+- `adjust-font-baseline` formats optional void, absolute metric values, percent
+  metric values, and raw-empty reset output;
+- `font-size` formats shortest float output;
+- `font-thicken` formats boolean output;
+- `font-thicken-strength` formats integer output after base-0 parsing;
+- `window-inherit-font-size` formats boolean output;
+- `window-title-font-family` formats optional void output, byte-preserving
+  string output, and raw-empty reset output;
+- representative row order is stable within formatter order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=117
+audit_covered=86
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 86 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml font_scalar_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml metric_modifier_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_font_thicken_parses_and_round_trips`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_font_synthetic_style_and_size_parse_and_format`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml window_scalar_config_parse_format_reset_and_diagnose`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 117 `Oracle complete`, 86 `Audit covered`,
+  and 0 `Gap`.
+- Matrix assertion passed: CFG-218 remains `Gap`; all six `font scalar`
+  formatter rows are `Oracle complete`; representative complex font rows and
+  custom `format_entry` rows remain `Audit covered`.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer confirmed that the diff is limited to the requested six files, the
+result commit had not been made before review, the generated inventory has 203
+rows with 117 `Oracle complete`, 86 `Audit covered`, and 0 `Gap`, the
+`font scalar` family contains exactly the six target rows, CFG-218 remains `Gap`
+and owned by Experiment 65, and README status is `Pass`. The reviewer also reran
+all six requested `cargo test` filters, `cargo fmt --check`, `git diff --check`,
+and the matrix assertion.
+
+## Conclusion
+
+The scalar-shaped font formatter rows are now oracle-complete. CFG-218 remains
+open with 86 audit-covered formatter rows: 16 complex font rows and 70 custom
+`format_entry` rows.
