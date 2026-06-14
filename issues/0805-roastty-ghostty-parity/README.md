@@ -906,3 +906,5 @@ remains open.
   — **Pass**
 - [Experiment 79: Packed flag formatter oracle](79-packed-flag-formatter-oracle.md)
   — **Pass**
+- [Experiment 80: Background image enum formatter oracle](80-background-image-enum-formatter-oracle.md)
+  — **Designed**
