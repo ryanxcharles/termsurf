@@ -724,3 +724,5 @@ remains open.
   — **Pass**
 - [Experiment 55: Color keyword formatter oracle](55-color-keyword-formatter-oracle.md)
   — **Pass**
+- [Experiment 56: Key remap formatter oracle](56-key-remap-formatter-oracle.md)
+  — **Designed**
