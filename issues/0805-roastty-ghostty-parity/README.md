@@ -1158,3 +1158,5 @@ remains open.
   — **Pass**
 - [Experiment 110: Right click action runtime](110-right-click-action-runtime.md)
   — **Pass**
+- [Experiment 111: Mouse hide while typing runtime](111-mouse-hide-while-typing-runtime.md)
+  — **Designed**
