@@ -538,3 +538,5 @@ remains open.
   — **Pass**
 - [Experiment 30: Click repeat interval parser oracle](30-click-repeat-interval-parser-oracle.md)
   — **Pass**
+- [Experiment 31: Cursor style blink parser oracle](31-cursor-style-blink-parser-oracle.md)
+  — **Designed**
