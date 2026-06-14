@@ -917,3 +917,5 @@ remains open.
   — **Pass**
 - [Experiment 80: Background image enum formatter oracle](80-background-image-enum-formatter-oracle.md)
   — **Pass**
+- [Experiment 81: GTK enum formatter oracle](81-gtk-enum-formatter-oracle.md) —
+  **Designed**
