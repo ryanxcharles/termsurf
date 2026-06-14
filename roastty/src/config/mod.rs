@@ -14908,7 +14908,11 @@ mod tests {
     }
 
     #[test]
-    fn config_set_routes_theme_field() {
+    fn theme_config_parser_family_oracle() {
+        let theme = |light: &str, dark: &str| Theme {
+            light: light.to_string(),
+            dark: dark.to_string(),
+        };
         let line = |cfg: &Config| -> String {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -14917,6 +14921,62 @@ mod tests {
                 .unwrap()
                 .to_string()
         };
+
+        assert_eq!(
+            Theme::parse_cli(Some("catppuccin-mocha")),
+            Ok(theme("catppuccin-mocha", "catppuccin-mocha"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some(" \t solarized \t ")),
+            Ok(theme("solarized", "solarized"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:day,dark:night")),
+            Ok(theme("day", "night"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some(" light : day , dark : night ")),
+            Ok(theme("day", "night"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:\"a,b\",dark:c")),
+            Ok(theme("a,b", "c"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:a,light:b,dark:c")),
+            Ok(theme("b", "c"))
+        );
+        assert_eq!(Theme::parse_cli(Some("light:,dark:x")), Ok(theme("", "x")));
+        assert_eq!(
+            Theme::parse_cli(Some("light=day")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("bright:x,dark:y")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:day")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:day,nightonly")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:\"\\q\",dark:x")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(Theme::parse_cli(None), Err(ThemeParseError::ValueRequired));
+        assert_eq!(
+            Theme::parse_cli(Some("")),
+            Err(ThemeParseError::ValueRequired)
+        );
+
+        let parsed = Theme::parse_cli(Some("light:day,dark:night")).unwrap();
+        let mut out = String::new();
+        parsed.format_entry(&mut EntryFormatter::new("theme", &mut out));
+        assert_eq!(out, "theme = light:day,dark:night\n");
 
         // A single name and a pair route to the `theme` field (via format_config).
         let mut cfg = Config::default();
@@ -14938,6 +14998,45 @@ mod tests {
             cfg.set("theme", Some("bright:x,dark:y")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        cfg.set("theme", Some("catppuccin-mocha")).unwrap();
+        let diagnostics = cfg.load_str(
+            "theme = light:day\n\
+             theme\n\
+             theme = light:\"\\q\",dark:x\n\
+             theme = light:day,dark:night\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "theme".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "theme".to_string(),
+                    error: ConfigSetError::ValueRequired,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "theme".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+        assert_eq!(line(&cfg), "theme = light:day,dark:night");
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--theme= light:day,dark:night "]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(line(&cli_cfg), "theme = light:day,dark:night");
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned.theme, cli_cfg.theme);
     }
 
     #[test]

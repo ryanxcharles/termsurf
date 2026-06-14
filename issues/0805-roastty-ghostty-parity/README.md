@@ -333,6 +333,11 @@ experiment files until they are proven.
   an empty reset. For Roastty, `key-remap`, `key-remap =`, and `--key-remap`
   should clear the remap set; invalid non-empty remaps should report diagnostics
   without inventing a `ValueRequired` branch.
+- **`theme` parser parity is macOS/non-Windows scoped.** Pinned Ghostty routes
+  any comma, equals sign, or colon in `theme` through the light/dark pair parser
+  on macOS and other non-Windows builds. Its Windows-only drive-letter exception
+  for `C:\...` paths is outside Issue 805's copied macOS app parity oracle and
+  should be tracked separately if Windows config parity work starts.
 - **Default config formatter parity needs an A/B fixture.** Experiment 8 found
   and fixed non-repeatable formatter order drift by comparing pinned Ghostty
   `+show-config --default --no-pager` output to Roastty
@@ -667,4 +672,4 @@ remains open.
   — **Pass**
 - [Experiment 46: Key remap parser oracle](46-key-remap-parser-oracle.md) —
   **Pass**
-- [Experiment 47: Theme parser oracle](47-theme-parser-oracle.md) — **Designed**
+- [Experiment 47: Theme parser oracle](47-theme-parser-oracle.md) — **Pass**
