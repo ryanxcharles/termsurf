@@ -187,3 +187,129 @@ Reviewer evidence:
   rows.
 - The matrix assertion is non-vacuous because it checks the exact promoted set
   plus excluded adjacent custom and collection rows.
+
+## Result
+
+**Result:** Pass
+
+Experiment 83 added the `misc_direct_enum_config_formatter_family_oracle` guard
+and promoted exactly nine formatter rows to `Oracle complete`:
+
+- `async-backend`
+- `confirm-close-surface`
+- `custom-shader-animation`
+- `fullscreen`
+- `grapheme-width-method`
+- `link-previews`
+- `linux-cgroup`
+- `shell-integration`
+- `window-subtitle`
+
+The regenerated formatter inventory reported:
+
+- `ghostty_canonical=203`
+- `roastty_formatter_rows=203`
+- `missing_canonical_formatter_rows=0`
+- `extra_formatter_rows=0`
+- `oracle_complete=194`
+- `audit_covered=9`
+- `gap=0`
+- `no_output_rows=1`
+
+The formatter inventory assertion passed for the exact promoted set and kept the
+remaining audit-covered rows out of the `misc direct enum` family:
+`background-blur`, `env`, `input`, `mouse-scroll-multiplier`, `palette`,
+`quick-terminal-size`, `selection-word-chars`, `undo-timeout`, and
+`window-decoration`.
+
+Verification run:
+
+- `cargo test --manifest-path roastty/Cargo.toml misc_direct_enum_config_formatter_family_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  passed with the counts above.
+- The formatter inventory assertion passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_format_entries` passed
+  with seven matching tests.
+- `cargo test --manifest-path roastty/Cargo.toml enum_format_entries_2` passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_format_entries_misc`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_format_entries_fullscreen`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_from_keyword_round_trips_and_rejects_unknown`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_from_keyword_round_trips_mac_bgimage_shader`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_from_keyword_round_trips_misc_fullscreen`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml enum_from_keyword_round_trips_shell_notify`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml async_update_config_parse_format_reset_and_diagnose`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml linux_cgroup_config_parse_format_reset_and_diagnose`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_formatter_inventory.py`
+  passed; generated `__pycache__/` was removed.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/83-misc-direct-enum-formatter-oracle.md`
+  passed.
+- `git diff --check` passed.
+
+Final verdict: Approved.
+
+Re-review confirmed the prior finding is resolved:
+
+- `roastty/src/config/mod.rs` now sets `quick-terminal-size = 50%` before
+  formatting the non-default config.
+- `roastty/src/config/mod.rs` now asserts
+  `quick-terminal-size < shell-integration < shell-integration-features`.
+
+The reviewer found no new Required findings.
+
+## Conclusion
+
+The direct enum formatter surface is now fully proved. CFG-218 still remains a
+formatter parity tracking row, but the generated formatter inventory has no
+dispatch gaps: 194 rows are `Oracle complete`, the remaining 9 rows are
+explicitly `Audit covered`, and 0 rows are formatter gaps. The next experiment
+should target one of the remaining custom scalar or collection formatter
+families rather than another direct enum family.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Initial verdict: Changes required.
+
+Required finding:
+
+- `roastty/src/config/mod.rs:15208` checked
+  `quick-terminal-keyboard-interactivity < shell-integration` instead of the
+  approved
+  `quick-terminal-size < shell-integration < shell-integration-features`
+  adjacency. Because `quick-terminal-size` is an optional custom formatter row,
+  the test needed to create a non-default `quick-terminal-size` line and assert
+  against that adjacent row.
+
+Fix:
+
+- Updated the oracle to set `quick-terminal-size = 50%` before formatting the
+  non-default config, then restored the
+  `quick-terminal-size < shell-integration < shell-integration-features`
+  assertion.
+
+Re-verification after the fix:
+
+- `cargo test --manifest-path roastty/Cargo.toml misc_direct_enum_config_formatter_family_oracle`
+  passed.
+- Regenerated formatter inventory retained `oracle_complete=194`,
+  `audit_covered=9`, and `gap=0`.
+- Formatter inventory assertion passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_formatter_inventory.py`
+  passed; generated `__pycache__/` was removed.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/83-misc-direct-enum-formatter-oracle.md`
+  passed.
+- `git diff --check` passed.

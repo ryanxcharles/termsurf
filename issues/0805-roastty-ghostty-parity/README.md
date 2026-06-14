@@ -378,6 +378,12 @@ experiment files until they are proven.
   proving the `macos-dock-drop-behavior = window` compatibility shim and keeping
   adjacent optional/scalar rows such as `macos-option-as-alt`,
   `macos-custom-icon`, and icon color rows outside the family.
+- **Misc direct enum formatter rows can be closed before custom rows.**
+  Experiment 83 promoted `async-backend`, `confirm-close-surface`,
+  `custom-shader-animation`, `fullscreen`, `grapheme-width-method`,
+  `link-previews`, `linux-cgroup`, `shell-integration`, and `window-subtitle` by
+  proving direct keyword output, config-level output, raw-empty resets, and
+  local ordering, leaving the truly custom scalar/collection rows for later.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -934,4 +940,4 @@ remains open.
 - [Experiment 82: macOS enum formatter oracle](82-macos-enum-formatter-oracle.md)
   — **Pass**
 - [Experiment 83: Misc direct enum formatter oracle](83-misc-direct-enum-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

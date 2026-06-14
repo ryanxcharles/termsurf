@@ -14989,6 +14989,234 @@ mod tests {
     }
 
     #[test]
+    fn misc_direct_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (AsyncBackend::Auto, "auto"),
+            (AsyncBackend::Epoll, "epoll"),
+            (AsyncBackend::IoUring, "io_uring"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (ConfirmCloseSurface::False, "false"),
+            (ConfirmCloseSurface::True, "true"),
+            (ConfirmCloseSurface::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (CustomShaderAnimation::False, "false"),
+            (CustomShaderAnimation::True, "true"),
+            (CustomShaderAnimation::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (Fullscreen::False, "false"),
+            (Fullscreen::True, "true"),
+            (Fullscreen::NonNative, "non-native"),
+            (Fullscreen::NonNativeVisibleMenu, "non-native-visible-menu"),
+            (Fullscreen::NonNativePaddedNotch, "non-native-padded-notch"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GraphemeWidthMethod::Legacy, "legacy"),
+            (GraphemeWidthMethod::Unicode, "unicode"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (LinkPreviews::False, "false"),
+            (LinkPreviews::True, "true"),
+            (LinkPreviews::Osc8, "osc8"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (LinuxCgroup::Never, "never"),
+            (LinuxCgroup::Always, "always"),
+            (LinuxCgroup::SingleInstance, "single-instance"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (ShellIntegration::None, "none"),
+            (ShellIntegration::Detect, "detect"),
+            (ShellIntegration::Bash, "bash"),
+            (ShellIntegration::Elvish, "elvish"),
+            (ShellIntegration::Fish, "fish"),
+            (ShellIntegration::Nushell, "nushell"),
+            (ShellIntegration::Zsh, "zsh"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (WindowSubtitle::False, "false"),
+            (WindowSubtitle::WorkingDirectory, "working-directory"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "async-backend"),
+            "async-backend = auto"
+        );
+        assert_eq!(
+            line(&default_lines, "confirm-close-surface"),
+            "confirm-close-surface = true"
+        );
+        assert_eq!(
+            line(&default_lines, "custom-shader-animation"),
+            "custom-shader-animation = true"
+        );
+        assert_eq!(line(&default_lines, "fullscreen"), "fullscreen = false");
+        assert_eq!(
+            line(&default_lines, "grapheme-width-method"),
+            "grapheme-width-method = unicode"
+        );
+        assert_eq!(
+            line(&default_lines, "link-previews"),
+            "link-previews = true"
+        );
+        assert_eq!(
+            line(&default_lines, "linux-cgroup"),
+            format!("linux-cgroup = {}", default.linux_cgroup.keyword())
+        );
+        assert_eq!(
+            line(&default_lines, "shell-integration"),
+            "shell-integration = detect"
+        );
+        assert_eq!(
+            line(&default_lines, "window-subtitle"),
+            "window-subtitle = false"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("async-backend", Some("io_uring")).unwrap();
+        cfg.set("confirm-close-surface", Some("always")).unwrap();
+        cfg.set("custom-shader-animation", Some("always")).unwrap();
+        cfg.set("fullscreen", Some("non-native-visible-menu"))
+            .unwrap();
+        cfg.set("grapheme-width-method", Some("legacy")).unwrap();
+        cfg.set("link-previews", Some("osc8")).unwrap();
+        cfg.set("linux-cgroup", Some("always")).unwrap();
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        cfg.set("shell-integration", Some("zsh")).unwrap();
+        cfg.set("window-subtitle", Some("working-directory"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "async-backend"), "async-backend = io_uring");
+        assert_eq!(
+            line(&lines, "confirm-close-surface"),
+            "confirm-close-surface = always"
+        );
+        assert_eq!(
+            line(&lines, "custom-shader-animation"),
+            "custom-shader-animation = always"
+        );
+        assert_eq!(
+            line(&lines, "fullscreen"),
+            "fullscreen = non-native-visible-menu"
+        );
+        assert_eq!(
+            line(&lines, "grapheme-width-method"),
+            "grapheme-width-method = legacy"
+        );
+        assert_eq!(line(&lines, "link-previews"), "link-previews = osc8");
+        assert_eq!(line(&lines, "linux-cgroup"), "linux-cgroup = always");
+        assert_eq!(line(&lines, "shell-integration"), "shell-integration = zsh");
+        assert_eq!(
+            line(&lines, "window-subtitle"),
+            "window-subtitle = working-directory"
+        );
+
+        for key in [
+            "async-backend",
+            "confirm-close-surface",
+            "custom-shader-animation",
+            "fullscreen",
+            "grapheme-width-method",
+            "link-previews",
+            "linux-cgroup",
+            "shell-integration",
+            "window-subtitle",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "async-backend",
+            "confirm-close-surface",
+            "custom-shader-animation",
+            "fullscreen",
+            "grapheme-width-method",
+            "link-previews",
+            "linux-cgroup",
+            "shell-integration",
+            "window-subtitle",
+        ] {
+            assert_eq!(
+                line(&reset_lines, key),
+                line(&default_lines, key),
+                "{key} raw-empty reset returns to the default"
+            );
+        }
+
+        assert!(index(&lines, "adjust-cursor-thickness") < index(&lines, "adjust-cursor-height"));
+        assert!(index(&lines, "adjust-cursor-height") < index(&lines, "grapheme-width-method"));
+        assert!(index(&lines, "link-url") < index(&lines, "link-previews"));
+        assert!(index(&lines, "link-previews") < index(&lines, "fullscreen"));
+        assert!(index(&lines, "fullscreen") < index(&lines, "title"));
+        assert!(index(&lines, "title") < index(&lines, "class"));
+        assert!(index(&lines, "class") < index(&lines, "x11-instance-name"));
+        assert!(index(&lines, "window-subtitle") < index(&lines, "window-theme"));
+        assert!(index(&lines, "window-theme") < index(&lines, "window-colorspace"));
+        assert!(index(&lines, "window-padding-color") < index(&lines, "confirm-close-surface"));
+        assert!(
+            index(&lines, "confirm-close-surface") < index(&lines, "quit-after-last-window-closed")
+        );
+        assert!(index(&lines, "quick-terminal-size") < index(&lines, "shell-integration"));
+        assert!(index(&lines, "shell-integration") < index(&lines, "shell-integration-features"));
+        assert!(index(&lines, "osc-color-report-format") < index(&lines, "vt-kam-allowed"));
+        assert!(index(&lines, "vt-kam-allowed") < index(&lines, "custom-shader"));
+        assert!(index(&lines, "custom-shader") < index(&lines, "custom-shader-animation"));
+        assert!(index(&lines, "custom-shader-animation") < index(&lines, "bell-features"));
+        assert!(index(&lines, "linux-cgroup") < index(&lines, "linux-cgroup-memory-limit"));
+        assert!(index(&lines, "enquiry-response") < index(&lines, "async-backend"));
+        assert!(index(&lines, "async-backend") < index(&lines, "auto-update"));
+    }
+
+    #[test]
     fn enum_format_entries_misc() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();

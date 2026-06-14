@@ -50,6 +50,7 @@ BACKGROUND_IMAGE_ENUM_ORACLE_TEST = (
 )
 GTK_ENUM_ORACLE_TEST = "gtk_enum_config_formatter_family_oracle"
 MACOS_ENUM_ORACLE_TEST = "macos_enum_config_formatter_family_oracle"
+MISC_DIRECT_ENUM_ORACLE_TEST = "misc_direct_enum_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
@@ -169,6 +170,17 @@ MACOS_ENUM_OPTIONS = {
     "macos-icon",
     "macos-icon-frame",
     "macos-shortcuts",
+}
+MISC_DIRECT_ENUM_OPTIONS = {
+    "async-backend",
+    "confirm-close-surface",
+    "custom-shader-animation",
+    "fullscreen",
+    "grapheme-width-method",
+    "link-previews",
+    "linux-cgroup",
+    "shell-integration",
+    "window-subtitle",
 }
 OPTIONAL_COLOR_OPTIONS = {
     "bold-color",
@@ -308,6 +320,8 @@ def formatter_family(option: str, path_text: str, call_text: str) -> str:
         return "gtk enum"
     if option in MACOS_ENUM_OPTIONS:
         return "macos enum"
+    if option in MISC_DIRECT_ENUM_OPTIONS:
+        return "misc direct enum"
     if "font_" in call_text or "Font" in call_text:
         return "font"
     if "window_padding" in call_text:
@@ -478,6 +492,7 @@ def build_rows(
     background_image_enum_oracle_present: bool,
     gtk_enum_oracle_present: bool,
     macos_enum_oracle_present: bool,
+    misc_direct_enum_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
@@ -781,6 +796,18 @@ def build_rows(
                 "representative order checks"
             )
             missing_evidence = "None for macOS enum formatter rows."
+        elif misc_direct_enum_oracle_present and family == "misc direct enum":
+            status = "Oracle complete"
+            evidence = (
+                "Misc direct enum formatter oracle covers every AsyncBackend, "
+                "ConfirmCloseSurface, CustomShaderAnimation, Fullscreen, "
+                "GraphemeWidthMethod, LinkPreviews, LinuxCgroup, "
+                "ShellIntegration, and WindowSubtitle keyword; direct enum "
+                "formatter output; representative Config::set plus "
+                "format_config output; raw-empty resets to defaults; and "
+                "representative order checks"
+            )
+            missing_evidence = "None for misc direct enum formatter rows."
         elif metric_modifier_oracle_present and family == "metric modifier":
             status = "Oracle complete"
             evidence = (
@@ -911,6 +938,7 @@ def main() -> int:
     )
     gtk_enum_oracle_present = GTK_ENUM_ORACLE_TEST in roastty_source
     macos_enum_oracle_present = MACOS_ENUM_ORACLE_TEST in roastty_source
+    misc_direct_enum_oracle_present = MISC_DIRECT_ENUM_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
@@ -946,6 +974,7 @@ def main() -> int:
         background_image_enum_oracle_present,
         gtk_enum_oracle_present,
         macos_enum_oracle_present,
+        misc_direct_enum_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
@@ -961,7 +990,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        82
+        83
+        if misc_direct_enum_oracle_present
+        else 82
         if macos_enum_oracle_present
         else 81
         if gtk_enum_oracle_present
