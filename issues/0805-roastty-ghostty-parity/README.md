@@ -457,3 +457,5 @@ remains open.
 - [Experiment 20: Path parser oracle](20-path-parser-oracle.md) — **Pass**
 - [Experiment 21: Working directory parser oracle](21-working-directory-parser-oracle.md)
   — **Pass**
+- [Experiment 22: Command palette parser oracle](22-command-palette-parser-oracle.md)
+  — **Designed**
