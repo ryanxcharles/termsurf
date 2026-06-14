@@ -833,3 +833,5 @@ remains open.
   — **Pass**
 - [Experiment 69: Codepoint map formatter oracle](69-codepoint-map-formatter-oracle.md)
   — **Pass**
+- [Experiment 70: Font shaping break formatter oracle](70-font-shaping-break-formatter-oracle.md)
+  — **Designed**
