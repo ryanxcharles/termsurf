@@ -681,3 +681,5 @@ remains open.
 - [Experiment 48: Keybind parser oracle](48-keybind-parser-oracle.md) — **Pass**
 - [Experiment 49: Config default files load oracle](49-config-default-files-load-oracle.md)
   — **Pass**
+- [Experiment 50: Non-default formatter facet audit](50-non-default-formatter-facet-audit.md)
+  — **Designed**
