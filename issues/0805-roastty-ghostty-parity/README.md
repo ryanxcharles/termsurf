@@ -360,6 +360,15 @@ experiment files until they are proven.
   while keeping already-proven packed rows unpromoted. The matrix assertion must
   inspect the family column because unrelated evidence text may legitimately
   mention packed flag output.
+- **Background-image enum rows are distinct from adjacent image scalars.**
+  Experiment 80 promoted only `background-image-fit` and
+  `background-image-position` by proving every enum keyword, representative
+  `Config::set` plus `format_config` output, raw-empty resets, and local order
+  while keeping `background-image`, `background-image-opacity`, and
+  `background-image-repeat` outside the family.
+- **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
+  `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
+  artifact and remove it after running the inventory script compile check.
 - **Full-header ABI gaps must be split into symbol and semantic outcomes.**
   Experiment 5 proved the mapped Ghostty header can be closed at the
   declaration/export level while still recording honest semantic divergences for
@@ -907,4 +916,4 @@ remains open.
 - [Experiment 79: Packed flag formatter oracle](79-packed-flag-formatter-oracle.md)
   — **Pass**
 - [Experiment 80: Background image enum formatter oracle](80-background-image-enum-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

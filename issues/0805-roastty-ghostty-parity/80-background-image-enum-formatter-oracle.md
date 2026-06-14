@@ -135,3 +135,82 @@ Findings:
   `python3 -m py_compile` without `PYTHONDONTWRITEBYTECODE=1`, creating
   `issues/0805-roastty-ghostty-parity/__pycache__/`. The generated cache was
   removed before the plan commit.
+
+## Result
+
+**Result:** Pass
+
+Implemented the background-image enum formatter oracle and promoted exactly the
+two planned CFG-218 rows:
+
+- `background-image-fit`;
+- `background-image-position`.
+
+The regenerated formatter inventory reports:
+
+- `ghostty_canonical=203`;
+- `roastty_formatter_rows=203`;
+- `missing_canonical_formatter_rows=0`;
+- `extra_formatter_rows=0`;
+- `oracle_complete=172`;
+- `audit_covered=31`;
+- `gap=0`.
+
+The matrix assertion passed and confirmed that adjacent rows `background-image`,
+`background-image-opacity`, and `background-image-repeat` were not classified as
+`background image enum`.
+
+Verification run:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml`
+- `cargo test --manifest-path roastty/Cargo.toml background_image_enum_config_formatter_family_oracle`
+  — passed, 1 test.
+- `cargo test --manifest-path roastty/Cargo.toml enum_format_entries_bgimage` —
+  passed, 1 test.
+- `cargo test --manifest-path roastty/Cargo.toml enum_from_keyword_round_trips_misc`
+  — passed, matching the existing
+  `config::tests::enum_from_keyword_round_trips_misc_fullscreen` test.
+- `cargo test --manifest-path roastty/Cargo.toml background_image_config_parse_format_reset_and_diagnose`
+  — passed, 1 test.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle` —
+  passed, 1 test.
+- Formatter inventory regeneration — passed with the expected counts above.
+- Matrix assertion — passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_formatter_inventory.py`
+  — passed, then the generated `__pycache__/` artifact was removed.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` — passed.
+- `prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/80-background-image-enum-formatter-oracle.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+Background-image enum formatting is now a durable, non-default CFG-218 oracle
+rather than broad audit coverage. The remaining formatter gap is 31
+`Audit covered` rows and 0 formatter-dispatch gaps; CFG-218 correctly remains
+`Gap` until those remaining rows receive focused formatter oracles.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Verdict: Approved.
+
+Findings:
+
+- No Required findings.
+
+Reviewer verification:
+
+- New and related Cargo tests pass.
+- `cargo fmt --check`, `prettier --check`, and `git diff --check` pass.
+- Matrix assertion passes.
+- Inventory rows show 203 total rows, 172 `Oracle complete` rows, 31
+  `Audit covered` rows, and 0 `Gap` rows.
+- `background-image-fit` and `background-image-position` are the only
+  `background image enum` rows.
+- The README marks Experiment 80 as `Pass`, Learnings were updated, and the
+  result was still uncommitted during review.
+
+The reviewer did not rerun inventory regeneration or `py_compile` because those
+commands can write generated artifacts and the review was read-only.

@@ -14499,6 +14499,102 @@ mod tests {
     }
 
     #[test]
+    fn background_image_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (BackgroundImageFit::Contain, "contain"),
+            (BackgroundImageFit::Cover, "cover"),
+            (BackgroundImageFit::Stretch, "stretch"),
+            (BackgroundImageFit::None, "none"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (BackgroundImagePosition::TopLeft, "top-left"),
+            (BackgroundImagePosition::TopCenter, "top-center"),
+            (BackgroundImagePosition::TopRight, "top-right"),
+            (BackgroundImagePosition::CenterLeft, "center-left"),
+            (BackgroundImagePosition::CenterCenter, "center-center"),
+            (BackgroundImagePosition::CenterRight, "center-right"),
+            (BackgroundImagePosition::BottomLeft, "bottom-left"),
+            (BackgroundImagePosition::BottomCenter, "bottom-center"),
+            (BackgroundImagePosition::BottomRight, "bottom-right"),
+            (BackgroundImagePosition::Center, "center"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default_lines = formatted_lines(&Config::default());
+        assert_eq!(
+            line(&default_lines, "background-image-fit"),
+            "background-image-fit = contain"
+        );
+        assert_eq!(
+            line(&default_lines, "background-image-position"),
+            "background-image-position = center"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("background-image-fit", Some("cover")).unwrap();
+        cfg.set("background-image-position", Some("bottom-right"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image-fit"),
+            "background-image-fit = cover"
+        );
+        assert_eq!(
+            line(&lines, "background-image-position"),
+            "background-image-position = bottom-right"
+        );
+
+        cfg.set("background-image-fit", Some("")).unwrap();
+        cfg.set("background-image-position", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "background-image-fit"),
+            "background-image-fit = contain"
+        );
+        assert_eq!(
+            line(&reset_lines, "background-image-position"),
+            "background-image-position = center"
+        );
+
+        assert!(index(&lines, "background-image") < index(&lines, "background-image-opacity"));
+        assert!(
+            index(&lines, "background-image-opacity") < index(&lines, "background-image-position")
+        );
+        assert!(index(&lines, "background-image-position") < index(&lines, "background-image-fit"));
+        assert!(index(&lines, "background-image-fit") < index(&lines, "background-image-repeat"));
+    }
+
+    #[test]
     fn enum_format_entries_misc() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
