@@ -962,3 +962,5 @@ remains open.
   — **Pass**
 - [Experiment 86: Boolean diagnostic oracle](86-boolean-diagnostic-oracle.md) —
   **Pass**
+- [Experiment 87: Integer diagnostic oracle](87-integer-diagnostic-oracle.md) —
+  **Designed**
