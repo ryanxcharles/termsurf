@@ -544,6 +544,13 @@ experiment files until they are proven.
   append, `raw:` and `path:` select explicit storage, unknown-tag values fall
   back to raw input, `raw:` may carry an empty payload, and invalid entries
   leave the existing list unchanged.
+- **Repeatable font strings share one helper with a CLI exception.** Experiment
+  42 proved canonical `font-family`, `font-family-bold`, `font-family-italic`,
+  `font-family-bold-italic`, and `font-feature`: missing values are required,
+  exact empty values clear the list, non-empty values append byte-for-byte,
+  `overwrite_next` clears only before the next append and then resets,
+  clones/equality ignore `overwrite_next`, CLI font-family values replace file
+  values, and CLI font-feature values append normally.
 
 ## Verification
 
@@ -627,4 +634,4 @@ remains open.
   — **Pass**
 - [Experiment 41: Input parser oracle](41-input-parser-oracle.md) — **Pass**
 - [Experiment 42: Repeatable string font parser oracle](42-repeatable-string-font-parser-oracle.md)
-  — **Designed**
+  — **Pass**

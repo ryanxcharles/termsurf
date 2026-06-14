@@ -16395,14 +16395,54 @@ mod tests {
     }
 
     #[test]
-    fn config_font_family_repeats_clears_and_cli_overwrites_files() {
+    fn repeatable_string_font_config_parser_family_oracle() {
+        assert_eq!(
+            RepeatableString::default().parse_cli(None),
+            Err(RepeatableStringParseError::ValueRequired)
+        );
+
+        let mut direct = RepeatableString::default();
+        direct.list = vec!["old".to_string()];
+        assert_eq!(direct.parse_cli(Some("")), Ok(()));
+        assert!(direct.list.is_empty());
+
+        direct.list = vec!["file value".to_string()];
+        direct.overwrite_next = true;
+        assert_eq!(direct.parse_cli(Some("CLI Font: 13!")), Ok(()));
+        assert_eq!(direct.list, vec!["CLI Font: 13!"]);
+        assert!(!direct.overwrite_next);
+        assert_eq!(direct.parse_cli(Some("Next Font")), Ok(()));
+        assert_eq!(direct.list, vec!["CLI Font: 13!", "Next Font"]);
+
+        direct.overwrite_next = true;
+        let cloned = direct.clone();
+        assert_eq!(cloned.list, direct.list);
+        assert!(!cloned.overwrite_next);
+        let mut same_list = direct.clone();
+        same_list.overwrite_next = true;
+        assert_eq!(same_list, direct);
+
+        let lines = |cfg: &Config, prefix: &str| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .filter(|line| line.starts_with(prefix))
+                .map(str::to_string)
+                .collect()
+        };
+
         let mut cfg = Config::default();
         cfg.set("font-family", Some("A")).unwrap();
         cfg.set("font-family", Some("B")).unwrap();
         assert_eq!(cfg.font_family.list, vec!["A", "B"]);
+        assert_eq!(
+            lines(&cfg, "font-family = "),
+            vec!["font-family = A", "font-family = B"]
+        );
 
         cfg.set("font-family", Some("")).unwrap();
         assert!(cfg.font_family.list.is_empty());
+        assert_eq!(lines(&cfg, "font-family = "), vec!["font-family = "]);
         cfg.set("font-family", Some("C")).unwrap();
         assert_eq!(cfg.font_family.list, vec!["C"]);
 
@@ -16424,34 +16464,22 @@ mod tests {
         let diagnostics = cfg.set_cli_args(["--font-family=", "--font-family=CLI"]);
         assert!(diagnostics.is_empty());
         assert_eq!(cfg.font_family.list, vec!["CLI"]);
-    }
-
-    #[test]
-    fn font_feature_config_parse_format_reset_load_cli_append_and_clone() {
-        let lines = |cfg: &Config| -> Vec<String> {
-            let mut out = String::new();
-            cfg.format_config(&mut out);
-            out.lines()
-                .filter(|l| l.starts_with("font-feature = "))
-                .map(str::to_string)
-                .collect()
-        };
 
         let mut cfg = Config::default();
         assert!(cfg.font_feature.list.is_empty());
-        assert_eq!(lines(&cfg), vec!["font-feature = "]);
+        assert_eq!(lines(&cfg, "font-feature = "), vec!["font-feature = "]);
 
         cfg.set("font-feature", Some("calt")).unwrap();
         cfg.set("font-feature", Some("-liga")).unwrap();
         assert_eq!(cfg.font_feature.list, vec!["calt", "-liga"]);
         assert_eq!(
-            lines(&cfg),
+            lines(&cfg, "font-feature = "),
             vec!["font-feature = calt", "font-feature = -liga"]
         );
 
         cfg.set("font-feature", Some("")).unwrap();
         assert!(cfg.font_feature.list.is_empty());
-        assert_eq!(lines(&cfg), vec!["font-feature = "]);
+        assert_eq!(lines(&cfg, "font-feature = "), vec!["font-feature = "]);
 
         assert_eq!(
             cfg.set("font-feature", None),

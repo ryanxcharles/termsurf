@@ -185,3 +185,133 @@ Fix:
 **Re-review verdict:** Approved.
 
 Findings after fix: none.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes a focused
+`repeatable_string_font_config_parser_family_oracle` that covers the direct
+`RepeatableString` parser boundary, the four `font-family*` fields, and
+`font-feature`. The oracle proves missing-value errors, exact-empty resets,
+byte-preserving non-empty appends, one-shot `overwrite_next` clearing,
+clone/equality behavior that ignores `overwrite_next`, font-family CLI
+replacement of file values, font-feature CLI append behavior, and formatter
+output for empty and repeated entries.
+
+The parser inventory generator now detects that oracle and promotes only the
+five canonical repeatable-string font rows to `Oracle complete`. The regenerated
+CFG-217 parser inventory reports 203 parser rows, 189 `Oracle complete`, 14
+`Audit covered`, and 0 `Gap`. CFG-217 remains `Gap` because the remaining
+audit-only parser rows still need their own upstream-derived oracles.
+
+Verification run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml repeatable_string_font_config_parser_family_oracle
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+python3 - <<'PY'
+from pathlib import Path
+
+rows = []
+for line in Path('issues/0805-roastty-ghostty-parity/config-parser-inventory.md').read_text().splitlines():
+    if line.startswith('| PARSE-'):
+        rows.append([cell.strip() for cell in line.strip('|').split('|')])
+
+assert len(rows) == 203, len(rows)
+assert sum(row[4] == 'Oracle complete' for row in rows) == 189
+assert sum(row[4] == 'Audit covered' for row in rows) == 14
+assert not [row for row in rows if row[4] == 'Gap']
+expected_audit = {
+    '`clipboard-codepoint-map`',
+    '`config-default-files`',
+    '`font-codepoint-map`',
+    '`font-style`',
+    '`font-style-bold`',
+    '`font-style-bold-italic`',
+    '`font-style-italic`',
+    '`font-variation`',
+    '`font-variation-bold`',
+    '`font-variation-bold-italic`',
+    '`font-variation-italic`',
+    '`key-remap`',
+    '`keybind`',
+    '`theme`',
+}
+actual_audit = {row[1] for row in rows if row[4] == 'Audit covered'}
+assert actual_audit == expected_audit, sorted(actual_audit ^ expected_audit)
+for option in {
+    '`font-family`',
+    '`font-family-bold`',
+    '`font-family-italic`',
+    '`font-family-bold-italic`',
+    '`font-feature`',
+}:
+    row = next(row for row in rows if row[1] == option)
+    assert row[4] == 'Oracle complete', row
+
+cfg217 = None
+for line in Path('issues/0805-roastty-ghostty-parity/config-matrix.md').read_text().splitlines():
+    if line.startswith('| CFG-217 |'):
+        cfg217 = [cell.strip() for cell in line.strip('|').split('|')]
+        break
+assert cfg217 is not None
+assert cfg217[4] == 'Gap', cfg217
+assert cfg217[11] == 'Experiment 42', cfg217
+assert '189 parser rows Oracle complete' in cfg217[12], cfg217
+print('repeatable_string_font_rows=5 oracle_complete=189 cfg217=Gap')
+PY
+cargo fmt --manifest-path roastty/Cargo.toml
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_parser_inventory.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+prettier --write --prose-wrap always --print-width 80 \
+  issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/42-repeatable-string-font-parser-oracle.md \
+  issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md
+git diff --check
+```
+
+Observed key outputs:
+
+- `test config::tests::repeatable_string_font_config_parser_family_oracle ... ok`
+- `oracle_complete=189`
+- `audit_covered=14`
+- `gap=0`
+- `repeatable_string_font_rows=5 oracle_complete=189 cfg217=Gap`
+
+## Conclusion
+
+The five repeatable-string font parser rows are no longer audit-only. Future
+parser work can focus on the 14 remaining audit-only rows: codepoint maps,
+font-style, font-variation, key remap/keybind, theme, and
+`config-default-files`.
+
+## Completion Review
+
+Reviewed by an adversarial Codex subagent with fresh context.
+
+**Initial verdict:** Changes required.
+
+Required finding:
+
+- A `py_compile` artifact remained under
+  `issues/0805-roastty-ghostty-parity/__pycache__/`, violating the experiment
+  pass criterion that no `__pycache__` or `.pyc` artifacts remain.
+
+Fix:
+
+- Removed `issues/0805-roastty-ghostty-parity/__pycache__/`.
+
+**Re-review verdict:** Approved.
+
+Findings after fix: none.
+
+The reviewer verified that no `__pycache__` or `.pyc` artifacts remained,
+`git status --short` showed only intended tracked changes, and
+`git diff --check` passed.
