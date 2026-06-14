@@ -162,3 +162,132 @@ Reviewed by a fresh-context Codex adversarial subagent.
 The reviewer reported no findings. It confirmed the README links Experiment 48
 as `Designed`, the experiment has the required sections, and the plan matches
 the CFG-217 parser-facet scope without claiming runtime keybinding parity.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the keybind parser oracle and promoted only the canonical `keybind`
+parser row.
+
+Changes made:
+
+- Renamed and expanded the config-level keybind test to
+  `keybind_config_parser_family_oracle`.
+- Covered missing value, empty default reset, `clear`, root direct bindings,
+  root key sequences, chained actions, table direct bindings, table sequences,
+  table clears, invalid root/table chains, invalid chained actions, slash
+  disambiguation, trigger prefixes, physical key aliases, config-file
+  diagnostics, CLI parsing, formatting, equality, and clone behavior.
+- Added `keybind_config_parser_family_oracle` detection to
+  `config_parser_inventory.py`.
+- Regenerated `config-parser-inventory.md` and `config-matrix.md`.
+- Added the README learning that this oracle proves parser-surface behavior but
+  not runtime shortcut dispatch.
+
+Verification performed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml keybind_config_parser_family_oracle
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+python3 - <<'PY'
+from pathlib import Path
+
+rows = []
+for line in Path('issues/0805-roastty-ghostty-parity/config-parser-inventory.md').read_text().splitlines():
+    if line.startswith('| PARSE-'):
+        cells = [cell.strip() for cell in line.strip('|').split('|')]
+        rows.append(cells)
+
+by_option = {row[1].strip('`'): row for row in rows}
+audit = {row[1].strip('`') for row in rows if row[4] == 'Audit covered'}
+
+assert len(rows) == 203, len(rows)
+assert sum(row[4] == 'Oracle complete' for row in rows) == 202
+assert by_option['keybind'][4] == 'Oracle complete'
+assert audit == {'config-default-files'}, audit
+assert not any(row[4] == 'Gap' for row in rows)
+
+matrix = Path('issues/0805-roastty-ghostty-parity/config-matrix.md').read_text()
+cfg217 = next(line for line in matrix.splitlines() if line.startswith('| CFG-217 '))
+cfg217_cells = [cell.strip() for cell in cfg217.strip('|').split('|')]
+assert cfg217_cells[4] == 'Gap'
+assert cfg217_cells[11] == 'Experiment 48'
+assert 'config-parser-inventory.md' in cfg217_cells[6]
+PY
+cargo fmt --manifest-path roastty/Cargo.toml
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_parser_inventory.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+test -z "$(find issues/0805-roastty-ghostty-parity -name __pycache__ -prune -print)"
+git diff --check
+```
+
+The parser inventory reports:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=202
+audit_covered=1
+gap=0
+```
+
+The first focused run exposed that the oracle expected prefix formatting that
+did not match pinned Ghostty. The formatter and oracle now match pinned Ghostty:
+prefix flags affect stored parser/runtime metadata, but formatted keybind lines
+print only the trigger key/sequence and action.
+
+## Conclusion
+
+`keybind` parser parity is now Oracle complete for CFG-217. The remaining
+audit-only parser row is `config-default-files`, so CFG-217 correctly remains
+`Gap` at 202 Oracle complete rows, 1 Audit covered row, and 0 dispatch gaps.
+
+## Completion Review
+
+Reviewed by fresh-context Codex adversarial subagents.
+
+Initial completion review verdict: Changes required.
+
+Findings:
+
+- Required: the oracle asserted non-Ghostty keybind formatter semantics for
+  trigger prefixes. Fixed by changing Roastty keybind formatting to match pinned
+  Ghostty: `global:`, `all:`, `unconsumed:`, and `performable:` remain parser
+  metadata but are not emitted in formatted config lines.
+- Required: the oracle parsed table bindings and table sequences, then cleared
+  the table before asserting formatted table entries. Fixed by asserting table
+  direct/sequence entries and their chained actions before separately asserting
+  the `nav/` table-clear output.
+
+Verification after fixes:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml keybind_config_parser_family_oracle
+cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+Re-review verdict: Approved.
+
+The re-review confirmed both required findings were resolved, reran the focused
+keybind oracle, the default format oracle, `cargo fmt --check`,
+`git diff --check`, and the read-only matrix assertion, and reported no new
+Required findings.

@@ -57,6 +57,7 @@ FONT_VARIATION_ORACLE_TEST = "font_variation_config_parser_family_oracle"
 CODEPOINT_MAP_ORACLE_TEST = "codepoint_map_config_parser_family_oracle"
 KEY_REMAP_ORACLE_TEST = "key_remap_config_parser_family_oracle"
 THEME_ORACLE_TEST = "theme_config_parser_family_oracle"
+KEYBIND_ORACLE_TEST = "keybind_config_parser_family_oracle"
 
 REPEATABLE_STRING_FONT_OPTIONS = {
     "font-family",
@@ -385,6 +386,7 @@ def build_rows(
     codepoint_map_oracle_present: bool,
     key_remap_oracle_present: bool,
     theme_oracle_present: bool,
+    keybind_oracle_present: bool,
 ) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
     arm_by_key: dict[str, ParserArm] = {}
     for arm in arms:
@@ -703,6 +705,15 @@ def build_rows(
                 "formatting, and clone semantics"
             )
             missing_evidence = "None for direct theme parser semantics."
+        elif keybind_oracle_present and option == "keybind":
+            status = "Oracle complete"
+            evidence = (
+                "Keybind parser oracle covers defaults, clear, direct bindings, "
+                "key sequences, chained actions, key tables, table clears, slash "
+                "disambiguation, trigger prefixes, invalid chains/actions, "
+                "diagnostics, CLI, formatting, equality, and clone semantics"
+            )
+            missing_evidence = "None for direct keybind parser semantics."
         elif option == "config-default-files":
             missing_evidence = (
                 "Direct parser and effective default-file load-order semantics must "
@@ -775,6 +786,7 @@ def main() -> int:
     codepoint_map_oracle_present = CODEPOINT_MAP_ORACLE_TEST in roastty_source
     key_remap_oracle_present = KEY_REMAP_ORACLE_TEST in roastty_source
     theme_oracle_present = THEME_ORACLE_TEST in roastty_source
+    keybind_oracle_present = KEYBIND_ORACLE_TEST in roastty_source
     rows, missing, compatibility_only, noncanonical = build_rows(
         upstream,
         aliases,
@@ -812,13 +824,16 @@ def main() -> int:
         codepoint_map_oracle_present,
         key_remap_oracle_present,
         theme_oracle_present,
+        keybind_oracle_present,
     )
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        47
+        48
+        if keybind_oracle_present
+        else 47
         if theme_oracle_present
         else 46
         if key_remap_oracle_present

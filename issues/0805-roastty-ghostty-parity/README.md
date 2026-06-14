@@ -338,6 +338,11 @@ experiment files until they are proven.
   on macOS and other non-Windows builds. Its Windows-only drive-letter exception
   for `C:\...` paths is outside Issue 805's copied macOS app parity oracle and
   should be tracked separately if Windows config parity work starts.
+- **`keybind` parser parity is parser-surface only.** Experiment 48 proves
+  pinned Ghostty `Keybinds.parseCLI` semantics for defaults, clear, root
+  bindings, key sequences, chains, tables, slash disambiguation, trigger
+  prefixes, diagnostics, CLI, formatting, equality, and clone behavior. Runtime
+  shortcut dispatch remains covered by separate keybinding/runtime facets.
 - **Default config formatter parity needs an A/B fixture.** Experiment 8 found
   and fixed non-repeatable formatter order drift by comparing pinned Ghostty
   `+show-config --default --no-pager` output to Roastty
@@ -673,5 +678,4 @@ remains open.
 - [Experiment 46: Key remap parser oracle](46-key-remap-parser-oracle.md) —
   **Pass**
 - [Experiment 47: Theme parser oracle](47-theme-parser-oracle.md) — **Pass**
-- [Experiment 48: Keybind parser oracle](48-keybind-parser-oracle.md) —
-  **Designed**
+- [Experiment 48: Keybind parser oracle](48-keybind-parser-oracle.md) — **Pass**

@@ -372,15 +372,6 @@ fn format_binding(
     table: Option<&str>,
 ) -> Vec<String> {
     let mut trigger = String::new();
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_GLOBAL != 0 {
-        trigger.push_str("global:");
-    }
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_ALL != 0 {
-        trigger.push_str("all:");
-    }
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_CONSUMED == 0 {
-        trigger.push_str("unconsumed:");
-    }
     if let Some(table) = table {
         trigger.push_str(table);
         trigger.push('/');

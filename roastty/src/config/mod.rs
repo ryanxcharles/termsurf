@@ -22458,7 +22458,7 @@ mod tests {
     }
 
     #[test]
-    fn keybind_config_parse_format_reset_load_cli_and_clone() {
+    fn keybind_config_parser_family_oracle() {
         let lines = |cfg: &Config| -> Vec<String> {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -22487,14 +22487,34 @@ mod tests {
         cfg.set("keybind", Some("clear")).unwrap();
         cfg.set("keybind", Some("x=text:parent")).unwrap();
         cfg.set("keybind", Some("chain=text:child")).unwrap();
+        cfg.set("keybind", Some("ctrl+a>n=new_window")).unwrap();
+        cfg.set("keybind", Some("chain=goto_split:left")).unwrap();
         cfg.set("keybind", Some("nav/a=quit")).unwrap();
         cfg.set("keybind", Some("chain=new_window")).unwrap();
+        cfg.set("keybind", Some("nav/c>d=toggle_fullscreen"))
+            .unwrap();
+        cfg.set("keybind", Some("chain=close_surface")).unwrap();
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "keybind = x=text:parent",
+                "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
+                "keybind = nav/a=quit",
+                "keybind = chain=new_window",
+                "keybind = nav/c>d=toggle_fullscreen",
+                "keybind = chain=close_surface",
+            ]
+        );
         cfg.set("keybind", Some("nav/")).unwrap();
         assert_eq!(
             lines(&cfg),
             vec![
                 "keybind = x=text:parent",
                 "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
                 "keybind = nav/",
             ]
         );
@@ -22508,6 +22528,44 @@ mod tests {
             cfg.set("keybind", Some("nav/chain=ignore")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        for value in [
+            "/=text:slash",
+            "ctrl+/=text:ctrlslash",
+            "shift+/=ignore",
+            "ctrl+a>ctrl+/=new_window",
+            "mytable//=text:table-slash",
+            "mytable/a>/=new_window",
+        ] {
+            cfg.set("keybind", Some(value)).unwrap();
+        }
+        let slash_lines = lines(&cfg);
+        for expected in [
+            "keybind = /=text:slash",
+            "keybind = ctrl+/=text:ctrlslash",
+            "keybind = shift+/=ignore",
+            "keybind = ctrl+a>ctrl+/=new_window",
+            "keybind = mytable//=text:table-slash",
+            "keybind = mytable/a>/=new_window",
+        ] {
+            assert!(
+                slash_lines.iter().any(|line| line == expected),
+                "missing formatted keybind line {expected}; got {slash_lines:?}"
+            );
+        }
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("global:all:unconsumed:a=quit"))
+            .unwrap();
+        cfg.set("keybind", Some("performable:b=new_window"))
+            .unwrap();
+        assert!(cfg.keybind.has_global_keybinds);
+        let prefix_lines = lines(&cfg);
+        assert!(prefix_lines.iter().any(|line| line == "keybind = a=quit"));
+        assert!(prefix_lines
+            .iter()
+            .any(|line| line == "keybind = b=new_window"));
 
         let diagnostics = cfg.load_str(
             "keybind = clear\n\
