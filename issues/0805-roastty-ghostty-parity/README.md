@@ -511,3 +511,5 @@ remains open.
   **Pass**
 - [Experiment 26: Enum parser oracle](26-enum-parser-oracle.md) — **Pass**
 - [Experiment 27: Color parser oracle](27-color-parser-oracle.md) — **Pass**
+- [Experiment 28: Metric modifier parser oracle](28-metric-modifier-parser-oracle.md)
+  — **Designed**
