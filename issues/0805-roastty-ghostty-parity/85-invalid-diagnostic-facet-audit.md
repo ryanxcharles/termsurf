@@ -134,9 +134,9 @@ for line in Path('issues/0805-roastty-ghostty-parity/config-diagnostic-inventory
     if line.startswith('| DIAG-'):
         diagnostic_rows.append([cell.strip() for cell in line.strip('|').split('|')])
 assert len(diagnostic_rows) == 203, len(diagnostic_rows)
-incomplete = [row for row in diagnostic_rows if row[4] != 'Oracle complete']
-oracle_complete = sum(row[4] == 'Oracle complete' for row in diagnostic_rows)
-gap_count = sum(row[4] == 'Gap' for row in diagnostic_rows)
+incomplete = [row for row in diagnostic_rows if row[5] != 'Oracle complete']
+oracle_complete = sum(row[5] == 'Oracle complete' for row in diagnostic_rows)
+gap_count = sum(row[5] == 'Gap' for row in diagnostic_rows)
 assert (not incomplete and cfg219[4] == 'Pass') or (incomplete and cfg219[4] == 'Gap')
 assert f'{oracle_complete} rows Oracle complete' in cfg219[12], cfg219
 assert f'{len(incomplete)} rows are not Oracle complete' in cfg219[12], cfg219
@@ -181,3 +181,61 @@ Fixes:
 Final verdict: Approved.
 
 Re-review confirmed all prior findings are resolved.
+
+## Result
+
+**Result:** Pass
+
+The diagnostic inventory generator now emits one row for each of the 203 pinned
+Ghostty canonical config options and updates CFG-219 from the generated counts.
+The generated inventory found 122 rows with existing diagnostic-specific oracle
+evidence, 81 rows that are only audit-covered, and 0 rows that are structural
+diagnostic gaps.
+
+CFG-219 remains `Gap`, as intended, because not every diagnostic row is
+`Oracle complete`. CFG-217 and CFG-218 were captured before generation and
+asserted byte-for-byte unchanged after generation.
+
+Verification output:
+
+```text
+ghostty_canonical=203
+diagnostic_rows=203
+missing_canonical_diagnostic_rows=0
+extra_diagnostic_rows=0
+oracle_complete=122
+audit_covered=81
+gap=0
+diagnostic_rows=203 incomplete=81 cfg219=Gap
+```
+
+Additional checks passed:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_diagnostic_inventory.py
+prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/85-invalid-diagnostic-facet-audit.md issues/0805-roastty-ghostty-parity/config-diagnostic-inventory.md
+git diff --check
+```
+
+## Conclusion
+
+Experiment 85 creates the CFG-219 diagnostic audit surface without overclaiming
+full diagnostic parity. Future diagnostic experiments can now choose bounded
+families from `config-diagnostic-inventory.md`, promote rows only when explicit
+`ConfigDiagnostic` behavior is proven, and let CFG-219 move to `Pass` only when
+all 203 diagnostic rows are `Oracle complete`.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Final verdict: Approved.
+
+Findings: None.
+
+The reviewer confirmed that the result commit had not been made, the inventory
+has 203 diagnostic rows matching 203 canonical options, counts are 122
+`Oracle complete`, 81 `Audit covered`, and 0 `Gap`, CFG-217 and CFG-218 are
+unchanged, CFG-219 remains `Gap` with the generated inventory and count note,
+the README marks Experiment 85 `Pass`, the learning is recorded, and the
+experiment verification snippets use the correct diagnostic status column.

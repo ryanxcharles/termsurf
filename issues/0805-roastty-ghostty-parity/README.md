@@ -389,6 +389,11 @@ experiment files until they are proven.
   to `Pass`, and changed the generated complete note to include the owner and
   row counts. Formatter parity now has 203 `Oracle complete` rows, 0
   audit-covered rows, and 0 gaps.
+- **Diagnostic parity needs its own inventory.** Experiment 85 found 122
+  canonical options with explicit diagnostic evidence already in parser-family
+  or option-specific oracles and 81 options that still need explicit
+  `ConfigDiagnostic` proof. CFG-219 now has a concrete row inventory and remains
+  `Gap` until every diagnostic row is `Oracle complete`.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -949,4 +954,4 @@ remains open.
 - [Experiment 84: Custom format_entry formatter oracle](84-custom-format-entry-formatter-oracle.md)
   — **Pass**
 - [Experiment 85: Invalid diagnostic facet audit](85-invalid-diagnostic-facet-audit.md)
-  — **Designed**
+  — **Pass**
