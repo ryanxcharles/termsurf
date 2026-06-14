@@ -542,6 +542,12 @@ experiment files until they are proven.
   `false`, falls back to standard when selection clipboards are unsupported,
   reads standard for `copy-on-select = clipboard`, and does not bypass terminal
   mouse reporting.
+- **Right-click actions run only after mouse reporting declines the event.**
+  Experiment 110 matched pinned Ghostty's `right-click-action` behavior for
+  `ignore`, `paste`, `copy`, `copy-or-paste`, and non-link `context-menu`.
+  Reporting-mode right clicks clear selection, reset selection gesture state,
+  dispatch the mouse report, and skip right-click action side effects; link
+  context-menu behavior remains tracked under notification/link runtime parity.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1151,4 +1157,4 @@ remains open.
 - [Experiment 109: Middle click action runtime](109-middle-click-action-runtime.md)
   — **Pass**
 - [Experiment 110: Right click action runtime](110-right-click-action-runtime.md)
-  — **Designed**
+  — **Pass**

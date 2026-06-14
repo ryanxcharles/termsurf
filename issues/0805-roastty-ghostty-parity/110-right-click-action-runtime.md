@@ -164,3 +164,104 @@ Fix:
 
 Re-review verdict: **Approved**. The reviewer confirmed the prior findings are
 resolved and found no remaining required design issues.
+
+## Result
+
+**Result:** Pass
+
+Roastty now stores `right-click-action` as surface runtime state, initializes it
+from config, refreshes it on surface config update, and applies it on
+right-button press only after terminal mouse reporting has had the first chance
+to consume the event.
+
+Focused tests now prove:
+
+- `ignore` consumes the right-button press without clipboard activity.
+- `paste` clears selection and requests standard clipboard paste.
+- `copy` writes an existing selection to the standard clipboard, clears the
+  selection, and does not paste.
+- `copy` with no selection consumes the press without copy or paste activity.
+- `copy-or-paste` copies and clears when a selection exists, then pastes from
+  the standard clipboard when no selection exists.
+- `context-menu` returns unconsumed, selects the clicked word, and preserves an
+  existing selection when the clicked point is inside it.
+- reporting-mode right clicks clear selection, reset nonzero selection gesture
+  state, dispatch the mouse report, and skip right-click action side effects.
+- existing surfaces change behavior when `right-click-action` is reloaded.
+
+`RUNTIME-004G` is promoted to `Oracle complete`. `RUNTIME-004F` remains `Gap`,
+and `CFG-223` remains `Gap` because eight runtime/UI rows are still incomplete.
+
+Verification run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml right_click_action
+cargo test --manifest-path roastty/Cargo.toml mouse_runtime
+cargo fmt --manifest-path roastty/Cargo.toml
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+
+prettier --write --prose-wrap always --print-width 80 \
+  issues/0805-roastty-ghostty-parity/config-matrix.md \
+  issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/110-right-click-action-runtime.md
+
+PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
+from pathlib import Path
+
+inventory = Path("issues/0805-roastty-ghostty-parity/config-runtime-inventory.md").read_text()
+matrix = Path("issues/0805-roastty-ghostty-parity/config-matrix.md").read_text()
+cfg223 = next(row for row in matrix.splitlines() if row.startswith("| CFG-223 "))
+
+rows = {}
+for line in inventory.splitlines():
+    if not line.startswith("| RUNTIME-"):
+        continue
+    cells = [cell.strip() for cell in line.strip("|").split("|")]
+    rows[cells[0]] = cells
+
+assert rows["RUNTIME-004G"][5] == "Oracle complete", rows["RUNTIME-004G"]
+assert rows["RUNTIME-004F"][5] == "Gap", rows["RUNTIME-004F"]
+assert "| Gap " in cfg223
+PY
+
+python3 -m py_compile issues/0805-roastty-ghostty-parity/config_runtime_inventory.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+
+prettier --check issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/110-right-click-action-runtime.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md \
+  issues/0805-roastty-ghostty-parity/config-runtime-inventory.md
+
+git diff --check
+```
+
+## Conclusion
+
+Right-click action parity for the non-link surface runtime path is now covered
+by focused tests and the generated CFG-223 runtime inventory. The next CFG-223
+mouse gap is `RUNTIME-004F` (`mouse-hide-while-typing`), while link-specific
+context menu behavior remains in `RUNTIME-012`.
+
+## Completion Review
+
+Fresh-context Codex adversarial reviewer `Dewey` returned **Approved** with no
+findings.
+
+The reviewer independently checked:
+
+- the result remained uncommitted before review;
+- the working-tree diff was limited to the expected six files;
+- `cargo test --manifest-path roastty/Cargo.toml right_click_action`;
+- `cargo test --manifest-path roastty/Cargo.toml mouse_runtime`;
+- `cargo fmt --manifest-path roastty/Cargo.toml -- --check`;
+- Prettier check for the touched issue docs;
+- `git diff --check`;
+- the runtime inventory counts and assertions for `RUNTIME-004G`,
+  `RUNTIME-004F`, and `CFG-223`.
+
+The reviewer skipped normal `python3 -m py_compile` because it writes
+`__pycache__`, and instead used a non-writing source compile check.

@@ -189,15 +189,17 @@ ROWS = [
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` `right-click-action`; `vendor/ghostty/src/Surface.zig` right-click action dispatch",
         roastty_reference="`roastty/src/lib.rs` mouse button handlers and app runtime actions",
         family="mouse",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
-            "`right-click-action` is parsed and formatted, but CFG-223 still "
-            "needs runtime proof for context-menu, paste, copy, "
-            "copy-or-paste, and ignore behavior."
+            "`right_click_action_*` tests prove right-button press honors "
+            "`ignore`, `paste`, `copy`, `copy-or-paste`, and `context-menu`; "
+            "clears or preserves selections according to pinned Ghostty "
+            "semantics; refreshes existing surfaces on config update; and "
+            "does not bypass terminal mouse reporting."
         ),
-        missing_evidence="Add focused runtime/UI tests for every right-click-action variant.",
+        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012.",
         guard_tier="Tier 3",
-        guard_command="TBD by future CFG-223 right-click-action experiment.",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml right_click_action`",
     ),
     RuntimeRow(
         id="RUNTIME-004H",

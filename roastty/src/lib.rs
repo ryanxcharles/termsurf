@@ -2658,6 +2658,7 @@ struct Surface {
     key_remaps: key_mods::RemapSet,
     macos_option_as_alt: Option<key_mods::OptionAsAlt>,
     cursor_click_to_move: bool,
+    right_click_action: config::RightClickAction,
     middle_click_action: config::MiddleClickAction,
     mouse_scroll_multiplier: config::MouseScrollMultiplier,
     click_repeat_interval_ns: u64,
@@ -3637,6 +3638,7 @@ impl Surface {
         self.key_remaps = parsed.key_remap.clone();
         self.macos_option_as_alt = parsed.macos_option_as_alt;
         self.cursor_click_to_move = parsed.cursor_click_to_move;
+        self.right_click_action = parsed.right_click_action;
         self.middle_click_action = parsed.middle_click_action;
         self.mouse_reporting = parsed.mouse_reporting;
         self.mouse_scroll_multiplier = parsed.mouse_scroll_multiplier;
@@ -5652,12 +5654,96 @@ impl Surface {
             false
         } else if matches!(
             (button, state),
+            (mouse::MouseButton::Right, SurfaceMouseButtonState::Press)
+        ) {
+            self.right_click_action()
+        } else if matches!(
+            (button, state),
             (mouse::MouseButton::Middle, SurfaceMouseButtonState::Press)
         ) {
             self.middle_click_action()
         } else {
             self.dispatch_mouse_report(action, Some(button))
         }
+    }
+
+    fn right_click_action(&mut self) -> bool {
+        match self.right_click_action {
+            config::RightClickAction::Ignore => true,
+            config::RightClickAction::Paste => {
+                self.selection_clear_and_reset();
+                let _ = self.paste_from_clipboard(ROASTTY_CLIPBOARD_STANDARD);
+                true
+            }
+            config::RightClickAction::Copy => {
+                let _ = self.copy_to_clipboard(CopyToClipboardFormat::Mixed);
+                self.selection_clear_and_reset();
+                true
+            }
+            config::RightClickAction::CopyOrPaste => {
+                if self.has_active_selection() {
+                    let _ = self.copy_to_clipboard(CopyToClipboardFormat::Mixed);
+                    self.selection_clear_and_reset();
+                } else {
+                    let _ = self.paste_from_clipboard(ROASTTY_CLIPBOARD_STANDARD);
+                }
+                true
+            }
+            config::RightClickAction::ContextMenu => self.context_menu_action(),
+        }
+    }
+
+    fn context_menu_action(&mut self) -> bool {
+        let Some((x, y)) = self.mouse.position else {
+            return false;
+        };
+        if !x.is_finite() || !y.is_finite() || x > f64::from(f32::MAX) || y > f64::from(f32::MAX) {
+            return false;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        let boundary_codepoints = self.selection_word_boundaries().to_vec();
+        let selected = worker.with_termio_mut(|termio| {
+            let terminal = termio.terminal();
+            let geometry = self.mouse_report_geometry(terminal)?;
+            let pos = mouse_encode::Position {
+                x: x as f32,
+                y: y as f32,
+            };
+            if geometry.pos_out_of_viewport(pos) {
+                return None;
+            }
+            let cell = geometry.pos_to_cell(pos);
+            let selection = terminal.active_selection();
+            if let Some(selection) = selection {
+                if terminal
+                    .selection_contains(selection, TerminalPointTag::Viewport, cell)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false)
+                {
+                    return Some(false);
+                }
+            }
+            let ref_ = terminal.grid_ref(TerminalPointTag::Viewport, cell)?;
+            let selection = terminal
+                .select_word(ref_, Some(&boundary_codepoints))
+                .ok()??;
+            termio.terminal_mut().set_selection(Some(selection)).ok()?;
+            Some(true)
+        });
+        if selected == Some(true) {
+            self.request_render();
+        }
+        false
+    }
+
+    fn has_active_selection(&self) -> bool {
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return false;
+        };
+        worker.with_termio(|termio| termio.terminal().active_selection().is_some())
     }
 
     fn middle_click_action(&mut self) -> bool {
@@ -17625,6 +17711,7 @@ pub extern "C" fn roastty_surface_new(
         key_remaps,
         macos_option_as_alt,
         cursor_click_to_move,
+        right_click_action,
         middle_click_action,
         mouse_reporting,
         mouse_scroll_multiplier,
@@ -17650,6 +17737,7 @@ pub extern "C" fn roastty_surface_new(
                 parsed.key_remap.clone(),
                 parsed.macos_option_as_alt,
                 parsed.cursor_click_to_move,
+                parsed.right_click_action,
                 parsed.middle_click_action,
                 parsed.mouse_reporting,
                 parsed.mouse_scroll_multiplier,
@@ -17671,6 +17759,7 @@ pub extern "C" fn roastty_surface_new(
             key_mods::RemapSet::default(),
             None,
             true,
+            config::RightClickAction::ContextMenu,
             config::MiddleClickAction::PrimaryPaste,
             true,
             config::MouseScrollMultiplier::default(),
@@ -17727,6 +17816,7 @@ pub extern "C" fn roastty_surface_new(
         key_remaps,
         macos_option_as_alt,
         cursor_click_to_move,
+        right_click_action,
         middle_click_action,
         mouse_scroll_multiplier,
         click_repeat_interval_ns,
@@ -19542,6 +19632,16 @@ mod tests {
         handle
     }
 
+    fn new_test_config_with_right_click_action(
+        right_click_action: config::RightClickAction,
+    ) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        let config = config_from_handle(handle).unwrap();
+        config.parsed.right_click_action = right_click_action;
+        config.sync_from_parsed_config();
+        handle
+    }
+
     fn new_test_config_with_font_size(font_size: f32) -> RoasttyConfig {
         let handle = roastty_config_new();
         config_from_handle(handle).unwrap().parsed.font_size = font_size;
@@ -20114,6 +20214,27 @@ mod tests {
         roastty_app_new(&runtime, config)
     }
 
+    fn new_test_app_with_clipboard_read_write_config(
+        userdata: usize,
+        read_result: bool,
+        supports_selection_clipboard: bool,
+        config: RoasttyConfig,
+    ) -> RoasttyApp {
+        reset_clipboard_read_records(read_result);
+        reset_clipboard_write_records();
+        let runtime = RoasttyRuntimeConfig {
+            userdata: userdata as *mut c_void,
+            supports_selection_clipboard,
+            wakeup_cb: None,
+            action_cb: None,
+            read_clipboard_cb: Some(read_clipboard_record_cb),
+            confirm_read_clipboard_cb: None,
+            write_clipboard_cb: Some(write_clipboard_record_cb),
+            close_surface_cb: None,
+        };
+        roastty_app_new(&runtime, config)
+    }
+
     fn new_test_app_with_clipboard_read_confirm(
         userdata: usize,
         result: bool,
@@ -20568,6 +20689,21 @@ mod tests {
             .with_termio_mut(|termio| termio.terminal_mut().set_selection(selection).unwrap());
     }
 
+    fn surface_selection_plain_text(surface: RoasttySurface) -> Option<String> {
+        let surface = surface_from_handle(surface).unwrap();
+        surface
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| {
+                let terminal = termio.terminal();
+                let selection = terminal.active_selection()?;
+                terminal
+                    .selection_format(TerminalSelectionFormat::Plain, true, true, Some(selection))
+                    .ok()
+            })
+    }
+
     fn set_surface_test_geometry(
         surface: RoasttySurface,
         columns: u16,
@@ -20774,6 +20910,15 @@ mod tests {
             surface,
             ROASTTY_MOUSE_BUTTON_PRESS,
             mouse_button_to_int(mouse::MouseButton::Middle),
+            ROASTTY_MODS_NONE,
+        )
+    }
+
+    fn press_right(surface: RoasttySurface) -> bool {
+        roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            mouse_button_to_int(mouse::MouseButton::Right),
             ROASTTY_MODS_NONE,
         )
     }
@@ -21964,6 +22109,253 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(enabled);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_ignore_consumes_without_clipboard() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::Ignore);
+        let app = new_test_app_with_clipboard_read_write_config(0x1101, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        assert!(press_right(surface));
+        assert!(clipboard_read_records().is_empty());
+        assert!(clipboard_write_records().is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_paste_clears_selection_and_reads_standard_clipboard() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::Paste);
+        let app = new_test_app_with_clipboard_read_write_config(0x1102, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker =
+            Some(test_worker("printf 'word next'; sleep 1"));
+        wait_for_surface_plain_screen(app, surface, "word next");
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 0), (3, 0))),
+        );
+
+        assert!(press_right(surface));
+
+        let records = clipboard_read_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].userdata, 0x1102);
+        assert_eq!(records[0].clipboard, ROASTTY_CLIPBOARD_STANDARD);
+        assert!(clipboard_write_records().is_empty());
+        assert!(!roastty_surface_has_selection(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_copy_writes_selection_and_clears_it() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::Copy);
+        let app = new_test_app_with_clipboard_read_write_config(0x1103, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker =
+            Some(test_worker("printf 'word next'; sleep 1"));
+        wait_for_surface_plain_screen(app, surface, "word next");
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 0), (3, 0))),
+        );
+
+        assert!(press_right(surface));
+
+        let records = clipboard_write_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].userdata, 0x1103);
+        assert_eq!(records[0].clipboard, ROASTTY_CLIPBOARD_STANDARD);
+        assert!(records[0]
+            .contents
+            .iter()
+            .any(|(mime, data)| { mime == "text/plain" && data == "word" }));
+        assert!(clipboard_read_records().is_empty());
+        assert!(!roastty_surface_has_selection(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_copy_without_selection_only_clears_and_consumes() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::Copy);
+        let app = new_test_app_with_clipboard_read_write_config(0x1104, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        assert!(press_right(surface));
+
+        assert!(clipboard_write_records().is_empty());
+        assert!(clipboard_read_records().is_empty());
+        assert!(!roastty_surface_has_selection(surface));
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_copy_or_paste_copies_selection_else_pastes() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::CopyOrPaste);
+        let app = new_test_app_with_clipboard_read_write_config(0x1105, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker =
+            Some(test_worker("printf 'word next'; sleep 5"));
+        wait_for_surface_plain_screen(app, surface, "word next");
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 0), (3, 0))),
+        );
+
+        assert!(press_right(surface));
+
+        let writes = clipboard_write_records();
+        assert_eq!(writes.len(), 1);
+        assert!(writes[0]
+            .contents
+            .iter()
+            .any(|(mime, data)| { mime == "text/plain" && data == "word" }));
+        assert!(clipboard_read_records().is_empty());
+        assert!(!roastty_surface_has_selection(surface));
+
+        assert!(press_right(surface));
+        let reads = clipboard_read_records();
+        assert_eq!(reads.len(), 1);
+        assert_eq!(reads[0].userdata, 0x1105);
+        assert_eq!(reads[0].clipboard, ROASTTY_CLIPBOARD_STANDARD);
+        assert_eq!(clipboard_write_records().len(), 1);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_context_menu_selects_word_or_preserves_containing_selection() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::ContextMenu);
+        let app = new_test_app_with_clipboard_read_write_config(0x1106, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker =
+            Some(test_worker("printf 'word next'; sleep 1"));
+        set_surface_test_geometry(surface, 10, 5, 10, 20);
+        wait_for_surface_plain_screen(app, surface, "word next");
+        roastty_surface_mouse_pos(surface, 15.0, 5.0, ROASTTY_MODS_NONE);
+
+        assert!(!press_right(surface));
+        assert_eq!(
+            surface_selection_plain_text(surface).as_deref(),
+            Some("word")
+        );
+        assert!(clipboard_read_records().is_empty());
+        assert!(clipboard_write_records().is_empty());
+
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 0), (8, 0))),
+        );
+        assert!(!press_right(surface));
+        assert_eq!(
+            surface_selection_plain_text(surface).as_deref(),
+            Some("word next")
+        );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_mouse_reporting_clears_selection_and_skips_actions() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::Paste);
+        let app = new_test_app_with_clipboard_read_write_config(0x1107, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker =
+            Some(test_worker("printf 'word next'; sleep 1"));
+        set_surface_test_geometry(surface, 10, 5, 10, 20);
+        wait_for_surface_plain_screen(app, surface, "word next");
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 0), (3, 0))),
+        );
+        SELECTION_TEST_CLOCK_NS.with(|clock| clock.set(Some(1_000_000)));
+        roastty_surface_mouse_pos(surface, 5.0, 5.0, ROASTTY_MODS_NONE);
+        assert!(!roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_PRESS,
+            mouse_button_to_int(mouse::MouseButton::Left),
+            ROASTTY_MODS_NONE
+        ));
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .selection_gesture
+                .click_count(),
+            1
+        );
+        assert!(!roastty_surface_mouse_button(
+            surface,
+            ROASTTY_MOUSE_BUTTON_RELEASE,
+            mouse_button_to_int(mouse::MouseButton::Left),
+            ROASTTY_MODS_NONE
+        ));
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (0, 0), (3, 0))),
+        );
+        set_surface_worker_mouse_tracking(surface, true);
+
+        assert!(press_right(surface));
+
+        SELECTION_TEST_CLOCK_NS.with(|clock| clock.set(None));
+        assert!(!roastty_surface_has_selection(surface));
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .selection_gesture
+                .click_count(),
+            0
+        );
+        assert!(clipboard_read_records().is_empty());
+        assert!(clipboard_write_records().is_empty());
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn right_click_action_config_update_changes_existing_surface() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::Ignore);
+        let app = new_test_app_with_clipboard_read_write_config(0x1108, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+
+        assert!(press_right(surface));
+        assert!(clipboard_read_records().is_empty());
+
+        let updated = new_test_config_with_right_click_action(config::RightClickAction::Paste);
+        roastty_surface_update_config(surface, updated);
+        assert!(press_right(surface));
+
+        let records = clipboard_read_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].userdata, 0x1108);
+        assert_eq!(records[0].clipboard, ROASTTY_CLIPBOARD_STANDARD);
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(updated);
         roastty_config_free(config);
     }
 
