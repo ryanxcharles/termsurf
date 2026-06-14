@@ -783,3 +783,5 @@ remains open.
   — **Pass**
 - [Experiment 63: Optional command formatter oracle](63-optional-command-formatter-oracle.md)
   — **Pass**
+- [Experiment 64: Optional value formatter oracle](64-optional-value-formatter-oracle.md)
+  — **Designed**
