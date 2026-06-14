@@ -17860,6 +17860,132 @@ mod tests {
     }
 
     #[test]
+    fn optional_scalar_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "cursor-style-blink",
+            "class",
+            "language",
+            "macos-custom-icon",
+            "macos-option-as-alt",
+            "title",
+            "x11-instance-name",
+            "linux-cgroup-memory-limit",
+            "linux-cgroup-processes-limit",
+            "window-position-x",
+            "window-position-y",
+        ] {
+            assert_eq!(line(&default_lines, key), format!("{key} = "));
+        }
+
+        cfg.cursor_style_blink = Some(false);
+        cfg.class = Some("Class\0Name".to_string());
+        cfg.language = Some("en_US.UTF-8".to_string());
+        cfg.macos_custom_icon = Some("CustomIcon".to_string());
+        cfg.macos_option_as_alt = Some(key_mods::OptionAsAlt::True);
+        cfg.title = Some("Title\0Suffix".to_string());
+        cfg.x11_instance_name = Some("roastty-instance".to_string());
+        cfg.linux_cgroup_memory_limit = Some(4096);
+        cfg.linux_cgroup_processes_limit = Some(17);
+        cfg.window_position_x = Some(-16);
+        cfg.window_position_y = Some(27);
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "cursor-style-blink"),
+            "cursor-style-blink = false"
+        );
+        assert_eq!(line(&lines, "class"), "class = Class\0Name");
+        assert_eq!(line(&lines, "language"), "language = en_US.UTF-8");
+        assert_eq!(
+            line(&lines, "macos-custom-icon"),
+            "macos-custom-icon = CustomIcon"
+        );
+        assert_eq!(
+            line(&lines, "macos-option-as-alt"),
+            "macos-option-as-alt = true"
+        );
+        assert_eq!(line(&lines, "title"), "title = Title\0Suffix");
+        assert_eq!(
+            line(&lines, "x11-instance-name"),
+            "x11-instance-name = roastty-instance"
+        );
+        assert_eq!(
+            line(&lines, "linux-cgroup-memory-limit"),
+            "linux-cgroup-memory-limit = 4096"
+        );
+        assert_eq!(
+            line(&lines, "linux-cgroup-processes-limit"),
+            "linux-cgroup-processes-limit = 17"
+        );
+        assert_eq!(line(&lines, "window-position-x"), "window-position-x = -16");
+        assert_eq!(line(&lines, "window-position-y"), "window-position-y = 27");
+
+        cfg.set("cursor-style-blink", Some("")).unwrap();
+        cfg.set("class", Some("")).unwrap();
+        cfg.set("language", Some("")).unwrap();
+        cfg.set("macos-custom-icon", Some("")).unwrap();
+        cfg.set("macos-option-as-alt", Some("")).unwrap();
+        cfg.set("title", Some("")).unwrap();
+        cfg.set("x11-instance-name", Some("")).unwrap();
+        cfg.set("linux-cgroup-memory-limit", Some("")).unwrap();
+        cfg.set("linux-cgroup-processes-limit", Some("")).unwrap();
+        cfg.set("window-position-x", Some("")).unwrap();
+        cfg.set("window-position-y", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "cursor-style-blink",
+            "class",
+            "language",
+            "macos-custom-icon",
+            "macos-option-as-alt",
+            "title",
+            "x11-instance-name",
+            "linux-cgroup-memory-limit",
+            "linux-cgroup-processes-limit",
+            "window-position-x",
+            "window-position-y",
+        ] {
+            assert_eq!(line(&reset_lines, key), format!("{key} = "));
+        }
+
+        assert!(index(&lines, "language") < index(&lines, "title"));
+        assert!(index(&lines, "title") < index(&lines, "class"));
+        assert!(index(&lines, "class") < index(&lines, "x11-instance-name"));
+        assert!(index(&lines, "x11-instance-name") < index(&lines, "macos-option-as-alt"));
+        assert!(index(&lines, "macos-option-as-alt") < index(&lines, "macos-custom-icon"));
+        assert!(index(&lines, "window-position-x") < index(&lines, "window-position-y"));
+        assert!(
+            index(&lines, "linux-cgroup-memory-limit")
+                < index(&lines, "linux-cgroup-processes-limit")
+        );
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

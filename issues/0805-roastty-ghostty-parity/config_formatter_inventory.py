@@ -23,6 +23,7 @@ import config_inventory
 
 ENTRY_FORMATTER_RE = re.compile(r'EntryFormatter::new\(\s*"(?P<key>[^"]+)"', re.DOTALL)
 PRIMITIVE_ORACLE_TEST = "primitive_config_formatter_family_oracle"
+OPTIONAL_SCALAR_ORACLE_TEST = "optional_scalar_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
@@ -123,6 +124,10 @@ def formatter_family(option: str, path_text: str, call_text: str) -> str:
         return "window padding"
     if "format_metric_modifier" in call_text:
         return "metric modifier"
+    if "entry_optional" in path_text and any(
+        helper in path_text for helper in ("entry_bool", "entry_int", "entry_str")
+    ):
+        return "optional scalar"
     if "entry_optional" in path_text:
         return "optional value"
     if "entry_bool" in path_text:
@@ -260,6 +265,7 @@ def build_rows(
     upstream: list[str],
     calls: list[FormatterCall],
     primitive_oracle_present: bool,
+    optional_scalar_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
@@ -334,6 +340,16 @@ def build_rows(
                 "byte-preserving string text, and representative order checks"
             )
             missing_evidence = "None for direct primitive formatter rows."
+        elif optional_scalar_oracle_present and family == "optional scalar":
+            status = "Oracle complete"
+            evidence = (
+                "Optional scalar formatter oracle covers optional None void "
+                "output, optional bool output, signed and unsigned integer "
+                "output, byte-preserving string output, macos option-as-alt "
+                "keyword string output, raw-empty resets, and representative "
+                "order checks"
+            )
+            missing_evidence = "None for optional scalar formatter rows."
         elif metric_modifier_oracle_present and family == "metric modifier":
             status = "Oracle complete"
             evidence = (
@@ -433,6 +449,7 @@ def main() -> int:
     calls = extract_formatter_calls(args.roastty)
     roastty_source = args.roastty.read_text()
     primitive_oracle_present = PRIMITIVE_ORACLE_TEST in roastty_source
+    optional_scalar_oracle_present = OPTIONAL_SCALAR_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
@@ -445,6 +462,7 @@ def main() -> int:
         upstream,
         calls,
         primitive_oracle_present,
+        optional_scalar_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
@@ -460,7 +478,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        59
+        60
+        if optional_scalar_oracle_present
+        else 59
         if keybind_oracle_present
         else 58
         if command_palette_oracle_present

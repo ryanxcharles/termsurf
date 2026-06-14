@@ -502,6 +502,12 @@ experiment files until they are proven.
   empty `keybind = foo/` line afterward. Roastty now matches that behavior and
   the single `keybind` formatter row is promoted by a dedicated formatter
   oracle.
+- **Optional scalar formatter rows are distinct from optional custom rows.**
+  Experiment 60 split 11 `entry_optional` rows that recurse into `entry_bool`,
+  `entry_int`, or `entry_str` into an `optional scalar` formatter family. These
+  rows share void output for `None`, scalar output for `Some`, raw-empty reset
+  behavior, and representative declaration-order checks. Optional custom
+  `format_entry` rows and font rows remain unpromoted.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -753,4 +759,4 @@ remains open.
 - [Experiment 59: Keybind formatter oracle](59-keybind-formatter-oracle.md) —
   **Pass**
 - [Experiment 60: Optional scalar formatter oracle](60-optional-scalar-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

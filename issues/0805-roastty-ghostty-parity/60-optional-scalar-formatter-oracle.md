@@ -100,3 +100,89 @@ Findings: none.
 The reviewer verified the README link, required sections, 11-row target set,
 expected 91/112/0 count movement, exclusion of optional custom and font rows,
 and verification criteria.
+
+## Result
+
+**Result:** Pass
+
+Added the focused `optional_scalar_config_formatter_family_oracle`, split
+optional scalar rows out of the broad `optional value` formatter family, and
+promoted only those rows.
+
+The new oracle proves:
+
+- optional `None` values format as void lines (`key = `);
+- optional bool values format as `true`/`false`;
+- optional signed and unsigned integer values format as decimal integers;
+- optional string values are byte-preserving, including embedded NUL bytes;
+- `macos-option-as-alt` formats its optional keyword string through the same
+  optional scalar path;
+- raw-empty config values reset every target row back to its default optional
+  void output;
+- representative row order is stable within the upstream declaration order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=91
+audit_covered=112
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 112 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml optional_scalar_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml cursor_style_blink_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml string_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml integer_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 91 `Oracle complete`, 112 `Audit covered`,
+  and 0 `Gap`.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`; all
+  previously promoted formatter families remain `Oracle complete`; the 11
+  optional scalar formatter rows are `Oracle complete`; optional custom
+  `format_entry` rows and font rows remain `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/60-optional-scalar-formatter-oracle.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-formatter-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  completed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The optional scalar formatter rows are now oracle-complete. CFG-218 remains open
+with the broad `font`, generic optional custom `format_entry`, and custom
+formatter rows still requiring future non-default formatter oracles.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Required findings: none.
+
+Optional finding:
+
+- The reviewer found that running the formatter inventory with a missing scratch
+  `/tmp` matrix path fails because the generator reads the matrix before
+  rewriting it. The issue workflow and this experiment's pass criteria use the
+  real checked-in matrix path, which succeeded; improving scratch-output
+  ergonomics is optional follow-up.
+
+The reviewer independently verified all five requested cargo tests,
+`cargo fmt --check`, `git diff --check`, README status, Result and Conclusion
+sections, and that the result commit had not been made before review.
