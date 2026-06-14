@@ -472,6 +472,13 @@ experiment files until they are proven.
   `config_finalize_scalar_tail` proves unset `auto-update-channel` finalizes to
   `Tip` while explicit values are preserved. CFG-220 remains `Gap` with 16
   `Oracle complete` rows, 1 incomplete row, and 0 structural finalization gaps.
+- **Click-repeat interval finalization uses the platform OS helper.** Experiment
+  98 updated Roastty to match pinned Ghostty's
+  `internal_os.clickInterval() orelse 500` behavior by routing finalization
+  through `mouse::click_interval().unwrap_or(500)`, with deterministic test
+  coverage for OS-provided values, fallback 500, nonzero preservation, and the
+  parser/finalize boundary. CFG-220 now has 17 `Oracle complete` rows and 0
+  incomplete finalization rows, so validation/finalization parity is `Pass`.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -1058,4 +1065,4 @@ remains open.
 - [Experiment 97: Auto-update channel finalization](97-auto-update-channel-finalization.md)
   — **Pass**
 - [Experiment 98: Click repeat interval finalization](98-click-repeat-interval-finalization.md)
-  — **Designed**
+  — **Pass**

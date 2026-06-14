@@ -29,7 +29,7 @@ use crate::font::metrics::Modifier as MetricModifier;
 use crate::input::key_mods::{self, Mods, RemapSet, RemapSetParseError};
 use crate::input::link;
 use crate::os::homedir::expand_home;
-use crate::os::{desktop, passwd, resources_dir};
+use crate::os::{desktop, mouse, passwd, resources_dir};
 use crate::terminal::color::{Palette as TerminalPalette, PaletteMask, Rgb, DEFAULT_PALETTE};
 use crate::terminal::cursor;
 use crate::terminal::selection_codepoints::DEFAULT_WORD_BOUNDARIES;
@@ -2343,6 +2343,22 @@ impl Config {
     }
 
     #[cfg(test)]
+    fn finalize_with_click_interval_for_test(&mut self, click_interval: Option<u32>) {
+        let mut report = ConfigFinalizeReport::default();
+        self.finalize_scalars_with_click_interval(
+            &mut report,
+            &ConfigFinalizeContext {
+                app_runtime: ConfigAppRuntime::None,
+                probable_cli: true,
+                env_shell: None,
+                passwd_shell: None,
+                passwd_home: None,
+            },
+            click_interval,
+        );
+    }
+
+    #[cfg(test)]
     fn finalize_with_app_runtime_for_test(
         &mut self,
         app_runtime: ConfigAppRuntime,
@@ -2540,6 +2556,15 @@ impl Config {
         report: &mut ConfigFinalizeReport,
         context: &ConfigFinalizeContext,
     ) {
+        self.finalize_scalars_with_click_interval(report, context, mouse::click_interval());
+    }
+
+    fn finalize_scalars_with_click_interval(
+        &mut self,
+        report: &mut ConfigFinalizeReport,
+        context: &ConfigFinalizeContext,
+        click_interval: Option<u32>,
+    ) {
         if self.font_family.count() != 0 {
             if self.font_family_bold.count() == 0 {
                 self.font_family_bold = self.font_family.clone();
@@ -2559,9 +2584,7 @@ impl Config {
         self.finalize_working_directory(context);
         self.finalize_gtk_single_instance(context);
 
-        if self.click_repeat_interval == 0 {
-            self.click_repeat_interval = 500;
-        }
+        self.finalize_click_repeat_interval_with(click_interval);
         self.mouse_scroll_multiplier.precision =
             self.mouse_scroll_multiplier.precision.clamp(0.01, 10_000.0);
         self.mouse_scroll_multiplier.discrete =
@@ -2581,6 +2604,12 @@ impl Config {
         }
         self.faint_opacity = self.faint_opacity.clamp(0.0, 1.0);
         self.key_remap.finalize();
+    }
+
+    fn finalize_click_repeat_interval_with(&mut self, click_interval: Option<u32>) {
+        if self.click_repeat_interval == 0 {
+            self.click_repeat_interval = click_interval.unwrap_or(500);
+        }
     }
 
     fn finalize_link_url(&mut self) {
@@ -23270,18 +23299,23 @@ mod tests {
             discrete: 20_000.0,
         };
 
-        cfg.finalize();
+        cfg.finalize_with_click_interval_for_test(Some(321));
 
-        assert_eq!(cfg.click_repeat_interval, 500);
+        assert_eq!(cfg.click_repeat_interval, 321);
         assert_eq!(cfg.mouse_scroll_multiplier.precision, 0.01);
         assert_eq!(cfg.mouse_scroll_multiplier.discrete, 10_000.0);
+
+        let mut fallback = Config::default();
+        fallback.click_repeat_interval = 0;
+        fallback.finalize_with_click_interval_for_test(None);
+        assert_eq!(fallback.click_repeat_interval, 500);
 
         cfg.click_repeat_interval = 250;
         cfg.mouse_scroll_multiplier = MouseScrollMultiplier {
             precision: 0.5,
             discrete: 2.0,
         };
-        cfg.finalize();
+        cfg.finalize_with_click_interval_for_test(Some(321));
         assert_eq!(cfg.click_repeat_interval, 250);
         assert_eq!(cfg.mouse_scroll_multiplier.precision, 0.5);
         assert_eq!(cfg.mouse_scroll_multiplier.discrete, 2.0);
@@ -23860,8 +23894,8 @@ mod tests {
         cfg.set("click-repeat-interval", Some("0")).unwrap();
         assert_eq!(cfg.click_repeat_interval, 0);
         let mut finalized = cfg.clone();
-        finalized.finalize();
-        assert_eq!(finalized.click_repeat_interval, 500);
+        finalized.finalize_click_repeat_interval_with(Some(321));
+        assert_eq!(finalized.click_repeat_interval, 321);
         assert_eq!(cfg.click_repeat_interval, 0);
 
         let cloned = cfg.clone();

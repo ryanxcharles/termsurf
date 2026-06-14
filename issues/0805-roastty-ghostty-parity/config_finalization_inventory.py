@@ -132,17 +132,21 @@ ROWS = [
         ghostty_reference="`vendor/ghostty/src/config/Config.zig::finalize`, `internal_os.clickInterval() orelse 500`",
         roastty_reference="`roastty/src/config/mod.rs::finalize_scalars` click-repeat block",
         family="platform scalar finalization",
-        status="Audit covered",
+        status="Oracle complete",
         evidence=(
-            "`mouse_behavior_finalize_resolves_and_clamps` proves parser-level "
-            "`0` finalizes to 500 and nonzero values are preserved in Roastty."
+            "Pinned Ghostty finalizes `0` with `internal_os.clickInterval() "
+            "orelse 500`; pinned macOS helper uses `NSEvent.doubleClickInterval`, "
+            "multiplies by 1000, and rounds up; Roastty finalization uses "
+            "`mouse::click_interval().unwrap_or(500)`; Roastty's OS helper uses "
+            "`NSEvent::doubleClickInterval()` on macOS, returns `None` on "
+            "non-macOS targets, and rounds up seconds to milliseconds; "
+            "`mouse_behavior_finalize_resolves_and_clamps` proves injected "
+            "OS-provided values, fallback 500, nonzero preservation, and mouse "
+            "scroll clamping in the scalar finalization pass; "
+            "`click_repeat_interval_config_parser_family_oracle` preserves the "
+            "parser/finalization boundary without host-dependent assertions."
         ),
-        missing_evidence=(
-            "Needs explicit parity proof for app-runtime OS click interval "
-            "defaulting, because pinned Ghostty uses `internal_os.clickInterval() "
-            "orelse 500` outside tests while Roastty currently finalizes `0` to "
-            "500 through a direct scalar block."
-        ),
+        missing_evidence="None for click-repeat interval finalization behavior.",
     ),
     FinalizationRow(
         behavior="mouse scroll multiplier clamps",

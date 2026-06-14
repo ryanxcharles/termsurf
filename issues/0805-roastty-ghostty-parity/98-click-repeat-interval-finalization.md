@@ -166,3 +166,76 @@ Final verdict: Approved.
 
 Re-review confirmed the stale host-dependent assertion is now covered by the
 experiment plan.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now finalizes `click-repeat-interval = 0` through
+`mouse::click_interval().unwrap_or(500)`, matching pinned Ghostty's
+`internal_os.clickInterval() orelse 500` behavior. The scalar finalization test
+uses an injected click interval to prove both the OS-provided and fallback
+branches deterministically, while the parser-family oracle still proves parsed
+`0` remains `0` before finalization without making a host-dependent production
+`Config::finalize()` assertion.
+
+FINAL-008 is now `Oracle complete`. The regenerated finalization inventory has
+17 `Oracle complete` rows, 0 incomplete rows, and 0 finalization gaps. CFG-220
+is now `Pass`.
+
+Verification output:
+
+```text
+finalization_rows=17
+oracle_complete=17
+audit_covered=0
+gap=0
+click_interval_os_helper=true finalization_rows=17 oracle_complete=17 incomplete=0 gaps=0 cfg220=Pass protected_cfg217_219_unchanged=true
+```
+
+Focused Rust checks passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml mouse_behavior_finalize_resolves_and_clamps
+cargo test --manifest-path roastty/Cargo.toml click_repeat_interval_config_parser_family_oracle
+cargo test --manifest-path roastty/Cargo.toml click_interval_matches_platform_shape
+cargo test --manifest-path roastty/Cargo.toml seconds_to_millis_ceil_matches_upstream_conversion
+```
+
+Additional checks passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml -- --check
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  issues/0805-roastty-ghostty-parity/config_finalization_inventory.py
+prettier --check \
+  issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/98-click-repeat-interval-finalization.md \
+  issues/0805-roastty-ghostty-parity/config-finalization-inventory.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md
+git diff --check
+```
+
+## Conclusion
+
+CFG-220 validation and finalization behavior is now complete. The next config
+facet is CFG-221, source precedence and repeated-file load semantics.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Verdict: Approved.
+
+Required findings: None.
+
+The reviewer verified that the result was still uncommitted, scope was limited
+to FINAL-008 and expected issue artifacts, production finalization now routes
+through `mouse::click_interval().unwrap_or(500)`, tests cover injected OS value,
+fallback `500`, nonzero preservation, scroll clamping in the scalar finalization
+pass, and parser/finalization boundary without a host-dependent production
+finalize assertion, pinned Ghostty and Roastty OS helper shapes match, the
+inventory has 17 `Oracle complete` rows and 0 incomplete rows, CFG-220 is `Pass`
+with 17/0/0 counts, CFG-217 through CFG-219 are unchanged from the plan commit,
+and the formatting, focused Rust, whitespace, source, matrix, and inventory
+checks passed.
