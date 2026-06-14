@@ -1908,6 +1908,7 @@ typedef struct {
 
 ROASTTY_API int roastty_init(uintptr_t, char**);
 ROASTTY_API roastty_info_s roastty_info(void);
+ROASTTY_API const char* roastty_translate(const char*);
 /* String values returned by roastty_build_info are borrowed process-static
  * values. They remain valid for the lifetime of the process and must not be
  * passed to roastty_string_free. */
@@ -2465,10 +2466,12 @@ ROASTTY_API roastty_inspector_t roastty_surface_inspector(roastty_surface_t);
 ROASTTY_API void roastty_inspector_free(roastty_surface_t);
 ROASTTY_API bool roastty_inspector_metal_init(roastty_inspector_t, void*);
 ROASTTY_API void roastty_inspector_metal_render(roastty_inspector_t, void*, void*);
+ROASTTY_API bool roastty_inspector_metal_shutdown(roastty_inspector_t);
 
 /* Embedded config/misc tail (Issue 802 / Exp 10) — see roastty_action_* notes. */
 ROASTTY_API void roastty_cli_try_action(void);
 ROASTTY_API void roastty_set_window_background_blur(roastty_app_t, void*);
+ROASTTY_API bool roastty_benchmark_cli(const char*, const char*);
 ROASTTY_API void roastty_inspector_set_focus(roastty_inspector_t, bool);
 ROASTTY_API void roastty_inspector_set_content_scale(roastty_inspector_t,
                                                      double,
@@ -2500,6 +2503,7 @@ roastty_surface_key_translation_mods(roastty_surface_t, roastty_input_mods_e);
 ROASTTY_API bool roastty_surface_key(roastty_surface_t, roastty_input_key_s);
 ROASTTY_API bool roastty_app_key(roastty_app_t, roastty_input_key_s);
 ROASTTY_API void roastty_app_keyboard_changed(roastty_app_t);
+ROASTTY_API void roastty_app_open_config(roastty_app_t);
 ROASTTY_API bool roastty_surface_key_is_binding(roastty_surface_t,
                                                 roastty_input_key_s,
                                                 roastty_binding_flags_e*);

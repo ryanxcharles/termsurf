@@ -737,39 +737,6 @@ impl Config {
     /// upstream `Config` declaration order (upstream `FileFormatter.format`,
     /// `config/formatter_file.zig`, the default non-docs / non-changed path).
     pub(crate) fn format_config(&self, out: &mut String) {
-        EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
-        EntryFormatter::new("quit-after-last-window-closed", out)
-            .entry_bool(self.quit_after_last_window_closed);
-        EntryFormatter::new("quit-after-last-window-closed-delay", out)
-            .entry_optional(self.quit_after_last_window_closed_delay, |v, f| {
-                v.format_entry(f)
-            });
-        self.undo_timeout
-            .format_entry(&mut EntryFormatter::new("undo-timeout", out));
-        self.quick_terminal_position
-            .format_entry(&mut EntryFormatter::new("quick-terminal-position", out));
-        self.quick_terminal_size
-            .format_entry(&mut EntryFormatter::new("quick-terminal-size", out));
-        self.gtk_quick_terminal_layer
-            .format_entry(&mut EntryFormatter::new("gtk-quick-terminal-layer", out));
-        EntryFormatter::new("gtk-quick-terminal-namespace", out)
-            .entry_str(&self.gtk_quick_terminal_namespace);
-        self.quick_terminal_screen
-            .format_entry(&mut EntryFormatter::new("quick-terminal-screen", out));
-        EntryFormatter::new("quick-terminal-animation-duration", out)
-            .entry_float(self.quick_terminal_animation_duration);
-        EntryFormatter::new("quick-terminal-autohide", out)
-            .entry_bool(self.quick_terminal_autohide);
-        self.quick_terminal_space_behavior
-            .format_entry(&mut EntryFormatter::new(
-                "quick-terminal-space-behavior",
-                out,
-            ));
-        self.quick_terminal_keyboard_interactivity
-            .format_entry(&mut EntryFormatter::new(
-                "quick-terminal-keyboard-interactivity",
-                out,
-            ));
         EntryFormatter::new("language", out)
             .entry_optional(self.language.clone(), |v, f| f.entry_str(&v));
         self.font_family
@@ -881,6 +848,8 @@ impl Config {
             .entry_optional(self.selection_background, |v, f| v.format_entry(f));
         EntryFormatter::new("selection-clear-on-typing", out)
             .entry_bool(self.selection_clear_on_typing);
+        EntryFormatter::new("selection-clear-on-copy", out)
+            .entry_bool(self.selection_clear_on_copy);
         self.selection_word_chars
             .format_entry(&mut EntryFormatter::new("selection-word-chars", out));
         EntryFormatter::new("minimum-contrast", out).entry_float(self.minimum_contrast);
@@ -907,6 +876,9 @@ impl Config {
         EntryFormatter::new("mouse-reporting", out).entry_bool(self.mouse_reporting);
         self.mouse_scroll_multiplier
             .format_entry(&mut EntryFormatter::new("mouse-scroll-multiplier", out));
+        EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
+        EntryFormatter::new("background-opacity-cells", out)
+            .entry_bool(self.background_opacity_cells);
         self.background_blur
             .format_entry(&mut EntryFormatter::new("background-blur", out));
         EntryFormatter::new("unfocused-split-opacity", out)
@@ -929,22 +901,16 @@ impl Config {
             .entry_optional(self.command.clone(), |v, f| v.format_entry(f));
         EntryFormatter::new("initial-command", out)
             .entry_optional(self.initial_command.clone(), |v, f| v.format_entry(f));
-        EntryFormatter::new("background-opacity", out).entry_float(self.background_opacity);
-        EntryFormatter::new("background-opacity-cells", out)
-            .entry_bool(self.background_opacity_cells);
-        EntryFormatter::new("bell-audio-path", out)
-            .entry_optional(self.bell_audio_path.clone(), |v, f| v.format_entry(f));
-        EntryFormatter::new("bell-audio-volume", out).entry_float(self.bell_audio_volume);
-        self.notify_on_command_finish_after
-            .format_entry(&mut EntryFormatter::new(
-                "notify-on-command-finish-after",
-                out,
-            ));
         self.notify_on_command_finish
             .format_entry(&mut EntryFormatter::new("notify-on-command-finish", out));
         self.notify_on_command_finish_action
             .format_entry(&mut EntryFormatter::new(
                 "notify-on-command-finish-action",
+                out,
+            ));
+        self.notify_on_command_finish_after
+            .format_entry(&mut EntryFormatter::new(
+                "notify-on-command-finish-after",
                 out,
             ));
         self.env.format_entry(&mut EntryFormatter::new("env", out));
@@ -1042,8 +1008,6 @@ impl Config {
         EntryFormatter::new("image-storage-limit", out).entry_int(self.image_storage_limit);
         self.copy_on_select
             .format_entry(&mut EntryFormatter::new("copy-on-select", out));
-        EntryFormatter::new("selection-clear-on-copy", out)
-            .entry_bool(self.selection_clear_on_copy);
         self.right_click_action
             .format_entry(&mut EntryFormatter::new("right-click-action", out));
         self.middle_click_action
@@ -1054,6 +1018,39 @@ impl Config {
         EntryFormatter::new("config-default-files", out).entry_bool(self.config_default_files);
         self.confirm_close_surface
             .format_entry(&mut EntryFormatter::new("confirm-close-surface", out));
+        EntryFormatter::new("quit-after-last-window-closed", out)
+            .entry_bool(self.quit_after_last_window_closed);
+        EntryFormatter::new("quit-after-last-window-closed-delay", out)
+            .entry_optional(self.quit_after_last_window_closed_delay, |v, f| {
+                v.format_entry(f)
+            });
+        EntryFormatter::new("initial-window", out).entry_bool(self.initial_window);
+        self.undo_timeout
+            .format_entry(&mut EntryFormatter::new("undo-timeout", out));
+        self.quick_terminal_position
+            .format_entry(&mut EntryFormatter::new("quick-terminal-position", out));
+        self.quick_terminal_size
+            .format_entry(&mut EntryFormatter::new("quick-terminal-size", out));
+        self.gtk_quick_terminal_layer
+            .format_entry(&mut EntryFormatter::new("gtk-quick-terminal-layer", out));
+        EntryFormatter::new("gtk-quick-terminal-namespace", out)
+            .entry_str(&self.gtk_quick_terminal_namespace);
+        self.quick_terminal_screen
+            .format_entry(&mut EntryFormatter::new("quick-terminal-screen", out));
+        EntryFormatter::new("quick-terminal-animation-duration", out)
+            .entry_float(self.quick_terminal_animation_duration);
+        EntryFormatter::new("quick-terminal-autohide", out)
+            .entry_bool(self.quick_terminal_autohide);
+        self.quick_terminal_space_behavior
+            .format_entry(&mut EntryFormatter::new(
+                "quick-terminal-space-behavior",
+                out,
+            ));
+        self.quick_terminal_keyboard_interactivity
+            .format_entry(&mut EntryFormatter::new(
+                "quick-terminal-keyboard-interactivity",
+                out,
+            ));
         self.shell_integration
             .format_entry(&mut EntryFormatter::new("shell-integration", out));
         self.shell_integration_features
@@ -1069,6 +1066,9 @@ impl Config {
             .format_entry(&mut EntryFormatter::new("custom-shader-animation", out));
         self.bell_features
             .format_entry(&mut EntryFormatter::new("bell-features", out));
+        EntryFormatter::new("bell-audio-path", out)
+            .entry_optional(self.bell_audio_path.clone(), |v, f| v.format_entry(f));
+        EntryFormatter::new("bell-audio-volume", out).entry_float(self.bell_audio_volume);
         self.app_notifications
             .format_entry(&mut EntryFormatter::new("app-notifications", out));
         self.macos_non_native_fullscreen
@@ -1174,8 +1174,15 @@ impl Config {
     }
 
     fn replay_into(&self, target: &mut Config) -> Result<(), ConfigSetError> {
+        Self::replay_entries_into(&self.replay_entries, target)
+    }
+
+    fn replay_entries_into(
+        entries: &[ConfigReplayEntry],
+        target: &mut Config,
+    ) -> Result<(), ConfigSetError> {
         let mut cli_replay_active = false;
-        for entry in &self.replay_entries {
+        for entry in entries {
             if entry.source == ConfigSetSource::Cli && entry.begin_cli_batch {
                 if cli_replay_active {
                     target.end_cli_replay();
@@ -1395,13 +1402,11 @@ impl Config {
             "bell-audio-volume" => {
                 self.bell_audio_volume = set_f64_field(value, default.bell_audio_volume)?
             }
-            "bell-audio-path" => {
-                self.bell_audio_path = set_optional_value_field(
-                    value,
-                    default.bell_audio_path,
-                    ConfigFilePath::parse_single,
-                )?
-            }
+            "bell-audio-path" => set_optional_config_file_path_field(
+                &mut self.bell_audio_path,
+                value,
+                default.bell_audio_path,
+            )?,
             "notify-on-command-finish-after" => {
                 self.notify_on_command_finish_after = set_value_field(
                     value,
@@ -1427,6 +1432,13 @@ impl Config {
             }
             "scrollbar" => {
                 self.scrollbar = set_enum_field(value, default.scrollbar, Scrollbar::from_keyword)?
+            }
+            "link" => {
+                if value == Some("") {
+                    self.link = default.link;
+                } else {
+                    return Err(ConfigSetError::NotImplemented);
+                }
             }
             "link-url" => self.link_url = set_bool_field(value, default.link_url)?,
             "window-colorspace" => {
@@ -1562,13 +1574,11 @@ impl Config {
                     BackgroundImagePosition::from_keyword,
                 )?
             }
-            "background-image" => {
-                self.background_image = set_optional_value_field(
-                    value,
-                    default.background_image,
-                    ConfigFilePath::parse_single,
-                )?
-            }
+            "background-image" => set_optional_config_file_path_field(
+                &mut self.background_image,
+                value,
+                default.background_image,
+            )?,
             "background-image-fit" => {
                 self.bg_image_fit = set_enum_field(
                     value,
@@ -1867,6 +1877,13 @@ impl Config {
                     GtkToolbarStyle::from_keyword,
                 )?
             }
+            "adw-toolbar-style" => {
+                self.gtk_toolbar_style = set_enum_field(
+                    value,
+                    default.gtk_toolbar_style,
+                    GtkToolbarStyle::from_keyword,
+                )?
+            }
             "gtk-titlebar-style" => {
                 self.gtk_titlebar_style = set_enum_field(
                     value,
@@ -2026,8 +2043,18 @@ impl Config {
             "background-image-repeat" => {
                 self.bg_image_repeat = set_bool_field(value, default.bg_image_repeat)?
             }
+            "background-blur-radius" => {
+                if value == Some("") {
+                    self.background_blur = default.background_blur;
+                } else {
+                    self.background_blur.parse_cli(value)?;
+                }
+            }
             "background-opacity" => {
                 self.background_opacity = set_f64_field(value, default.background_opacity)?
+            }
+            "background-image-opacity" => {
+                self.bg_image_opacity = set_f32_field(value, default.bg_image_opacity)?
             }
             "background-opacity-cells" => {
                 self.background_opacity_cells =
@@ -2056,6 +2083,12 @@ impl Config {
                 self.cursor_text =
                     set_optional_value_field(value, default.cursor_text, TerminalColor::parse_cli)?
             }
+            "cursor-invert-fg-bg" => {
+                if parse_compat_bool(value)? {
+                    self.cursor_color = Some(TerminalColor::CellForeground);
+                    self.cursor_text = Some(TerminalColor::CellBackground);
+                }
+            }
             "cursor-click-to-move" => {
                 self.cursor_click_to_move = set_bool_field(value, default.cursor_click_to_move)?
             }
@@ -2077,10 +2110,21 @@ impl Config {
                     TerminalColor::parse_cli,
                 )?
             }
+            "selection-invert-fg-bg" => {
+                if parse_compat_bool(value)? {
+                    self.selection_foreground = Some(TerminalColor::CellBackground);
+                    self.selection_background = Some(TerminalColor::CellForeground);
+                }
+            }
             "selection-word-chars" => self.selection_word_chars.parse_cli(value)?,
             "bold-color" => {
                 self.bold_color =
                     set_optional_value_field(value, default.bold_color, BoldColor::parse_cli)?
+            }
+            "bold-is-bright" => {
+                if parse_compat_bool(value)? {
+                    self.bold_color = Some(BoldColor::Bright);
+                }
             }
             "faint-opacity" => self.faint_opacity = set_f64_field(value, default.faint_opacity)?,
             "minimum-contrast" => {
@@ -2141,8 +2185,12 @@ impl Config {
             "font-variation-bold-italic" => {
                 set_repeatable_font_variation(&mut self.font_variation_bold_italic, value)?
             }
-            "font-codepoint-map" => self.font_codepoint_map.parse_cli(value)?,
-            "clipboard-codepoint-map" => self.clipboard_codepoint_map.parse_cli(value)?,
+            "font-codepoint-map" => {
+                set_repeatable_codepoint_map(&mut self.font_codepoint_map, value)?
+            }
+            "clipboard-codepoint-map" => {
+                set_repeatable_clipboard_codepoint_map(&mut self.clipboard_codepoint_map, value)?
+            }
             // `BackgroundBlur::parse_cli` is `&mut self` (it overwrites `self` in
             // place), so its arm is inline: a set-but-empty value resets to the
             // default; otherwise parse in place (a missing value sets `.true`, the
@@ -2764,6 +2812,8 @@ impl Config {
         I: IntoIterator<Item = &'a str>,
     {
         let mut diagnostics = Vec::new();
+        self.config_default_files = true;
+        let replay_len_start = self.replay_entries.len();
         self.font_family.overwrite_next = true;
         self.font_family_bold.overwrite_next = true;
         self.font_family_italic.overwrite_next = true;
@@ -2800,6 +2850,16 @@ impl Config {
         self.font_family_italic.overwrite_next = false;
         self.font_family_bold_italic.overwrite_next = false;
         let base = std::fs::canonicalize(base).unwrap_or_else(|_| base.to_path_buf());
+        if !self.config_default_files {
+            let replay_entries = self.replay_entries[replay_len_start..].to_vec();
+            if !replay_entries.is_empty() {
+                let mut new_config = Config::default();
+                if Config::replay_entries_into(&replay_entries, &mut new_config).is_ok() {
+                    new_config.replay_entries = replay_entries;
+                    *self = new_config;
+                }
+            }
+        }
         self.expand_config_file_paths_from_base(&base);
         diagnostics
     }
@@ -2944,8 +3004,7 @@ pub(crate) enum ConfigRecursiveFileErrorKind {
     Io(std::io::Error),
 }
 
-/// An error from `Config::set` (upstream `parseIntoField`'s
-/// `error.{InvalidField,InvalidValue,ValueRequired}`).
+/// An error from `Config::set` (upstream `parseIntoField` errors).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConfigSetError {
     /// No field matched the key (upstream `error.InvalidField`).
@@ -2954,6 +3013,8 @@ pub(crate) enum ConfigSetError {
     InvalidValue,
     /// The field requires a value but none was given.
     ValueRequired,
+    /// The field exists but the upstream parser returns `error.NotImplemented`.
+    NotImplemented,
 }
 
 /// A per-line config-load diagnostic (upstream's `parse` diagnostics): the 1-indexed
@@ -3197,10 +3258,6 @@ impl ConfigFilePath {
         if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
             value = &value[1..value.len() - 1];
         }
-        if value.as_bytes().contains(&0) {
-            return Err(MagicParseError::InvalidValue);
-        }
-
         let path = value.to_string();
         Ok(if optional {
             ConfigFilePath::Optional(path)
@@ -3300,8 +3357,7 @@ impl RepeatableFontVariation {
             .as_bytes()
             .try_into()
             .map_err(|_| RepeatableFontVariationParseError::InvalidValue)?;
-        let value = value
-            .parse::<f64>()
+        let value = parse_zig_float_f64(value)
             .map_err(|_| RepeatableFontVariationParseError::InvalidValue)?;
         self.list.push(FontVariation { id, value });
         Ok(())
@@ -3485,6 +3541,13 @@ fn set_bool_field(value: Option<&str>, default_value: bool) -> Result<bool, Conf
     }
 }
 
+/// Resolve a deprecated compatibility bool (upstream compatibility handlers use
+/// `parseBool(value orelse "t")`): a missing value is `true`, an explicit false
+/// is accepted and ignored by the caller, and invalid values are rejected.
+fn parse_compat_bool(value: Option<&str>) -> Result<bool, ConfigSetError> {
+    parse_bool(value.unwrap_or("t")).ok_or(ConfigSetError::InvalidValue)
+}
+
 /// Resolve an `f64` field (upstream's type-magic `parseFloat` case): a
 /// set-but-empty value resets to the default; a missing value is
 /// `ValueRequired`; otherwise parse as `f64`, with `InvalidValue` on parse
@@ -3493,7 +3556,7 @@ fn set_f64_field(value: Option<&str>, default_value: f64) -> Result<f64, ConfigS
     match value {
         Some("") => Ok(default_value),
         None => Err(ConfigSetError::ValueRequired),
-        Some(v) => v.parse::<f64>().map_err(|_| ConfigSetError::InvalidValue),
+        Some(v) => parse_zig_float_f64(v),
     }
 }
 
@@ -3502,7 +3565,126 @@ fn set_f32_field(value: Option<&str>, default_value: f32) -> Result<f32, ConfigS
     match value {
         Some("") => Ok(default_value),
         None => Err(ConfigSetError::ValueRequired),
-        Some(v) => v.parse::<f32>().map_err(|_| ConfigSetError::InvalidValue),
+        Some(v) => parse_zig_float_f32(v),
+    }
+}
+
+fn parse_zig_float_f64(value: &str) -> Result<f64, ConfigSetError> {
+    let (negative, body) = split_float_sign(value).ok_or(ConfigSetError::InvalidValue)?;
+    if body.is_empty() {
+        return Err(ConfigSetError::InvalidValue);
+    }
+    let normalized = normalize_zig_float(value, negative, body)?;
+    parse_c_float_f64(&normalized)
+}
+
+fn parse_zig_float_f32(value: &str) -> Result<f32, ConfigSetError> {
+    let (negative, body) = split_float_sign(value).ok_or(ConfigSetError::InvalidValue)?;
+    if body.is_empty() {
+        return Err(ConfigSetError::InvalidValue);
+    }
+    let normalized = normalize_zig_float(value, negative, body)?;
+    parse_c_float_f32(&normalized)
+}
+
+fn split_float_sign(value: &str) -> Option<(bool, &str)> {
+    match value.as_bytes().first()? {
+        b'+' => Some((false, &value[1..])),
+        b'-' => Some((true, &value[1..])),
+        _ => Some((false, value)),
+    }
+}
+
+fn normalize_zig_float(value: &str, negative: bool, body: &str) -> Result<String, ConfigSetError> {
+    if value.bytes().any(|byte| byte.is_ascii_whitespace()) {
+        return Err(ConfigSetError::InvalidValue);
+    }
+    if body.to_ascii_lowercase().starts_with("nan(") {
+        return Err(ConfigSetError::InvalidValue);
+    }
+
+    if body.starts_with("0x") || body.starts_with("0X") {
+        validate_zig_hex_float_separators(body)?;
+        let mut normalized = String::new();
+        if negative {
+            normalized.push('-');
+        } else if value.starts_with('+') {
+            normalized.push('+');
+        }
+        normalized.push_str(&remove_zig_digit_separators(body, 16)?);
+        Ok(normalized)
+    } else {
+        remove_zig_digit_separators(value, 10)
+    }
+}
+
+fn parse_c_float_f64(value: &str) -> Result<f64, ConfigSetError> {
+    let c_value = std::ffi::CString::new(value).map_err(|_| ConfigSetError::InvalidValue)?;
+    let mut end: *mut libc::c_char = std::ptr::null_mut();
+    let parsed = unsafe { libc::strtod(c_value.as_ptr(), &mut end) };
+    let expected_end = unsafe { c_value.as_ptr().add(value.len()) as *mut libc::c_char };
+    if end == expected_end {
+        Ok(parsed)
+    } else {
+        Err(ConfigSetError::InvalidValue)
+    }
+}
+
+fn parse_c_float_f32(value: &str) -> Result<f32, ConfigSetError> {
+    let c_value = std::ffi::CString::new(value).map_err(|_| ConfigSetError::InvalidValue)?;
+    let mut end: *mut libc::c_char = std::ptr::null_mut();
+    let parsed = unsafe { libc::strtof(c_value.as_ptr(), &mut end) };
+    let expected_end = unsafe { c_value.as_ptr().add(value.len()) as *mut libc::c_char };
+    if end == expected_end {
+        Ok(parsed)
+    } else {
+        Err(ConfigSetError::InvalidValue)
+    }
+}
+
+fn remove_zig_digit_separators(value: &str, base: u32) -> Result<String, ConfigSetError> {
+    let bytes = value.as_bytes();
+    for (idx, byte) in bytes.iter().enumerate() {
+        if *byte == b'_' {
+            let prev = idx.checked_sub(1).and_then(|prev| bytes.get(prev)).copied();
+            let next = bytes.get(idx + 1).copied();
+            if !prev.is_some_and(|ch| is_float_digit(ch, base))
+                || !next.is_some_and(|ch| is_float_digit(ch, base))
+            {
+                return Err(ConfigSetError::InvalidValue);
+            }
+        }
+    }
+    Ok(value.chars().filter(|ch| *ch != '_').collect())
+}
+
+fn validate_zig_hex_float_separators(value: &str) -> Result<(), ConfigSetError> {
+    let bytes = value.as_bytes();
+    let mut in_exponent = false;
+    for (idx, byte) in bytes.iter().enumerate() {
+        match *byte {
+            b'p' | b'P' => in_exponent = true,
+            b'_' => {
+                let prev = idx.checked_sub(1).and_then(|prev| bytes.get(prev)).copied();
+                let next = bytes.get(idx + 1).copied();
+                let base = if in_exponent { 10 } else { 16 };
+                if !prev.is_some_and(|ch| is_float_digit(ch, base))
+                    || !next.is_some_and(|ch| is_float_digit(ch, base))
+                {
+                    return Err(ConfigSetError::InvalidValue);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn is_float_digit(byte: u8, base: u32) -> bool {
+    match base {
+        10 => byte.is_ascii_digit(),
+        16 => byte.is_ascii_hexdigit(),
+        _ => false,
     }
 }
 
@@ -3531,6 +3713,30 @@ fn set_repeatable_font_variation(
 ) -> Result<(), ConfigSetError> {
     if value == Some("") {
         *target = RepeatableFontVariation::default();
+        return Ok(());
+    }
+    target.parse_cli(value)?;
+    Ok(())
+}
+
+fn set_repeatable_codepoint_map(
+    target: &mut RepeatableCodepointMap,
+    value: Option<&str>,
+) -> Result<(), ConfigSetError> {
+    if value == Some("") {
+        *target = RepeatableCodepointMap::default();
+        return Ok(());
+    }
+    target.parse_cli(value)?;
+    Ok(())
+}
+
+fn set_repeatable_clipboard_codepoint_map(
+    target: &mut RepeatableClipboardCodepointMap,
+    value: Option<&str>,
+) -> Result<(), ConfigSetError> {
+    if value == Some("") {
+        *target = RepeatableClipboardCodepointMap::default();
         return Ok(());
     }
     target.parse_cli(value)?;
@@ -3663,6 +3869,29 @@ fn set_optional_value_field<T, E: Into<ConfigSetError>>(
     match value {
         Some("") => Ok(default_value),
         _ => parse(value).map(Some).map_err(Into::into),
+    }
+}
+
+/// Resolve an optional `config.path.Path` field. Upstream optional fields are
+/// parsed as their child type: a raw empty value resets to the default, while
+/// `Path.parseCLI` ignores parsed-empty values after `?`/quote handling.
+fn set_optional_config_file_path_field(
+    field: &mut Option<ConfigFilePath>,
+    value: Option<&str>,
+    default_value: Option<ConfigFilePath>,
+) -> Result<(), ConfigSetError> {
+    match value {
+        Some("") => {
+            *field = default_value;
+            Ok(())
+        }
+        Some(_) | None => {
+            let path = ConfigFilePath::parse_single(value)?;
+            if !path.path().is_empty() {
+                *field = Some(path);
+            }
+            Ok(())
+        }
     }
 }
 
@@ -3968,7 +4197,6 @@ fn parse_uint(buf: &str, base: u32, max: u64) -> Result<u64, IntParseError> {
     if bytes.is_empty() || bytes[0] == b'_' || bytes[bytes.len() - 1] == b'_' {
         return Err(IntParseError::Invalid);
     }
-
     let limit = max as i128;
     let mut acc: i128 = 0;
     for &c in bytes {
@@ -4467,8 +4695,7 @@ pub(crate) enum WindowPaddingParseError {
 }
 
 /// The `window-padding-*` config (upstream `Config.WindowPadding`): a padding pair
-/// (a single value applies to both edges). The `formatEntry` formatter is ported
-/// later.
+/// (a single value applies to both edges).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct WindowPadding {
     pub top_left: u32,
@@ -4906,15 +5133,13 @@ impl QuickTerminalSizeValue {
         }
 
         if let Some(value) = input.strip_suffix("px") {
-            return value
-                .parse::<u32>()
+            return parse_u32_dec(value)
                 .map(QuickTerminalSizeValue::Pixels)
-                .map_err(|_| QuickTerminalSizeParseError::InvalidValue);
+                .ok_or(QuickTerminalSizeParseError::InvalidValue);
         }
 
         if let Some(value) = input.strip_suffix('%') {
-            let percentage = value
-                .parse::<f32>()
+            let percentage = parse_zig_float_f32(value)
                 .map_err(|_| QuickTerminalSizeParseError::InvalidValue)?;
             if percentage < 0.0 {
                 return Err(QuickTerminalSizeParseError::InvalidValue);
@@ -5438,7 +5663,6 @@ pub(crate) fn parse_bool_field(value: Option<&str>) -> Result<bool, MagicParseEr
 pub(crate) fn parse_string_field(value: Option<&str>) -> Result<String, MagicParseError> {
     match value {
         None => Err(MagicParseError::ValueRequired),
-        Some(v) if v.as_bytes().contains(&0) => Err(MagicParseError::InvalidValue),
         Some(v) => Ok(v.to_string()),
     }
 }
@@ -5823,9 +6047,6 @@ impl RepeatableClipboardCodepointMap {
 
         let replacement = if let Some(cp_str) = value.strip_prefix("U+") {
             let cp = parse_u21_hex(cp_str).ok_or(ClipboardCodepointMapParseError::InvalidValue)?;
-            if char::from_u32(cp).is_none() {
-                return Err(ClipboardCodepointMapParseError::InvalidValue);
-            }
             ClipboardReplacement::Codepoint(cp)
         } else {
             // `value` is already valid UTF-8 (it is a `&str`).
@@ -5837,9 +6058,6 @@ impl RepeatableClipboardCodepointMap {
             .next()
             .map_err(|_| ClipboardCodepointMapParseError::InvalidValue)?
         {
-            if !valid_clipboard_scalar_range(range) {
-                return Err(ClipboardCodepointMapParseError::InvalidValue);
-            }
             self.map.push(ClipboardCodepointMapEntry {
                 range,
                 replacement: replacement.clone(),
@@ -5872,13 +6090,6 @@ impl RepeatableClipboardCodepointMap {
             formatter.entry_str(&format!("{}={}", key, value));
         }
     }
-}
-
-fn valid_clipboard_scalar_range([start, end]: [u32; 2]) -> bool {
-    start <= end
-        && char::from_u32(start).is_some()
-        && char::from_u32(end).is_some()
-        && !(start <= 0xdfff && end >= 0xd800)
 }
 
 /// Parse a base-16 `u21` (upstream `std.fmt.parseInt(u21, _, 16)`); every error is
@@ -7340,7 +7551,7 @@ const DEFAULT_COMMAND_PALETTE_ENTRIES: &[(&str, &str, &str)] = &[
     ("Focus Split: Up", "Focus the split above, if it exists.", "goto_split:up"),
     ("Focus Window: Next", "Focus the next window, if any.", "goto_window:next"),
     ("Focus Window: Previous", "Focus the previous window, if any.", "goto_window:previous"),
-    ("Ghostty", "Put a little Ghostty in your terminal.", "text:\\xf0\\x9f\\x91\\xbb"),
+    ("Ghostty", "Put a little Ghostty in your terminal.", "text:\u{1f47b}"),
     ("Increase Font Size", "Increase the font size by 1 point.", "increase_font_size:1"),
     ("Move Tab Left", "Move the current tab to the left.", "move_tab:-1"),
     ("Move Tab Right", "Move the current tab to the right.", "move_tab:1"),
@@ -8445,25 +8656,39 @@ impl Default for MouseScrollMultiplier {
 }
 
 impl MouseScrollMultiplier {
+    fn parse_float(value: &str) -> Result<f64, MouseScrollMultiplierParseError> {
+        parse_zig_float_f64(value).map_err(|_| MouseScrollMultiplierParseError::InvalidValue)
+    }
+
+    fn parse_auto_struct_value(raw: &str) -> Result<String, MouseScrollMultiplierParseError> {
+        let trimmed = raw.trim_matches(|c: char| c == ' ' || c == '\t');
+        if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+            let bytes = parse_quoted_string(trimmed.as_bytes())
+                .ok_or(MouseScrollMultiplierParseError::InvalidValue)?;
+            String::from_utf8(bytes).map_err(|_| MouseScrollMultiplierParseError::InvalidValue)
+        } else {
+            Ok(trimmed.to_string())
+        }
+    }
+
     pub(crate) fn parse_cli(
         &mut self,
         value: Option<&str>,
     ) -> Result<(), MouseScrollMultiplierParseError> {
         let input = value.ok_or(MouseScrollMultiplierParseError::ValueRequired)?;
         if input.is_empty() {
-            return Err(MouseScrollMultiplierParseError::InvalidValue);
+            return Ok(());
         }
 
         if !input.contains(':') {
-            let parsed = input
-                .parse::<f64>()
-                .map_err(|_| MouseScrollMultiplierParseError::InvalidValue)?;
+            let parsed = Self::parse_float(input)?;
             self.precision = parsed;
             self.discrete = parsed;
             return Ok(());
         }
 
         let ws = |c: char| c == ' ' || c == '\t';
+        let mut parsed = *self;
         let mut splitter = CommaSplitter::new(input);
         while let Some(entry) = splitter
             .next()
@@ -8476,16 +8701,15 @@ impl MouseScrollMultiplier {
                 .find(':')
                 .ok_or(MouseScrollMultiplierParseError::InvalidValue)?;
             let key = entry[..idx].trim_matches(ws);
-            let raw = entry[idx + 1..].trim_matches(ws);
-            let parsed = raw
-                .parse::<f64>()
-                .map_err(|_| MouseScrollMultiplierParseError::InvalidValue)?;
+            let raw = Self::parse_auto_struct_value(&entry[idx + 1..])?;
+            let value = Self::parse_float(&raw)?;
             match key {
-                "precision" => self.precision = parsed,
-                "discrete" => self.discrete = parsed,
+                "precision" => parsed.precision = value,
+                "discrete" => parsed.discrete = value,
                 _ => return Err(MouseScrollMultiplierParseError::InvalidValue),
             }
         }
+        *self = parsed;
         Ok(())
     }
 
@@ -8683,31 +8907,34 @@ mod tests {
         BackgroundBlur, BackgroundBlurParseError, BackgroundImageFit, BackgroundImagePosition,
         BellFeatures, BoldColor, ClipboardAccess, ClipboardCodepointMapEntry,
         ClipboardCodepointMapParseError, ClipboardReplacement, Color, ColorList, ColorParseError,
-        Command, CommandPaletteEntry, Config, ConfigAppRuntime, ConfigDiagnostic, ConfigFilePath,
-        ConfigFinalizeReport, ConfigFinalizeWarning, ConfigRecursiveFileErrorKind,
-        ConfigReplayEntry, ConfigSetError, ConfigSetSource, ConfigThemeLoadReport,
-        ConfirmCloseSurface, CopyOnSelect, CursorStyle, CustomShaderAnimation, DefaultConfigPaths,
-        Duration, DurationParseError, FlagsParseError, FontShapingBreak, FontStyle,
-        FontStyleParseError, FontSyntheticStyle, FontVariation, FreetypeLoadFlags, Fullscreen,
-        GraphemeWidthMethod, GtkSingleInstance, GtkTabsLocation, GtkTitlebarStyle, GtkToolbarStyle,
-        LinkPreviews, LinuxCgroup, MacAppIcon, MacAppIconFrame, MacHidden, MacOSDockDropBehavior,
-        MacShortcuts, MacTitlebarProxyIcon, MacTitlebarStyle, MacWindowButtons, MagicParseError,
-        MetricModifier, MiddleClickAction, MouseScrollMultiplier, MouseScrollMultiplierParseError,
-        MouseShiftCapture, NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
+        Command, CommandPaletteEntry, CommandParseError, Config, ConfigAppRuntime,
+        ConfigDiagnostic, ConfigFilePath, ConfigFinalizeReport, ConfigFinalizeWarning,
+        ConfigRecursiveFileErrorKind, ConfigReplayEntry, ConfigSetError, ConfigSetSource,
+        ConfigThemeLoadReport, ConfirmCloseSurface, CopyOnSelect, CursorStyle,
+        CustomShaderAnimation, DefaultConfigPaths, Duration, DurationParseError, FlagsParseError,
+        FontShapingBreak, FontStyle, FontStyleParseError, FontSyntheticStyle, FontVariation,
+        FreetypeLoadFlags, Fullscreen, GraphemeWidthMethod, GtkSingleInstance, GtkTabsLocation,
+        GtkTitlebarStyle, GtkToolbarStyle, LinkPreviews, LinuxCgroup, MacAppIcon, MacAppIconFrame,
+        MacHidden, MacOSDockDropBehavior, MacShortcuts, MacTitlebarProxyIcon, MacTitlebarStyle,
+        MacWindowButtons, MagicParseError, MetricModifier, MiddleClickAction,
+        MouseScrollMultiplier, MouseScrollMultiplierParseError, MouseShiftCapture,
+        NonNativeFullscreen, NotifyOnCommandFinish, NotifyOnCommandFinishAction,
         OptionalFileAction, OscColorReportFormat, Palette, PaletteParseError,
         QuickTerminalDimensions, QuickTerminalKeyboardInteractivity, QuickTerminalLayer,
         QuickTerminalPosition, QuickTerminalScreen, QuickTerminalSize, QuickTerminalSizeParseError,
         QuickTerminalSizeValue, QuickTerminalSpaceBehavior, ReadableIo, ReleaseChannel,
-        RepeatableClipboardCodepointMap, RepeatableCodepointMap, RepeatableConfigPath,
-        RepeatableConfigPathParseError, RepeatableFontVariation, RepeatableFontVariationParseError,
-        RepeatableReadableIo, RepeatableString, RepeatableStringParseError, ResizeOverlay,
-        ResizeOverlayPosition, RightClickAction, ScrollToBottom, Scrollbar, SelectionWordChars,
-        SelectionWordCharsParseError, ShellIntegration, ShellIntegrationFeatures,
-        SplitPreserveZoom, TerminalBoldColor, TerminalColor, Theme, ThemeParseError,
-        WindowColorspace, WindowDecoration, WindowDecorationParseError, WindowNewTabPosition,
-        WindowPadding, WindowPaddingBalance, WindowPaddingColor, WindowPaddingParseError,
-        WindowSaveState, WindowShowTabBar, WindowSubtitle, WindowTheme, WorkingDirectory,
-        WorkingDirectoryParseError, DEFAULT_URL_REGEX, NS_PER_MS, NS_PER_S,
+        RepeatableClipboardCodepointMap, RepeatableCodepointMap, RepeatableCodepointMapParseError,
+        RepeatableConfigPath, RepeatableConfigPathParseError, RepeatableFontVariation,
+        RepeatableFontVariationParseError, RepeatableReadableIo, RepeatableReadableIoParseError,
+        RepeatableString, RepeatableStringMap, RepeatableStringMapParseError,
+        RepeatableStringParseError, ResizeOverlay, ResizeOverlayPosition, RightClickAction,
+        ScrollToBottom, Scrollbar, SelectionWordChars, SelectionWordCharsParseError,
+        ShellIntegration, ShellIntegrationFeatures, SplitPreserveZoom, TerminalBoldColor,
+        TerminalColor, Theme, ThemeParseError, WindowColorspace, WindowDecoration,
+        WindowDecorationParseError, WindowNewTabPosition, WindowPadding, WindowPaddingBalance,
+        WindowPaddingColor, WindowPaddingParseError, WindowSaveState, WindowShowTabBar,
+        WindowSubtitle, WindowTheme, WorkingDirectory, WorkingDirectoryParseError,
+        DEFAULT_URL_REGEX, NS_PER_MS, NS_PER_S,
     };
     use crate::input::key_mods::{self, Mods};
     use crate::input::link::{Action as LinkAction, Highlight as LinkHighlight};
@@ -9814,6 +10041,145 @@ mod tests {
     }
 
     #[test]
+    fn macos_icon_screen_color_config_parser_family_oracle() {
+        let black = Color { r: 0, g: 0, b: 0 };
+        let white = Color {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        let color_0a0b0c = Color {
+            r: 0x0a,
+            g: 0x0b,
+            b: 0x0c,
+        };
+        let color_010203 = Color { r: 1, g: 2, b: 3 };
+
+        let screen_color_line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("macos-icon-screen-color = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.macos_icon_screen_color, None);
+        assert_eq!(screen_color_line(&cfg), "macos-icon-screen-color = ");
+
+        cfg.set("macos-icon-screen-color", Some("black,#0A0B0C"))
+            .unwrap();
+        assert_eq!(
+            cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![black, color_0a0b0c],
+            })
+        );
+        assert_eq!(
+            screen_color_line(&cfg),
+            "macos-icon-screen-color = #000000,#0a0b0c"
+        );
+
+        cfg.set("macos-icon-screen-color", Some(", black,\t#ffffff,,"))
+            .unwrap();
+        assert_eq!(
+            cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![black, white],
+            })
+        );
+        assert_eq!(
+            screen_color_line(&cfg),
+            "macos-icon-screen-color = #000000,#ffffff"
+        );
+
+        cfg.set("macos-icon-screen-color", Some("#010203")).unwrap();
+        assert_eq!(
+            cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![color_010203],
+            })
+        );
+        assert_eq!(screen_color_line(&cfg), "macos-icon-screen-color = #010203");
+
+        let sixty_four = ["black"; 64].join(",");
+        cfg.set("macos-icon-screen-color", Some(&sixty_four))
+            .unwrap();
+        assert_eq!(
+            cfg.macos_icon_screen_color.as_ref().unwrap().colors.len(),
+            64
+        );
+        let too_many = ["black"; 65].join(",");
+        assert_eq!(
+            cfg.set("macos-icon-screen-color", Some(&too_many)),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        cfg.set("macos-icon-screen-color", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon_screen_color, None);
+        assert_eq!(screen_color_line(&cfg), "macos-icon-screen-color = ");
+        assert_eq!(
+            cfg.set("macos-icon-screen-color", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        let mut direct = ColorList::default();
+        assert_eq!(direct.parse_cli(None), Err(ColorParseError::ValueRequired));
+        assert_eq!(
+            direct.parse_cli(Some("")),
+            Err(ColorParseError::ValueRequired)
+        );
+        for bad in [",", " ", "notacolor", "#xyzxyz"] {
+            assert_eq!(
+                cfg.set("macos-icon-screen-color", Some(bad)),
+                Err(ConfigSetError::InvalidValue),
+                "{bad}"
+            );
+        }
+
+        cfg.set("macos-icon-screen-color", Some("#010203")).unwrap();
+        let diagnostics = cfg.load_str("macos-icon-screen-color = notacolor\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "macos-icon-screen-color".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(
+            cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![color_010203],
+            })
+        );
+
+        cfg.load_str("macos-icon-screen-color = #0A0B0C\n");
+        assert_eq!(
+            cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![color_0a0b0c],
+            })
+        );
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--macos-icon-screen-color=black,white"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(
+            cli_cfg.macos_icon_screen_color,
+            Some(ColorList {
+                colors: vec![black, white],
+            })
+        );
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
+    }
+
+    #[test]
     fn duration_parse_cli_sums_segments_in_nanoseconds() {
         let dur = |ns: u64| Ok(Duration { duration: ns });
 
@@ -9946,6 +10312,115 @@ mod tests {
     }
 
     #[test]
+    fn window_padding_config_parser_family_oracle() {
+        let pad = |top_left, bottom_right| WindowPadding {
+            top_left,
+            bottom_right,
+        };
+
+        assert_eq!(WindowPadding::parse_cli(Some("100")), Ok(pad(100, 100)));
+        assert_eq!(WindowPadding::parse_cli(Some("100,200")), Ok(pad(100, 200)));
+        assert_eq!(
+            WindowPadding::parse_cli(Some(" \t100\t,\t200 ")),
+            Ok(pad(100, 200))
+        );
+        assert_eq!(WindowPadding::parse_cli(Some("1_000")), Ok(pad(1000, 1000)));
+        assert_eq!(WindowPadding::parse_cli(Some("+5")), Ok(pad(5, 5)));
+        assert_eq!(WindowPadding::parse_cli(Some("-0")), Ok(pad(0, 0)));
+        assert_eq!(
+            WindowPadding::parse_cli(Some("4294967295")),
+            Ok(pad(u32::MAX, u32::MAX))
+        );
+        assert_eq!(
+            WindowPadding::parse_cli(None),
+            Err(WindowPaddingParseError::ValueRequired)
+        );
+        for bad in [
+            "",
+            "a",
+            "100,x",
+            "100,",
+            ",100",
+            "1,2,3",
+            "4294967296",
+            "_5",
+            "5_",
+            "-5",
+            "1\n",
+        ] {
+            assert_eq!(
+                WindowPadding::parse_cli(Some(bad)),
+                Err(WindowPaddingParseError::InvalidValue),
+                "{bad:?}"
+            );
+        }
+
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_padding_x, pad(2, 2));
+        assert_eq!(cfg.window_padding_y, pad(2, 2));
+        assert_eq!(line(&cfg, "window-padding-x"), "window-padding-x = 2");
+        assert_eq!(line(&cfg, "window-padding-y"), "window-padding-y = 2");
+
+        cfg.set("window-padding-x", Some("4")).unwrap();
+        cfg.set("window-padding-y", Some("6,8")).unwrap();
+        assert_eq!(cfg.window_padding_x, pad(4, 4));
+        assert_eq!(cfg.window_padding_y, pad(6, 8));
+        assert_eq!(line(&cfg, "window-padding-x"), "window-padding-x = 4");
+        assert_eq!(line(&cfg, "window-padding-y"), "window-padding-y = 6,8");
+
+        cfg.set("window-padding-x", Some("")).unwrap();
+        cfg.set("window-padding-y", Some("")).unwrap();
+        assert_eq!(cfg.window_padding_x, pad(2, 2));
+        assert_eq!(cfg.window_padding_y, pad(2, 2));
+
+        assert_eq!(
+            cfg.set("window-padding-x", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-padding-y", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("window-padding-x", Some("left")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("window-padding-y", Some("1,right")),
+            Err(ConfigSetError::InvalidValue)
+        );
+
+        let diagnostics =
+            cfg.load_str("window-padding-x = 4\nwindow-padding-x = left\nwindow-padding-y = 6,8\nwindow-padding-y = 1,right\n");
+        assert_eq!(cfg.window_padding_x, pad(4, 4));
+        assert_eq!(cfg.window_padding_y, pad(6, 8));
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "window-padding-x".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "window-padding-y".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn window_decoration_parse_cli_resolves_bool_and_variants() {
         // Upstream `WindowDecoration.parseCLI` cases.
         assert_eq!(
@@ -10007,6 +10482,78 @@ mod tests {
             WindowDecoration::parse_cli(Some("True")),
             Err(WindowDecorationParseError::InvalidValue)
         );
+    }
+
+    #[test]
+    fn window_decoration_config_parser_family_oracle() {
+        let line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("window-decoration = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.window_decoration, WindowDecoration::Auto);
+        assert_eq!(line(&cfg), "window-decoration = auto");
+        assert_eq!(
+            WindowDecoration::parse_cli(None),
+            Ok(WindowDecoration::Auto)
+        );
+
+        for token in ["true", "1", "t", "T"] {
+            cfg.set("window-decoration", Some(token)).unwrap();
+            assert_eq!(cfg.window_decoration, WindowDecoration::Auto, "{token}");
+            assert_eq!(line(&cfg), "window-decoration = auto");
+        }
+        for token in ["false", "0", "f", "F"] {
+            cfg.set("window-decoration", Some(token)).unwrap();
+            assert_eq!(cfg.window_decoration, WindowDecoration::None, "{token}");
+            assert_eq!(line(&cfg), "window-decoration = none");
+        }
+        for (token, expected) in [
+            ("auto", WindowDecoration::Auto),
+            ("client", WindowDecoration::Client),
+            ("server", WindowDecoration::Server),
+            ("none", WindowDecoration::None),
+        ] {
+            cfg.set("window-decoration", Some(token)).unwrap();
+            assert_eq!(cfg.window_decoration, expected);
+            assert_eq!(line(&cfg), format!("window-decoration = {token}"));
+        }
+
+        for invalid in ["", "aaaa", "True", " auto", "auto "] {
+            assert_eq!(
+                cfg.set("window-decoration", Some(invalid)),
+                Err(ConfigSetError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        cfg.set("window-decoration", Some("server")).unwrap();
+        let diagnostics = cfg.load_str("window-decoration = nope\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "window-decoration".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(cfg.window_decoration, WindowDecoration::Server);
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--window-decoration=client"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(cli_cfg.window_decoration, WindowDecoration::Client);
+        assert_eq!(line(&cli_cfg), "window-decoration = client");
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
     }
 
     #[test]
@@ -10075,7 +10622,12 @@ mod tests {
     }
 
     #[test]
-    fn config_file_repeatable_path_parse_cli_matches_upstream() {
+    fn repeatable_path_config_parser_family_oracle() {
+        let empty = RepeatableConfigPath::default();
+        let mut out = String::new();
+        empty.format_entry(&mut EntryFormatter::new("path", &mut out));
+        assert_eq!(out, "path = \n");
+
         let mut paths = RepeatableConfigPath::default();
         assert_eq!(paths.parse_cli(Some("config.1")), Ok(()));
         assert_eq!(paths.parse_cli(Some("?config.2")), Ok(()));
@@ -10089,6 +10641,13 @@ mod tests {
                 ConfigFilePath::Required("?config.3".to_string()),
                 ConfigFilePath::Optional("config.4".to_string()),
             ]
+        );
+
+        let mut out = String::new();
+        paths.format_entry(&mut EntryFormatter::new("path", &mut out));
+        assert_eq!(
+            out,
+            "path = config.1\npath = ?config.2\npath = ?config.3\npath = ?config.4\n"
         );
 
         // Parsed-empty paths are ignored, not reset.
@@ -10105,6 +10664,131 @@ mod tests {
         // A raw empty value resets the repeatable list.
         assert_eq!(paths.parse_cli(Some("")), Ok(()));
         assert!(paths.list.is_empty());
+    }
+
+    #[test]
+    fn path_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.set("bell-audio-path", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("background-image", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        cfg.set("bell-audio-path", Some("sound.wav")).unwrap();
+        assert_eq!(
+            cfg.bell_audio_path,
+            Some(ConfigFilePath::Required("sound.wav".to_string()))
+        );
+        cfg.set("bell-audio-path", Some("?optional.wav")).unwrap();
+        assert_eq!(
+            cfg.bell_audio_path,
+            Some(ConfigFilePath::Optional("optional.wav".to_string()))
+        );
+        cfg.set("bell-audio-path", Some("\"?required-literal.wav\""))
+            .unwrap();
+        assert_eq!(
+            cfg.bell_audio_path,
+            Some(ConfigFilePath::Required(
+                "?required-literal.wav".to_string()
+            ))
+        );
+        cfg.set("bell-audio-path", Some("?\"optional-quoted.wav\""))
+            .unwrap();
+        assert_eq!(
+            cfg.bell_audio_path,
+            Some(ConfigFilePath::Optional("optional-quoted.wav".to_string()))
+        );
+
+        let prior_bell = cfg.bell_audio_path.clone();
+        cfg.set("bell-audio-path", Some("?")).unwrap();
+        assert_eq!(cfg.bell_audio_path, prior_bell);
+        cfg.set("bell-audio-path", Some("\"\"")).unwrap();
+        assert_eq!(cfg.bell_audio_path, prior_bell);
+        cfg.set("bell-audio-path", Some("?\"\"")).unwrap();
+        assert_eq!(cfg.bell_audio_path, prior_bell);
+
+        cfg.set("bell-audio-path", Some("bad\0path")).unwrap();
+        assert_eq!(
+            cfg.bell_audio_path,
+            Some(ConfigFilePath::Required("bad\0path".to_string()))
+        );
+        cfg.set("bell-audio-path", Some("")).unwrap();
+        assert_eq!(cfg.bell_audio_path, None);
+
+        cfg.set("background-image", Some("backdrop.png")).unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Required("backdrop.png".to_string()))
+        );
+        cfg.set("background-image", Some("?optional.png")).unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Optional("optional.png".to_string()))
+        );
+        cfg.set("background-image", Some("\"?required-literal.png\""))
+            .unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Required(
+                "?required-literal.png".to_string()
+            ))
+        );
+        cfg.set("background-image", Some("?\"optional-quoted.png\""))
+            .unwrap();
+        assert_eq!(
+            cfg.background_image,
+            Some(ConfigFilePath::Optional("optional-quoted.png".to_string()))
+        );
+
+        let prior_background = cfg.background_image.clone();
+        cfg.set("background-image", Some("?")).unwrap();
+        assert_eq!(cfg.background_image, prior_background);
+        cfg.set("background-image", Some("\"\"")).unwrap();
+        assert_eq!(cfg.background_image, prior_background);
+        cfg.set("background-image", Some("?\"\"")).unwrap();
+        assert_eq!(cfg.background_image, prior_background);
+        cfg.set("background-image", Some("")).unwrap();
+        assert_eq!(cfg.background_image, None);
+
+        assert_eq!(
+            cfg.set("config-file", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("config-file", Some("config.1")).unwrap();
+        cfg.set("config-file", Some("?config.2")).unwrap();
+        cfg.set("config-file", Some("\"?config.3\"")).unwrap();
+        cfg.set("config-file", Some("?\"config.4\"")).unwrap();
+        assert_eq!(
+            cfg.config_file.list,
+            vec![
+                ConfigFilePath::Required("config.1".to_string()),
+                ConfigFilePath::Optional("config.2".to_string()),
+                ConfigFilePath::Required("?config.3".to_string()),
+                ConfigFilePath::Optional("config.4".to_string()),
+            ]
+        );
+
+        cfg.set("config-file", Some("?")).unwrap();
+        cfg.set("config-file", Some("\"\"")).unwrap();
+        cfg.set("config-file", Some("?\"\"")).unwrap();
+        assert_eq!(cfg.config_file.list.len(), 4);
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|line| line == "config-file = config.1"));
+        assert!(out.lines().any(|line| line == "config-file = ?config.2"));
+        assert!(out.lines().any(|line| line == "config-file = ?config.3"));
+        assert!(out.lines().any(|line| line == "config-file = ?config.4"));
+
+        cfg.set("config-file", Some("")).unwrap();
+        assert!(cfg.config_file.list.is_empty());
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|line| line == "config-file = "));
     }
 
     #[test]
@@ -10140,23 +10824,15 @@ mod tests {
             Some(ConfigFilePath::Optional("optional-quoted.wav".to_string()))
         );
 
+        let prior = cfg.bell_audio_path.clone();
         cfg.set("bell-audio-path", Some("?")).unwrap();
-        assert_eq!(
-            cfg.bell_audio_path,
-            Some(ConfigFilePath::Optional(String::new()))
-        );
+        assert_eq!(cfg.bell_audio_path, prior);
 
         cfg.set("bell-audio-path", Some("\"\"")).unwrap();
-        assert_eq!(
-            cfg.bell_audio_path,
-            Some(ConfigFilePath::Required(String::new()))
-        );
+        assert_eq!(cfg.bell_audio_path, prior);
 
         cfg.set("bell-audio-path", Some("?\"\"")).unwrap();
-        assert_eq!(
-            cfg.bell_audio_path,
-            Some(ConfigFilePath::Optional(String::new()))
-        );
+        assert_eq!(cfg.bell_audio_path, prior);
 
         cfg.set("bell-audio-path", Some("")).unwrap();
         assert_eq!(cfg.bell_audio_path, None);
@@ -10165,9 +10841,10 @@ mod tests {
             cfg.set("bell-audio-path", None),
             Err(ConfigSetError::ValueRequired)
         );
+        assert_eq!(cfg.set("bell-audio-path", Some("bad\0path")), Ok(()));
         assert_eq!(
-            cfg.set("bell-audio-path", Some("bad\0path")),
-            Err(ConfigSetError::InvalidValue)
+            cfg.bell_audio_path,
+            Some(ConfigFilePath::Required("bad\0path".to_string()))
         );
     }
 
@@ -10234,6 +10911,14 @@ mod tests {
         );
         assert_eq!(line(&cfg), "background-image = ?required-literal.png");
 
+        let prior = cfg.background_image.clone();
+        cfg.set("background-image", Some("?")).unwrap();
+        assert_eq!(cfg.background_image, prior);
+        cfg.set("background-image", Some("\"\"")).unwrap();
+        assert_eq!(cfg.background_image, prior);
+        cfg.set("background-image", Some("?\"\"")).unwrap();
+        assert_eq!(cfg.background_image, prior);
+
         cfg.set("background-image", Some("")).unwrap();
         assert_eq!(cfg.background_image, None);
         assert_eq!(line(&cfg), "background-image = ");
@@ -10242,9 +10927,10 @@ mod tests {
             cfg.set("background-image", None),
             Err(ConfigSetError::ValueRequired)
         );
+        assert_eq!(cfg.set("background-image", Some("bad\0path")), Ok(()));
         assert_eq!(
-            cfg.set("background-image", Some("bad\0path")),
-            Err(ConfigSetError::InvalidValue)
+            cfg.background_image,
+            Some(ConfigFilePath::Required("bad\0path".to_string()))
         );
     }
 
@@ -11086,10 +11772,8 @@ mod tests {
             cfg.set("macos-custom-icon", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("macos-custom-icon", Some("bad\0path")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("macos-custom-icon", Some("bad\0path")).unwrap();
+        assert_eq!(cfg.macos_custom_icon.as_deref(), Some("bad\0path"));
 
         cfg.set("macos-icon-ghost-color", Some("ForestGreen"))
             .unwrap();
@@ -11683,6 +12367,130 @@ mod tests {
     }
 
     #[test]
+    fn config_compatibility_alias_semantics() {
+        let mut cfg = Config::default();
+
+        cfg.set("background-blur-radius", Some("12")).unwrap();
+        assert_eq!(cfg.background_blur, BackgroundBlur::Radius(12));
+        cfg.set("adw-toolbar-style", Some("flat")).unwrap();
+        assert_eq!(cfg.gtk_toolbar_style, GtkToolbarStyle::Flat);
+        cfg.set("gtk-tabs-location", Some("hidden")).unwrap();
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Never);
+        cfg.set("gtk-single-instance", Some("desktop")).unwrap();
+        assert_eq!(cfg.gtk_single_instance, GtkSingleInstance::Detect);
+        cfg.set("macos-dock-drop-behavior", Some("window")).unwrap();
+        assert_eq!(
+            cfg.macos_dock_drop_behavior,
+            MacOSDockDropBehavior::NewWindow
+        );
+
+        cfg.set("cursor-invert-fg-bg", Some("false")).unwrap();
+        assert_eq!(cfg.cursor_color, None);
+        assert_eq!(cfg.cursor_text, None);
+        cfg.set("cursor-invert-fg-bg", None).unwrap();
+        assert_eq!(cfg.cursor_color, Some(TerminalColor::CellForeground));
+        assert_eq!(cfg.cursor_text, Some(TerminalColor::CellBackground));
+
+        cfg.set("selection-invert-fg-bg", Some("0")).unwrap();
+        assert_eq!(cfg.selection_foreground, None);
+        assert_eq!(cfg.selection_background, None);
+        cfg.set("selection-invert-fg-bg", Some("true")).unwrap();
+        assert_eq!(
+            cfg.selection_foreground,
+            Some(TerminalColor::CellBackground)
+        );
+        assert_eq!(
+            cfg.selection_background,
+            Some(TerminalColor::CellForeground)
+        );
+
+        cfg.set("bold-is-bright", Some("f")).unwrap();
+        assert_eq!(cfg.bold_color, None);
+        cfg.set("bold-is-bright", None).unwrap();
+        assert_eq!(cfg.bold_color, Some(BoldColor::Bright));
+
+        for (key, value) in [
+            ("background-blur-radius", Some("999")),
+            ("adw-toolbar-style", Some("nope")),
+            ("gtk-tabs-location", Some("hidden-ish")),
+            ("cursor-invert-fg-bg", Some("maybe")),
+            ("selection-invert-fg-bg", Some("")),
+            ("bold-is-bright", Some("bright")),
+            ("gtk-single-instance", Some("desktop-ish")),
+            ("macos-dock-drop-behavior", Some("tab")),
+        ] {
+            assert_eq!(cfg.set(key, value), Err(ConfigSetError::InvalidValue));
+        }
+
+        let mut loaded = Config::default();
+        let diagnostics = loaded.load_str(
+            "background-blur-radius = 3\n\
+             adw-toolbar-style = raised-border\n\
+             gtk-tabs-location = hidden\n\
+             cursor-invert-fg-bg\n\
+             selection-invert-fg-bg = true\n\
+             bold-is-bright\n\
+             gtk-single-instance = desktop\n\
+             macos-dock-drop-behavior = window\n\
+             background-blur-radius = 300\n\
+             adw-toolbar-style = ornate\n\
+             cursor-invert-fg-bg = maybe\n\
+             selection-invert-fg-bg = \n\
+             bold-is-bright = maybe\n",
+        );
+
+        assert_eq!(loaded.background_blur, BackgroundBlur::Radius(3));
+        assert_eq!(loaded.gtk_toolbar_style, GtkToolbarStyle::RaisedBorder);
+        assert_eq!(loaded.window_show_tab_bar, WindowShowTabBar::Never);
+        assert_eq!(loaded.cursor_color, Some(TerminalColor::CellForeground));
+        assert_eq!(loaded.cursor_text, Some(TerminalColor::CellBackground));
+        assert_eq!(
+            loaded.selection_foreground,
+            Some(TerminalColor::CellBackground)
+        );
+        assert_eq!(
+            loaded.selection_background,
+            Some(TerminalColor::CellForeground)
+        );
+        assert_eq!(loaded.bold_color, Some(BoldColor::Bright));
+        assert_eq!(loaded.gtk_single_instance, GtkSingleInstance::Detect);
+        assert_eq!(
+            loaded.macos_dock_drop_behavior,
+            MacOSDockDropBehavior::NewWindow
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 9,
+                    key: "background-blur-radius".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 10,
+                    key: "adw-toolbar-style".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 11,
+                    key: "cursor-invert-fg-bg".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 12,
+                    key: "selection-invert-fg-bg".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 13,
+                    key: "bold-is-bright".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn config_gtk_single_instance_finalize_non_gtk_leaves_detect_unchanged() {
         let mut cfg = Config::default();
         cfg.finalize_with_app_runtime_for_test(ConfigAppRuntime::None, true);
@@ -12114,7 +12922,7 @@ mod tests {
     }
 
     #[test]
-    fn config_default_files_is_cli_only() {
+    fn config_default_files_parser_family_oracle() {
         let mut cfg = Config::default();
         assert!(cfg.config_default_files);
 
@@ -12125,9 +12933,10 @@ mod tests {
         assert!(diagnostics.is_empty());
         assert!(cfg.config_default_files);
 
-        let diagnostics = cfg.set_cli_args(["--config-default-files=false"]);
+        let diagnostics = cfg.set_cli_args(["--config-default-files=false", "--title=CLI Title"]);
         assert!(diagnostics.is_empty());
         assert!(!cfg.config_default_files);
+        assert_eq!(cfg.title.as_deref(), Some("CLI Title"));
 
         let diagnostics = cfg.set_cli_args(["--config-default-files="]);
         assert!(diagnostics.is_empty());
@@ -12143,6 +12952,76 @@ mod tests {
             }]
         );
         assert!(cfg.config_default_files);
+
+        let dir = unique_config_test_dir("config-default-files-oracle");
+        let default_config = dir.join("config.roastty");
+        write_config_file(
+            &default_config,
+            "term = file-term\n\
+             title = File Title\n\
+             fullscreen = true\n\
+             config-default-files = false\n",
+        );
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(default_config.clone()),
+            preferred_xdg: None,
+            legacy_app_support: None,
+            preferred_app_support: None,
+        });
+        assert!(report.errors.is_empty());
+        assert_eq!(report.loaded.len(), 1);
+        assert!(report.loaded[0].diagnostics.is_empty());
+        assert_eq!(cfg.term, "file-term");
+        assert_eq!(cfg.title.as_deref(), Some("File Title"));
+        assert_eq!(cfg.fullscreen, Fullscreen::True);
+        assert!(cfg.config_default_files);
+
+        let diagnostics = cfg.set_cli_args(["--config-default-files=false", "--title=CLI Only"]);
+        assert!(diagnostics.is_empty());
+        assert!(!cfg.config_default_files);
+        assert_eq!(cfg.term, Config::default().term);
+        assert_eq!(cfg.title.as_deref(), Some("CLI Only"));
+        assert_eq!(cfg.fullscreen, Fullscreen::False);
+        assert_eq!(cfg.replay_entries.len(), 2);
+        assert!(cfg
+            .replay_entries
+            .iter()
+            .all(|entry| entry.source == ConfigSetSource::Cli));
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(default_config.clone()),
+            preferred_xdg: None,
+            legacy_app_support: None,
+            preferred_app_support: None,
+        });
+        assert!(report.errors.is_empty());
+        let diagnostics = cfg.set_cli_args(["--config-default-files=", "--title=CLI Keeps Files"]);
+        assert!(diagnostics.is_empty());
+        assert!(cfg.config_default_files);
+        assert_eq!(cfg.term, "file-term");
+        assert_eq!(cfg.title.as_deref(), Some("CLI Keeps Files"));
+        assert_eq!(cfg.fullscreen, Fullscreen::True);
+
+        let mut cfg = Config::default();
+        let report = cfg.load_default_files_from_paths(DefaultConfigPaths {
+            legacy_xdg: Some(default_config),
+            preferred_xdg: None,
+            legacy_app_support: None,
+            preferred_app_support: None,
+        });
+        assert!(report.errors.is_empty());
+        let diagnostics =
+            cfg.set_cli_args(["--config-default-files=true", "--title=CLI Keeps Files"]);
+        assert!(diagnostics.is_empty());
+        assert!(cfg.config_default_files);
+        assert_eq!(cfg.term, "file-term");
+        assert_eq!(cfg.title.as_deref(), Some("CLI Keeps Files"));
+        assert_eq!(cfg.fullscreen, Fullscreen::True);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -12202,11 +13081,163 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_codepoint_map_parse_cli_parses_entries() {
+    fn selection_word_chars_config_parser_family_oracle() {
+        let sp = ' ' as u32;
+        let tab = '\t' as u32;
+        let semi = ';' as u32;
+        let comma = ',' as u32;
+
+        let selection_line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("selection-word-chars = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.selection_word_chars.codepoints,
+            DEFAULT_WORD_BOUNDARIES.to_vec()
+        );
+        assert_eq!(
+            selection_line(&cfg),
+            "selection-word-chars =  \t'\"│`|:;,()[]{}<>$"
+        );
+
+        cfg.set("selection-word-chars", Some(" \t;,")).unwrap();
+        assert_eq!(
+            cfg.selection_word_chars.codepoints,
+            vec![0, sp, tab, semi, comma]
+        );
+        assert_eq!(selection_line(&cfg), "selection-word-chars =  \t;,");
+
+        cfg.set("selection-word-chars", Some(" \\t;,")).unwrap();
+        assert_eq!(
+            cfg.selection_word_chars.codepoints,
+            vec![0, sp, tab, semi, comma]
+        );
+
+        cfg.set("selection-word-chars", Some("\\\\;")).unwrap();
+        assert_eq!(
+            cfg.selection_word_chars.codepoints,
+            vec![0, '\\' as u32, semi]
+        );
+
+        cfg.set("selection-word-chars", Some("\\u{2502};")).unwrap();
+        assert_eq!(cfg.selection_word_chars.codepoints, vec![0, 0x2502, semi]);
+        assert_eq!(selection_line(&cfg), "selection-word-chars = │;");
+
+        cfg.set("selection-word-chars", Some("")).unwrap();
+        assert_eq!(cfg.selection_word_chars.codepoints, vec![0]);
+        assert_eq!(selection_line(&cfg), "selection-word-chars = ");
+
+        assert_eq!(
+            cfg.set("selection-word-chars", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("selection-word-chars", Some("ab")).unwrap();
+        assert_eq!(
+            cfg.set("selection-word-chars", Some("\\q")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.selection_word_chars.codepoints,
+            vec![0, 'a' as u32, 'b' as u32]
+        );
+
+        let diagnostics = cfg.load_str("selection-word-chars = \\q\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "selection-word-chars".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(
+            cfg.selection_word_chars.codepoints,
+            vec![0, 'a' as u32, 'b' as u32]
+        );
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--selection-word-chars= _"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(
+            cli_cfg.selection_word_chars.codepoints,
+            vec![0, sp, '_' as u32]
+        );
+
+        let fmt = |codepoints: Vec<u32>| {
+            let mut out = String::new();
+            SelectionWordChars { codepoints }
+                .format_entry(&mut EntryFormatter::new("selection-word-chars", &mut out));
+            out
+        };
+        assert_eq!(
+            fmt(vec![0, semi, comma, 0x2502]),
+            "selection-word-chars = ;,│\n"
+        );
+        assert_eq!(
+            fmt(vec![0, 'A' as u32, 0xD800, 'B' as u32]),
+            "selection-word-chars = AB\n"
+        );
+        let mut capped = vec![0u32];
+        capped.extend(std::iter::repeat('x' as u32).take(4097));
+        assert_eq!(
+            fmt(capped),
+            format!("selection-word-chars = {}\n", "x".repeat(4096))
+        );
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
+    }
+
+    #[test]
+    fn codepoint_map_config_parser_family_oracle() {
         let entry = |lo: u32, hi: u32, r: ClipboardReplacement| ClipboardCodepointMapEntry {
             range: [lo, hi],
             replacement: r,
         };
+
+        let mut font_direct = RepeatableCodepointMap::default();
+        assert_eq!(
+            font_direct.parse_cli(None),
+            Err(RepeatableCodepointMapParseError::ValueRequired)
+        );
+        assert_eq!(
+            font_direct.parse_cli(Some("")),
+            Err(RepeatableCodepointMapParseError::InvalidValue)
+        );
+        assert_eq!(font_direct.parse_cli(Some("U+ABCD = Symbols")), Ok(()));
+        assert_eq!(
+            font_direct.map.get(0xABCD).unwrap().family.as_deref(),
+            Some("Symbols")
+        );
+        assert_eq!(
+            font_direct.parse_cli(Some("U+0001-U+0003, U+0005 = Emoji")),
+            Ok(())
+        );
+        assert_eq!(
+            font_direct.map.get(0x0002).unwrap().family.as_deref(),
+            Some("Emoji")
+        );
+        assert_eq!(
+            font_direct.parse_cli(Some("U+ABCD")),
+            Err(RepeatableCodepointMapParseError::InvalidValue)
+        );
+        assert_eq!(
+            font_direct.parse_cli(Some("U+0003-U+0001=Bad")),
+            Err(RepeatableCodepointMapParseError::InvalidValue)
+        );
+        let mut out = String::new();
+        font_direct.format_entry(&mut EntryFormatter::new("font-codepoint-map", &mut out));
+        assert!(out.contains("font-codepoint-map = U+ABCD=Symbols\n"));
+        assert!(out.contains("font-codepoint-map = U+0001-U+0003=Emoji\n"));
+        assert!(out.contains("font-codepoint-map = U+0005=Emoji\n"));
 
         // Upstream `parseCLI` cases.
         let mut m = RepeatableClipboardCodepointMap::default();
@@ -12271,6 +13302,10 @@ mod tests {
             Err(ClipboardCodepointMapParseError::ValueRequired)
         );
         assert_eq!(
+            m.parse_cli(Some("")),
+            Err(ClipboardCodepointMapParseError::InvalidValue)
+        );
+        assert_eq!(
             m.parse_cli(Some("U+2500")), // no `=`
             Err(ClipboardCodepointMapParseError::InvalidValue)
         );
@@ -12286,18 +13321,15 @@ mod tests {
             m.parse_cli(Some("U+2500=U+")), // empty codepoint replacement
             Err(ClipboardCodepointMapParseError::InvalidValue)
         );
+        assert_eq!(m.parse_cli(Some("U+2500=U+110000")), Ok(()));
         assert_eq!(
-            m.parse_cli(Some("U+2500=U+110000")), // non-scalar replacement
-            Err(ClipboardCodepointMapParseError::InvalidValue)
+            m.map.last().unwrap().replacement,
+            ClipboardReplacement::Codepoint(0x110000)
         );
-        assert_eq!(
-            m.parse_cli(Some("U+D800=U+002D")), // surrogate range
-            Err(ClipboardCodepointMapParseError::InvalidValue)
-        );
-        assert_eq!(
-            m.parse_cli(Some("U+110000=U+002D")), // non-scalar range
-            Err(ClipboardCodepointMapParseError::InvalidValue)
-        );
+        assert_eq!(m.parse_cli(Some("U+D800=U+002D")), Ok(()));
+        assert_eq!(m.map.last().unwrap().range, [0xD800, 0xD800]);
+        assert_eq!(m.parse_cli(Some("U+110000=U+002D")), Ok(()));
+        assert_eq!(m.map.last().unwrap().range, [0x110000, 0x110000]);
 
         // Replacement-codepoint parser edges (raw `parseInt(u21, _, 16)` path).
         let cp = |s: &str| {
@@ -12320,6 +13352,75 @@ mod tests {
             cp("U+2500=U+200000"), // u21 overflow
             Err(ClipboardCodepointMapParseError::InvalidValue)
         );
+
+        let mut cfg = Config::default();
+        cfg.set("font-codepoint-map", Some("U+ABCD=Font")).unwrap();
+        cfg.set("clipboard-codepoint-map", Some("U+2500=U+002D"))
+            .unwrap();
+        cfg.set("font-codepoint-map", Some("")).unwrap();
+        cfg.set("clipboard-codepoint-map", Some("")).unwrap();
+        assert!(cfg.font_codepoint_map.map.is_empty());
+        assert!(cfg.clipboard_codepoint_map.map.is_empty());
+        assert_eq!(
+            cfg.set("font-codepoint-map", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("clipboard-codepoint-map", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        let diagnostics = cfg.load_str(
+            "font-codepoint-map = U+1111=Font\n\
+             font-codepoint-map = U+0003-U+0001=Bad\n\
+             clipboard-codepoint-map = U+2500=U+002D\n\
+             clipboard-codepoint-map\n\
+             font-codepoint-map =\n\
+             clipboard-codepoint-map =\n",
+        );
+        assert!(cfg.font_codepoint_map.map.is_empty());
+        assert!(cfg.clipboard_codepoint_map.map.is_empty());
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "font-codepoint-map".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "clipboard-codepoint-map".to_string(),
+                    error: ConfigSetError::ValueRequired,
+                },
+            ]
+        );
+
+        let diagnostics = cfg.set_cli_args([
+            "--font-codepoint-map=U+ABCD=CLI Font",
+            "--clipboard-codepoint-map=U+110000=U+110000",
+        ]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            cfg.font_codepoint_map
+                .map
+                .get(0xABCD)
+                .unwrap()
+                .family
+                .as_deref(),
+            Some("CLI Font")
+        );
+        assert_eq!(
+            cfg.clipboard_codepoint_map.map,
+            vec![entry(
+                0x110000,
+                0x110000,
+                ClipboardReplacement::Codepoint(0x110000)
+            )]
+        );
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
     }
 
     #[test]
@@ -12396,6 +13497,111 @@ mod tests {
         assert_eq!(WorkingDirectory::Inherit.value(), None);
         assert_eq!(WorkingDirectory::Home.value(), None);
         assert_eq!(WorkingDirectory::Path("x".to_string()).value(), Some("x"));
+    }
+
+    #[test]
+    fn working_directory_config_parser_family_oracle() {
+        let parse = |s: Option<&str>| {
+            let mut wd = WorkingDirectory::Inherit;
+            wd.parse_cli(s).map(|()| wd)
+        };
+
+        assert_eq!(parse(Some("home")), Ok(WorkingDirectory::Home));
+        assert_eq!(parse(Some("inherit")), Ok(WorkingDirectory::Inherit));
+        assert_eq!(
+            parse(Some("Home")),
+            Ok(WorkingDirectory::Path("Home".to_string()))
+        );
+        assert_eq!(
+            parse(Some("INHERIT")),
+            Ok(WorkingDirectory::Path("INHERIT".to_string()))
+        );
+        assert_eq!(
+            parse(Some(" \t\nhome\r\u{0B}\u{0C}")),
+            Ok(WorkingDirectory::Home)
+        );
+        assert_eq!(
+            parse(Some("  relative/path  ")),
+            Ok(WorkingDirectory::Path("relative/path".to_string()))
+        );
+        assert_eq!(
+            parse(Some("\"/tmp path\"")),
+            Ok(WorkingDirectory::Path("/tmp path".to_string()))
+        );
+        assert_eq!(parse(Some("\"home\"")), Ok(WorkingDirectory::Home));
+        assert_eq!(
+            parse(Some("\" home \"")),
+            Ok(WorkingDirectory::Path(" home ".to_string()))
+        );
+        assert_eq!(
+            parse(Some("\"\"")),
+            Ok(WorkingDirectory::Path(String::new()))
+        );
+        assert_eq!(
+            parse(Some("~/projects/app")),
+            Ok(WorkingDirectory::Path("~/projects/app".to_string()))
+        );
+        assert_eq!(
+            parse(Some("bad\0path")),
+            Ok(WorkingDirectory::Path("bad\0path".to_string()))
+        );
+        assert_eq!(parse(None), Err(WorkingDirectoryParseError::ValueRequired));
+        assert_eq!(
+            parse(Some("")),
+            Err(WorkingDirectoryParseError::ValueRequired)
+        );
+        assert_eq!(
+            parse(Some(" \t\n\r\u{0B}\u{0C}")),
+            Err(WorkingDirectoryParseError::ValueRequired)
+        );
+
+        let line = |cfg: &Config| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("working-directory = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.working_directory, None);
+        assert_eq!(line(&cfg), "working-directory = ");
+
+        cfg.set("working-directory", Some("home")).unwrap();
+        assert_eq!(cfg.working_directory, Some(WorkingDirectory::Home));
+        assert_eq!(line(&cfg), "working-directory = home");
+
+        cfg.set("working-directory", Some("inherit")).unwrap();
+        assert_eq!(cfg.working_directory, Some(WorkingDirectory::Inherit));
+        assert_eq!(line(&cfg), "working-directory = inherit");
+
+        cfg.set("working-directory", Some("\"\"")).unwrap();
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path(String::new()))
+        );
+        assert_eq!(line(&cfg), "working-directory = ");
+
+        cfg.set("working-directory", Some("relative/path")).unwrap();
+        assert_eq!(
+            cfg.working_directory,
+            Some(WorkingDirectory::Path("relative/path".to_string()))
+        );
+        assert_eq!(line(&cfg), "working-directory = relative/path");
+
+        assert_eq!(
+            cfg.set("working-directory", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("working-directory", Some("   ")),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        cfg.set("working-directory", Some("")).unwrap();
+        assert_eq!(cfg.working_directory, None);
+        assert_eq!(line(&cfg), "working-directory = ");
     }
 
     #[test]
@@ -12817,12 +14023,40 @@ mod tests {
     }
 
     #[test]
-    fn palette_config_parse_format_reset_and_diagnose() {
+    fn palette_config_parser_family_oracle() {
         let mut cfg = Config::default();
         assert_eq!(cfg.palette.value[0], Rgb::new(0x1d, 0x1f, 0x21));
         assert!(cfg.palette.mask.is_empty());
         assert!(!cfg.palette_generate);
         assert!(!cfg.palette_harmonious);
+
+        let mut direct = Palette::default();
+        assert_eq!(
+            direct.parse_cli(None),
+            Err(PaletteParseError::ValueRequired)
+        );
+        assert_eq!(
+            direct.parse_cli(Some("0")),
+            Err(PaletteParseError::InvalidValue)
+        );
+        assert_eq!(direct.parse_cli(Some("1=red")), Ok(()));
+        assert_eq!(direct.value[1], Rgb::new(0xff, 0x00, 0x00));
+        assert!(direct.mask.get(1));
+        assert_eq!(
+            direct.parse_cli(Some("2=#010203=ignored")),
+            Err(PaletteParseError::InvalidValue)
+        );
+        assert!(!direct.mask.get(2));
+        assert_eq!(
+            direct.parse_cli(Some("2=nope")),
+            Err(PaletteParseError::InvalidValue)
+        );
+        assert!(!direct.mask.get(2));
+        assert_eq!(
+            direct.parse_cli(Some("256=#ffffff")),
+            Err(PaletteParseError::Overflow)
+        );
+        assert!(!direct.mask.get(255));
 
         cfg.set("palette", Some("0=#aabbcc")).unwrap();
         cfg.set("palette", Some("0x10=#112233")).unwrap();
@@ -13265,6 +14499,966 @@ mod tests {
     }
 
     #[test]
+    fn background_image_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (BackgroundImageFit::Contain, "contain"),
+            (BackgroundImageFit::Cover, "cover"),
+            (BackgroundImageFit::Stretch, "stretch"),
+            (BackgroundImageFit::None, "none"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (BackgroundImagePosition::TopLeft, "top-left"),
+            (BackgroundImagePosition::TopCenter, "top-center"),
+            (BackgroundImagePosition::TopRight, "top-right"),
+            (BackgroundImagePosition::CenterLeft, "center-left"),
+            (BackgroundImagePosition::CenterCenter, "center-center"),
+            (BackgroundImagePosition::CenterRight, "center-right"),
+            (BackgroundImagePosition::BottomLeft, "bottom-left"),
+            (BackgroundImagePosition::BottomCenter, "bottom-center"),
+            (BackgroundImagePosition::BottomRight, "bottom-right"),
+            (BackgroundImagePosition::Center, "center"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default_lines = formatted_lines(&Config::default());
+        assert_eq!(
+            line(&default_lines, "background-image-fit"),
+            "background-image-fit = contain"
+        );
+        assert_eq!(
+            line(&default_lines, "background-image-position"),
+            "background-image-position = center"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("background-image-fit", Some("cover")).unwrap();
+        cfg.set("background-image-position", Some("bottom-right"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image-fit"),
+            "background-image-fit = cover"
+        );
+        assert_eq!(
+            line(&lines, "background-image-position"),
+            "background-image-position = bottom-right"
+        );
+
+        cfg.set("background-image-fit", Some("")).unwrap();
+        cfg.set("background-image-position", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "background-image-fit"),
+            "background-image-fit = contain"
+        );
+        assert_eq!(
+            line(&reset_lines, "background-image-position"),
+            "background-image-position = center"
+        );
+
+        assert!(index(&lines, "background-image") < index(&lines, "background-image-opacity"));
+        assert!(
+            index(&lines, "background-image-opacity") < index(&lines, "background-image-position")
+        );
+        assert!(index(&lines, "background-image-position") < index(&lines, "background-image-fit"));
+        assert!(index(&lines, "background-image-fit") < index(&lines, "background-image-repeat"));
+    }
+
+    #[test]
+    fn gtk_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (GtkSingleInstance::False, "false"),
+            (GtkSingleInstance::True, "true"),
+            (GtkSingleInstance::Detect, "detect"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GtkTabsLocation::Top, "top"),
+            (GtkTabsLocation::Bottom, "bottom"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GtkToolbarStyle::Flat, "flat"),
+            (GtkToolbarStyle::Raised, "raised"),
+            (GtkToolbarStyle::RaisedBorder, "raised-border"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GtkTitlebarStyle::Native, "native"),
+            (GtkTitlebarStyle::Tabs, "tabs"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default_lines = formatted_lines(&Config::default());
+        assert_eq!(
+            line(&default_lines, "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+        assert_eq!(
+            line(&default_lines, "gtk-tabs-location"),
+            "gtk-tabs-location = top"
+        );
+        assert_eq!(
+            line(&default_lines, "gtk-toolbar-style"),
+            "gtk-toolbar-style = raised"
+        );
+        assert_eq!(
+            line(&default_lines, "gtk-titlebar-style"),
+            "gtk-titlebar-style = native"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("gtk-single-instance", Some("true")).unwrap();
+        cfg.set("gtk-tabs-location", Some("bottom")).unwrap();
+        cfg.set("gtk-toolbar-style", Some("raised-border")).unwrap();
+        cfg.set("gtk-titlebar-style", Some("tabs")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "gtk-single-instance"),
+            "gtk-single-instance = true"
+        );
+        assert_eq!(
+            line(&lines, "gtk-tabs-location"),
+            "gtk-tabs-location = bottom"
+        );
+        assert_eq!(
+            line(&lines, "gtk-toolbar-style"),
+            "gtk-toolbar-style = raised-border"
+        );
+        assert_eq!(
+            line(&lines, "gtk-titlebar-style"),
+            "gtk-titlebar-style = tabs"
+        );
+
+        cfg.set("gtk-single-instance", Some("desktop")).unwrap();
+        assert_eq!(
+            line(&formatted_lines(&cfg), "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+        cfg.set("adw-toolbar-style", Some("flat")).unwrap();
+        assert_eq!(
+            line(&formatted_lines(&cfg), "gtk-toolbar-style"),
+            "gtk-toolbar-style = flat"
+        );
+        cfg.set("gtk-tabs-location", Some("hidden")).unwrap();
+        let compat_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&compat_lines, "gtk-tabs-location"),
+            "gtk-tabs-location = bottom"
+        );
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Never);
+
+        cfg.set("gtk-single-instance", Some("")).unwrap();
+        cfg.set("gtk-tabs-location", Some("")).unwrap();
+        cfg.set("gtk-toolbar-style", Some("")).unwrap();
+        cfg.set("gtk-titlebar-style", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+        assert_eq!(
+            line(&reset_lines, "gtk-tabs-location"),
+            "gtk-tabs-location = top"
+        );
+        assert_eq!(
+            line(&reset_lines, "gtk-toolbar-style"),
+            "gtk-toolbar-style = raised"
+        );
+        assert_eq!(
+            line(&reset_lines, "gtk-titlebar-style"),
+            "gtk-titlebar-style = native"
+        );
+
+        assert!(index(&lines, "gtk-opengl-debug") < index(&lines, "gtk-single-instance"));
+        assert!(index(&lines, "gtk-single-instance") < index(&lines, "gtk-titlebar"));
+        assert!(index(&lines, "gtk-titlebar") < index(&lines, "gtk-tabs-location"));
+        assert!(
+            index(&lines, "gtk-tabs-location") < index(&lines, "gtk-titlebar-hide-when-maximized")
+        );
+        assert!(
+            index(&lines, "gtk-titlebar-hide-when-maximized") < index(&lines, "gtk-toolbar-style")
+        );
+        assert!(index(&lines, "gtk-toolbar-style") < index(&lines, "gtk-titlebar-style"));
+        assert!(index(&lines, "gtk-titlebar-style") < index(&lines, "gtk-wide-tabs"));
+        assert!(index(&lines, "gtk-wide-tabs") < index(&lines, "gtk-custom-css"));
+    }
+
+    #[test]
+    fn macos_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (NonNativeFullscreen::False, "false"),
+            (NonNativeFullscreen::True, "true"),
+            (NonNativeFullscreen::VisibleMenu, "visible-menu"),
+            (NonNativeFullscreen::PaddedNotch, "padded-notch"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacWindowButtons::Visible, "visible"),
+            (MacWindowButtons::Hidden, "hidden"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacTitlebarStyle::Native, "native"),
+            (MacTitlebarStyle::Transparent, "transparent"),
+            (MacTitlebarStyle::Tabs, "tabs"),
+            (MacTitlebarStyle::Hidden, "hidden"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacTitlebarProxyIcon::Visible, "visible"),
+            (MacTitlebarProxyIcon::Hidden, "hidden"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacOSDockDropBehavior::NewTab, "new-tab"),
+            (MacOSDockDropBehavior::NewWindow, "new-window"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [(MacHidden::Never, "never"), (MacHidden::Always, "always")] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacAppIcon::Official, "official"),
+            (MacAppIcon::Blueprint, "blueprint"),
+            (MacAppIcon::Chalkboard, "chalkboard"),
+            (MacAppIcon::Microchip, "microchip"),
+            (MacAppIcon::Glass, "glass"),
+            (MacAppIcon::Holographic, "holographic"),
+            (MacAppIcon::Paper, "paper"),
+            (MacAppIcon::Retro, "retro"),
+            (MacAppIcon::Xray, "xray"),
+            (MacAppIcon::Custom, "custom"),
+            (MacAppIcon::CustomStyle, "custom-style"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacAppIconFrame::Aluminum, "aluminum"),
+            (MacAppIconFrame::Beige, "beige"),
+            (MacAppIconFrame::Plastic, "plastic"),
+            (MacAppIconFrame::Chrome, "chrome"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MacShortcuts::Allow, "allow"),
+            (MacShortcuts::Deny, "deny"),
+            (MacShortcuts::Ask, "ask"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default_lines = formatted_lines(&Config::default());
+        assert_eq!(
+            line(&default_lines, "macos-non-native-fullscreen"),
+            "macos-non-native-fullscreen = false"
+        );
+        assert_eq!(
+            line(&default_lines, "macos-window-buttons"),
+            "macos-window-buttons = visible"
+        );
+        assert_eq!(
+            line(&default_lines, "macos-titlebar-style"),
+            "macos-titlebar-style = transparent"
+        );
+        assert_eq!(
+            line(&default_lines, "macos-titlebar-proxy-icon"),
+            "macos-titlebar-proxy-icon = visible"
+        );
+        assert_eq!(
+            line(&default_lines, "macos-dock-drop-behavior"),
+            "macos-dock-drop-behavior = new-tab"
+        );
+        assert_eq!(line(&default_lines, "macos-hidden"), "macos-hidden = never");
+        assert_eq!(line(&default_lines, "macos-icon"), "macos-icon = official");
+        assert_eq!(
+            line(&default_lines, "macos-icon-frame"),
+            "macos-icon-frame = aluminum"
+        );
+        assert_eq!(
+            line(&default_lines, "macos-shortcuts"),
+            "macos-shortcuts = ask"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("macos-non-native-fullscreen", Some("visible-menu"))
+            .unwrap();
+        cfg.set("macos-window-buttons", Some("hidden")).unwrap();
+        cfg.set("macos-titlebar-style", Some("tabs")).unwrap();
+        cfg.set("macos-titlebar-proxy-icon", Some("hidden"))
+            .unwrap();
+        cfg.set("macos-dock-drop-behavior", Some("new-window"))
+            .unwrap();
+        cfg.set("macos-hidden", Some("always")).unwrap();
+        cfg.set("macos-icon", Some("custom-style")).unwrap();
+        cfg.set("macos-icon-frame", Some("chrome")).unwrap();
+        cfg.set("macos-shortcuts", Some("deny")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "macos-non-native-fullscreen"),
+            "macos-non-native-fullscreen = visible-menu"
+        );
+        assert_eq!(
+            line(&lines, "macos-window-buttons"),
+            "macos-window-buttons = hidden"
+        );
+        assert_eq!(
+            line(&lines, "macos-titlebar-style"),
+            "macos-titlebar-style = tabs"
+        );
+        assert_eq!(
+            line(&lines, "macos-titlebar-proxy-icon"),
+            "macos-titlebar-proxy-icon = hidden"
+        );
+        assert_eq!(
+            line(&lines, "macos-dock-drop-behavior"),
+            "macos-dock-drop-behavior = new-window"
+        );
+        assert_eq!(line(&lines, "macos-hidden"), "macos-hidden = always");
+        assert_eq!(line(&lines, "macos-icon"), "macos-icon = custom-style");
+        assert_eq!(
+            line(&lines, "macos-icon-frame"),
+            "macos-icon-frame = chrome"
+        );
+        assert_eq!(line(&lines, "macos-shortcuts"), "macos-shortcuts = deny");
+
+        cfg.set("macos-dock-drop-behavior", Some("window")).unwrap();
+        assert_eq!(
+            line(&formatted_lines(&cfg), "macos-dock-drop-behavior"),
+            "macos-dock-drop-behavior = new-window"
+        );
+
+        for key in [
+            "macos-non-native-fullscreen",
+            "macos-window-buttons",
+            "macos-titlebar-style",
+            "macos-titlebar-proxy-icon",
+            "macos-dock-drop-behavior",
+            "macos-hidden",
+            "macos-icon",
+            "macos-icon-frame",
+            "macos-shortcuts",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "macos-non-native-fullscreen"),
+            "macos-non-native-fullscreen = false"
+        );
+        assert_eq!(
+            line(&reset_lines, "macos-window-buttons"),
+            "macos-window-buttons = visible"
+        );
+        assert_eq!(
+            line(&reset_lines, "macos-titlebar-style"),
+            "macos-titlebar-style = transparent"
+        );
+        assert_eq!(
+            line(&reset_lines, "macos-titlebar-proxy-icon"),
+            "macos-titlebar-proxy-icon = visible"
+        );
+        assert_eq!(
+            line(&reset_lines, "macos-dock-drop-behavior"),
+            "macos-dock-drop-behavior = new-tab"
+        );
+        assert_eq!(line(&reset_lines, "macos-hidden"), "macos-hidden = never");
+        assert_eq!(line(&reset_lines, "macos-icon"), "macos-icon = official");
+        assert_eq!(
+            line(&reset_lines, "macos-icon-frame"),
+            "macos-icon-frame = aluminum"
+        );
+        assert_eq!(
+            line(&reset_lines, "macos-shortcuts"),
+            "macos-shortcuts = ask"
+        );
+
+        assert!(index(&lines, "app-notifications") < index(&lines, "macos-non-native-fullscreen"));
+        assert!(
+            index(&lines, "macos-non-native-fullscreen") < index(&lines, "macos-window-buttons")
+        );
+        assert!(index(&lines, "macos-window-buttons") < index(&lines, "macos-titlebar-style"));
+        assert!(index(&lines, "macos-titlebar-style") < index(&lines, "macos-titlebar-proxy-icon"));
+        assert!(
+            index(&lines, "macos-titlebar-proxy-icon") < index(&lines, "macos-dock-drop-behavior")
+        );
+        assert!(index(&lines, "macos-dock-drop-behavior") < index(&lines, "macos-option-as-alt"));
+        assert!(index(&lines, "macos-option-as-alt") < index(&lines, "macos-window-shadow"));
+        assert!(index(&lines, "macos-window-shadow") < index(&lines, "macos-hidden"));
+        assert!(index(&lines, "macos-hidden") < index(&lines, "macos-auto-secure-input"));
+        assert!(index(&lines, "macos-icon") < index(&lines, "macos-custom-icon"));
+        assert!(index(&lines, "macos-custom-icon") < index(&lines, "macos-icon-frame"));
+        assert!(index(&lines, "macos-icon-frame") < index(&lines, "macos-icon-ghost-color"));
+        assert!(index(&lines, "macos-icon-ghost-color") < index(&lines, "macos-icon-screen-color"));
+        assert!(index(&lines, "macos-icon-screen-color") < index(&lines, "macos-shortcuts"));
+        assert!(index(&lines, "macos-shortcuts") < index(&lines, "linux-cgroup"));
+    }
+
+    #[test]
+    fn misc_direct_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (AsyncBackend::Auto, "auto"),
+            (AsyncBackend::Epoll, "epoll"),
+            (AsyncBackend::IoUring, "io_uring"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (ConfirmCloseSurface::False, "false"),
+            (ConfirmCloseSurface::True, "true"),
+            (ConfirmCloseSurface::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (CustomShaderAnimation::False, "false"),
+            (CustomShaderAnimation::True, "true"),
+            (CustomShaderAnimation::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (Fullscreen::False, "false"),
+            (Fullscreen::True, "true"),
+            (Fullscreen::NonNative, "non-native"),
+            (Fullscreen::NonNativeVisibleMenu, "non-native-visible-menu"),
+            (Fullscreen::NonNativePaddedNotch, "non-native-padded-notch"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GraphemeWidthMethod::Legacy, "legacy"),
+            (GraphemeWidthMethod::Unicode, "unicode"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (LinkPreviews::False, "false"),
+            (LinkPreviews::True, "true"),
+            (LinkPreviews::Osc8, "osc8"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (LinuxCgroup::Never, "never"),
+            (LinuxCgroup::Always, "always"),
+            (LinuxCgroup::SingleInstance, "single-instance"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (ShellIntegration::None, "none"),
+            (ShellIntegration::Detect, "detect"),
+            (ShellIntegration::Bash, "bash"),
+            (ShellIntegration::Elvish, "elvish"),
+            (ShellIntegration::Fish, "fish"),
+            (ShellIntegration::Nushell, "nushell"),
+            (ShellIntegration::Zsh, "zsh"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (WindowSubtitle::False, "false"),
+            (WindowSubtitle::WorkingDirectory, "working-directory"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "async-backend"),
+            "async-backend = auto"
+        );
+        assert_eq!(
+            line(&default_lines, "confirm-close-surface"),
+            "confirm-close-surface = true"
+        );
+        assert_eq!(
+            line(&default_lines, "custom-shader-animation"),
+            "custom-shader-animation = true"
+        );
+        assert_eq!(line(&default_lines, "fullscreen"), "fullscreen = false");
+        assert_eq!(
+            line(&default_lines, "grapheme-width-method"),
+            "grapheme-width-method = unicode"
+        );
+        assert_eq!(
+            line(&default_lines, "link-previews"),
+            "link-previews = true"
+        );
+        assert_eq!(
+            line(&default_lines, "linux-cgroup"),
+            format!("linux-cgroup = {}", default.linux_cgroup.keyword())
+        );
+        assert_eq!(
+            line(&default_lines, "shell-integration"),
+            "shell-integration = detect"
+        );
+        assert_eq!(
+            line(&default_lines, "window-subtitle"),
+            "window-subtitle = false"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("async-backend", Some("io_uring")).unwrap();
+        cfg.set("confirm-close-surface", Some("always")).unwrap();
+        cfg.set("custom-shader-animation", Some("always")).unwrap();
+        cfg.set("fullscreen", Some("non-native-visible-menu"))
+            .unwrap();
+        cfg.set("grapheme-width-method", Some("legacy")).unwrap();
+        cfg.set("link-previews", Some("osc8")).unwrap();
+        cfg.set("linux-cgroup", Some("always")).unwrap();
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        cfg.set("shell-integration", Some("zsh")).unwrap();
+        cfg.set("window-subtitle", Some("working-directory"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "async-backend"), "async-backend = io_uring");
+        assert_eq!(
+            line(&lines, "confirm-close-surface"),
+            "confirm-close-surface = always"
+        );
+        assert_eq!(
+            line(&lines, "custom-shader-animation"),
+            "custom-shader-animation = always"
+        );
+        assert_eq!(
+            line(&lines, "fullscreen"),
+            "fullscreen = non-native-visible-menu"
+        );
+        assert_eq!(
+            line(&lines, "grapheme-width-method"),
+            "grapheme-width-method = legacy"
+        );
+        assert_eq!(line(&lines, "link-previews"), "link-previews = osc8");
+        assert_eq!(line(&lines, "linux-cgroup"), "linux-cgroup = always");
+        assert_eq!(line(&lines, "shell-integration"), "shell-integration = zsh");
+        assert_eq!(
+            line(&lines, "window-subtitle"),
+            "window-subtitle = working-directory"
+        );
+
+        for key in [
+            "async-backend",
+            "confirm-close-surface",
+            "custom-shader-animation",
+            "fullscreen",
+            "grapheme-width-method",
+            "link-previews",
+            "linux-cgroup",
+            "shell-integration",
+            "window-subtitle",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "async-backend",
+            "confirm-close-surface",
+            "custom-shader-animation",
+            "fullscreen",
+            "grapheme-width-method",
+            "link-previews",
+            "linux-cgroup",
+            "shell-integration",
+            "window-subtitle",
+        ] {
+            assert_eq!(
+                line(&reset_lines, key),
+                line(&default_lines, key),
+                "{key} raw-empty reset returns to the default"
+            );
+        }
+
+        assert!(index(&lines, "adjust-cursor-thickness") < index(&lines, "adjust-cursor-height"));
+        assert!(index(&lines, "adjust-cursor-height") < index(&lines, "grapheme-width-method"));
+        assert!(index(&lines, "link-url") < index(&lines, "link-previews"));
+        assert!(index(&lines, "link-previews") < index(&lines, "fullscreen"));
+        assert!(index(&lines, "fullscreen") < index(&lines, "title"));
+        assert!(index(&lines, "title") < index(&lines, "class"));
+        assert!(index(&lines, "class") < index(&lines, "x11-instance-name"));
+        assert!(index(&lines, "window-subtitle") < index(&lines, "window-theme"));
+        assert!(index(&lines, "window-theme") < index(&lines, "window-colorspace"));
+        assert!(index(&lines, "window-padding-color") < index(&lines, "confirm-close-surface"));
+        assert!(
+            index(&lines, "confirm-close-surface") < index(&lines, "quit-after-last-window-closed")
+        );
+        assert!(index(&lines, "quick-terminal-size") < index(&lines, "shell-integration"));
+        assert!(index(&lines, "shell-integration") < index(&lines, "shell-integration-features"));
+        assert!(index(&lines, "osc-color-report-format") < index(&lines, "vt-kam-allowed"));
+        assert!(index(&lines, "vt-kam-allowed") < index(&lines, "custom-shader"));
+        assert!(index(&lines, "custom-shader") < index(&lines, "custom-shader-animation"));
+        assert!(index(&lines, "custom-shader-animation") < index(&lines, "bell-features"));
+        assert!(index(&lines, "linux-cgroup") < index(&lines, "linux-cgroup-memory-limit"));
+        assert!(index(&lines, "enquiry-response") < index(&lines, "async-backend"));
+        assert!(index(&lines, "async-backend") < index(&lines, "auto-update"));
+    }
+
+    #[test]
+    fn custom_format_entry_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let lines_for = |lines: &[String], key: &str| -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (value, expected) in [
+            (BackgroundBlur::False, "a = false\n"),
+            (BackgroundBlur::True, "a = true\n"),
+            (BackgroundBlur::Radius(42), "a = 42\n"),
+            (
+                BackgroundBlur::MacosGlassRegular,
+                "a = macos-glass-regular\n",
+            ),
+            (BackgroundBlur::MacosGlassClear, "a = macos-glass-clear\n"),
+        ] {
+            assert_eq!(fmt(&|f| value.format_entry(f)), expected);
+        }
+
+        let mut env = RepeatableStringMap::default();
+        assert_eq!(fmt(&|f| env.format_entry(f)), "a = \n");
+        env.parse_cli(Some("A=B")).unwrap();
+        env.parse_cli(Some("B = C")).unwrap();
+        assert_eq!(fmt(&|f| env.format_entry(f)), "a = A=B\na = B=C\n");
+
+        let input_empty = RepeatableReadableIo::default();
+        assert_eq!(fmt(&|f| input_empty.format_entry(f)), "a = \n");
+        let input = RepeatableReadableIo {
+            list: vec![
+                ReadableIo::Raw("hello\\n".to_string()),
+                ReadableIo::Path("/tmp/in.txt".to_string()),
+            ],
+        };
+        assert_eq!(
+            fmt(&|f| input.format_entry(f)),
+            "a = raw:hello\\n\na = path:/tmp/in.txt\n"
+        );
+
+        assert_eq!(
+            fmt(&|f| MouseScrollMultiplier {
+                precision: 1.5,
+                discrete: 2.5
+            }
+            .format_entry(f)),
+            "a = precision:1.5,discrete:2.5\n"
+        );
+
+        let mut palette = Palette::default();
+        palette.value[0] = Rgb::new(0xaa, 0xbb, 0xcc);
+        palette.value[255] = Rgb::new(0x01, 0x02, 0x03);
+        let palette_direct = fmt(&|f| palette.format_entry(f));
+        let palette_lines: Vec<&str> = palette_direct.lines().collect();
+        assert_eq!(palette_lines.len(), 256);
+        for (idx, line) in palette_lines.iter().enumerate() {
+            let rgb = palette.value[idx];
+            assert_eq!(
+                *line,
+                format!("a = {}=#{:02x}{:02x}{:02x}", idx, rgb.r, rgb.g, rgb.b)
+            );
+        }
+
+        assert_eq!(fmt(&|f| QuickTerminalSize::default().format_entry(f)), "");
+        assert_eq!(
+            fmt(&|f| QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: None
+            }
+            .format_entry(f)),
+            "a = 50%\n"
+        );
+        assert_eq!(
+            fmt(&|f| QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(200))
+            }
+            .format_entry(f)),
+            "a = 50%,200px\n"
+        );
+
+        assert_eq!(
+            fmt(&|f| SelectionWordChars {
+                codepoints: vec![0, '_' as u32, '\u{e9}' as u32]
+            }
+            .format_entry(f)),
+            "a = _\u{e9}\n"
+        );
+        assert_eq!(
+            fmt(&|f| SelectionWordChars {
+                codepoints: vec![0]
+            }
+            .format_entry(f)),
+            "a = \n"
+        );
+
+        assert_eq!(
+            fmt(&|f| Duration {
+                duration: 90 * NS_PER_S
+            }
+            .format_entry(f)),
+            "a = 1m 30s\n"
+        );
+        assert_eq!(fmt(&|f| Duration { duration: 0 }.format_entry(f)), "a = \n");
+
+        for (value, expected) in [
+            (WindowDecoration::Auto, "a = auto\n"),
+            (WindowDecoration::Client, "a = client\n"),
+            (WindowDecoration::Server, "a = server\n"),
+            (WindowDecoration::None, "a = none\n"),
+        ] {
+            assert_eq!(fmt(&|f| value.format_entry(f)), expected);
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("background-blur", Some("macos-glass-regular"))
+            .unwrap();
+        cfg.set("env", Some("A=B")).unwrap();
+        cfg.set("env", Some("B=C")).unwrap();
+        cfg.set("input", Some("raw:hello\\n")).unwrap();
+        cfg.set("input", Some("path:/tmp/in.txt")).unwrap();
+        cfg.set(
+            "mouse-scroll-multiplier",
+            Some("precision:1.5,discrete:2.5"),
+        )
+        .unwrap();
+        cfg.set("palette", Some("0=#aabbcc")).unwrap();
+        cfg.set("palette", Some("255=#010203")).unwrap();
+        cfg.set("quick-terminal-size", Some("50%,200px")).unwrap();
+        cfg.set("selection-word-chars", Some(" _")).unwrap();
+        cfg.set("undo-timeout", Some("1m 30s")).unwrap();
+        cfg.set("window-decoration", Some("server")).unwrap();
+        let lines = formatted_lines(&cfg);
+
+        assert_eq!(
+            line(&lines, "background-blur"),
+            "background-blur = macos-glass-regular"
+        );
+        assert_eq!(
+            lines_for(&lines, "env"),
+            vec!["env = A=B".to_string(), "env = B=C".to_string()]
+        );
+        assert_eq!(
+            lines_for(&lines, "input"),
+            vec![
+                "input = raw:hello\\n".to_string(),
+                "input = path:/tmp/in.txt".to_string()
+            ]
+        );
+        assert_eq!(
+            line(&lines, "mouse-scroll-multiplier"),
+            "mouse-scroll-multiplier = precision:1.5,discrete:2.5"
+        );
+        assert_eq!(line(&lines, "palette"), "palette = 0=#aabbcc");
+        assert!(lines.iter().any(|line| line == "palette = 255=#010203"));
+        assert_eq!(
+            line(&lines, "quick-terminal-size"),
+            "quick-terminal-size = 50%,200px"
+        );
+        assert_eq!(
+            line(&lines, "selection-word-chars"),
+            "selection-word-chars =  _"
+        );
+        assert_eq!(line(&lines, "undo-timeout"), "undo-timeout = 1m 30s");
+        assert_eq!(
+            line(&lines, "window-decoration"),
+            "window-decoration = server"
+        );
+
+        cfg.set("background-blur", Some("")).unwrap();
+        cfg.set("env", Some("")).unwrap();
+        cfg.set("input", Some("")).unwrap();
+        cfg.set("mouse-scroll-multiplier", Some("")).unwrap();
+        cfg.set("palette", Some("")).unwrap();
+        cfg.set("quick-terminal-size", Some("")).unwrap();
+        cfg.set("selection-word-chars", Some("")).unwrap();
+        cfg.set("undo-timeout", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "background-blur"),
+            "background-blur = false"
+        );
+        assert_eq!(lines_for(&reset_lines, "env"), vec!["env = ".to_string()]);
+        assert_eq!(
+            lines_for(&reset_lines, "input"),
+            vec!["input = ".to_string()]
+        );
+        assert_eq!(
+            line(&reset_lines, "mouse-scroll-multiplier"),
+            "mouse-scroll-multiplier = precision:1.5,discrete:2.5"
+        );
+        assert_eq!(line(&reset_lines, "palette"), "palette = 0=#1d1f21");
+        assert!(lines_for(&reset_lines, "quick-terminal-size").is_empty());
+        assert_eq!(
+            line(&reset_lines, "selection-word-chars"),
+            "selection-word-chars = "
+        );
+        assert_eq!(line(&reset_lines, "undo-timeout"), "undo-timeout = 5s");
+
+        assert!(index(&lines, "selection-word-chars") < index(&lines, "palette"));
+        assert!(index(&lines, "palette") < index(&lines, "palette-generate"));
+        assert!(index(&lines, "mouse-scroll-multiplier") < index(&lines, "background-opacity"));
+        assert!(index(&lines, "background-opacity") < index(&lines, "background-blur"));
+        assert!(index(&lines, "background-blur") < index(&lines, "unfocused-split-opacity"));
+        assert!(index(&lines, "env") < index(&lines, "input"));
+        assert!(index(&lines, "input") < index(&lines, "wait-after-command"));
+        assert!(index(&lines, "window-padding-color") < index(&lines, "window-decoration"));
+        assert!(index(&lines, "window-decoration") < index(&lines, "window-title-font-family"));
+        assert!(index(&lines, "undo-timeout") < index(&lines, "quick-terminal-position"));
+        assert!(index(&lines, "quick-terminal-position") < index(&lines, "quick-terminal-size"));
+        assert!(index(&lines, "quick-terminal-size") < index(&lines, "gtk-quick-terminal-layer"));
+    }
+
+    #[test]
     fn enum_format_entries_misc() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
@@ -13350,7 +15544,13 @@ mod tests {
     }
 
     #[test]
-    fn font_style_parse_cli() {
+    fn font_style_config_parser_family_oracle() {
+        let formatted = |style: FontStyle| {
+            let mut out = String::new();
+            style.format_entry(&mut EntryFormatter::new("a", &mut out));
+            out
+        };
+
         assert_eq!(
             FontStyle::parse_cli(None),
             Err(FontStyleParseError::ValueRequired)
@@ -13364,21 +15564,111 @@ mod tests {
             FontStyle::parse_cli(Some("bold")),
             Ok(FontStyle::Name("bold".to_string()))
         );
+        assert_eq!(
+            FontStyle::parse_cli(Some("False")),
+            Ok(FontStyle::Name("False".to_string()))
+        );
+        assert_eq!(
+            FontStyle::parse_cli(Some("  default  ")),
+            Ok(FontStyle::Name("  default  ".to_string()))
+        );
+        assert_eq!(
+            FontStyle::parse_cli(Some("Semi-Bold!")),
+            Ok(FontStyle::Name("Semi-Bold!".to_string()))
+        );
         // Any non-default/false value (including empty) is a named style; the
         // set-but-empty reset is a separate dispatch branch.
         assert_eq!(
             FontStyle::parse_cli(Some("")),
             Ok(FontStyle::Name(String::new()))
         );
+        assert!(FontStyle::Default.enabled());
+        assert!(FontStyle::Name("Bold".to_string()).enabled());
+        assert!(!FontStyle::False.enabled());
+        assert_eq!(FontStyle::Default.name_value(), None);
+        assert_eq!(FontStyle::False.name_value(), None);
+        assert_eq!(
+            FontStyle::Name("Italic".to_string()).name_value(),
+            Some("Italic")
+        );
 
         // Round-trip: parse_cli then format_entry recovers the formatted line for
         // each of the three formatted cases.
-        for value in ["default", "false", "bold"] {
+        for value in ["default", "false", "bold", "Semi-Bold!"] {
             let parsed = FontStyle::parse_cli(Some(value)).unwrap();
-            let mut out = String::new();
-            parsed.format_entry(&mut EntryFormatter::new("a", &mut out));
-            assert_eq!(out, format!("a = {}\n", value));
+            assert_eq!(formatted(parsed), format!("a = {}\n", value));
         }
+
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        cfg.set("font-style", Some("false")).unwrap();
+        cfg.set("font-style-bold", Some("Bold")).unwrap();
+        cfg.set("font-style-italic", Some("default")).unwrap();
+        cfg.set("font-style-bold-italic", Some("  Fancy Italic  "))
+            .unwrap();
+        assert_eq!(cfg.font_style, FontStyle::False);
+        assert_eq!(cfg.font_style_bold, FontStyle::Name("Bold".to_string()));
+        assert_eq!(cfg.font_style_italic, FontStyle::Default);
+        assert_eq!(
+            cfg.font_style_bold_italic,
+            FontStyle::Name("  Fancy Italic  ".to_string())
+        );
+        assert_eq!(line(&cfg, "font-style"), "font-style = false");
+        assert_eq!(line(&cfg, "font-style-bold"), "font-style-bold = Bold");
+        assert_eq!(
+            line(&cfg, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&cfg, "font-style-bold-italic"),
+            "font-style-bold-italic =   Fancy Italic  "
+        );
+
+        cfg.set("font-style", Some("")).unwrap();
+        assert_eq!(cfg.font_style, FontStyle::Default);
+        assert_eq!(line(&cfg, "font-style"), "font-style = default");
+        assert_eq!(
+            cfg.set("font-style-bold", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        let diagnostics = cfg.load_str("font-style-bold = false\nfont-style-italic\n");
+        assert_eq!(cfg.font_style_bold, FontStyle::False);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "font-style-italic".to_string(),
+                error: ConfigSetError::ValueRequired,
+            }]
+        );
+
+        let diagnostics = cfg.set_cli_args([
+            "--font-style=Book",
+            "--font-style-bold=Heavy",
+            "--font-style-italic=false",
+            "--font-style-bold-italic=default",
+        ]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.font_style, FontStyle::Name("Book".to_string()));
+        assert_eq!(cfg.font_style_bold, FontStyle::Name("Heavy".to_string()));
+        assert_eq!(cfg.font_style_italic, FontStyle::False);
+        assert_eq!(cfg.font_style_bold_italic, FontStyle::Default);
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.font_style, cfg.font_style);
+        assert_eq!(cloned.font_style_bold, cfg.font_style_bold);
+        assert_eq!(cloned.font_style_italic, cfg.font_style_italic);
+        assert_eq!(cloned.font_style_bold_italic, cfg.font_style_bold_italic);
     }
 
     #[test]
@@ -13398,6 +15688,1223 @@ mod tests {
             fmt(&|f| FontShapingBreak { cursor: false }.format_entry(f)),
             "a = no-cursor\n"
         );
+    }
+
+    #[test]
+    fn font_shaping_break_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&default_lines, "font-shaping-break"),
+            "font-shaping-break = cursor"
+        );
+
+        cfg.set("font-shaping-break", Some("no-cursor")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "font-shaping-break"),
+            "font-shaping-break = no-cursor"
+        );
+
+        cfg.set("font-shaping-break", Some("false")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "font-shaping-break"),
+            "font-shaping-break = no-cursor"
+        );
+
+        cfg.set("font-shaping-break", Some("true")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "font-shaping-break"),
+            "font-shaping-break = cursor"
+        );
+
+        cfg.set("font-shaping-break", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "font-shaping-break"),
+            "font-shaping-break = cursor"
+        );
+
+        assert!(index(&lines, "font-thicken") < index(&lines, "font-thicken-strength"));
+        assert!(index(&lines, "font-thicken-strength") < index(&lines, "font-shaping-break"));
+        assert!(index(&lines, "font-shaping-break") < index(&lines, "alpha-blending"));
+    }
+
+    #[test]
+    fn keyword_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (AlphaBlending::Native, "native"),
+            (AlphaBlending::Linear, "linear"),
+            (AlphaBlending::LinearCorrected, "linear-corrected"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (CursorStyle::Block, "block"),
+            (CursorStyle::Bar, "bar"),
+            (CursorStyle::Underline, "underline"),
+            (CursorStyle::BlockHollow, "block_hollow"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MouseShiftCapture::False, "false"),
+            (MouseShiftCapture::True, "true"),
+            (MouseShiftCapture::Always, "always"),
+            (MouseShiftCapture::Never, "never"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [(Scrollbar::System, "system"), (Scrollbar::Never, "never")] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("alpha-blending", Some("linear-corrected")).unwrap();
+        cfg.set("cursor-style", Some("block_hollow")).unwrap();
+        cfg.set("mouse-shift-capture", Some("always")).unwrap();
+        cfg.set("scrollbar", Some("never")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "alpha-blending"),
+            "alpha-blending = linear-corrected"
+        );
+        assert_eq!(line(&lines, "cursor-style"), "cursor-style = block_hollow");
+        assert_eq!(
+            line(&lines, "mouse-shift-capture"),
+            "mouse-shift-capture = always"
+        );
+        assert_eq!(line(&lines, "scrollbar"), "scrollbar = never");
+
+        cfg.set("alpha-blending", Some("")).unwrap();
+        cfg.set("cursor-style", Some("")).unwrap();
+        cfg.set("mouse-shift-capture", Some("")).unwrap();
+        cfg.set("scrollbar", Some("")).unwrap();
+
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "alpha-blending"),
+            "alpha-blending = native"
+        );
+        assert_eq!(line(&reset_lines, "cursor-style"), "cursor-style = block");
+        assert_eq!(
+            line(&reset_lines, "mouse-shift-capture"),
+            "mouse-shift-capture = false"
+        );
+        assert_eq!(line(&reset_lines, "scrollbar"), "scrollbar = system");
+
+        assert!(index(&lines, "font-shaping-break") < index(&lines, "alpha-blending"));
+        assert!(index(&lines, "alpha-blending") < index(&lines, "cursor-style"));
+        assert!(index(&lines, "cursor-style") < index(&lines, "scroll-to-bottom"));
+        assert!(index(&lines, "scroll-to-bottom") < index(&lines, "mouse-shift-capture"));
+        assert!(index(&lines, "mouse-shift-capture") < index(&lines, "scrollbar"));
+    }
+
+    #[test]
+    fn clipboard_access_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (ClipboardAccess::Allow, "allow"),
+            (ClipboardAccess::Deny, "deny"),
+            (ClipboardAccess::Ask, "ask"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&default_lines, "clipboard-read"),
+            "clipboard-read = ask"
+        );
+        assert_eq!(
+            line(&default_lines, "clipboard-write"),
+            "clipboard-write = allow"
+        );
+
+        cfg.set("clipboard-read", Some("deny")).unwrap();
+        cfg.set("clipboard-write", Some("ask")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "clipboard-read"), "clipboard-read = deny");
+        assert_eq!(line(&lines, "clipboard-write"), "clipboard-write = ask");
+
+        cfg.set("clipboard-read", Some("")).unwrap();
+        cfg.set("clipboard-write", Some("")).unwrap();
+
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(line(&reset_lines, "clipboard-read"), "clipboard-read = ask");
+        assert_eq!(
+            line(&reset_lines, "clipboard-write"),
+            "clipboard-write = allow"
+        );
+
+        assert!(index(&lines, "focus-follows-mouse") < index(&lines, "clipboard-read"));
+        assert!(index(&lines, "clipboard-read") < index(&lines, "clipboard-write"));
+        assert!(index(&lines, "clipboard-write") < index(&lines, "clipboard-trim-trailing-spaces"));
+        assert!(index(&lines, "clipboard-trim-trailing-spaces") < index(&lines, "copy-on-select"));
+    }
+
+    #[test]
+    fn direct_color_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(line(&default_lines, "background"), "background = #282c34");
+        assert_eq!(line(&default_lines, "foreground"), "foreground = #ffffff");
+        assert_eq!(
+            line(&default_lines, "search-foreground"),
+            "search-foreground = #000000"
+        );
+        assert_eq!(
+            line(&default_lines, "search-background"),
+            "search-background = #ffe082"
+        );
+        assert_eq!(
+            line(&default_lines, "search-selected-foreground"),
+            "search-selected-foreground = #000000"
+        );
+        assert_eq!(
+            line(&default_lines, "search-selected-background"),
+            "search-selected-background = #f2a57e"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("background", Some("#010203")).unwrap();
+        cfg.set("foreground", Some("ForestGreen")).unwrap();
+        cfg.set("search-foreground", Some("cell-foreground"))
+            .unwrap();
+        cfg.set("search-background", Some("#0a0b0c")).unwrap();
+        cfg.set("search-selected-foreground", Some("cell-background"))
+            .unwrap();
+        cfg.set("search-selected-background", Some("#aabbcc"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "background"), "background = #010203");
+        assert_eq!(line(&lines, "foreground"), "foreground = #228b22");
+        assert_eq!(
+            line(&lines, "search-foreground"),
+            "search-foreground = cell-foreground"
+        );
+        assert_eq!(
+            line(&lines, "search-background"),
+            "search-background = #0a0b0c"
+        );
+        assert_eq!(
+            line(&lines, "search-selected-foreground"),
+            "search-selected-foreground = cell-background"
+        );
+        assert_eq!(
+            line(&lines, "search-selected-background"),
+            "search-selected-background = #aabbcc"
+        );
+
+        for key in [
+            "background",
+            "foreground",
+            "search-foreground",
+            "search-background",
+            "search-selected-foreground",
+            "search-selected-background",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "background",
+            "foreground",
+            "search-foreground",
+            "search-background",
+            "search-selected-foreground",
+            "search-selected-background",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "theme") < index(&lines, "background"));
+        assert!(index(&lines, "background") < index(&lines, "foreground"));
+        assert!(index(&lines, "foreground") < index(&lines, "background-image"));
+        assert!(index(&lines, "selection-word-chars") < index(&lines, "palette"));
+        assert!(index(&lines, "palette") < index(&lines, "cursor-color"));
+        assert!(index(&lines, "split-preserve-zoom") < index(&lines, "search-foreground"));
+        assert!(index(&lines, "search-foreground") < index(&lines, "search-background"));
+        assert!(index(&lines, "search-background") < index(&lines, "search-selected-foreground"));
+        assert!(
+            index(&lines, "search-selected-foreground")
+                < index(&lines, "search-selected-background")
+        );
+        assert!(index(&lines, "search-selected-background") < index(&lines, "command"));
+    }
+
+    #[test]
+    fn click_action_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (CopyOnSelect::False, "false"),
+            (CopyOnSelect::True, "true"),
+            (CopyOnSelect::Clipboard, "clipboard"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (RightClickAction::Ignore, "ignore"),
+            (RightClickAction::Paste, "paste"),
+            (RightClickAction::Copy, "copy"),
+            (RightClickAction::CopyOrPaste, "copy-or-paste"),
+            (RightClickAction::ContextMenu, "context-menu"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (MiddleClickAction::PrimaryPaste, "primary-paste"),
+            (MiddleClickAction::Ignore, "ignore"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "copy-on-select"),
+            "copy-on-select = true"
+        );
+        assert_eq!(
+            line(&default_lines, "right-click-action"),
+            "right-click-action = context-menu"
+        );
+        assert_eq!(
+            line(&default_lines, "middle-click-action"),
+            "middle-click-action = primary-paste"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("copy-on-select", Some("clipboard")).unwrap();
+        cfg.set("right-click-action", Some("copy-or-paste"))
+            .unwrap();
+        cfg.set("middle-click-action", Some("ignore")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "copy-on-select"), "copy-on-select = clipboard");
+        assert_eq!(
+            line(&lines, "right-click-action"),
+            "right-click-action = copy-or-paste"
+        );
+        assert_eq!(
+            line(&lines, "middle-click-action"),
+            "middle-click-action = ignore"
+        );
+
+        cfg.set("copy-on-select", Some("")).unwrap();
+        cfg.set("right-click-action", Some("")).unwrap();
+        cfg.set("middle-click-action", Some("")).unwrap();
+
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "copy-on-select"),
+            line(&default_lines, "copy-on-select")
+        );
+        assert_eq!(
+            line(&reset_lines, "right-click-action"),
+            "right-click-action = context-menu"
+        );
+        assert_eq!(
+            line(&reset_lines, "middle-click-action"),
+            "middle-click-action = primary-paste"
+        );
+
+        assert!(index(&lines, "title-report") < index(&lines, "image-storage-limit"));
+        assert!(index(&lines, "image-storage-limit") < index(&lines, "copy-on-select"));
+        assert!(index(&lines, "copy-on-select") < index(&lines, "right-click-action"));
+        assert!(index(&lines, "right-click-action") < index(&lines, "middle-click-action"));
+        assert!(index(&lines, "middle-click-action") < index(&lines, "click-repeat-interval"));
+        assert!(index(&lines, "click-repeat-interval") < index(&lines, "config-file"));
+    }
+
+    #[test]
+    fn window_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (WindowTheme::Auto, "auto"),
+            (WindowTheme::System, "system"),
+            (WindowTheme::Light, "light"),
+            (WindowTheme::Dark, "dark"),
+            (WindowTheme::Ghostty, "ghostty"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (WindowSaveState::Default, "default"),
+            (WindowSaveState::Never, "never"),
+            (WindowSaveState::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (WindowNewTabPosition::Current, "current"),
+            (WindowNewTabPosition::End, "end"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (WindowShowTabBar::Always, "always"),
+            (WindowShowTabBar::Auto, "auto"),
+            (WindowShowTabBar::Never, "never"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(line(&default_lines, "window-theme"), "window-theme = auto");
+        assert_eq!(
+            line(&default_lines, "window-save-state"),
+            "window-save-state = default"
+        );
+        assert_eq!(
+            line(&default_lines, "window-new-tab-position"),
+            "window-new-tab-position = current"
+        );
+        assert_eq!(
+            line(&default_lines, "window-show-tab-bar"),
+            "window-show-tab-bar = auto"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("window-theme", Some("dark")).unwrap();
+        cfg.set("window-save-state", Some("always")).unwrap();
+        cfg.set("window-new-tab-position", Some("end")).unwrap();
+        cfg.set("window-show-tab-bar", Some("never")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "window-theme"), "window-theme = dark");
+        assert_eq!(
+            line(&lines, "window-save-state"),
+            "window-save-state = always"
+        );
+        assert_eq!(
+            line(&lines, "window-new-tab-position"),
+            "window-new-tab-position = end"
+        );
+        assert_eq!(
+            line(&lines, "window-show-tab-bar"),
+            "window-show-tab-bar = never"
+        );
+
+        for key in [
+            "window-theme",
+            "window-save-state",
+            "window-new-tab-position",
+            "window-show-tab-bar",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "window-theme",
+            "window-save-state",
+            "window-new-tab-position",
+            "window-show-tab-bar",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "window-subtitle") < index(&lines, "window-theme"));
+        assert!(index(&lines, "window-theme") < index(&lines, "window-colorspace"));
+        assert!(index(&lines, "window-colorspace") < index(&lines, "window-save-state"));
+        assert!(index(&lines, "window-save-state") < index(&lines, "window-new-tab-position"));
+        assert!(index(&lines, "window-new-tab-position") < index(&lines, "window-show-tab-bar"));
+        assert!(index(&lines, "window-show-tab-bar") < index(&lines, "window-titlebar-background"));
+        assert!(index(&lines, "window-titlebar-background") < index(&lines, "resize-overlay"));
+    }
+
+    #[test]
+    fn resize_overlay_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (ResizeOverlay::Always, "always"),
+            (ResizeOverlay::Never, "never"),
+            (ResizeOverlay::AfterFirst, "after-first"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (ResizeOverlayPosition::Center, "center"),
+            (ResizeOverlayPosition::TopLeft, "top-left"),
+            (ResizeOverlayPosition::TopCenter, "top-center"),
+            (ResizeOverlayPosition::TopRight, "top-right"),
+            (ResizeOverlayPosition::BottomLeft, "bottom-left"),
+            (ResizeOverlayPosition::BottomCenter, "bottom-center"),
+            (ResizeOverlayPosition::BottomRight, "bottom-right"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "resize-overlay"),
+            "resize-overlay = after-first"
+        );
+        assert_eq!(
+            line(&default_lines, "resize-overlay-position"),
+            "resize-overlay-position = center"
+        );
+        assert_eq!(
+            line(&default_lines, "resize-overlay-duration"),
+            "resize-overlay-duration = 750ms"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("resize-overlay", Some("always")).unwrap();
+        cfg.set("resize-overlay-position", Some("bottom-right"))
+            .unwrap();
+        cfg.set("resize-overlay-duration", Some("1s 250ms"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "resize-overlay"), "resize-overlay = always");
+        assert_eq!(
+            line(&lines, "resize-overlay-position"),
+            "resize-overlay-position = bottom-right"
+        );
+        assert_eq!(
+            line(&lines, "resize-overlay-duration"),
+            "resize-overlay-duration = 1s 250ms"
+        );
+
+        for key in [
+            "resize-overlay",
+            "resize-overlay-position",
+            "resize-overlay-duration",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "resize-overlay",
+            "resize-overlay-position",
+            "resize-overlay-duration",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "window-titlebar-background") < index(&lines, "resize-overlay"));
+        assert!(index(&lines, "resize-overlay") < index(&lines, "resize-overlay-position"));
+        assert!(
+            index(&lines, "resize-overlay-position") < index(&lines, "resize-overlay-duration")
+        );
+        assert!(index(&lines, "resize-overlay-duration") < index(&lines, "focus-follows-mouse"));
+    }
+
+    #[test]
+    fn quick_terminal_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+        let maybe_index = |lines: &[String], key: &str| -> Option<usize> {
+            let prefix = format!("{key} = ");
+            lines.iter().position(|line| line.starts_with(&prefix))
+        };
+
+        for (variant, kw) in [
+            (QuickTerminalPosition::Top, "top"),
+            (QuickTerminalPosition::Bottom, "bottom"),
+            (QuickTerminalPosition::Left, "left"),
+            (QuickTerminalPosition::Right, "right"),
+            (QuickTerminalPosition::Center, "center"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalLayer::Overlay, "overlay"),
+            (QuickTerminalLayer::Top, "top"),
+            (QuickTerminalLayer::Bottom, "bottom"),
+            (QuickTerminalLayer::Background, "background"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalScreen::Main, "main"),
+            (QuickTerminalScreen::Mouse, "mouse"),
+            (QuickTerminalScreen::MacosMenuBar, "macos-menu-bar"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalSpaceBehavior::Remain, "remain"),
+            (QuickTerminalSpaceBehavior::Move, "move"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (QuickTerminalKeyboardInteractivity::None, "none"),
+            (QuickTerminalKeyboardInteractivity::OnDemand, "on-demand"),
+            (QuickTerminalKeyboardInteractivity::Exclusive, "exclusive"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "quick-terminal-position"),
+            "quick-terminal-position = top"
+        );
+        assert_eq!(maybe_index(&default_lines, "quick-terminal-size"), None);
+        assert_eq!(
+            line(&default_lines, "gtk-quick-terminal-layer"),
+            "gtk-quick-terminal-layer = top"
+        );
+        assert_eq!(
+            line(&default_lines, "quick-terminal-screen"),
+            "quick-terminal-screen = main"
+        );
+        assert_eq!(
+            line(&default_lines, "quick-terminal-space-behavior"),
+            "quick-terminal-space-behavior = move"
+        );
+        assert_eq!(
+            line(&default_lines, "quick-terminal-keyboard-interactivity"),
+            "quick-terminal-keyboard-interactivity = on-demand"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        cfg.set("quick-terminal-position", Some("center")).unwrap();
+        cfg.set("gtk-quick-terminal-layer", Some("bottom")).unwrap();
+        cfg.set("quick-terminal-screen", Some("macos-menu-bar"))
+            .unwrap();
+        cfg.set("quick-terminal-space-behavior", Some("remain"))
+            .unwrap();
+        cfg.set("quick-terminal-keyboard-interactivity", Some("exclusive"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "quick-terminal-position"),
+            "quick-terminal-position = center"
+        );
+        assert_eq!(
+            line(&lines, "gtk-quick-terminal-layer"),
+            "gtk-quick-terminal-layer = bottom"
+        );
+        assert_eq!(
+            line(&lines, "quick-terminal-screen"),
+            "quick-terminal-screen = macos-menu-bar"
+        );
+        assert_eq!(
+            line(&lines, "quick-terminal-space-behavior"),
+            "quick-terminal-space-behavior = remain"
+        );
+        assert_eq!(
+            line(&lines, "quick-terminal-keyboard-interactivity"),
+            "quick-terminal-keyboard-interactivity = exclusive"
+        );
+
+        for key in [
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "quick-terminal-screen",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "quick-terminal-screen",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "undo-timeout") < index(&lines, "quick-terminal-position"));
+        assert!(index(&lines, "quick-terminal-position") < index(&lines, "quick-terminal-size"));
+        assert!(index(&lines, "quick-terminal-size") < index(&lines, "gtk-quick-terminal-layer"));
+        assert!(
+            index(&lines, "gtk-quick-terminal-layer")
+                < index(&lines, "gtk-quick-terminal-namespace")
+        );
+        assert!(
+            index(&lines, "gtk-quick-terminal-namespace") < index(&lines, "quick-terminal-screen")
+        );
+        assert!(
+            index(&lines, "quick-terminal-screen")
+                < index(&lines, "quick-terminal-animation-duration")
+        );
+        assert!(
+            index(&lines, "quick-terminal-animation-duration")
+                < index(&lines, "quick-terminal-autohide")
+        );
+        assert!(
+            index(&lines, "quick-terminal-autohide")
+                < index(&lines, "quick-terminal-space-behavior")
+        );
+        assert!(
+            index(&lines, "quick-terminal-space-behavior")
+                < index(&lines, "quick-terminal-keyboard-interactivity")
+        );
+        assert!(
+            index(&lines, "quick-terminal-keyboard-interactivity")
+                < index(&lines, "shell-integration")
+        );
+    }
+
+    #[test]
+    fn command_finish_notification_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (NotifyOnCommandFinish::Never, "never"),
+            (NotifyOnCommandFinish::Unfocused, "unfocused"),
+            (NotifyOnCommandFinish::Always, "always"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, output) in [
+            (
+                NotifyOnCommandFinishAction {
+                    bell: true,
+                    notify: false,
+                },
+                "bell,no-notify",
+            ),
+            (
+                NotifyOnCommandFinishAction {
+                    bell: false,
+                    notify: true,
+                },
+                "no-bell,notify",
+            ),
+            (
+                NotifyOnCommandFinishAction {
+                    bell: true,
+                    notify: true,
+                },
+                "bell,notify",
+            ),
+            (
+                NotifyOnCommandFinishAction {
+                    bell: false,
+                    notify: false,
+                },
+                "no-bell,no-notify",
+            ),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {output}\n"));
+        }
+        assert_eq!(
+            fmt(&|f| Duration {
+                duration: NS_PER_S + 250 * NS_PER_MS,
+            }
+            .format_entry(f)),
+            "a = 1s 250ms\n"
+        );
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(
+            line(&default_lines, "notify-on-command-finish"),
+            "notify-on-command-finish = never"
+        );
+        assert_eq!(
+            line(&default_lines, "notify-on-command-finish-action"),
+            "notify-on-command-finish-action = bell,no-notify"
+        );
+        assert_eq!(
+            line(&default_lines, "notify-on-command-finish-after"),
+            "notify-on-command-finish-after = 5s"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("notify-on-command-finish", Some("always")).unwrap();
+        cfg.set("notify-on-command-finish-action", Some("no-bell,notify"))
+            .unwrap();
+        cfg.set("notify-on-command-finish-after", Some("1s 250ms"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "notify-on-command-finish"),
+            "notify-on-command-finish = always"
+        );
+        assert_eq!(
+            line(&lines, "notify-on-command-finish-action"),
+            "notify-on-command-finish-action = no-bell,notify"
+        );
+        assert_eq!(
+            line(&lines, "notify-on-command-finish-after"),
+            "notify-on-command-finish-after = 1s 250ms"
+        );
+
+        for key in [
+            "notify-on-command-finish",
+            "notify-on-command-finish-action",
+            "notify-on-command-finish-after",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "notify-on-command-finish",
+            "notify-on-command-finish-action",
+            "notify-on-command-finish-after",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "command") < index(&lines, "initial-command"));
+        assert!(index(&lines, "initial-command") < index(&lines, "notify-on-command-finish"));
+        assert!(
+            index(&lines, "notify-on-command-finish")
+                < index(&lines, "notify-on-command-finish-action")
+        );
+        assert!(
+            index(&lines, "notify-on-command-finish-action")
+                < index(&lines, "notify-on-command-finish-after")
+        );
+        assert!(index(&lines, "notify-on-command-finish-after") < index(&lines, "env"));
+        assert!(index(&lines, "env") < index(&lines, "input"));
+    }
+
+    #[test]
+    fn packed_flag_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (formatter, expected) in [
+            (
+                fmt(&|f| AppNotifications::default().format_entry(f)),
+                "a = clipboard-copy,config-reload\n",
+            ),
+            (
+                fmt(&|f| {
+                    AppNotifications {
+                        clipboard_copy: false,
+                        config_reload: true,
+                    }
+                    .format_entry(f)
+                }),
+                "a = no-clipboard-copy,config-reload\n",
+            ),
+            (
+                fmt(&|f| BellFeatures::default().format_entry(f)),
+                "a = no-system,no-audio,attention,title,no-border\n",
+            ),
+            (
+                fmt(&|f| {
+                    BellFeatures {
+                        system: true,
+                        audio: true,
+                        attention: true,
+                        title: false,
+                        border: true,
+                    }
+                    .format_entry(f)
+                }),
+                "a = system,audio,attention,no-title,border\n",
+            ),
+            (
+                fmt(&|f| FreetypeLoadFlags::default().format_entry(f)),
+                "a = hinting,no-force-autohint,no-monochrome,autohint,light\n",
+            ),
+            (
+                fmt(&|f| {
+                    FreetypeLoadFlags {
+                        hinting: false,
+                        force_autohint: true,
+                        monochrome: false,
+                        autohint: true,
+                        light: false,
+                    }
+                    .format_entry(f)
+                }),
+                "a = no-hinting,force-autohint,no-monochrome,autohint,no-light\n",
+            ),
+            (
+                fmt(&|f| ScrollToBottom::default().format_entry(f)),
+                "a = keystroke,no-output\n",
+            ),
+            (
+                fmt(&|f| {
+                    ScrollToBottom {
+                        keystroke: false,
+                        output: true,
+                    }
+                    .format_entry(f)
+                }),
+                "a = no-keystroke,output\n",
+            ),
+            (
+                fmt(&|f| ShellIntegrationFeatures::default().format_entry(f)),
+                "a = cursor,no-sudo,title,no-ssh-env,no-ssh-terminfo,path\n",
+            ),
+            (
+                fmt(&|f| {
+                    ShellIntegrationFeatures {
+                        cursor: false,
+                        sudo: true,
+                        title: true,
+                        ssh_env: true,
+                        ssh_terminfo: false,
+                        path: true,
+                    }
+                    .format_entry(f)
+                }),
+                "a = no-cursor,sudo,title,ssh-env,no-ssh-terminfo,path\n",
+            ),
+            (
+                fmt(&|f| SplitPreserveZoom::default().format_entry(f)),
+                "a = no-navigation\n",
+            ),
+            (
+                fmt(&|f| SplitPreserveZoom { navigation: true }.format_entry(f)),
+                "a = navigation\n",
+            ),
+        ] {
+            assert_eq!(formatter, expected);
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+
+        let mut cfg = Config::default();
+        cfg.set("app-notifications", Some("no-clipboard-copy,config-reload"))
+            .unwrap();
+        cfg.set("bell-features", Some("system,audio,no-title,border"))
+            .unwrap();
+        cfg.set(
+            "freetype-load-flags",
+            Some("no-hinting,force-autohint,no-light"),
+        )
+        .unwrap();
+        cfg.set("scroll-to-bottom", Some("no-keystroke,output"))
+            .unwrap();
+        cfg.set("shell-integration-features", Some("no-cursor,sudo,ssh-env"))
+            .unwrap();
+        cfg.set("split-preserve-zoom", Some("navigation")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "app-notifications"),
+            "app-notifications = no-clipboard-copy,config-reload"
+        );
+        assert_eq!(
+            line(&lines, "bell-features"),
+            "bell-features = system,audio,attention,no-title,border"
+        );
+        assert_eq!(
+            line(&lines, "freetype-load-flags"),
+            "freetype-load-flags = no-hinting,force-autohint,no-monochrome,autohint,no-light"
+        );
+        assert_eq!(
+            line(&lines, "scroll-to-bottom"),
+            "scroll-to-bottom = no-keystroke,output"
+        );
+        assert_eq!(
+            line(&lines, "shell-integration-features"),
+            "shell-integration-features = no-cursor,sudo,title,ssh-env,no-ssh-terminfo,path"
+        );
+        assert_eq!(
+            line(&lines, "split-preserve-zoom"),
+            "split-preserve-zoom = navigation"
+        );
+
+        for key in [
+            "app-notifications",
+            "bell-features",
+            "freetype-load-flags",
+            "scroll-to-bottom",
+            "shell-integration-features",
+            "split-preserve-zoom",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "app-notifications",
+            "bell-features",
+            "freetype-load-flags",
+            "scroll-to-bottom",
+            "shell-integration-features",
+            "split-preserve-zoom",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "font-shaping-break") < index(&lines, "freetype-load-flags"));
+        assert!(index(&lines, "freetype-load-flags") < index(&lines, "theme"));
+        assert!(index(&lines, "scroll-to-bottom") < index(&lines, "mouse-shift-capture"));
+        assert!(index(&lines, "shell-integration") < index(&lines, "shell-integration-features"));
+        assert!(
+            index(&lines, "shell-integration-features") < index(&lines, "command-palette-entry")
+        );
+        assert!(index(&lines, "split-divider-color") < index(&lines, "split-preserve-zoom"));
+        assert!(index(&lines, "split-preserve-zoom") < index(&lines, "search-foreground"));
+        assert!(index(&lines, "bell-features") < index(&lines, "bell-audio-path"));
+        assert!(index(&lines, "bell-audio-path") < index(&lines, "bell-audio-volume"));
+        assert!(index(&lines, "bell-audio-volume") < index(&lines, "app-notifications"));
     }
 
     #[test]
@@ -13667,7 +17174,11 @@ mod tests {
     }
 
     #[test]
-    fn config_set_routes_theme_field() {
+    fn theme_config_parser_family_oracle() {
+        let theme = |light: &str, dark: &str| Theme {
+            light: light.to_string(),
+            dark: dark.to_string(),
+        };
         let line = |cfg: &Config| -> String {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -13676,6 +17187,62 @@ mod tests {
                 .unwrap()
                 .to_string()
         };
+
+        assert_eq!(
+            Theme::parse_cli(Some("catppuccin-mocha")),
+            Ok(theme("catppuccin-mocha", "catppuccin-mocha"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some(" \t solarized \t ")),
+            Ok(theme("solarized", "solarized"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:day,dark:night")),
+            Ok(theme("day", "night"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some(" light : day , dark : night ")),
+            Ok(theme("day", "night"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:\"a,b\",dark:c")),
+            Ok(theme("a,b", "c"))
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:a,light:b,dark:c")),
+            Ok(theme("b", "c"))
+        );
+        assert_eq!(Theme::parse_cli(Some("light:,dark:x")), Ok(theme("", "x")));
+        assert_eq!(
+            Theme::parse_cli(Some("light=day")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("bright:x,dark:y")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:day")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:day,nightonly")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(
+            Theme::parse_cli(Some("light:\"\\q\",dark:x")),
+            Err(ThemeParseError::Invalid)
+        );
+        assert_eq!(Theme::parse_cli(None), Err(ThemeParseError::ValueRequired));
+        assert_eq!(
+            Theme::parse_cli(Some("")),
+            Err(ThemeParseError::ValueRequired)
+        );
+
+        let parsed = Theme::parse_cli(Some("light:day,dark:night")).unwrap();
+        let mut out = String::new();
+        parsed.format_entry(&mut EntryFormatter::new("theme", &mut out));
+        assert_eq!(out, "theme = light:day,dark:night\n");
 
         // A single name and a pair route to the `theme` field (via format_config).
         let mut cfg = Config::default();
@@ -13697,6 +17264,45 @@ mod tests {
             cfg.set("theme", Some("bright:x,dark:y")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        cfg.set("theme", Some("catppuccin-mocha")).unwrap();
+        let diagnostics = cfg.load_str(
+            "theme = light:day\n\
+             theme\n\
+             theme = light:\"\\q\",dark:x\n\
+             theme = light:day,dark:night\n",
+        );
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "theme".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "theme".to_string(),
+                    error: ConfigSetError::ValueRequired,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "theme".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+        assert_eq!(line(&cfg), "theme = light:day,dark:night");
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--theme= light:day,dark:night "]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(line(&cli_cfg), "theme = light:day,dark:night");
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned.theme, cli_cfg.theme);
     }
 
     #[test]
@@ -15126,14 +18732,10 @@ mod tests {
             cfg.set("enquiry-response", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("term", Some("bad\0term")),
-            Err(ConfigSetError::InvalidValue)
-        );
-        assert_eq!(
-            cfg.set("enquiry-response", Some("bad\0response")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("term", Some("bad\0term")).unwrap();
+        assert_eq!(cfg.term, "bad\0term");
+        cfg.set("enquiry-response", Some("bad\0response")).unwrap();
+        assert_eq!(cfg.enquiry_response, "bad\0response");
 
         let diagnostics = cfg.load_str(
             "term = xterm-roastty\n\
@@ -15142,21 +18744,14 @@ mod tests {
              enquiry-response = bad\0pong\n",
         );
         assert_eq!(cfg.term, "xterm-roastty");
-        assert_eq!(cfg.enquiry_response, "pong");
+        assert_eq!(cfg.enquiry_response, "bad\0pong");
         assert_eq!(
             diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "term".to_string(),
-                    error: ConfigSetError::ValueRequired,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "enquiry-response".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "term".to_string(),
+                error: ConfigSetError::ValueRequired,
+            }]
         );
 
         let cloned = cfg.clone();
@@ -15374,14 +18969,54 @@ mod tests {
     }
 
     #[test]
-    fn config_font_family_repeats_clears_and_cli_overwrites_files() {
+    fn repeatable_string_font_config_parser_family_oracle() {
+        assert_eq!(
+            RepeatableString::default().parse_cli(None),
+            Err(RepeatableStringParseError::ValueRequired)
+        );
+
+        let mut direct = RepeatableString::default();
+        direct.list = vec!["old".to_string()];
+        assert_eq!(direct.parse_cli(Some("")), Ok(()));
+        assert!(direct.list.is_empty());
+
+        direct.list = vec!["file value".to_string()];
+        direct.overwrite_next = true;
+        assert_eq!(direct.parse_cli(Some("CLI Font: 13!")), Ok(()));
+        assert_eq!(direct.list, vec!["CLI Font: 13!"]);
+        assert!(!direct.overwrite_next);
+        assert_eq!(direct.parse_cli(Some("Next Font")), Ok(()));
+        assert_eq!(direct.list, vec!["CLI Font: 13!", "Next Font"]);
+
+        direct.overwrite_next = true;
+        let cloned = direct.clone();
+        assert_eq!(cloned.list, direct.list);
+        assert!(!cloned.overwrite_next);
+        let mut same_list = direct.clone();
+        same_list.overwrite_next = true;
+        assert_eq!(same_list, direct);
+
+        let lines = |cfg: &Config, prefix: &str| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .filter(|line| line.starts_with(prefix))
+                .map(str::to_string)
+                .collect()
+        };
+
         let mut cfg = Config::default();
         cfg.set("font-family", Some("A")).unwrap();
         cfg.set("font-family", Some("B")).unwrap();
         assert_eq!(cfg.font_family.list, vec!["A", "B"]);
+        assert_eq!(
+            lines(&cfg, "font-family = "),
+            vec!["font-family = A", "font-family = B"]
+        );
 
         cfg.set("font-family", Some("")).unwrap();
         assert!(cfg.font_family.list.is_empty());
+        assert_eq!(lines(&cfg, "font-family = "), vec!["font-family = "]);
         cfg.set("font-family", Some("C")).unwrap();
         assert_eq!(cfg.font_family.list, vec!["C"]);
 
@@ -15403,34 +19038,22 @@ mod tests {
         let diagnostics = cfg.set_cli_args(["--font-family=", "--font-family=CLI"]);
         assert!(diagnostics.is_empty());
         assert_eq!(cfg.font_family.list, vec!["CLI"]);
-    }
-
-    #[test]
-    fn font_feature_config_parse_format_reset_load_cli_append_and_clone() {
-        let lines = |cfg: &Config| -> Vec<String> {
-            let mut out = String::new();
-            cfg.format_config(&mut out);
-            out.lines()
-                .filter(|l| l.starts_with("font-feature = "))
-                .map(str::to_string)
-                .collect()
-        };
 
         let mut cfg = Config::default();
         assert!(cfg.font_feature.list.is_empty());
-        assert_eq!(lines(&cfg), vec!["font-feature = "]);
+        assert_eq!(lines(&cfg, "font-feature = "), vec!["font-feature = "]);
 
         cfg.set("font-feature", Some("calt")).unwrap();
         cfg.set("font-feature", Some("-liga")).unwrap();
         assert_eq!(cfg.font_feature.list, vec!["calt", "-liga"]);
         assert_eq!(
-            lines(&cfg),
+            lines(&cfg, "font-feature = "),
             vec!["font-feature = calt", "font-feature = -liga"]
         );
 
         cfg.set("font-feature", Some("")).unwrap();
         assert!(cfg.font_feature.list.is_empty());
-        assert_eq!(lines(&cfg), vec!["font-feature = "]);
+        assert_eq!(lines(&cfg, "font-feature = "), vec!["font-feature = "]);
 
         assert_eq!(
             cfg.set("font-feature", None),
@@ -15542,7 +19165,7 @@ mod tests {
     }
 
     #[test]
-    fn font_variation_config_parse_format_reset_load_cli_append_and_clone() {
+    fn font_variation_config_parser_family_oracle() {
         let lines = |cfg: &Config, key: &str| -> Vec<String> {
             let prefix = format!("{} = ", key);
             let mut out = String::new();
@@ -15574,27 +19197,94 @@ mod tests {
             direct.parse_cli(Some("wght=heavy")),
             Err(RepeatableFontVariationParseError::InvalidValue)
         );
+        for value in ["wght=0x1p", "wght=0x1p_4", "wght=0x1p4_", "wght=1_"] {
+            assert_eq!(
+                direct.parse_cli(Some(value)),
+                Err(RepeatableFontVariationParseError::InvalidValue),
+                "rejects {value:?}"
+            );
+        }
         direct.parse_cli(Some("wght =200")).unwrap();
         direct.parse_cli(Some("slnt= -15")).unwrap();
+        direct.parse_cli(Some("wdth=1_000.5")).unwrap();
+        direct.parse_cli(Some("opsz=0x1p4")).unwrap();
+        direct.parse_cli(Some("ital=0x1.8p1")).unwrap();
+        direct.parse_cli(Some("NAN1=nAn")).unwrap();
+        direct.parse_cli(Some("INF1=+Inf")).unwrap();
+        direct.parse_cli(Some("INF2=-iNf")).unwrap();
+        direct.parse_cli(Some("OVFL=1e309")).unwrap();
+        direct.parse_cli(Some("UNFL=0x1p-9999999999")).unwrap();
         assert_eq!(
-            direct.list,
-            vec![
+            &direct.list[..2],
+            [
                 FontVariation {
                     id: *b"wght",
-                    value: 200.0,
+                    value: 200.0
                 },
                 FontVariation {
                     id: *b"slnt",
-                    value: -15.0,
+                    value: -15.0
                 },
             ]
         );
+        assert_eq!(
+            direct.list[2],
+            FontVariation {
+                id: *b"wdth",
+                value: 1000.5
+            }
+        );
+        assert_eq!(
+            direct.list[3],
+            FontVariation {
+                id: *b"opsz",
+                value: 16.0
+            }
+        );
+        assert_eq!(
+            direct.list[4],
+            FontVariation {
+                id: *b"ital",
+                value: 3.0
+            }
+        );
+        assert_eq!(direct.list[5].id, *b"NAN1");
+        assert!(direct.list[5].value.is_nan());
+        assert_eq!(
+            direct.list[6],
+            FontVariation {
+                id: *b"INF1",
+                value: f64::INFINITY
+            }
+        );
+        assert_eq!(
+            direct.list[7],
+            FontVariation {
+                id: *b"INF2",
+                value: f64::NEG_INFINITY
+            }
+        );
+        assert_eq!(
+            direct.list[8],
+            FontVariation {
+                id: *b"OVFL",
+                value: f64::INFINITY
+            }
+        );
+        assert_eq!(
+            direct.list[9],
+            FontVariation {
+                id: *b"UNFL",
+                value: 0.0
+            }
+        );
         let mut direct_out = String::new();
         direct.format_entry(&mut EntryFormatter::new("font-variation", &mut direct_out));
-        assert_eq!(
-            direct_out,
-            "font-variation = wght=200\nfont-variation = slnt=-15\n"
-        );
+        assert!(direct_out.contains("font-variation = wght=200\n"));
+        assert!(direct_out.contains("font-variation = slnt=-15\n"));
+        assert!(direct_out.contains("font-variation = wdth=1000.5\n"));
+        assert!(direct_out.contains("font-variation = opsz=16\n"));
+        assert!(direct_out.contains("font-variation = NAN1=nan\n"));
 
         let mut cfg = Config::default();
         assert!(cfg.font_variation.list.is_empty());
@@ -15753,6 +19443,9 @@ mod tests {
             "font-codepoint-map = U+ABCD=Symbols\nfont-codepoint-map = U+0001-U+0003=Emoji\nfont-codepoint-map = U+0005=Emoji\n"
         );
 
+        cfg.set("font-codepoint-map", Some("")).unwrap();
+        assert!(cfg.font_codepoint_map.map.is_empty());
+
         assert_eq!(
             cfg.set("font-codepoint-map", None),
             Err(ConfigSetError::ValueRequired)
@@ -15801,6 +19494,9 @@ mod tests {
         assert!(out.contains("clipboard-codepoint-map = U+2500=U+002D\n"));
         assert!(out.contains("clipboard-codepoint-map = U+03A3=SUM\n"));
 
+        cfg.set("clipboard-codepoint-map", Some("")).unwrap();
+        assert!(cfg.clipboard_codepoint_map.map.is_empty());
+
         assert_eq!(
             cfg.set("clipboard-codepoint-map", None),
             Err(ConfigSetError::ValueRequired)
@@ -15812,12 +19508,98 @@ mod tests {
     }
 
     #[test]
-    fn config_key_remap_routes_formats_resets_and_finalizes() {
+    fn codepoint_map_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&default_lines, "font-codepoint-map"),
+            vec!["font-codepoint-map = "]
+        );
+        assert_eq!(
+            lines_for(&default_lines, "clipboard-codepoint-map"),
+            vec!["clipboard-codepoint-map = "]
+        );
+
+        cfg.set("font-codepoint-map", Some("U+0001-U+0003, U+0005 = Emoji"))
+            .unwrap();
+        cfg.set("font-codepoint-map", Some("U+ABCD = Symbols"))
+            .unwrap();
+        cfg.set("clipboard-codepoint-map", Some("U+2500=U+002D"))
+            .unwrap();
+        cfg.set("clipboard-codepoint-map", Some("U+2501-U+2503=|"))
+            .unwrap();
+        cfg.set("clipboard-codepoint-map", Some("U+03A3=SUM"))
+            .unwrap();
+        cfg.set("clipboard-codepoint-map", Some("U+2603=")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "font-codepoint-map"),
+            vec![
+                "font-codepoint-map = U+0001-U+0003=Emoji",
+                "font-codepoint-map = U+0005=Emoji",
+                "font-codepoint-map = U+ABCD=Symbols",
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "clipboard-codepoint-map"),
+            vec![
+                "clipboard-codepoint-map = U+2500=U+002D",
+                "clipboard-codepoint-map = U+2501-U+2503=|",
+                "clipboard-codepoint-map = U+03A3=SUM",
+                "clipboard-codepoint-map = U+2603=",
+            ]
+        );
+
+        cfg.set("font-codepoint-map", Some("")).unwrap();
+        cfg.set("clipboard-codepoint-map", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&reset_lines, "font-codepoint-map"),
+            vec!["font-codepoint-map = "]
+        );
+        assert_eq!(
+            lines_for(&reset_lines, "clipboard-codepoint-map"),
+            vec!["clipboard-codepoint-map = "]
+        );
+
+        assert!(index(&lines, "font-variation-bold-italic") < index(&lines, "font-codepoint-map"));
+        assert!(index(&lines, "font-codepoint-map") < index(&lines, "clipboard-codepoint-map"));
+        assert!(index(&lines, "clipboard-codepoint-map") < index(&lines, "font-thicken"));
+        assert!(index(&lines, "font-thicken-strength") < index(&lines, "font-shaping-break"));
+    }
+
+    #[test]
+    fn key_remap_config_parser_family_oracle() {
         let mut cfg = Config::default();
         assert_eq!(cfg.key_remap.format_entries(), vec![String::new()]);
 
         cfg.set("key-remap", Some("ctrl=super")).unwrap();
         cfg.set("key-remap", Some("right_ctrl=alt")).unwrap();
+        cfg.set("key-remap", Some("left_alt=right_ctrl")).unwrap();
         cfg.finalize();
 
         assert_eq!(
@@ -15828,10 +19610,25 @@ mod tests {
             key_mods::Mods::for_mod(key_mods::Mod::Alt, key_mods::Side::Left)
         );
         assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Ctrl,
+                key_mods::Side::Left
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Super, key_mods::Side::Left)
+        );
+        assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Alt,
+                key_mods::Side::Left
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Ctrl, key_mods::Side::Right)
+        );
+        assert_eq!(
             cfg.key_remap.format_entries(),
             vec![
                 "right_ctrl=left_alt".to_string(),
                 "left_ctrl=left_super".to_string(),
+                "left_alt=right_ctrl".to_string(),
             ]
         );
 
@@ -15846,7 +19643,30 @@ mod tests {
             vec![
                 "key-remap = right_ctrl=left_alt",
                 "key-remap = left_ctrl=left_super",
+                "key-remap = left_alt=right_ctrl",
             ]
+        );
+
+        cfg.set("key-remap", None).unwrap();
+        assert_eq!(cfg.key_remap.format_entries(), vec![String::new()]);
+
+        cfg.set("key-remap", Some("control=command")).unwrap();
+        cfg.set("key-remap", Some("right_option=left_control"))
+            .unwrap();
+        cfg.finalize();
+        assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Ctrl,
+                key_mods::Side::Right
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Super, key_mods::Side::Left)
+        );
+        assert_eq!(
+            cfg.key_remap.apply(key_mods::Mods::for_mod(
+                key_mods::Mod::Alt,
+                key_mods::Side::Right
+            )),
+            key_mods::Mods::for_mod(key_mods::Mod::Ctrl, key_mods::Side::Left)
         );
 
         cfg.set("key-remap", Some("")).unwrap();
@@ -15855,11 +19675,7 @@ mod tests {
         let mut out = String::new();
         cfg.format_config(&mut out);
         assert!(out.lines().any(|line| line == "key-remap = "));
-    }
 
-    #[test]
-    fn config_key_remap_invalid_values_are_invalid_value() {
-        let mut cfg = Config::default();
         assert_eq!(
             cfg.set("key-remap", Some("ctrl")),
             Err(ConfigSetError::InvalidValue)
@@ -15868,6 +19684,49 @@ mod tests {
             cfg.set("key-remap", Some("hyper=ctrl")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        cfg.set("key-remap", Some("left_ctrl=super")).unwrap();
+        let diagnostics = cfg.load_str("key-remap = hyper=ctrl\nkey-remap\nkey-remap = ctrl\n");
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "key-remap".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "key-remap".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+        assert_eq!(cfg.key_remap.format_entries(), vec![String::new()]);
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--key-remap=opt=cmd", "--key-remap=left_control=right_alt"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        cli_cfg.finalize();
+        assert_eq!(
+            cli_cfg.key_remap.format_entries(),
+            vec![
+                "right_alt=left_super".to_string(),
+                "left_alt=left_super".to_string(),
+                "left_ctrl=right_alt".to_string(),
+            ]
+        );
+
+        assert_eq!(
+            cli_cfg.set_cli_args(["--key-remap"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(cli_cfg.key_remap.format_entries(), vec![String::new()]);
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned.key_remap, cli_cfg.key_remap);
     }
 
     #[test]
@@ -15909,18 +19768,6 @@ mod tests {
             .map(|l| l.split(" = ").next().unwrap())
             .collect();
         let mut expected = vec![
-            "initial-window",
-            "quit-after-last-window-closed",
-            "quit-after-last-window-closed-delay",
-            "undo-timeout",
-            "quick-terminal-position",
-            "gtk-quick-terminal-layer",
-            "gtk-quick-terminal-namespace",
-            "quick-terminal-screen",
-            "quick-terminal-animation-duration",
-            "quick-terminal-autohide",
-            "quick-terminal-space-behavior",
-            "quick-terminal-keyboard-interactivity",
             "language",
             "font-family",
             "font-family-bold",
@@ -15969,6 +19816,7 @@ mod tests {
             "selection-foreground",
             "selection-background",
             "selection-clear-on-typing",
+            "selection-clear-on-copy",
             "selection-word-chars",
             "minimum-contrast",
         ];
@@ -15987,6 +19835,8 @@ mod tests {
             "mouse-shift-capture",
             "mouse-reporting",
             "mouse-scroll-multiplier",
+            "background-opacity",
+            "background-opacity-cells",
             "background-blur",
             "unfocused-split-opacity",
             "unfocused-split-fill",
@@ -15998,13 +19848,9 @@ mod tests {
             "search-selected-background",
             "command",
             "initial-command",
-            "background-opacity",
-            "background-opacity-cells",
-            "bell-audio-path",
-            "bell-audio-volume",
-            "notify-on-command-finish-after",
             "notify-on-command-finish",
             "notify-on-command-finish-action",
+            "notify-on-command-finish-after",
             "env",
             "input",
             "wait-after-command",
@@ -16059,13 +19905,24 @@ mod tests {
             "title-report",
             "image-storage-limit",
             "copy-on-select",
-            "selection-clear-on-copy",
             "right-click-action",
             "middle-click-action",
             "click-repeat-interval",
             "config-file",
             "config-default-files",
             "confirm-close-surface",
+            "quit-after-last-window-closed",
+            "quit-after-last-window-closed-delay",
+            "initial-window",
+            "undo-timeout",
+            "quick-terminal-position",
+            "gtk-quick-terminal-layer",
+            "gtk-quick-terminal-namespace",
+            "quick-terminal-screen",
+            "quick-terminal-animation-duration",
+            "quick-terminal-autohide",
+            "quick-terminal-space-behavior",
+            "quick-terminal-keyboard-interactivity",
             "shell-integration",
             "shell-integration-features",
         ]);
@@ -16079,6 +19936,8 @@ mod tests {
             "custom-shader",
             "custom-shader-animation",
             "bell-features",
+            "bell-audio-path",
+            "bell-audio-volume",
             "app-notifications",
             "macos-non-native-fullscreen",
             "macos-window-buttons",
@@ -16145,6 +20004,1667 @@ mod tests {
         assert!(out.contains("title = \n"));
         assert!(out.contains("window-position-x = \n"));
         assert!(out.contains("window-position-y = \n"));
+    }
+
+    #[test]
+    fn config_default_format_oracle() {
+        let ghostty = normalize_default_config_fixture(include_str!(
+            "../../testdata/issue805-ghostty-default-config.txt"
+        ));
+
+        let cfg = Config::default();
+        let mut roastty_raw = String::new();
+        cfg.format_config(&mut roastty_raw);
+        if let Ok(path) = std::env::var("ROASTTY_DEFAULT_CONFIG_OUT") {
+            std::fs::write(path, &roastty_raw).unwrap();
+        }
+        let roastty = normalize_default_config_fixture(&roastty_raw);
+        assert_eq!(roastty.lines().count(), ghostty.lines().count());
+
+        let ghostty_comparable = comparable_default_config_lines(&ghostty);
+        let roastty_comparable = comparable_default_config_lines(&roastty);
+        assert_eq!(roastty_comparable, ghostty_comparable);
+
+        let ghostty_keybind_count = default_config_lines_for_key(&ghostty, "keybind").len();
+        let roastty_keybind_count = default_config_lines_for_key(&roastty, "keybind").len();
+        assert_eq!(ghostty_keybind_count, 93);
+        assert_eq!(roastty_keybind_count, 93);
+        assert_eq!(
+            default_config_multiset_mismatch_count(
+                &default_config_lines_for_key(&ghostty, "keybind"),
+                &default_config_lines_for_key(&roastty, "keybind")
+            ),
+            0
+        );
+
+        let ghostty_command_palette =
+            default_config_lines_for_key(&ghostty, "command-palette-entry");
+        let roastty_command_palette =
+            default_config_lines_for_key(&roastty, "command-palette-entry");
+        assert_eq!(ghostty_command_palette.len(), 88);
+        assert_eq!(roastty_command_palette.len(), 88);
+        assert_eq!(roastty_command_palette, ghostty_command_palette);
+        assert_eq!(
+            default_config_multiset_mismatch_count(
+                &ghostty_command_palette,
+                &roastty_command_palette
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn primitive_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        cfg.selection_clear_on_copy = true;
+        cfg.clipboard_trim_trailing_spaces = false;
+        cfg.scrollback_limit = 12_345;
+        cfg.abnormal_command_exit_runtime = 987;
+        cfg.background_opacity = 0.125;
+        cfg.minimum_contrast = f64::NAN;
+        cfg.term = "xterm-roastty".to_string();
+        cfg.enquiry_response = "answer=42,raw".to_string();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "selection-clear-on-copy"),
+            "selection-clear-on-copy = true"
+        );
+        assert_eq!(
+            line(&lines, "clipboard-trim-trailing-spaces"),
+            "clipboard-trim-trailing-spaces = false"
+        );
+        assert_eq!(line(&lines, "scrollback-limit"), "scrollback-limit = 12345");
+        assert_eq!(
+            line(&lines, "abnormal-command-exit-runtime"),
+            "abnormal-command-exit-runtime = 987"
+        );
+        assert_eq!(
+            line(&lines, "background-opacity"),
+            "background-opacity = 0.125"
+        );
+        assert_eq!(line(&lines, "minimum-contrast"), "minimum-contrast = nan");
+        assert_eq!(line(&lines, "term"), "term = xterm-roastty");
+        assert_eq!(
+            line(&lines, "enquiry-response"),
+            "enquiry-response = answer=42,raw"
+        );
+
+        assert!(
+            index(&lines, "selection-clear-on-typing") < index(&lines, "selection-clear-on-copy")
+        );
+        assert!(index(&lines, "abnormal-command-exit-runtime") < index(&lines, "scrollback-limit"));
+        assert!(index(&lines, "background-opacity") < index(&lines, "background-opacity-cells"));
+        assert!(index(&lines, "term") < index(&lines, "enquiry-response"));
+    }
+
+    #[test]
+    fn optional_scalar_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "cursor-style-blink",
+            "class",
+            "language",
+            "macos-custom-icon",
+            "macos-option-as-alt",
+            "title",
+            "x11-instance-name",
+            "linux-cgroup-memory-limit",
+            "linux-cgroup-processes-limit",
+            "window-position-x",
+            "window-position-y",
+        ] {
+            assert_eq!(line(&default_lines, key), format!("{key} = "));
+        }
+
+        cfg.cursor_style_blink = Some(false);
+        cfg.class = Some("Class\0Name".to_string());
+        cfg.language = Some("en_US.UTF-8".to_string());
+        cfg.macos_custom_icon = Some("CustomIcon".to_string());
+        cfg.macos_option_as_alt = Some(key_mods::OptionAsAlt::True);
+        cfg.title = Some("Title\0Suffix".to_string());
+        cfg.x11_instance_name = Some("roastty-instance".to_string());
+        cfg.linux_cgroup_memory_limit = Some(4096);
+        cfg.linux_cgroup_processes_limit = Some(17);
+        cfg.window_position_x = Some(-16);
+        cfg.window_position_y = Some(27);
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "cursor-style-blink"),
+            "cursor-style-blink = false"
+        );
+        assert_eq!(line(&lines, "class"), "class = Class\0Name");
+        assert_eq!(line(&lines, "language"), "language = en_US.UTF-8");
+        assert_eq!(
+            line(&lines, "macos-custom-icon"),
+            "macos-custom-icon = CustomIcon"
+        );
+        assert_eq!(
+            line(&lines, "macos-option-as-alt"),
+            "macos-option-as-alt = true"
+        );
+        assert_eq!(line(&lines, "title"), "title = Title\0Suffix");
+        assert_eq!(
+            line(&lines, "x11-instance-name"),
+            "x11-instance-name = roastty-instance"
+        );
+        assert_eq!(
+            line(&lines, "linux-cgroup-memory-limit"),
+            "linux-cgroup-memory-limit = 4096"
+        );
+        assert_eq!(
+            line(&lines, "linux-cgroup-processes-limit"),
+            "linux-cgroup-processes-limit = 17"
+        );
+        assert_eq!(line(&lines, "window-position-x"), "window-position-x = -16");
+        assert_eq!(line(&lines, "window-position-y"), "window-position-y = 27");
+
+        cfg.set("cursor-style-blink", Some("")).unwrap();
+        cfg.set("class", Some("")).unwrap();
+        cfg.set("language", Some("")).unwrap();
+        cfg.set("macos-custom-icon", Some("")).unwrap();
+        cfg.set("macos-option-as-alt", Some("")).unwrap();
+        cfg.set("title", Some("")).unwrap();
+        cfg.set("x11-instance-name", Some("")).unwrap();
+        cfg.set("linux-cgroup-memory-limit", Some("")).unwrap();
+        cfg.set("linux-cgroup-processes-limit", Some("")).unwrap();
+        cfg.set("window-position-x", Some("")).unwrap();
+        cfg.set("window-position-y", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "cursor-style-blink",
+            "class",
+            "language",
+            "macos-custom-icon",
+            "macos-option-as-alt",
+            "title",
+            "x11-instance-name",
+            "linux-cgroup-memory-limit",
+            "linux-cgroup-processes-limit",
+            "window-position-x",
+            "window-position-y",
+        ] {
+            assert_eq!(line(&reset_lines, key), format!("{key} = "));
+        }
+
+        assert!(index(&lines, "language") < index(&lines, "title"));
+        assert!(index(&lines, "title") < index(&lines, "class"));
+        assert!(index(&lines, "class") < index(&lines, "x11-instance-name"));
+        assert!(index(&lines, "x11-instance-name") < index(&lines, "macos-option-as-alt"));
+        assert!(index(&lines, "macos-option-as-alt") < index(&lines, "macos-custom-icon"));
+        assert!(index(&lines, "window-position-x") < index(&lines, "window-position-y"));
+        assert!(
+            index(&lines, "linux-cgroup-memory-limit")
+                < index(&lines, "linux-cgroup-processes-limit")
+        );
+    }
+
+    #[test]
+    fn optional_color_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "bold-color",
+            "cursor-color",
+            "cursor-text",
+            "macos-icon-ghost-color",
+            "selection-background",
+            "selection-foreground",
+            "split-divider-color",
+            "unfocused-split-fill",
+            "window-titlebar-background",
+            "window-titlebar-foreground",
+        ] {
+            assert_eq!(line(&default_lines, key), format!("{key} = "));
+        }
+
+        cfg.bold_color = Some(BoldColor::Bright);
+        cfg.cursor_color = Some(TerminalColor::CellBackground);
+        cfg.cursor_text = Some(TerminalColor::CellForeground);
+        cfg.macos_icon_ghost_color = Some(Color {
+            r: 0x01,
+            g: 0x02,
+            b: 0x03,
+        });
+        cfg.selection_background = Some(TerminalColor::Color(Color {
+            r: 0x0a,
+            g: 0x0b,
+            b: 0x0c,
+        }));
+        cfg.selection_foreground = Some(TerminalColor::CellForeground);
+        cfg.set("split-divider-color", Some("ForestGreen")).unwrap();
+        cfg.unfocused_split_fill = Some(Color {
+            r: 0xaa,
+            g: 0xbb,
+            b: 0xcc,
+        });
+        cfg.window_titlebar_background = Some(Color {
+            r: 0x10,
+            g: 0x20,
+            b: 0x30,
+        });
+        cfg.window_titlebar_foreground = Some(Color {
+            r: 0xfe,
+            g: 0xdc,
+            b: 0xba,
+        });
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "bold-color"), "bold-color = bright");
+        assert_eq!(
+            line(&lines, "cursor-color"),
+            "cursor-color = cell-background"
+        );
+        assert_eq!(line(&lines, "cursor-text"), "cursor-text = cell-foreground");
+        assert_eq!(
+            line(&lines, "macos-icon-ghost-color"),
+            "macos-icon-ghost-color = #010203"
+        );
+        assert_eq!(
+            line(&lines, "selection-background"),
+            "selection-background = #0a0b0c"
+        );
+        assert_eq!(
+            line(&lines, "selection-foreground"),
+            "selection-foreground = cell-foreground"
+        );
+        assert_eq!(
+            line(&lines, "split-divider-color"),
+            "split-divider-color = #228b22"
+        );
+        assert_eq!(
+            line(&lines, "unfocused-split-fill"),
+            "unfocused-split-fill = #aabbcc"
+        );
+        assert_eq!(
+            line(&lines, "window-titlebar-background"),
+            "window-titlebar-background = #102030"
+        );
+        assert_eq!(
+            line(&lines, "window-titlebar-foreground"),
+            "window-titlebar-foreground = #fedcba"
+        );
+
+        cfg.set("bold-color", Some("")).unwrap();
+        cfg.set("cursor-color", Some("")).unwrap();
+        cfg.set("cursor-text", Some("")).unwrap();
+        cfg.set("macos-icon-ghost-color", Some("")).unwrap();
+        cfg.set("selection-background", Some("")).unwrap();
+        cfg.set("selection-foreground", Some("")).unwrap();
+        cfg.set("split-divider-color", Some("")).unwrap();
+        cfg.set("unfocused-split-fill", Some("")).unwrap();
+        cfg.set("window-titlebar-background", Some("")).unwrap();
+        cfg.set("window-titlebar-foreground", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "bold-color",
+            "cursor-color",
+            "cursor-text",
+            "macos-icon-ghost-color",
+            "selection-background",
+            "selection-foreground",
+            "split-divider-color",
+            "unfocused-split-fill",
+            "window-titlebar-background",
+            "window-titlebar-foreground",
+        ] {
+            assert_eq!(line(&reset_lines, key), format!("{key} = "));
+        }
+
+        assert!(index(&lines, "cursor-color") < index(&lines, "cursor-text"));
+        assert!(index(&lines, "cursor-text") < index(&lines, "bold-color"));
+        assert!(index(&lines, "unfocused-split-fill") < index(&lines, "split-divider-color"));
+        assert!(index(&lines, "window-titlebar-background") < index(&lines, "bold-color"));
+        assert!(
+            index(&lines, "window-titlebar-background")
+                < index(&lines, "window-titlebar-foreground")
+        );
+        assert!(index(&lines, "macos-icon-ghost-color") < index(&lines, "macos-icon-screen-color"));
+    }
+
+    #[test]
+    fn optional_path_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&default_lines, "background-image"),
+            "background-image = "
+        );
+        assert_eq!(
+            line(&default_lines, "bell-audio-path"),
+            "bell-audio-path = "
+        );
+
+        cfg.set("background-image", Some("backdrop.png")).unwrap();
+        cfg.set("bell-audio-path", Some("?bell.wav")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image"),
+            "background-image = backdrop.png"
+        );
+        assert_eq!(
+            line(&lines, "bell-audio-path"),
+            "bell-audio-path = ?bell.wav"
+        );
+
+        cfg.set("background-image", Some("?optional.png")).unwrap();
+        cfg.set("bell-audio-path", Some("\"?literal.wav\""))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image"),
+            "background-image = ?optional.png"
+        );
+        assert_eq!(
+            line(&lines, "bell-audio-path"),
+            "bell-audio-path = ?literal.wav"
+        );
+
+        cfg.set("background-image", Some("bad\0path.png")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "background-image"),
+            "background-image = bad\0path.png"
+        );
+
+        let prior_background = cfg.background_image.clone();
+        cfg.set("background-image", Some("?")).unwrap();
+        cfg.set("background-image", Some("\"\"")).unwrap();
+        cfg.set("background-image", Some("?\"\"")).unwrap();
+        assert_eq!(cfg.background_image, prior_background);
+        assert_eq!(
+            line(&formatted_lines(&cfg), "background-image"),
+            "background-image = bad\0path.png"
+        );
+
+        cfg.set("background-image", Some("")).unwrap();
+        cfg.set("bell-audio-path", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "background-image"),
+            "background-image = "
+        );
+        assert_eq!(line(&reset_lines, "bell-audio-path"), "bell-audio-path = ");
+
+        assert!(index(&lines, "background-image") < index(&lines, "config-file"));
+        assert!(index(&lines, "config-file") < index(&lines, "bell-audio-path"));
+    }
+
+    #[test]
+    fn optional_command_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(line(&default_lines, "command"), "command = ");
+        assert_eq!(
+            line(&default_lines, "initial-command"),
+            "initial-command = "
+        );
+
+        cfg.set("command", Some(" echo hello ")).unwrap();
+        cfg.set("initial-command", Some("direct:nvim main.rs"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "command"), "command = echo hello");
+        assert_eq!(
+            line(&lines, "initial-command"),
+            "initial-command = direct:nvim main.rs"
+        );
+
+        cfg.set("command", Some("shell:\techo\t")).unwrap();
+        cfg.set("initial-command", Some("direct:")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "command"), "command = \techo\t");
+        assert_eq!(line(&lines, "initial-command"), "initial-command = direct:");
+
+        cfg.set("command", Some("")).unwrap();
+        cfg.set("initial-command", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(line(&reset_lines, "command"), "command = ");
+        assert_eq!(line(&reset_lines, "initial-command"), "initial-command = ");
+
+        assert!(index(&lines, "command") < index(&lines, "initial-command"));
+        assert!(index(&lines, "initial-command") < index(&lines, "input"));
+    }
+
+    #[test]
+    fn optional_value_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "auto-update",
+            "auto-update-channel",
+            "macos-icon-screen-color",
+            "quit-after-last-window-closed-delay",
+            "theme",
+            "working-directory",
+        ] {
+            assert_eq!(line(&default_lines, key), format!("{key} = "));
+        }
+
+        cfg.set("auto-update", Some("download")).unwrap();
+        cfg.set("auto-update-channel", Some("stable")).unwrap();
+        cfg.set("macos-icon-screen-color", Some("#0A0B0C,white"))
+            .unwrap();
+        cfg.set("quit-after-last-window-closed-delay", Some("1m30s"))
+            .unwrap();
+        cfg.set("theme", Some("light:Light Theme,dark:Dark Theme"))
+            .unwrap();
+        cfg.set("working-directory", Some("home")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "auto-update"), "auto-update = download");
+        assert_eq!(
+            line(&lines, "auto-update-channel"),
+            "auto-update-channel = stable"
+        );
+        assert_eq!(
+            line(&lines, "macos-icon-screen-color"),
+            "macos-icon-screen-color = #0a0b0c,#ffffff"
+        );
+        assert_eq!(
+            line(&lines, "quit-after-last-window-closed-delay"),
+            "quit-after-last-window-closed-delay = 1m 30s"
+        );
+        assert_eq!(
+            line(&lines, "theme"),
+            "theme = light:Light Theme,dark:Dark Theme"
+        );
+        assert_eq!(
+            line(&lines, "working-directory"),
+            "working-directory = home"
+        );
+
+        cfg.set("theme", Some("TokyoNight")).unwrap();
+        cfg.set("working-directory", Some("\"/tmp/roast dir\""))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "theme"), "theme = TokyoNight");
+        assert_eq!(
+            line(&lines, "working-directory"),
+            "working-directory = /tmp/roast dir"
+        );
+
+        for key in [
+            "auto-update",
+            "auto-update-channel",
+            "macos-icon-screen-color",
+            "quit-after-last-window-closed-delay",
+            "theme",
+            "working-directory",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "auto-update",
+            "auto-update-channel",
+            "macos-icon-screen-color",
+            "quit-after-last-window-closed-delay",
+            "theme",
+            "working-directory",
+        ] {
+            assert_eq!(line(&reset_lines, key), format!("{key} = "));
+        }
+
+        assert!(index(&lines, "theme") < index(&lines, "working-directory"));
+        assert!(
+            index(&lines, "working-directory")
+                < index(&lines, "quit-after-last-window-closed-delay")
+        );
+        assert!(
+            index(&lines, "quit-after-last-window-closed-delay")
+                < index(&lines, "macos-icon-screen-color")
+        );
+        assert!(index(&lines, "macos-icon-screen-color") < index(&lines, "auto-update"));
+        assert!(index(&lines, "auto-update") < index(&lines, "auto-update-channel"));
+    }
+
+    #[test]
+    fn font_scalar_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&default_lines, "adjust-font-baseline"),
+            "adjust-font-baseline = "
+        );
+        assert_eq!(
+            line(&default_lines, "window-title-font-family"),
+            "window-title-font-family = "
+        );
+
+        cfg.set("adjust-font-baseline", Some("12")).unwrap();
+        cfg.set("font-size", Some("13.5")).unwrap();
+        cfg.set("font-thicken", Some("true")).unwrap();
+        cfg.set("font-thicken-strength", Some("0x80")).unwrap();
+        cfg.set("window-inherit-font-size", Some("false")).unwrap();
+        cfg.set("window-title-font-family", Some("Title\0Font"))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "adjust-font-baseline"),
+            "adjust-font-baseline = 12"
+        );
+        assert_eq!(line(&lines, "font-size"), "font-size = 13.5");
+        assert_eq!(line(&lines, "font-thicken"), "font-thicken = true");
+        assert_eq!(
+            line(&lines, "font-thicken-strength"),
+            "font-thicken-strength = 128"
+        );
+        assert_eq!(
+            line(&lines, "window-inherit-font-size"),
+            "window-inherit-font-size = false"
+        );
+        assert_eq!(
+            line(&lines, "window-title-font-family"),
+            "window-title-font-family = Title\0Font"
+        );
+
+        cfg.set("adjust-font-baseline", Some("25%")).unwrap();
+        cfg.set("window-title-font-family", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "adjust-font-baseline"),
+            "adjust-font-baseline = 25%"
+        );
+        assert_eq!(
+            line(&lines, "window-title-font-family"),
+            "window-title-font-family = "
+        );
+
+        cfg.set("adjust-font-baseline", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "adjust-font-baseline"),
+            "adjust-font-baseline = "
+        );
+
+        assert!(index(&lines, "font-size") < index(&lines, "font-thicken"));
+        assert!(index(&lines, "font-thicken") < index(&lines, "font-thicken-strength"));
+        assert!(index(&lines, "font-thicken-strength") < index(&lines, "adjust-font-baseline"));
+        assert!(index(&lines, "adjust-font-baseline") < index(&lines, "window-inherit-font-size"));
+        assert!(
+            index(&lines, "window-inherit-font-size") < index(&lines, "window-title-font-family")
+        );
+    }
+
+    #[test]
+    fn font_repeatable_string_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "font-family",
+            "font-family-bold",
+            "font-family-italic",
+            "font-family-bold-italic",
+            "font-feature",
+        ] {
+            assert_eq!(lines_for(&default_lines, key), vec![format!("{key} = ")]);
+        }
+
+        cfg.set("font-family", Some("Regular A")).unwrap();
+        cfg.set("font-family", Some("Regular\0B")).unwrap();
+        cfg.set("font-family-bold", Some("Bold A")).unwrap();
+        cfg.set("font-family-bold", Some("Bold B")).unwrap();
+        cfg.set("font-family-italic", Some("Italic A")).unwrap();
+        cfg.set("font-family-italic", Some("Italic B")).unwrap();
+        cfg.set("font-family-bold-italic", Some("Bold Italic A"))
+            .unwrap();
+        cfg.set("font-family-bold-italic", Some("Bold Italic B"))
+            .unwrap();
+        cfg.set("font-feature", Some("calt")).unwrap();
+        cfg.set("font-feature", Some("-liga\0off")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "font-family"),
+            vec!["font-family = Regular A", "font-family = Regular\0B"]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-family-bold"),
+            vec!["font-family-bold = Bold A", "font-family-bold = Bold B"]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-family-italic"),
+            vec![
+                "font-family-italic = Italic A",
+                "font-family-italic = Italic B"
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-family-bold-italic"),
+            vec![
+                "font-family-bold-italic = Bold Italic A",
+                "font-family-bold-italic = Bold Italic B"
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-feature"),
+            vec!["font-feature = calt", "font-feature = -liga\0off"]
+        );
+
+        cfg.set("font-family", Some("")).unwrap();
+        cfg.set("font-family-bold", Some("")).unwrap();
+        cfg.set("font-family-italic", Some("")).unwrap();
+        cfg.set("font-family-bold-italic", Some("")).unwrap();
+        cfg.set("font-feature", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "font-family",
+            "font-family-bold",
+            "font-family-italic",
+            "font-family-bold-italic",
+            "font-feature",
+        ] {
+            assert_eq!(lines_for(&reset_lines, key), vec![format!("{key} = ")]);
+        }
+
+        assert!(index(&lines, "font-family") < index(&lines, "font-family-bold"));
+        assert!(index(&lines, "font-family-bold") < index(&lines, "font-family-italic"));
+        assert!(index(&lines, "font-family-italic") < index(&lines, "font-family-bold-italic"));
+        assert!(index(&lines, "font-family-bold-italic") < index(&lines, "font-feature"));
+    }
+
+    #[test]
+    fn font_style_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(line(&default_lines, "font-style"), "font-style = default");
+        assert_eq!(
+            line(&default_lines, "font-style-bold"),
+            "font-style-bold = default"
+        );
+        assert_eq!(
+            line(&default_lines, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&default_lines, "font-style-bold-italic"),
+            "font-style-bold-italic = default"
+        );
+        assert_eq!(
+            line(&default_lines, "font-synthetic-style"),
+            "font-synthetic-style = bold,italic,bold-italic"
+        );
+
+        cfg.set("font-style", Some("false")).unwrap();
+        cfg.set("font-style-bold", Some("Bold")).unwrap();
+        cfg.set("font-style-italic", Some("default")).unwrap();
+        cfg.set("font-style-bold-italic", Some("  Fancy Italic  "))
+            .unwrap();
+        cfg.set("font-synthetic-style", Some("false")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "font-style"), "font-style = false");
+        assert_eq!(line(&lines, "font-style-bold"), "font-style-bold = Bold");
+        assert_eq!(
+            line(&lines, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&lines, "font-style-bold-italic"),
+            "font-style-bold-italic =   Fancy Italic  "
+        );
+        assert_eq!(
+            line(&lines, "font-synthetic-style"),
+            "font-synthetic-style = no-bold,no-italic,no-bold-italic"
+        );
+
+        cfg.set(
+            "font-synthetic-style",
+            Some("no-bold,italic,no-bold-italic"),
+        )
+        .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "font-synthetic-style"),
+            "font-synthetic-style = no-bold,italic,no-bold-italic"
+        );
+
+        cfg.set("font-style", Some("")).unwrap();
+        cfg.set("font-style-bold", Some("")).unwrap();
+        cfg.set("font-style-italic", Some("")).unwrap();
+        cfg.set("font-style-bold-italic", Some("")).unwrap();
+        cfg.set("font-synthetic-style", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(line(&reset_lines, "font-style"), "font-style = default");
+        assert_eq!(
+            line(&reset_lines, "font-style-bold"),
+            "font-style-bold = default"
+        );
+        assert_eq!(
+            line(&reset_lines, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&reset_lines, "font-style-bold-italic"),
+            "font-style-bold-italic = default"
+        );
+        assert_eq!(
+            line(&reset_lines, "font-synthetic-style"),
+            "font-synthetic-style = bold,italic,bold-italic"
+        );
+
+        assert!(index(&lines, "font-style") < index(&lines, "font-style-bold"));
+        assert!(index(&lines, "font-style-bold") < index(&lines, "font-style-italic"));
+        assert!(index(&lines, "font-style-italic") < index(&lines, "font-style-bold-italic"));
+        assert!(index(&lines, "font-style-bold-italic") < index(&lines, "font-synthetic-style"));
+    }
+
+    #[test]
+    fn font_variation_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "font-variation",
+            "font-variation-bold",
+            "font-variation-italic",
+            "font-variation-bold-italic",
+        ] {
+            assert_eq!(lines_for(&default_lines, key), vec![format!("{key} = ")]);
+        }
+
+        cfg.set("font-variation", Some("wght=200")).unwrap();
+        cfg.set("font-variation", Some("slnt=-15")).unwrap();
+        cfg.set("font-variation", Some("NAN1=nAn")).unwrap();
+        cfg.set("font-variation", Some("INF1=+Inf")).unwrap();
+        cfg.set("font-variation-bold", Some("wght=700")).unwrap();
+        cfg.set("font-variation-italic", Some("ital=0x1.8p1"))
+            .unwrap();
+        cfg.set("font-variation-bold-italic", Some("wdth=90"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "font-variation"),
+            vec![
+                "font-variation = wght=200",
+                "font-variation = slnt=-15",
+                "font-variation = NAN1=nan",
+                "font-variation = INF1=inf",
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-variation-bold"),
+            vec!["font-variation-bold = wght=700"]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-variation-italic"),
+            vec!["font-variation-italic = ital=3"]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-variation-bold-italic"),
+            vec!["font-variation-bold-italic = wdth=90"]
+        );
+
+        cfg.set("font-variation", Some("")).unwrap();
+        cfg.set("font-variation-bold", Some("")).unwrap();
+        cfg.set("font-variation-italic", Some("")).unwrap();
+        cfg.set("font-variation-bold-italic", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "font-variation",
+            "font-variation-bold",
+            "font-variation-italic",
+            "font-variation-bold-italic",
+        ] {
+            assert_eq!(lines_for(&reset_lines, key), vec![format!("{key} = ")]);
+        }
+
+        assert!(index(&lines, "font-variation") < index(&lines, "font-variation-bold"));
+        assert!(index(&lines, "font-variation-bold") < index(&lines, "font-variation-italic"));
+        assert!(
+            index(&lines, "font-variation-italic") < index(&lines, "font-variation-bold-italic")
+        );
+        assert!(index(&lines, "font-variation-bold-italic") < index(&lines, "font-codepoint-map"));
+    }
+
+    #[test]
+    fn metric_modifier_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let cases = [
+            ("adjust-box-thickness", "1", "adjust-box-thickness = 1"),
+            ("adjust-cell-height", "-2", "adjust-cell-height = -2"),
+            ("adjust-cell-width", "+3", "adjust-cell-width = 3"),
+            ("adjust-cursor-height", "4", "adjust-cursor-height = 4"),
+            (
+                "adjust-cursor-thickness",
+                "5",
+                "adjust-cursor-thickness = 5",
+            ),
+            (
+                "adjust-icon-height",
+                "0x1p4%",
+                "adjust-icon-height = 15.999999999999993%",
+            ),
+            (
+                "adjust-overline-position",
+                "-50%",
+                "adjust-overline-position = -50%",
+            ),
+            (
+                "adjust-overline-thickness",
+                "-150%",
+                "adjust-overline-thickness = -100%",
+            ),
+            (
+                "adjust-strikethrough-position",
+                "1_000",
+                "adjust-strikethrough-position = 1000",
+            ),
+            (
+                "adjust-strikethrough-thickness",
+                "1_0.5%",
+                "adjust-strikethrough-thickness = 10.499999999999998%",
+            ),
+            (
+                "adjust-underline-position",
+                "Inf%",
+                "adjust-underline-position = inf%",
+            ),
+            (
+                "adjust-underline-thickness",
+                "nAn%",
+                "adjust-underline-thickness = nan%",
+            ),
+        ];
+        for (key, value, expected) in cases {
+            cfg.set(key, Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, key), expected);
+        }
+
+        cfg.set("adjust-cell-width", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "adjust-cell-width"), "adjust-cell-width = ");
+
+        assert!(index(&lines, "adjust-cell-width") < index(&lines, "adjust-cell-height"));
+        assert!(index(&lines, "adjust-cursor-thickness") < index(&lines, "adjust-cursor-height"));
+        assert!(index(&lines, "adjust-box-thickness") < index(&lines, "adjust-icon-height"));
+    }
+
+    #[test]
+    fn window_padding_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "window-padding-x"), "window-padding-x = 2");
+        assert_eq!(line(&lines, "window-padding-y"), "window-padding-y = 2");
+        assert_eq!(
+            line(&lines, "window-padding-balance"),
+            "window-padding-balance = false"
+        );
+        assert_eq!(
+            line(&lines, "window-padding-color"),
+            "window-padding-color = background"
+        );
+
+        cfg.set("window-padding-x", Some("4")).unwrap();
+        cfg.set("window-padding-y", Some("6,8")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "window-padding-x"), "window-padding-x = 4");
+        assert_eq!(line(&lines, "window-padding-y"), "window-padding-y = 6,8");
+
+        cfg.set("window-padding-x", Some("10,12")).unwrap();
+        cfg.set("window-padding-y", Some("0")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "window-padding-x"), "window-padding-x = 10,12");
+        assert_eq!(line(&lines, "window-padding-y"), "window-padding-y = 0");
+
+        for (value, expected) in [
+            ("false", "window-padding-balance = false"),
+            ("true", "window-padding-balance = true"),
+            ("equal", "window-padding-balance = equal"),
+        ] {
+            cfg.set("window-padding-balance", Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, "window-padding-balance"), expected);
+        }
+
+        for (value, expected) in [
+            ("background", "window-padding-color = background"),
+            ("extend", "window-padding-color = extend"),
+            ("extend-always", "window-padding-color = extend-always"),
+        ] {
+            cfg.set("window-padding-color", Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, "window-padding-color"), expected);
+        }
+
+        cfg.set("window-padding-x", Some("")).unwrap();
+        cfg.set("window-padding-y", Some("")).unwrap();
+        cfg.set("window-padding-balance", Some("")).unwrap();
+        cfg.set("window-padding-color", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "window-padding-x"), "window-padding-x = 2");
+        assert_eq!(line(&lines, "window-padding-y"), "window-padding-y = 2");
+        assert_eq!(
+            line(&lines, "window-padding-balance"),
+            "window-padding-balance = false"
+        );
+        assert_eq!(
+            line(&lines, "window-padding-color"),
+            "window-padding-color = background"
+        );
+
+        assert!(index(&lines, "window-padding-x") < index(&lines, "window-padding-y"));
+        assert!(index(&lines, "window-padding-y") < index(&lines, "window-padding-balance"));
+        assert!(index(&lines, "window-padding-balance") < index(&lines, "window-padding-color"));
+    }
+
+    #[test]
+    fn repeatable_path_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(lines_for(&lines, "config-file"), vec!["config-file = "]);
+        assert_eq!(lines_for(&lines, "custom-shader"), vec!["custom-shader = "]);
+        assert_eq!(
+            lines_for(&lines, "gtk-custom-css"),
+            vec!["gtk-custom-css = "]
+        );
+
+        cfg.set("config-file", Some("base.conf")).unwrap();
+        cfg.set("config-file", Some("?optional.conf")).unwrap();
+        cfg.set("config-file", Some("\"?literal.conf\"")).unwrap();
+        cfg.set("custom-shader", Some("base.glsl")).unwrap();
+        cfg.set("custom-shader", Some("?optional.glsl")).unwrap();
+        cfg.set("custom-shader", Some("\"?literal.glsl\"")).unwrap();
+        cfg.set("gtk-custom-css", Some("base.css")).unwrap();
+        cfg.set("gtk-custom-css", Some("?optional.css")).unwrap();
+        cfg.set("gtk-custom-css", Some("\"?literal.css\"")).unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "config-file"),
+            vec![
+                "config-file = base.conf",
+                "config-file = ?optional.conf",
+                "config-file = ?literal.conf"
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "custom-shader"),
+            vec![
+                "custom-shader = base.glsl",
+                "custom-shader = ?optional.glsl",
+                "custom-shader = ?literal.glsl"
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "gtk-custom-css"),
+            vec![
+                "gtk-custom-css = base.css",
+                "gtk-custom-css = ?optional.css",
+                "gtk-custom-css = ?literal.css"
+            ]
+        );
+
+        cfg.set("config-file", Some("")).unwrap();
+        cfg.set("custom-shader", Some("")).unwrap();
+        cfg.set("gtk-custom-css", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(lines_for(&lines, "config-file"), vec!["config-file = "]);
+        assert_eq!(lines_for(&lines, "custom-shader"), vec!["custom-shader = "]);
+        assert_eq!(
+            lines_for(&lines, "gtk-custom-css"),
+            vec!["gtk-custom-css = "]
+        );
+
+        assert!(index(&lines, "config-file") < index(&lines, "custom-shader"));
+        assert!(index(&lines, "custom-shader") < index(&lines, "gtk-custom-css"));
+    }
+
+    #[test]
+    fn color_keyword_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "osc-color-report-format"),
+            "osc-color-report-format = 16-bit"
+        );
+        assert_eq!(
+            line(&lines, "window-colorspace"),
+            "window-colorspace = srgb"
+        );
+
+        for (value, expected) in [
+            ("none", "osc-color-report-format = none"),
+            ("8-bit", "osc-color-report-format = 8-bit"),
+            ("16-bit", "osc-color-report-format = 16-bit"),
+        ] {
+            cfg.set("osc-color-report-format", Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, "osc-color-report-format"), expected);
+        }
+
+        for (value, expected) in [
+            ("srgb", "window-colorspace = srgb"),
+            ("display-p3", "window-colorspace = display-p3"),
+        ] {
+            cfg.set("window-colorspace", Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, "window-colorspace"), expected);
+        }
+
+        cfg.set("osc-color-report-format", Some("")).unwrap();
+        cfg.set("window-colorspace", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "osc-color-report-format"),
+            "osc-color-report-format = 16-bit"
+        );
+        assert_eq!(
+            line(&lines, "window-colorspace"),
+            "window-colorspace = srgb"
+        );
+        assert!(index(&lines, "window-colorspace") < index(&lines, "osc-color-report-format"));
+    }
+
+    #[test]
+    fn key_remap_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(lines_for(&lines, "key-remap"), vec!["key-remap = "]);
+
+        cfg.set("key-remap", Some("ctrl=super")).unwrap();
+        cfg.set("key-remap", Some("right_ctrl=alt")).unwrap();
+        cfg.set("key-remap", Some("left_alt=right_ctrl")).unwrap();
+        cfg.finalize();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "key-remap"),
+            vec![
+                "key-remap = right_ctrl=left_alt",
+                "key-remap = left_ctrl=left_super",
+                "key-remap = left_alt=right_ctrl",
+            ]
+        );
+
+        cfg.set("key-remap", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(lines_for(&lines, "key-remap"), vec!["key-remap = "]);
+
+        let mut cli_cfg = Config::default();
+        assert!(cli_cfg
+            .set_cli_args([
+                "--key-remap=control=command",
+                "--key-remap=right_option=left_control"
+            ])
+            .is_empty());
+        cli_cfg.finalize();
+        let lines = formatted_lines(&cli_cfg);
+        assert_eq!(
+            lines_for(&lines, "key-remap"),
+            vec![
+                "key-remap = right_ctrl=left_super",
+                "key-remap = right_alt=left_ctrl",
+                "key-remap = left_ctrl=left_super",
+            ]
+        );
+
+        assert!(cli_cfg.set_cli_args(["--key-remap"]).is_empty());
+        let lines = formatted_lines(&cli_cfg);
+        assert_eq!(lines_for(&lines, "key-remap"), vec!["key-remap = "]);
+
+        assert!(index(&lines, "keybind") < index(&lines, "key-remap"));
+        assert!(index(&lines, "key-remap") < index(&lines, "window-padding-x"));
+    }
+
+    #[test]
+    fn link_no_output_config_formatter_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn assert_no_link_formatter_line(lines: &[String]) {
+            assert!(
+                lines.iter().all(|line| !line.starts_with("link = ")),
+                "link formatter unexpectedly emitted output: {lines:?}"
+            );
+        }
+
+        let mut cfg = Config::default();
+        let default_links = cfg.link.clone();
+        assert_eq!(default_links.len(), 1);
+
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = true"));
+
+        assert_eq!(
+            cfg.set("link", Some("regex=https://example.invalid")),
+            Err(ConfigSetError::NotImplemented)
+        );
+        assert_eq!(cfg.link, default_links);
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = true"));
+
+        cfg.link.clear();
+        assert!(cfg.link.is_empty());
+        cfg.set("link", Some("")).unwrap();
+        assert_eq!(cfg.link, default_links);
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = true"));
+
+        cfg.set("link-url", Some("false")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = false"));
+    }
+
+    #[test]
+    fn config_default_parser_oracle() {
+        let fixture = include_str!("../../testdata/issue805-ghostty-default-config.txt");
+        let lines: Vec<&str> = fixture.lines().collect();
+        assert_eq!(lines.len(), 635);
+
+        let mut failures = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            let Some((key, value)) = Config::parse_config_line(line) else {
+                panic!("line {} was not parsed: {line:?}", index + 1);
+            };
+
+            let mut cfg = Config::default();
+            if let Err(error) = cfg.set(key, value) {
+                failures.push(format!(
+                    "line {} key {key:?} rejected: {error:?}; line={line:?}",
+                    index + 1
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    fn normalize_default_config_fixture(input: &str) -> String {
+        input
+            .replace("Ghostty", "{App}")
+            .replace("Roastty", "{App}")
+            .replace("ghostty", "{app}")
+            .replace("roastty", "{app}")
+    }
+
+    fn comparable_default_config_lines(input: &str) -> Vec<&str> {
+        input.lines().collect()
+    }
+
+    fn default_config_lines_for_key<'a>(input: &'a str, key: &str) -> Vec<&'a str> {
+        let prefix = format!("{key} = ");
+        input
+            .lines()
+            .filter(|line| line.starts_with(&prefix))
+            .collect()
+    }
+
+    fn default_config_multiset_mismatch_count(left: &[&str], right: &[&str]) -> usize {
+        let mut left = left.to_vec();
+        let mut right = right.to_vec();
+        left.sort_unstable();
+        right.sort_unstable();
+
+        let mut left_index = 0;
+        let mut right_index = 0;
+        let mut mismatches = 0;
+
+        while left_index < left.len() && right_index < right.len() {
+            match left[left_index].cmp(right[right_index]) {
+                std::cmp::Ordering::Less => {
+                    mismatches += 1;
+                    left_index += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    left_index += 1;
+                    right_index += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    mismatches += 1;
+                    right_index += 1;
+                }
+            }
+        }
+
+        mismatches + (left.len() - left_index) + (right.len() - right_index)
+    }
+
+    #[test]
+    fn command_palette_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+        assert!(cfg.command_palette_entry.entries.iter().all(|entry| {
+            crate::canonical_config_binding_action(entry.action.as_bytes()).is_some()
+        }));
+
+        cfg.set("command-palette-entry", Some("clear")).unwrap();
+        assert!(cfg.command_palette_entry.entries.is_empty());
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        assert!(out.lines().any(|line| line == "command-palette-entry = "));
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Reset Font Style, action:csi:0m"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:\"Focus, Split\",description:\"Go, right\",action:goto_split:right"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:first,title:second,description:old,description:new,action:ignore,action:text:hello"),
+        )
+        .unwrap();
+        cfg.set(
+            "command-palette-entry",
+            Some("title:Shorthand,action:copy_to_clipboard"),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries,
+            vec![
+                CommandPaletteEntry::new("Reset Font Style", "", "csi:0m"),
+                CommandPaletteEntry::new("Focus, Split", "Go, right", "goto_split:right"),
+                CommandPaletteEntry::new("second", "new", "text:hello"),
+                CommandPaletteEntry::new("Shorthand", "", "copy_to_clipboard:mixed"),
+            ]
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let lines: Vec<&str> = out
+            .lines()
+            .filter(|line| line.starts_with("command-palette-entry = "))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                "command-palette-entry = title:\"Reset Font Style\",action:\"csi:0m\"",
+                "command-palette-entry = title:\"Focus, Split\",description:\"Go, right\",action:\"goto_split:right\"",
+                "command-palette-entry = title:\"second\",description:\"new\",action:\"text:hello\"",
+                "command-palette-entry = title:\"Shorthand\",action:\"copy_to_clipboard:mixed\"",
+            ]
+        );
+
+        cfg.set(
+            "command-palette-entry",
+            Some("title:\"A\\nB\",description:\"tab\\tq\",action:\"text:\\xf0\\x9f\\x91\\xbb\""),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.command_palette_entry.entries.last(),
+            Some(&CommandPaletteEntry::new(
+                "A\nB",
+                "tab\tq",
+                "text:\\xf0\\x9f\\x91\\xbb",
+            ))
+        );
+
+        cfg.set("command-palette-entry", Some("")).unwrap();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+        cfg.set("command-palette-entry", None).unwrap();
+        assert_eq!(cfg.command_palette_entry.entries.len(), 88);
+
+        for bad in [
+            "title:Only Title",
+            "action:ignore",
+            "title:x,action:no_such_action",
+            "title:x,unknown:y,action:ignore",
+            "title:\"unterminated,action:ignore",
+            "title:\"bad\\q\",action:ignore",
+        ] {
+            assert_eq!(
+                cfg.set("command-palette-entry", Some(bad)),
+                Err(ConfigSetError::InvalidValue),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
@@ -16358,7 +21878,7 @@ mod tests {
                 entry!(
                     "Ghostty",
                     "Put a little Ghostty in your terminal.",
-                    "text:\\xf0\\x9f\\x91\\xbb"
+                    "text:\u{1f47b}"
                 ),
                 entry!(
                     "Increase Font Size",
@@ -16498,7 +22018,7 @@ mod tests {
             .contains(&CommandPaletteEntry::new(
                 "Ghostty",
                 "Put a little Ghostty in your terminal.",
-                "text:\\xf0\\x9f\\x91\\xbb",
+                "text:\u{1f47b}",
             )));
 
         let mut out = String::new();
@@ -16512,7 +22032,7 @@ mod tests {
             lines[0],
             "command-palette-entry = title:\"Change Tab Title\\xe2\\x80\\xa6\",description:\"Prompt for a new title for the current tab.\",action:\"prompt_tab_title\""
         );
-        assert!(lines.contains(&"command-palette-entry = title:\"Ghostty\",description:\"Put a little Ghostty in your terminal.\",action:\"text:\\\\xf0\\\\x9f\\\\x91\\\\xbb\""));
+        assert!(lines.contains(&"command-palette-entry = title:\"Ghostty\",description:\"Put a little Ghostty in your terminal.\",action:\"text:\\xf0\\x9f\\x91\\xbb\""));
 
         cfg.set("command-palette-entry", Some("clear")).unwrap();
         assert!(cfg.command_palette_entry.entries.is_empty());
@@ -16918,8 +22438,15 @@ mod tests {
             value.parse_cli(None),
             Err(MouseScrollMultiplierParseError::ValueRequired)
         );
+        assert_eq!(value.parse_cli(Some("")), Ok(()));
+        assert_eq!(
+            value,
+            MouseScrollMultiplier {
+                precision: 6.0,
+                discrete: 8.0,
+            }
+        );
         for bad in [
-            "",
             "foo:1",
             "precision:bar",
             "precision:1,discrete:3,foo:5",
@@ -16932,6 +22459,181 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn mouse_scroll_multiplier_config_parser_family_oracle() {
+        let line = |cfg: &Config| {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("mouse-scroll-multiplier = "))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 1.0,
+                discrete: 3.0,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "mouse-scroll-multiplier = precision:1,discrete:3"
+        );
+
+        cfg.set("mouse-scroll-multiplier", Some("3")).unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 3.0,
+                discrete: 3.0,
+            }
+        );
+
+        cfg.set("mouse-scroll-multiplier", Some("")).unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 3.0,
+                discrete: 3.0,
+            }
+        );
+
+        cfg.set("mouse-scroll-multiplier", Some("precision:1"))
+            .unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 1.0,
+                discrete: 3.0,
+            }
+        );
+        cfg.set("mouse-scroll-multiplier", Some("discrete:5"))
+            .unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 1.0,
+                discrete: 5.0,
+            }
+        );
+        cfg.set(
+            "mouse-scroll-multiplier",
+            Some(" discrete : 8 , precision : 6 "),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 6.0,
+                discrete: 8.0,
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            "mouse-scroll-multiplier = precision:6,discrete:8"
+        );
+
+        cfg.set(
+            "mouse-scroll-multiplier",
+            Some("precision:\"1.5\",discrete:\"2.5\""),
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 1.5,
+                discrete: 2.5,
+            }
+        );
+
+        cfg.set("mouse-scroll-multiplier", Some("0x1p4")).unwrap();
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 16.0,
+                discrete: 16.0,
+            }
+        );
+        cfg.set("mouse-scroll-multiplier", Some("precision:+inf"))
+            .unwrap();
+        assert_eq!(cfg.mouse_scroll_multiplier.precision, f64::INFINITY);
+        cfg.set("mouse-scroll-multiplier", Some("discrete:-infinity"))
+            .unwrap();
+        assert_eq!(cfg.mouse_scroll_multiplier.discrete, f64::NEG_INFINITY);
+        cfg.set("mouse-scroll-multiplier", Some("nan")).unwrap();
+        assert!(cfg.mouse_scroll_multiplier.precision.is_nan());
+        assert!(cfg.mouse_scroll_multiplier.discrete.is_nan());
+
+        assert_eq!(
+            cfg.set("mouse-scroll-multiplier", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for invalid in [
+            "foo:1",
+            "precision:bar",
+            "precision:\"1.5",
+            "precision:1,discrete:3,foo:5",
+            "precision:1,,discrete:3",
+            ",precision:1,discrete:3",
+            "precision:0x1p_4",
+        ] {
+            assert_eq!(
+                cfg.set("mouse-scroll-multiplier", Some(invalid)),
+                Err(ConfigSetError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("mouse-scroll-multiplier", Some("2")).unwrap();
+        let diagnostics = cfg.load_str("mouse-scroll-multiplier = precision:bad\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 1,
+                key: "mouse-scroll-multiplier".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 2.0,
+                discrete: 2.0,
+            }
+        );
+        assert_eq!(
+            cfg.set("mouse-scroll-multiplier", Some("precision:9,foo:1")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 2.0,
+                discrete: 2.0,
+            }
+        );
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--mouse-scroll-multiplier=precision:4,discrete:6"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(
+            cli_cfg.mouse_scroll_multiplier,
+            MouseScrollMultiplier {
+                precision: 4.0,
+                discrete: 6.0,
+            }
+        );
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
     }
 
     #[test]
@@ -17170,6 +22872,551 @@ mod tests {
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.adjust_cell_width, cfg.adjust_cell_width);
         assert_eq!(cloned.adjust_cell_height, cfg.adjust_cell_height);
+    }
+
+    #[test]
+    fn metric_modifier_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let prefix = format!("{} = ", key);
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap()
+                .to_string()
+        }
+
+        fn assert_percent(value: MetricModifier, expected: f64) {
+            match value {
+                MetricModifier::Percent(actual) => assert_eq!(actual, expected),
+                other => panic!("expected percent modifier, got {other:?}"),
+            }
+        }
+
+        fn assert_percent_nan(value: MetricModifier) {
+            match value {
+                MetricModifier::Percent(actual) => assert!(actual.is_nan()),
+                other => panic!("expected percent modifier, got {other:?}"),
+            }
+        }
+
+        let mut cfg = Config::default();
+        let cases = [
+            ("adjust-box-thickness", "1", "adjust-box-thickness = 1"),
+            ("adjust-cell-height", "-2", "adjust-cell-height = -2"),
+            ("adjust-cell-width", "+3", "adjust-cell-width = 3"),
+            ("adjust-cursor-height", "4", "adjust-cursor-height = 4"),
+            (
+                "adjust-cursor-thickness",
+                "5",
+                "adjust-cursor-thickness = 5",
+            ),
+            ("adjust-font-baseline", "25%", "adjust-font-baseline = 25%"),
+            (
+                "adjust-icon-height",
+                "0x1p4%",
+                "adjust-icon-height = 15.999999999999993%",
+            ),
+            (
+                "adjust-overline-position",
+                "-50%",
+                "adjust-overline-position = -50%",
+            ),
+            (
+                "adjust-overline-thickness",
+                "-150%",
+                "adjust-overline-thickness = -100%",
+            ),
+            (
+                "adjust-strikethrough-position",
+                "1_000",
+                "adjust-strikethrough-position = 1000",
+            ),
+            (
+                "adjust-strikethrough-thickness",
+                "1_0.5%",
+                "adjust-strikethrough-thickness = 10.499999999999998%",
+            ),
+            (
+                "adjust-underline-position",
+                "Inf%",
+                "adjust-underline-position = inf%",
+            ),
+            (
+                "adjust-underline-thickness",
+                "nAn%",
+                "adjust-underline-thickness = nan%",
+            ),
+        ];
+        for (key, value, expected) in cases {
+            cfg.set(key, Some(value)).unwrap();
+            assert_eq!(line(&cfg, key), expected);
+        }
+
+        assert_eq!(
+            cfg.adjust_strikethrough_position,
+            Some(MetricModifier::Absolute(1000))
+        );
+        assert_eq!(cfg.adjust_icon_height, Some(MetricModifier::Percent(1.16)));
+        assert_eq!(
+            cfg.adjust_strikethrough_thickness,
+            Some(MetricModifier::Percent(1.105))
+        );
+        assert_eq!(
+            cfg.adjust_overline_thickness,
+            Some(MetricModifier::Percent(0.0))
+        );
+        assert_eq!(
+            cfg.adjust_underline_position,
+            Some(MetricModifier::Percent(f64::INFINITY))
+        );
+        assert_percent_nan(cfg.adjust_underline_thickness.unwrap());
+
+        cfg.set("adjust-cell-width", Some("2147483647")).unwrap();
+        assert_eq!(
+            cfg.adjust_cell_width,
+            Some(MetricModifier::Absolute(i32::MAX))
+        );
+        cfg.set("adjust-cell-width", Some("-2147483648")).unwrap();
+        assert_eq!(
+            cfg.adjust_cell_width,
+            Some(MetricModifier::Absolute(i32::MIN))
+        );
+        cfg.set("adjust-cell-width", Some("")).unwrap();
+        assert_eq!(cfg.adjust_cell_width, None);
+        assert_eq!(line(&cfg, "adjust-cell-width"), "adjust-cell-width = ");
+        assert_eq!(
+            cfg.set("adjust-cell-width", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        cfg.set("adjust-cell-height", Some("+0")).unwrap();
+        assert_eq!(cfg.adjust_cell_height, Some(MetricModifier::Absolute(0)));
+        cfg.set("adjust-cell-height", Some("-0")).unwrap();
+        assert_eq!(cfg.adjust_cell_height, Some(MetricModifier::Absolute(0)));
+        for value in [
+            "2147483648",
+            "-2147483649",
+            "0x10",
+            "0b10",
+            "1.5",
+            "_1",
+            "1_",
+            "1__0",
+            "+_1",
+            "-_1",
+        ] {
+            assert_eq!(
+                cfg.set("adjust-cell-height", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "adjust-cell-height rejects {value:?}"
+            );
+        }
+
+        for (value, expected) in [
+            ("+infinity%", f64::INFINITY),
+            ("-infinity%", 0.0),
+            ("1e309%", f64::INFINITY),
+            ("0x1.8P1%", 1.03),
+            ("1_000%", 11.0),
+        ] {
+            cfg.set("adjust-font-baseline", Some(value)).unwrap();
+            assert_percent(cfg.adjust_font_baseline.unwrap(), expected);
+        }
+        cfg.set("adjust-font-baseline", Some("NaN%")).unwrap();
+        assert_percent_nan(cfg.adjust_font_baseline.unwrap());
+
+        for value in [
+            "%",
+            "+%",
+            "abc%",
+            "_1%",
+            "1_%",
+            "1__0%",
+            "0x%",
+            "0x.p1%",
+            "0x1p%",
+            "0x1p_4%",
+            "0x1p4_%",
+            "nan(payload)%",
+        ] {
+            assert_eq!(
+                cfg.set("adjust-font-baseline", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "adjust-font-baseline rejects {value:?}"
+            );
+        }
+
+        let diagnostics = cfg.load_str(
+            "adjust-cell-width = 12\n\
+             adjust-cell-height = nope\n\
+             adjust-font-baseline\n\
+             adjust-cell-width =\n",
+        );
+        assert_eq!(cfg.adjust_cell_width, None);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "adjust-cell-height".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "adjust-font-baseline".to_string(),
+                    error: ConfigSetError::ValueRequired,
+                },
+            ]
+        );
+
+        let diagnostics = cfg.set_cli_args(["--adjust-cell-width=13", "--adjust-cell-height=25%"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.adjust_cell_width, Some(MetricModifier::Absolute(13)));
+        assert_eq!(cfg.adjust_cell_height, Some(MetricModifier::Percent(1.25)));
+        cfg.set("adjust-font-baseline", Some("25%")).unwrap();
+        cfg.set("adjust-underline-thickness", Some("25%")).unwrap();
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.adjust_cell_width, cfg.adjust_cell_width);
+        assert_eq!(cloned.adjust_cell_height, cfg.adjust_cell_height);
+    }
+
+    #[test]
+    fn background_blur_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let prefix = format!("{} = ", key);
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap()
+                .to_string()
+        }
+
+        for (value, expected, formatted) in [
+            (None, BackgroundBlur::True, "background-blur = true"),
+            (Some("1"), BackgroundBlur::True, "background-blur = true"),
+            (Some("t"), BackgroundBlur::True, "background-blur = true"),
+            (Some("T"), BackgroundBlur::True, "background-blur = true"),
+            (Some("true"), BackgroundBlur::True, "background-blur = true"),
+            (Some("0"), BackgroundBlur::False, "background-blur = false"),
+            (Some("f"), BackgroundBlur::False, "background-blur = false"),
+            (Some("F"), BackgroundBlur::False, "background-blur = false"),
+            (
+                Some("false"),
+                BackgroundBlur::False,
+                "background-blur = false",
+            ),
+            (
+                Some("macos-glass-regular"),
+                BackgroundBlur::MacosGlassRegular,
+                "background-blur = macos-glass-regular",
+            ),
+            (
+                Some("macos-glass-clear"),
+                BackgroundBlur::MacosGlassClear,
+                "background-blur = macos-glass-clear",
+            ),
+            (
+                Some("42"),
+                BackgroundBlur::Radius(42),
+                "background-blur = 42",
+            ),
+            (
+                Some("+2_5"),
+                BackgroundBlur::Radius(25),
+                "background-blur = 25",
+            ),
+            (
+                Some("1__0"),
+                BackgroundBlur::Radius(10),
+                "background-blur = 10",
+            ),
+            (
+                Some("0x10"),
+                BackgroundBlur::Radius(16),
+                "background-blur = 16",
+            ),
+            (
+                Some("0X11"),
+                BackgroundBlur::Radius(17),
+                "background-blur = 17",
+            ),
+            (
+                Some("0b101"),
+                BackgroundBlur::Radius(5),
+                "background-blur = 5",
+            ),
+            (
+                Some("0o77"),
+                BackgroundBlur::Radius(63),
+                "background-blur = 63",
+            ),
+            (
+                Some("255"),
+                BackgroundBlur::Radius(255),
+                "background-blur = 255",
+            ),
+        ] {
+            let mut cfg = Config::default();
+            cfg.background_blur = BackgroundBlur::Radius(99);
+            cfg.set("background-blur", value).unwrap();
+            assert_eq!(cfg.background_blur, expected, "value {value:?}");
+            assert_eq!(line(&cfg, "background-blur"), formatted);
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("background-blur", Some("64")).unwrap();
+        cfg.set("background-blur", Some("")).unwrap();
+        assert_eq!(cfg.background_blur, Config::default().background_blur);
+        assert_eq!(line(&cfg, "background-blur"), "background-blur = false");
+
+        for value in [
+            "aaaa",
+            "420",
+            "-1",
+            "0x100",
+            "0b1_0000_0000",
+            "0x",
+            "0b",
+            "_1",
+            "1_",
+            "macos-glass",
+            "MACOS-GLASS-REGULAR",
+        ] {
+            assert_eq!(
+                cfg.set("background-blur", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "background-blur rejects {value:?}"
+            );
+        }
+
+        let mut retained = Config::default();
+        let diagnostics = retained.load_str(
+            "background-blur = 7\n\
+             background-blur = nope\n",
+        );
+        assert_eq!(retained.background_blur, BackgroundBlur::Radius(7));
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "background-blur".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str(
+            "background-blur = 7\n\
+             background-blur = nope\n\
+             background-blur =\n",
+        );
+        assert_eq!(cfg.background_blur, BackgroundBlur::False);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "background-blur".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let diagnostics = cfg.set_cli_args(["--background-blur=0x20"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.background_blur, BackgroundBlur::Radius(32));
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.background_blur, BackgroundBlur::Radius(32));
+    }
+
+    #[test]
+    fn click_repeat_interval_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let prefix = format!("{} = ", key);
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap()
+                .to_string()
+        }
+
+        for (value, expected) in [
+            ("0", 0),
+            ("+25", 25),
+            ("-0", 0),
+            ("1_000", 1000),
+            ("1__0", 10),
+            ("4294967295", u32::MAX),
+        ] {
+            let mut cfg = Config::default();
+            cfg.click_repeat_interval = 777;
+            cfg.set("click-repeat-interval", Some(value)).unwrap();
+            assert_eq!(cfg.click_repeat_interval, expected, "value {value:?}");
+            assert_eq!(
+                line(&cfg, "click-repeat-interval"),
+                format!("click-repeat-interval = {expected}")
+            );
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("click-repeat-interval", Some("250")).unwrap();
+        cfg.set("click-repeat-interval", Some("")).unwrap();
+        assert_eq!(cfg.click_repeat_interval, 0);
+        assert_eq!(
+            line(&cfg, "click-repeat-interval"),
+            "click-repeat-interval = 0"
+        );
+        assert_eq!(
+            cfg.set("click-repeat-interval", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        for value in [
+            "1.5",
+            "0x10",
+            "0b10",
+            "-1",
+            "4294967296",
+            "+",
+            "-",
+            "_1",
+            "1_",
+            " 10",
+            "10 ",
+            "\t10",
+            "10\t",
+        ] {
+            assert_eq!(
+                cfg.set("click-repeat-interval", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "click-repeat-interval rejects {value:?}"
+            );
+        }
+
+        let mut retained = Config::default();
+        let diagnostics = retained.load_str(
+            "click-repeat-interval = 333\n\
+             click-repeat-interval = nope\n",
+        );
+        assert_eq!(retained.click_repeat_interval, 333);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "click-repeat-interval".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let diagnostics = cfg.set_cli_args(["--click-repeat-interval=125"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.click_repeat_interval, 125);
+
+        cfg.set("click-repeat-interval", Some("0")).unwrap();
+        assert_eq!(cfg.click_repeat_interval, 0);
+        let mut finalized = cfg.clone();
+        finalized.finalize();
+        assert_eq!(finalized.click_repeat_interval, 500);
+        assert_eq!(cfg.click_repeat_interval, 0);
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.click_repeat_interval, 0);
+    }
+
+    #[test]
+    fn cursor_style_blink_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let prefix = format!("{} = ", key);
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap()
+                .to_string()
+        }
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.cursor_style_blink, None);
+        assert_eq!(line(&cfg, "cursor-style-blink"), "cursor-style-blink = ");
+
+        cfg.set("cursor-style-blink", None).unwrap();
+        assert_eq!(cfg.cursor_style_blink, Some(true));
+        assert_eq!(
+            line(&cfg, "cursor-style-blink"),
+            "cursor-style-blink = true"
+        );
+
+        for value in ["1", "t", "T", "true"] {
+            let mut cfg = Config::default();
+            cfg.set("cursor-style-blink", Some("false")).unwrap();
+            cfg.set("cursor-style-blink", Some(value)).unwrap();
+            assert_eq!(
+                cfg.cursor_style_blink,
+                Some(true),
+                "cursor-style-blink parses {value:?} as true"
+            );
+            assert_eq!(
+                line(&cfg, "cursor-style-blink"),
+                "cursor-style-blink = true"
+            );
+        }
+
+        for value in ["0", "f", "F", "false"] {
+            let mut cfg = Config::default();
+            cfg.set("cursor-style-blink", Some("true")).unwrap();
+            cfg.set("cursor-style-blink", Some(value)).unwrap();
+            assert_eq!(
+                cfg.cursor_style_blink,
+                Some(false),
+                "cursor-style-blink parses {value:?} as false"
+            );
+            assert_eq!(
+                line(&cfg, "cursor-style-blink"),
+                "cursor-style-blink = false"
+            );
+        }
+
+        cfg.set("cursor-style-blink", Some("true")).unwrap();
+        cfg.set("cursor-style-blink", Some("")).unwrap();
+        assert_eq!(cfg.cursor_style_blink, None);
+        assert_eq!(line(&cfg, "cursor-style-blink"), "cursor-style-blink = ");
+
+        for value in ["yes", "TRUE", "False", "2", "-1", " true", "true "] {
+            assert_eq!(
+                cfg.set("cursor-style-blink", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "cursor-style-blink rejects {value:?}"
+            );
+        }
+
+        let mut retained = Config::default();
+        let diagnostics = retained.load_str(
+            "cursor-style-blink = false\n\
+             cursor-style-blink = maybe\n",
+        );
+        assert_eq!(retained.cursor_style_blink, Some(false));
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "cursor-style-blink".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let diagnostics = cfg.set_cli_args(["--cursor-style-blink=true"]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.cursor_style_blink, Some(true));
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.cursor_style_blink, Some(true));
     }
 
     #[test]
@@ -18112,6 +24359,180 @@ mod tests {
     }
 
     #[test]
+    fn quick_terminal_size_config_parser_family_oracle() {
+        let line = |cfg: &Config| -> Option<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with("quick-terminal-size = "))
+                .map(ToOwned::to_owned)
+        };
+
+        let mut cfg = Config::default();
+        assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
+        assert_eq!(line(&cfg), None);
+
+        cfg.set("quick-terminal-size", Some("50%")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: None,
+            }
+        );
+        assert_eq!(line(&cfg), Some("quick-terminal-size = 50%".to_string()));
+
+        cfg.set("quick-terminal-size", Some("200px")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
+        assert_eq!(line(&cfg), Some("quick-terminal-size = 200px".to_string()));
+
+        for (input, expected) in [
+            ("1_000px", 1000),
+            ("+5px", 5),
+            ("-0px", 0),
+            ("4294967295px", u32::MAX),
+        ] {
+            cfg.set("quick-terminal-size", Some(input)).unwrap();
+            assert_eq!(
+                cfg.quick_terminal_size.primary,
+                Some(QuickTerminalSizeValue::Pixels(expected)),
+                "{input}"
+            );
+        }
+
+        for invalid in ["4294967296px", "-1px", "_5px", "5_px", "0x10px"] {
+            assert_eq!(
+                cfg.set("quick-terminal-size", Some(invalid)),
+                Err(ConfigSetError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        cfg.set("quick-terminal-size", Some(" 50% , 200px "))
+            .unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(50.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(200)),
+            }
+        );
+        assert_eq!(
+            line(&cfg),
+            Some("quick-terminal-size = 50%,200px".to_string())
+        );
+
+        cfg.set("quick-terminal-size", Some("0x1p4%")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size.primary,
+            Some(QuickTerminalSizeValue::Percentage(16.0))
+        );
+        cfg.set("quick-terminal-size", Some("+inf%")).unwrap();
+        assert_eq!(
+            cfg.quick_terminal_size.primary,
+            Some(QuickTerminalSizeValue::Percentage(f32::INFINITY))
+        );
+        cfg.set("quick-terminal-size", Some("nan%")).unwrap();
+        match cfg.quick_terminal_size.primary {
+            Some(QuickTerminalSizeValue::Percentage(v)) => assert!(v.is_nan()),
+            other => panic!("expected nan percentage, got {other:?}"),
+        }
+
+        assert_eq!(
+            cfg.set("quick-terminal-size", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("")),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("69px,")),
+            Err(QuickTerminalSizeParseError::ValueRequired)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("69px,42%,69px")),
+            Err(QuickTerminalSizeParseError::TooManyArguments)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("420")),
+            Err(QuickTerminalSizeParseError::MissingUnit)
+        );
+        assert_eq!(
+            QuickTerminalSize::parse_cli(Some("bobr")),
+            Err(QuickTerminalSizeParseError::MissingUnit)
+        );
+        for invalid in ["bobr%", "-32%", "0x1p_%", "0x1p4_%"] {
+            assert_eq!(
+                QuickTerminalSize::parse_cli(Some(invalid)),
+                Err(QuickTerminalSizeParseError::InvalidValue),
+                "{invalid:?}"
+            );
+        }
+
+        cfg.set("quick-terminal-size", Some("")).unwrap();
+        assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
+        assert_eq!(line(&cfg), None);
+
+        let diagnostics = cfg.load_str(
+            "quick-terminal-size = 200px\n\
+             quick-terminal-size = bobr\n\
+             quick-terminal-position = right\n",
+        );
+        assert_eq!(
+            cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Pixels(200)),
+                secondary: None,
+            }
+        );
+        assert_eq!(cfg.quick_terminal_position, QuickTerminalPosition::Right);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "quick-terminal-size".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+
+        let mut cli_cfg = Config::default();
+        assert_eq!(
+            cli_cfg.set_cli_args(["--quick-terminal-size=69%,420px"]),
+            Vec::<ConfigDiagnostic>::new()
+        );
+        assert_eq!(
+            cli_cfg.quick_terminal_size,
+            QuickTerminalSize {
+                primary: Some(QuickTerminalSizeValue::Percentage(69.0)),
+                secondary: Some(QuickTerminalSizeValue::Pixels(420)),
+            }
+        );
+        let landscape = QuickTerminalDimensions {
+            width: 2560,
+            height: 1600,
+        };
+        assert_eq!(
+            cli_cfg
+                .quick_terminal_size
+                .calculate(QuickTerminalPosition::Top, landscape),
+            QuickTerminalDimensions {
+                width: 420,
+                height: 1104,
+            }
+        );
+
+        let cloned = cli_cfg.clone();
+        assert_eq!(cloned, cli_cfg);
+    }
+
+    #[test]
     fn quick_terminal_size_config_parse_format_reset_and_diagnose() {
         let line = |cfg: &Config| -> Option<String> {
             let mut out = String::new();
@@ -18162,7 +24583,7 @@ mod tests {
             keys[position_index + 8],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[position_index + 9], "language");
+        assert_eq!(keys[position_index + 9], "shell-integration");
 
         cfg.set("quick-terminal-size", Some("")).unwrap();
         assert_eq!(cfg.quick_terminal_size, QuickTerminalSize::default());
@@ -18286,11 +24707,6 @@ mod tests {
             cfg.set("gtk-quick-terminal-namespace", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("gtk-quick-terminal-namespace", Some("bad\0namespace")),
-            Err(ConfigSetError::InvalidValue)
-        );
-
         cfg.set("quick-terminal-size", Some("50%")).unwrap();
         let mut out = String::new();
         cfg.format_config(&mut out);
@@ -18312,7 +24728,11 @@ mod tests {
             keys[size_index + 7],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[size_index + 8], "language");
+        assert_eq!(keys[size_index + 8], "shell-integration");
+
+        cfg.set("gtk-quick-terminal-namespace", Some("bad\0namespace"))
+            .unwrap();
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "bad\0namespace");
 
         let diagnostics = cfg.load_str(
             "gtk-quick-terminal-layer = bottom\n\
@@ -18322,28 +24742,21 @@ mod tests {
              quick-terminal-position = right\n",
         );
         assert_eq!(cfg.gtk_quick_terminal_layer, QuickTerminalLayer::Bottom);
-        assert_eq!(cfg.gtk_quick_terminal_namespace, "roastty-quick");
+        assert_eq!(cfg.gtk_quick_terminal_namespace, "bad\0namespace");
         assert_eq!(cfg.quick_terminal_position, QuickTerminalPosition::Right);
         assert_eq!(
             diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "gtk-quick-terminal-layer".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "gtk-quick-terminal-namespace".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "gtk-quick-terminal-layer".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
         );
 
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.gtk_quick_terminal_layer, QuickTerminalLayer::Bottom);
-        assert_eq!(cloned.gtk_quick_terminal_namespace, "roastty-quick");
+        assert_eq!(cloned.gtk_quick_terminal_namespace, "bad\0namespace");
     }
 
     #[test]
@@ -18472,7 +24885,7 @@ mod tests {
             keys[namespace_index + 5],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[namespace_index + 6], "language");
+        assert_eq!(keys[namespace_index + 6], "shell-integration");
 
         let diagnostics = cfg.load_str(
             "quick-terminal-screen = mouse\n\
@@ -18623,7 +25036,7 @@ mod tests {
             keys[autohide_index + 2],
             "quick-terminal-keyboard-interactivity"
         );
-        assert_eq!(keys[autohide_index + 3], "language");
+        assert_eq!(keys[autohide_index + 3], "shell-integration");
 
         let diagnostics = cfg.load_str(
             "quick-terminal-space-behavior = remain\n\
@@ -19005,6 +25418,19 @@ mod tests {
         assert_eq!(cfg.background_opacity, 1.0);
         assert_eq!(line(&cfg, "background-opacity"), "background-opacity = 1");
 
+        cfg.set("background-image-opacity", Some("0.25")).unwrap();
+        assert_eq!(cfg.bg_image_opacity, 0.25);
+        assert_eq!(
+            line(&cfg, "background-image-opacity"),
+            "background-image-opacity = 0.25"
+        );
+        cfg.set("background-image-opacity", Some("")).unwrap();
+        assert_eq!(cfg.bg_image_opacity, 1.0);
+        assert_eq!(
+            line(&cfg, "background-image-opacity"),
+            "background-image-opacity = 1"
+        );
+
         assert_eq!(
             cfg.set("background-opacity", None),
             Err(ConfigSetError::ValueRequired)
@@ -19376,7 +25802,162 @@ mod tests {
     }
 
     #[test]
-    fn command_config_parse_format_reset_and_diagnose() {
+    fn color_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .unwrap()
+                .to_string()
+        }
+
+        let default = Config::default();
+        let mut cfg = Config::default();
+
+        cfg.set("background", Some("ForestGreen")).unwrap();
+        assert_eq!(
+            cfg.background,
+            Color {
+                r: 0x22,
+                g: 0x8b,
+                b: 0x22,
+            }
+        );
+        assert_eq!(line(&cfg, "background"), "background = #228b22");
+
+        cfg.set("foreground", Some(" #AABBCC\t")).unwrap();
+        assert_eq!(
+            cfg.foreground,
+            Color {
+                r: 0xaa,
+                g: 0xbb,
+                b: 0xcc,
+            }
+        );
+        assert_eq!(line(&cfg, "foreground"), "foreground = #aabbcc");
+        assert_eq!(
+            cfg.set("foreground", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("background", Some("cell-foreground")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("background", Some("#12")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("background", Some("")).unwrap();
+        assert_eq!(cfg.background, default.background);
+        assert_eq!(line(&cfg, "background"), line(&default, "background"));
+
+        cfg.set("macos-icon-ghost-color", Some("#0a0b0c")).unwrap();
+        assert_eq!(
+            cfg.macos_icon_ghost_color,
+            Some(Color {
+                r: 10,
+                g: 11,
+                b: 12,
+            })
+        );
+        assert_eq!(
+            line(&cfg, "macos-icon-ghost-color"),
+            "macos-icon-ghost-color = #0a0b0c"
+        );
+        assert_eq!(
+            cfg.set("macos-icon-ghost-color", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("macos-icon-ghost-color", Some("")).unwrap();
+        assert_eq!(cfg.macos_icon_ghost_color, default.macos_icon_ghost_color);
+
+        cfg.set("search-foreground", Some("cell-foreground"))
+            .unwrap();
+        assert_eq!(cfg.search_foreground, TerminalColor::CellForeground);
+        assert_eq!(
+            line(&cfg, "search-foreground"),
+            "search-foreground = cell-foreground"
+        );
+        cfg.set("search-background", Some("cell-background"))
+            .unwrap();
+        assert_eq!(cfg.search_background, TerminalColor::CellBackground);
+        assert_eq!(
+            line(&cfg, "search-background"),
+            "search-background = cell-background"
+        );
+        cfg.set("search-background", Some("black")).unwrap();
+        assert_eq!(
+            cfg.search_background,
+            TerminalColor::Color(Color { r: 0, g: 0, b: 0 })
+        );
+        assert_eq!(
+            cfg.set("search-foreground", Some(" cell-foreground")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("search-foreground", Some("")).unwrap();
+        assert_eq!(cfg.search_foreground, default.search_foreground);
+
+        cfg.set("cursor-color", Some("cell-background")).unwrap();
+        assert_eq!(cfg.cursor_color, Some(TerminalColor::CellBackground));
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = cell-background");
+        cfg.set("cursor-color", Some("#010203")).unwrap();
+        assert_eq!(
+            cfg.cursor_color,
+            Some(TerminalColor::Color(Color { r: 1, g: 2, b: 3 }))
+        );
+        assert_eq!(line(&cfg, "cursor-color"), "cursor-color = #010203");
+        cfg.set("cursor-color", Some("")).unwrap();
+        assert_eq!(cfg.cursor_color, default.cursor_color);
+
+        cfg.set("bold-color", Some("bright")).unwrap();
+        assert_eq!(cfg.bold_color, Some(BoldColor::Bright));
+        assert_eq!(line(&cfg, "bold-color"), "bold-color = bright");
+        cfg.set("bold-color", Some("#040506")).unwrap();
+        assert_eq!(
+            cfg.bold_color,
+            Some(BoldColor::Color(Color { r: 4, g: 5, b: 6 }))
+        );
+        assert_eq!(line(&cfg, "bold-color"), "bold-color = #040506");
+        assert_eq!(
+            cfg.set("bold-color", Some(" bright")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("bold-color", Some("")).unwrap();
+        assert_eq!(cfg.bold_color, default.bold_color);
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str(
+            "background = #0a0b0c\nbackground = cell-foreground\nsearch-foreground = cell-background\nsearch-foreground = wrong-sentinel\n",
+        );
+        assert_eq!(
+            cfg.background,
+            Color {
+                r: 10,
+                g: 11,
+                b: 12,
+            }
+        );
+        assert_eq!(cfg.search_foreground, TerminalColor::CellBackground);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "background".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "search-foreground".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn command_config_parser_family_oracle() {
         let line = |cfg: &Config, key: &str| -> String {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -19399,6 +25980,29 @@ mod tests {
         cfg.set("command", Some(" shell:  echo hello ")).unwrap();
         assert_eq!(cfg.command, Some(Command::Shell("echo hello".to_string())));
         assert_eq!(line(&cfg, "command"), "command = echo hello");
+
+        cfg.set("command", Some(" shell:\techo\t ")).unwrap();
+        assert_eq!(cfg.command, Some(Command::Shell("\techo\t".to_string())));
+        assert_eq!(line(&cfg, "command"), "command = \techo\t");
+
+        cfg.set("command", Some("\tshell:echo")).unwrap();
+        assert_eq!(
+            cfg.command,
+            Some(Command::Shell("\tshell:echo".to_string()))
+        );
+
+        assert_eq!(
+            Command::parse_cli(Some("   ")),
+            Err(CommandParseError::ValueRequired)
+        );
+        assert_eq!(
+            Command::parse_cli(Some(" direct:   ")),
+            Ok(Command::Direct(vec![String::new()]))
+        );
+        assert_eq!(
+            Command::parse_cli(Some(" shell:   ")),
+            Ok(Command::Shell(String::new()))
+        );
 
         cfg.set("initial-command", Some("direct:echo hello"))
             .unwrap();
@@ -19426,6 +26030,31 @@ mod tests {
         assert_eq!(
             line(&cfg, "initial-command"),
             "initial-command = direct:echo hello"
+        );
+
+        cfg.set("initial-command", Some("direct:echo  hello"))
+            .unwrap();
+        assert_eq!(
+            cfg.initial_command,
+            Some(Command::Direct(vec![
+                "echo".to_string(),
+                String::new(),
+                "hello".to_string()
+            ]))
+        );
+        assert_eq!(
+            line(&cfg, "initial-command"),
+            "initial-command = direct:echo  hello"
+        );
+
+        cfg.set("initial-command", Some("direct:echo  ")).unwrap();
+        assert_eq!(
+            cfg.initial_command,
+            Some(Command::Direct(vec!["echo".to_string()]))
+        );
+        assert_eq!(
+            line(&cfg, "initial-command"),
+            "initial-command = direct:echo"
         );
 
         cfg.set("initial-command", Some("direct:")).unwrap();
@@ -19487,7 +26116,7 @@ mod tests {
     }
 
     #[test]
-    fn input_config_parse_format_reset_load_cli_and_clone() {
+    fn input_config_parser_family_oracle() {
         let lines = |cfg: &Config| -> Vec<String> {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -19496,6 +26125,52 @@ mod tests {
                 .map(str::to_string)
                 .collect()
         };
+
+        assert_eq!(
+            ReadableIo::parse_cli(""),
+            Err(RepeatableReadableIoParseError::ValueRequired)
+        );
+        assert_eq!(
+            ReadableIo::parse_cli("raw:hello\\n"),
+            Ok(ReadableIo::Raw("hello\\n".to_string()))
+        );
+        assert_eq!(
+            ReadableIo::parse_cli("path:/tmp/in.txt"),
+            Ok(ReadableIo::Path("/tmp/in.txt".to_string()))
+        );
+        assert_eq!(
+            ReadableIo::parse_cli("foo:bar"),
+            Ok(ReadableIo::Raw("foo:bar".to_string()))
+        );
+        assert_eq!(
+            ReadableIo::parse_cli("raw:"),
+            Ok(ReadableIo::Raw(String::new()))
+        );
+        assert_eq!(
+            ReadableIo::parse_cli("raw:\\q"),
+            Err(RepeatableReadableIoParseError::InvalidValue)
+        );
+
+        let mut direct = RepeatableReadableIo {
+            list: vec![ReadableIo::Raw("keep".to_string())],
+        };
+        assert_eq!(
+            direct.parse_cli(None),
+            Err(RepeatableReadableIoParseError::ValueRequired)
+        );
+        assert_eq!(direct.list, vec![ReadableIo::Raw("keep".to_string())]);
+        assert_eq!(
+            direct.parse_cli(Some("raw:\\q")),
+            Err(RepeatableReadableIoParseError::InvalidValue)
+        );
+        assert_eq!(direct.list, vec![ReadableIo::Raw("keep".to_string())]);
+        assert_eq!(direct.parse_cli(Some("")), Ok(()));
+        assert!(direct.list.is_empty());
+        assert_eq!(direct.parse_cli(Some("path:/tmp/direct")), Ok(()));
+        assert_eq!(
+            direct.list,
+            vec![ReadableIo::Path("/tmp/direct".to_string())]
+        );
 
         let mut cfg = Config::default();
         assert_eq!(cfg.input, RepeatableReadableIo::default());
@@ -19579,7 +26254,7 @@ mod tests {
     }
 
     #[test]
-    fn keybind_config_parse_format_reset_load_cli_and_clone() {
+    fn keybind_config_parser_family_oracle() {
         let lines = |cfg: &Config| -> Vec<String> {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -19608,15 +26283,34 @@ mod tests {
         cfg.set("keybind", Some("clear")).unwrap();
         cfg.set("keybind", Some("x=text:parent")).unwrap();
         cfg.set("keybind", Some("chain=text:child")).unwrap();
+        cfg.set("keybind", Some("ctrl+a>n=new_window")).unwrap();
+        cfg.set("keybind", Some("chain=goto_split:left")).unwrap();
         cfg.set("keybind", Some("nav/a=quit")).unwrap();
         cfg.set("keybind", Some("chain=new_window")).unwrap();
+        cfg.set("keybind", Some("nav/c>d=toggle_fullscreen"))
+            .unwrap();
+        cfg.set("keybind", Some("chain=close_surface")).unwrap();
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "keybind = x=text:parent",
+                "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
+                "keybind = nav/a=quit",
+                "keybind = chain=new_window",
+                "keybind = nav/c>d=toggle_fullscreen",
+                "keybind = chain=close_surface",
+            ]
+        );
         cfg.set("keybind", Some("nav/")).unwrap();
         assert_eq!(
             lines(&cfg),
             vec![
                 "keybind = x=text:parent",
                 "keybind = chain=text:child",
-                "keybind = nav/",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
             ]
         );
 
@@ -19629,6 +26323,44 @@ mod tests {
             cfg.set("keybind", Some("nav/chain=ignore")),
             Err(ConfigSetError::InvalidValue)
         );
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        for value in [
+            "/=text:slash",
+            "ctrl+/=text:ctrlslash",
+            "shift+/=ignore",
+            "ctrl+a>ctrl+/=new_window",
+            "mytable//=text:table-slash",
+            "mytable/a>/=new_window",
+        ] {
+            cfg.set("keybind", Some(value)).unwrap();
+        }
+        let slash_lines = lines(&cfg);
+        for expected in [
+            "keybind = /=text:slash",
+            "keybind = ctrl+/=text:ctrlslash",
+            "keybind = shift+/=ignore",
+            "keybind = ctrl+a>ctrl+/=new_window",
+            "keybind = mytable//=text:table-slash",
+            "keybind = mytable/a>/=new_window",
+        ] {
+            assert!(
+                slash_lines.iter().any(|line| line == expected),
+                "missing formatted keybind line {expected}; got {slash_lines:?}"
+            );
+        }
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("global:all:unconsumed:a=quit"))
+            .unwrap();
+        cfg.set("keybind", Some("performable:b=new_window"))
+            .unwrap();
+        assert!(cfg.keybind.has_global_keybinds);
+        let prefix_lines = lines(&cfg);
+        assert!(prefix_lines.iter().any(|line| line == "keybind = a=quit"));
+        assert!(prefix_lines
+            .iter()
+            .any(|line| line == "keybind = b=new_window"));
 
         let diagnostics = cfg.load_str(
             "keybind = clear\n\
@@ -19661,13 +26393,130 @@ mod tests {
         assert!(diagnostics.is_empty());
         assert_eq!(lines(&cfg), vec!["keybind = z=new_window"]);
 
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("key_a=quit")).unwrap();
+        assert_eq!(lines(&cfg), vec!["keybind = key_a=quit"]);
+
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
         assert_eq!(cloned.keybind, cfg.keybind);
     }
 
     #[test]
-    fn env_config_parse_format_reset_and_diagnose() {
+    fn keybind_config_formatter_family_oracle() {
+        let lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .filter(|line| line.starts_with("keybind = "))
+                .map(str::to_string)
+                .collect()
+        };
+
+        let mut cfg = Config::default();
+        let default_lines = lines(&cfg);
+        assert!(!default_lines.is_empty());
+        assert!(default_lines
+            .iter()
+            .any(|line| line == "keybind = super+,=open_config"));
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        assert_eq!(lines(&cfg), vec!["keybind = "]);
+        cfg.set("keybind", Some("")).unwrap();
+        assert_eq!(lines(&cfg), default_lines);
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("x=text:parent")).unwrap();
+        cfg.set("keybind", Some("chain=text:child")).unwrap();
+        cfg.set("keybind", Some("ctrl+a>n=new_window")).unwrap();
+        cfg.set("keybind", Some("chain=goto_split:left")).unwrap();
+        cfg.set("keybind", Some("nav/a=quit")).unwrap();
+        cfg.set("keybind", Some("chain=new_window")).unwrap();
+        cfg.set("keybind", Some("nav/c>d=toggle_fullscreen"))
+            .unwrap();
+        cfg.set("keybind", Some("chain=close_surface")).unwrap();
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "keybind = x=text:parent",
+                "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
+                "keybind = nav/a=quit",
+                "keybind = chain=new_window",
+                "keybind = nav/c>d=toggle_fullscreen",
+                "keybind = chain=close_surface",
+            ]
+        );
+
+        cfg.set("keybind", Some("nav/")).unwrap();
+        let after_table_clear = lines(&cfg);
+        assert_eq!(
+            after_table_clear,
+            vec![
+                "keybind = x=text:parent",
+                "keybind = chain=text:child",
+                "keybind = ctrl+a>n=new_window",
+                "keybind = chain=goto_split:left",
+            ]
+        );
+        assert!(!after_table_clear
+            .iter()
+            .any(|line| line == "keybind = nav/"));
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("foo/a=quit")).unwrap();
+        cfg.set("keybind", Some("foo/")).unwrap();
+        let after_foo_clear = lines(&cfg);
+        assert!(after_foo_clear.is_empty());
+        assert!(!after_foo_clear.iter().any(|line| line == "keybind = foo/"));
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        for value in [
+            "/=text:slash",
+            "ctrl+/=text:ctrlslash",
+            "shift+/=ignore",
+            "ctrl+a>ctrl+/=new_window",
+            "mytable//=text:table-slash",
+            "mytable/a>/=new_window",
+        ] {
+            cfg.set("keybind", Some(value)).unwrap();
+        }
+        assert_eq!(
+            lines(&cfg),
+            vec![
+                "keybind = /=text:slash",
+                "keybind = ctrl+/=text:ctrlslash",
+                "keybind = shift+/=ignore",
+                "keybind = ctrl+a>ctrl+/=new_window",
+                "keybind = mytable//=text:table-slash",
+                "keybind = mytable/a>/=new_window",
+            ]
+        );
+
+        cfg.set("keybind", Some("clear")).unwrap();
+        cfg.set("keybind", Some("global:all:unconsumed:a=quit"))
+            .unwrap();
+        cfg.set("keybind", Some("performable:b=new_window"))
+            .unwrap();
+        assert_eq!(
+            lines(&cfg),
+            vec!["keybind = a=quit", "keybind = b=new_window"]
+        );
+
+        let mut out = String::new();
+        cfg.format_config(&mut out);
+        let keys: Vec<&str> = out
+            .lines()
+            .map(|line| line.split(" = ").next().unwrap())
+            .collect();
+        let keybind = keys.iter().position(|key| *key == "keybind").unwrap();
+        let key_remap = keys.iter().position(|key| *key == "key-remap").unwrap();
+        assert_eq!(key_remap, keybind + cfg.keybind.format_entry_count());
+    }
+
+    #[test]
+    fn env_config_parser_family_oracle() {
         let lines = |cfg: &Config, key: &str| -> Vec<String> {
             let mut out = String::new();
             cfg.format_config(&mut out);
@@ -19680,6 +26529,23 @@ mod tests {
         let mut cfg = Config::default();
         assert_eq!(cfg.env.count(), 0);
         assert_eq!(lines(&cfg, "env"), vec!["env = ".to_string()]);
+
+        let mut direct = RepeatableStringMap::default();
+        assert_eq!(
+            direct.parse_cli(None),
+            Err(RepeatableStringMapParseError::ValueRequired)
+        );
+        assert_eq!(
+            direct.parse_cli(Some("   \t  ")),
+            Err(RepeatableStringMapParseError::ValueRequired)
+        );
+        assert_eq!(
+            direct.parse_cli(Some("MISSING_EQUALS")),
+            Err(RepeatableStringMapParseError::ValueRequired)
+        );
+        direct.parse_cli(Some("A=B")).unwrap();
+        direct.parse_cli(Some("")).unwrap();
+        assert_eq!(direct.count(), 0);
 
         cfg.set("env", Some("A=B")).unwrap();
         assert_eq!(cfg.env.count(), 1);
@@ -20021,6 +26887,458 @@ mod tests {
     }
 
     #[test]
+    fn link_config_parser_recognizes_not_implemented_and_empty_reset() {
+        let mut cfg = Config::default();
+        let default_links = cfg.link.clone();
+        assert_eq!(default_links.len(), 1);
+
+        assert_eq!(
+            cfg.set("link", Some("regex=https://example.invalid")),
+            Err(ConfigSetError::NotImplemented)
+        );
+        assert_eq!(cfg.set("link", None), Err(ConfigSetError::NotImplemented));
+        assert_eq!(cfg.link, default_links);
+
+        cfg.link.clear();
+        assert!(cfg.link.is_empty());
+        cfg.set("link", Some("")).unwrap();
+        assert_eq!(cfg.link, default_links);
+
+        let diagnostics =
+            cfg.load_str("link = https://example.invalid\nlink =\nunknown-link = x\n");
+        assert_eq!(cfg.link, default_links);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "link".to_string(),
+                    error: ConfigSetError::NotImplemented,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "unknown-link".to_string(),
+                    error: ConfigSetError::UnknownField,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn unsupported_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+        let default_links = cfg.link.clone();
+        assert_eq!(default_links.len(), 1);
+
+        assert_eq!(cfg.set("link", None), Err(ConfigSetError::NotImplemented));
+        assert_eq!(
+            cfg.set("link", Some("regex=https://example.invalid")),
+            Err(ConfigSetError::NotImplemented)
+        );
+        assert_eq!(cfg.link, default_links);
+        assert_eq!(
+            cfg.set("unknown-link", Some("x")),
+            Err(ConfigSetError::UnknownField)
+        );
+
+        cfg.link.clear();
+        assert!(cfg.link.is_empty());
+        cfg.set("link", Some("")).unwrap();
+        assert_eq!(cfg.link, default_links);
+
+        let diagnostics =
+            cfg.load_str("link = https://example.invalid\nlink =\nunknown-link = x\n");
+        assert_eq!(cfg.link, default_links);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "link".to_string(),
+                    error: ConfigSetError::NotImplemented,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "unknown-link".to_string(),
+                    error: ConfigSetError::UnknownField,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn boolean_config_parser_family_oracle() {
+        fn line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        }
+
+        for value in ["1", "t", "T", "true"] {
+            let mut cfg = Config::default();
+            cfg.set("maximize", Some(value)).unwrap();
+            assert!(cfg.maximize, "maximize parses {value:?} as true");
+            assert_eq!(line(&cfg, "maximize"), "maximize = true");
+
+            cfg.set("link-url", Some("false")).unwrap();
+            cfg.set("link-url", Some(value)).unwrap();
+            assert!(cfg.link_url, "link-url parses {value:?} as true");
+            assert_eq!(line(&cfg, "link-url"), "link-url = true");
+        }
+
+        for value in ["0", "f", "F", "false"] {
+            let mut cfg = Config::default();
+            cfg.set("maximize", Some("true")).unwrap();
+            cfg.set("maximize", Some(value)).unwrap();
+            assert!(!cfg.maximize, "maximize parses {value:?} as false");
+            assert_eq!(line(&cfg, "maximize"), "maximize = false");
+
+            cfg.set("link-url", Some(value)).unwrap();
+            assert!(!cfg.link_url, "link-url parses {value:?} as false");
+            assert_eq!(line(&cfg, "link-url"), "link-url = false");
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("maximize", None).unwrap();
+        assert!(cfg.maximize);
+        cfg.set("link-url", Some("false")).unwrap();
+        cfg.set("link-url", None).unwrap();
+        assert!(cfg.link_url);
+
+        cfg.set("maximize", Some("true")).unwrap();
+        cfg.set("maximize", Some("")).unwrap();
+        assert!(!cfg.maximize);
+        cfg.set("link-url", Some("false")).unwrap();
+        cfg.set("link-url", Some("")).unwrap();
+        assert!(cfg.link_url);
+
+        assert_eq!(
+            cfg.set("maximize", Some("yes")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        assert_eq!(
+            cfg.set("link-url", Some("yes")),
+            Err(ConfigSetError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn integer_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+
+        cfg.set("image-storage-limit", Some("42")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 42);
+        cfg.set("image-storage-limit", Some("0xFF")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 255);
+        cfg.set("image-storage-limit", Some("0X10")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 16);
+        cfg.set("image-storage-limit", Some("0b101")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 5);
+        cfg.set("image-storage-limit", Some("0B111")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 7);
+        cfg.set("image-storage-limit", Some("0o17")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 15);
+        cfg.set("image-storage-limit", Some("0O11")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 9);
+        cfg.set("image-storage-limit", Some("+1_024")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 1024);
+        cfg.set("image-storage-limit", Some("-0")).unwrap();
+        assert_eq!(cfg.image_storage_limit, 0);
+        cfg.set("image-storage-limit", Some("7")).unwrap();
+        cfg.set("image-storage-limit", Some("")).unwrap();
+        assert_eq!(
+            cfg.image_storage_limit,
+            Config::default().image_storage_limit
+        );
+
+        cfg.set("scrollback-limit", Some("0x20")).unwrap();
+        assert_eq!(cfg.scrollback_limit, 32);
+        cfg.set("linux-cgroup-memory-limit", Some("0x1_000"))
+            .unwrap();
+        assert_eq!(cfg.linux_cgroup_memory_limit, Some(4096));
+        cfg.set("linux-cgroup-memory-limit", Some("")).unwrap();
+        assert_eq!(cfg.linux_cgroup_memory_limit, None);
+
+        cfg.set("window-position-x", Some("-0X10")).unwrap();
+        assert_eq!(cfg.window_position_x, Some(-16));
+        cfg.set("window-position-x", Some("+0B111")).unwrap();
+        assert_eq!(cfg.window_position_x, Some(7));
+        cfg.set("window-position-x", Some("")).unwrap();
+        assert_eq!(cfg.window_position_x, None);
+
+        cfg.set("font-thicken-strength", Some("0xff")).unwrap();
+        assert_eq!(cfg.font_thicken_strength, 255);
+        cfg.set("font-thicken-strength", Some("0")).unwrap();
+        assert_eq!(cfg.font_thicken_strength, 0);
+        cfg.set("font-thicken-strength", Some("")).unwrap();
+        assert_eq!(
+            cfg.font_thicken_strength,
+            Config::default().font_thicken_strength
+        );
+
+        assert_eq!(
+            cfg.set("image-storage-limit", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for value in [
+            "-1",
+            "+",
+            "-",
+            "0x",
+            "0X",
+            "0b",
+            "0B",
+            "0o",
+            "0O",
+            "_1",
+            "1_",
+            "0x_FF",
+            "0b_101",
+            "0o_17",
+            "4294967296",
+        ] {
+            assert_eq!(
+                cfg.set("image-storage-limit", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "image-storage-limit rejects {value:?}"
+            );
+        }
+
+        for value in ["-32769", "32768", "-0X8001", "0x8000"] {
+            assert_eq!(
+                cfg.set("window-position-x", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "window-position-x rejects {value:?}"
+            );
+        }
+
+        for value in ["-1", "256", "0x100"] {
+            assert_eq!(
+                cfg.set("font-thicken-strength", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "font-thicken-strength rejects {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn float_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+
+        cfg.set("bell-audio-volume", Some("0.125")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 0.125);
+        cfg.set("bell-audio-volume", Some("+1e3")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 1000.0);
+        cfg.set("bell-audio-volume", Some("-1E-2")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, -0.01);
+        cfg.set("bell-audio-volume", Some("1_000.5")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 1000.5);
+        cfg.set("bell-audio-volume", Some("0x1p4")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 16.0);
+        cfg.set("bell-audio-volume", Some("0X1.8P1")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 3.0);
+        cfg.set("bell-audio-volume", Some("0x1.000000000000081p0"))
+            .unwrap();
+        assert_eq!(cfg.bell_audio_volume.to_bits(), 0x3ff0000000000001);
+        cfg.set("bell-audio-volume", Some("0x0")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 0.0);
+        cfg.set("bell-audio-volume", Some("-0x0")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, -0.0);
+        assert!(cfg.bell_audio_volume.is_sign_negative());
+        cfg.set("bell-audio-volume", Some("0x1_a.p2")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, 104.0);
+
+        cfg.set("bell-audio-volume", Some("nAn")).unwrap();
+        assert!(cfg.bell_audio_volume.is_nan());
+        cfg.set("bell-audio-volume", Some("+Inf")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, f64::INFINITY);
+        cfg.set("bell-audio-volume", Some("-iNf")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, f64::NEG_INFINITY);
+        cfg.set("bell-audio-volume", Some("INFINITY")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, f64::INFINITY);
+        cfg.set("bell-audio-volume", Some("1e309")).unwrap();
+        assert_eq!(cfg.bell_audio_volume, f64::INFINITY);
+        cfg.set("bell-audio-volume", Some("0x1p9999999999"))
+            .unwrap();
+        assert_eq!(cfg.bell_audio_volume, f64::INFINITY);
+        cfg.set("bell-audio-volume", Some("0x1p-9999999999"))
+            .unwrap();
+        assert_eq!(cfg.bell_audio_volume, 0.0);
+
+        cfg.set("background-image-opacity", Some("0x1p-1")).unwrap();
+        assert_eq!(cfg.bg_image_opacity, 0.5);
+        cfg.set("background-image-opacity", Some("0x1.000002p0"))
+            .unwrap();
+        assert_eq!(cfg.bg_image_opacity.to_bits(), 0x3f800001);
+        cfg.set("background-image-opacity", Some("1_0.5")).unwrap();
+        assert_eq!(cfg.bg_image_opacity, 10.5);
+        cfg.set("background-image-opacity", Some("NaN")).unwrap();
+        assert!(cfg.bg_image_opacity.is_nan());
+        cfg.set("background-image-opacity", Some("0.25")).unwrap();
+        cfg.set("background-image-opacity", Some("")).unwrap();
+        assert_eq!(cfg.bg_image_opacity, Config::default().bg_image_opacity);
+
+        assert_eq!(
+            cfg.set("bell-audio-volume", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for value in [
+            "+",
+            "-",
+            "abc",
+            "_1",
+            "1_",
+            "1__0",
+            "1._0",
+            "1_.0",
+            "0x",
+            "0x.p1",
+            "0x_1",
+            "0x1_",
+            "0x1__0",
+            "0x1._8",
+            "0x1_.8",
+            "0x1p",
+            "0x1p_4",
+            "0x1p4_",
+            "0x1p+",
+            "0x1p+_4",
+            "nan(payload)",
+            "NaN(123)",
+        ] {
+            assert_eq!(
+                cfg.set("bell-audio-volume", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "bell-audio-volume rejects {value:?}"
+            );
+        }
+        assert_eq!(
+            cfg.set("background-image-opacity", Some("nan(payload)")),
+            Err(ConfigSetError::InvalidValue)
+        );
+    }
+
+    #[test]
+    fn string_config_parser_family_oracle() {
+        assert_eq!(
+            parse_string_field(None),
+            Err(MagicParseError::ValueRequired)
+        );
+        assert_eq!(parse_string_field(Some("")), Ok(String::new()));
+        assert_eq!(
+            parse_string_field(Some("hello\0world")),
+            Ok("hello\0world".to_string())
+        );
+
+        let mut cfg = Config::default();
+
+        assert_eq!(cfg.set("term", None), Err(ConfigSetError::ValueRequired));
+        cfg.set("term", Some("xterm-roastty-\u{2603}\0suffix"))
+            .unwrap();
+        assert_eq!(cfg.term, "xterm-roastty-\u{2603}\0suffix");
+        cfg.set("term", Some("changed")).unwrap();
+        cfg.set("term", Some("")).unwrap();
+        assert_eq!(cfg.term, Config::default().term);
+
+        assert_eq!(cfg.set("title", None), Err(ConfigSetError::ValueRequired));
+        cfg.set("title", Some("title\0suffix")).unwrap();
+        assert_eq!(cfg.title, Some("title\0suffix".to_string()));
+        cfg.set("title", Some("")).unwrap();
+        assert_eq!(cfg.title, None);
+    }
+
+    #[test]
+    fn duration_config_parser_family_oracle() {
+        let dur = |duration| Ok(Duration { duration });
+
+        assert_eq!(
+            Duration::parse_cli(Some("1y")),
+            dur(365 * 24 * 60 * 60 * NS_PER_S)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("1w")),
+            dur(7 * 24 * 60 * 60 * NS_PER_S)
+        );
+        assert_eq!(
+            Duration::parse_cli(Some("1d")),
+            dur(24 * 60 * 60 * NS_PER_S)
+        );
+        assert_eq!(Duration::parse_cli(Some("1h")), dur(60 * 60 * NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("1m")), dur(60 * NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("1s")), dur(NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("1ms")), dur(NS_PER_MS));
+        assert_eq!(Duration::parse_cli(Some("1us")), dur(1_000));
+        assert_eq!(Duration::parse_cli(Some("1µs")), dur(1_000));
+        assert_eq!(Duration::parse_cli(Some("1ns")), dur(1));
+
+        assert_eq!(
+            Duration::parse_cli(Some("1m1ms")),
+            dur(60 * NS_PER_S + NS_PER_MS)
+        );
+        assert_eq!(Duration::parse_cli(Some("1h 30m")), dur(90 * 60 * NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some(" 1s ")), dur(NS_PER_S));
+        assert_eq!(Duration::parse_cli(Some("0")), dur(0));
+        assert_eq!(Duration::parse_cli(Some("600y")), dur(u64::MAX));
+
+        for value in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                Duration::parse_cli(value),
+                Err(DurationParseError::ValueRequired),
+                "duration requires {value:?}"
+            );
+        }
+        for value in [
+            "1",
+            "s",
+            "1x",
+            "1 ",
+            "0 ",
+            "18446744073709551616ns",
+            "18446744073709551616",
+        ] {
+            assert_eq!(
+                Duration::parse_cli(Some(value)),
+                Err(DurationParseError::InvalidValue),
+                "duration rejects {value:?}"
+            );
+        }
+
+        let mut cfg = Config::default();
+        assert_eq!(
+            cfg.set("undo-timeout", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("undo-timeout", Some("1m 30s")).unwrap();
+        assert_eq!(
+            cfg.undo_timeout,
+            Duration {
+                duration: 90 * NS_PER_S
+            }
+        );
+        cfg.set("undo-timeout", Some("")).unwrap();
+        assert_eq!(cfg.undo_timeout, Config::default().undo_timeout);
+
+        assert_eq!(
+            cfg.set("quit-after-last-window-closed-delay", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        cfg.set("quit-after-last-window-closed-delay", Some("250ms"))
+            .unwrap();
+        assert_eq!(
+            cfg.quit_after_last_window_closed_delay,
+            Some(Duration {
+                duration: 250 * NS_PER_MS
+            })
+        );
+        cfg.set("quit-after-last-window-closed-delay", Some(""))
+            .unwrap();
+        assert_eq!(cfg.quit_after_last_window_closed_delay, None);
+    }
+
+    #[test]
     fn config_link_url_finalize() {
         let cfg = Config::default();
         assert_eq!(cfg.link.len(), 1);
@@ -20198,10 +27516,8 @@ mod tests {
         assert_eq!(line(&cfg), "title = ");
 
         assert_eq!(cfg.set("title", None), Err(ConfigSetError::ValueRequired));
-        assert_eq!(
-            cfg.set("title", Some("bad\0title")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("title", Some("bad\0title")).unwrap();
+        assert_eq!(cfg.title.as_deref(), Some("bad\0title"));
 
         assert_eq!(
             cfg.set("title", Some("Clone title")).map(|_| {
@@ -20212,15 +27528,8 @@ mod tests {
         );
 
         let diagnostics = cfg.load_str("title = \" \"\ntitle =\ntitle = bad\0title\n");
-        assert_eq!(cfg.title, None);
-        assert_eq!(
-            diagnostics,
-            vec![ConfigDiagnostic {
-                line: 3,
-                key: "title".to_string(),
-                error: ConfigSetError::InvalidValue,
-            }]
-        );
+        assert_eq!(cfg.title.as_deref(), Some("bad\0title"));
+        assert!(diagnostics.is_empty());
     }
 
     #[test]
@@ -20254,21 +27563,12 @@ mod tests {
             cfg.set("language", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("language", Some("bad\0language")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("language", Some("bad\0language")).unwrap();
+        assert_eq!(cfg.language.as_deref(), Some("bad\0language"));
 
         let diagnostics = cfg.load_str("language = fr\nlanguage =\nlanguage = bad\0language\n");
-        assert_eq!(cfg.language, None);
-        assert_eq!(
-            diagnostics,
-            vec![ConfigDiagnostic {
-                line: 3,
-                key: "language".to_string(),
-                error: ConfigSetError::InvalidValue,
-            }]
-        );
+        assert_eq!(cfg.language.as_deref(), Some("bad\0language"));
+        assert!(diagnostics.is_empty());
 
         cfg.set("language", Some("ja")).unwrap();
         let cloned = cfg.clone();
@@ -20313,40 +27613,22 @@ mod tests {
             cfg.set("x11-instance-name", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("class", Some("bad\0class")),
-            Err(ConfigSetError::InvalidValue)
-        );
-        assert_eq!(
-            cfg.set("x11-instance-name", Some("bad\0instance")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("class", Some("bad\0class")).unwrap();
+        assert_eq!(cfg.class.as_deref(), Some("bad\0class"));
+        cfg.set("x11-instance-name", Some("bad\0instance")).unwrap();
+        assert_eq!(cfg.x11_instance_name.as_deref(), Some("bad\0instance"));
 
         let diagnostics = cfg.load_str(
             "class = com.example.Valid\nclass = bad\0class\nx11-instance-name = roastty\nx11-instance-name = bad\0instance\n",
         );
-        assert_eq!(cfg.class.as_deref(), Some("com.example.Valid"));
-        assert_eq!(cfg.x11_instance_name.as_deref(), Some("roastty"));
-        assert_eq!(
-            diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "class".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "x11-instance-name".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
-        );
+        assert_eq!(cfg.class.as_deref(), Some("bad\0class"));
+        assert_eq!(cfg.x11_instance_name.as_deref(), Some("bad\0instance"));
+        assert!(diagnostics.is_empty());
 
         let cloned = cfg.clone();
         assert_eq!(cloned, cfg);
-        assert_eq!(cloned.class.as_deref(), Some("com.example.Valid"));
-        assert_eq!(cloned.x11_instance_name.as_deref(), Some("roastty"));
+        assert_eq!(cloned.class.as_deref(), Some("bad\0class"));
+        assert_eq!(cloned.x11_instance_name.as_deref(), Some("bad\0instance"));
     }
 
     #[test]
@@ -20902,10 +28184,9 @@ mod tests {
             cfg.set("window-title-font-family", None),
             Err(ConfigSetError::ValueRequired)
         );
-        assert_eq!(
-            cfg.set("window-title-font-family", Some("bad\0font")),
-            Err(ConfigSetError::InvalidValue)
-        );
+        cfg.set("window-title-font-family", Some("bad\0font"))
+            .unwrap();
+        assert_eq!(cfg.window_title_font_family.as_deref(), Some("bad\0font"));
 
         let diagnostics = cfg.load_str(
             "window-vsync = false\n\
@@ -20915,22 +28196,15 @@ mod tests {
              tab-inherit-working-directory = false\n",
         );
         assert!(!cfg.window_vsync);
-        assert_eq!(cfg.window_title_font_family.as_deref(), Some("System Font"));
+        assert_eq!(cfg.window_title_font_family.as_deref(), Some("bad\0font"));
         assert!(!cfg.tab_inherit_working_directory);
         assert_eq!(
             diagnostics,
-            vec![
-                ConfigDiagnostic {
-                    line: 2,
-                    key: "window-vsync".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-                ConfigDiagnostic {
-                    line: 4,
-                    key: "window-title-font-family".to_string(),
-                    error: ConfigSetError::InvalidValue,
-                },
-            ]
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "window-vsync".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
         );
 
         let cloned = cfg.clone();
@@ -20938,7 +28212,7 @@ mod tests {
         assert!(!cloned.window_vsync);
         assert_eq!(
             cloned.window_title_font_family.as_deref(),
-            Some("System Font")
+            Some("bad\0font")
         );
         assert!(!cloned.tab_inherit_working_directory);
     }
@@ -21953,6 +29227,113 @@ mod tests {
     }
 
     #[test]
+    fn enum_config_parser_family_oracle() {
+        fn config_line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .unwrap()
+                .to_string()
+        }
+
+        let default = Config::default();
+        let mut cfg = Config::default();
+
+        cfg.set("copy-on-select", Some("clipboard")).unwrap();
+        assert_eq!(cfg.copy_on_select, CopyOnSelect::Clipboard);
+        assert_eq!(
+            config_line(&cfg, "copy-on-select"),
+            "copy-on-select = clipboard"
+        );
+        assert_eq!(
+            cfg.set("copy-on-select", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        for value in ["1", "TRUE", "clipboard ", "copy_on_select"] {
+            assert_eq!(
+                cfg.set("copy-on-select", Some(value)),
+                Err(ConfigSetError::InvalidValue),
+                "copy-on-select rejects {value:?}"
+            );
+        }
+        cfg.set("copy-on-select", Some("")).unwrap();
+        assert_eq!(cfg.copy_on_select, default.copy_on_select);
+        assert_eq!(
+            config_line(&cfg, "copy-on-select"),
+            config_line(&default, "copy-on-select")
+        );
+
+        cfg.set("auto-update", Some("check")).unwrap();
+        assert_eq!(cfg.auto_update, Some(AutoUpdate::Check));
+        assert_eq!(
+            cfg.set("auto-update", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+        assert_eq!(
+            cfg.set("auto-update", Some("always")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("auto-update", Some("")).unwrap();
+        assert_eq!(cfg.auto_update, default.auto_update);
+
+        cfg.set("auto-update-channel", Some("stable")).unwrap();
+        assert_eq!(cfg.auto_update_channel, Some(ReleaseChannel::Stable));
+        assert_eq!(
+            cfg.set("auto-update-channel", Some("nightly")),
+            Err(ConfigSetError::InvalidValue)
+        );
+        cfg.set("auto-update-channel", Some("")).unwrap();
+        assert_eq!(cfg.auto_update_channel, default.auto_update_channel);
+
+        cfg.set("macos-dock-drop-behavior", Some("window")).unwrap();
+        assert_eq!(
+            cfg.macos_dock_drop_behavior,
+            MacOSDockDropBehavior::NewWindow
+        );
+        assert_eq!(
+            config_line(&cfg, "macos-dock-drop-behavior"),
+            "macos-dock-drop-behavior = new-window"
+        );
+
+        cfg.set("gtk-single-instance", Some("desktop")).unwrap();
+        assert_eq!(cfg.gtk_single_instance, GtkSingleInstance::Detect);
+        assert_eq!(
+            config_line(&cfg, "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+
+        cfg.set("gtk-tabs-location", Some("bottom")).unwrap();
+        assert_eq!(cfg.gtk_tabs_location, GtkTabsLocation::Bottom);
+        cfg.window_show_tab_bar = WindowShowTabBar::Auto;
+        cfg.set("gtk-tabs-location", Some("hidden")).unwrap();
+        assert_eq!(cfg.gtk_tabs_location, GtkTabsLocation::Bottom);
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Never);
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str(
+            "copy-on-select = clipboard\ncopy-on-select = nope\nauto-update = check\nauto-update = always\n",
+        );
+        assert_eq!(cfg.copy_on_select, CopyOnSelect::Clipboard);
+        assert_eq!(cfg.auto_update, Some(AutoUpdate::Check));
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 2,
+                    key: "copy-on-select".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+                ConfigDiagnostic {
+                    line: 4,
+                    key: "auto-update".to_string(),
+                    error: ConfigSetError::InvalidValue,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn packed_flags_parse_cli() {
         // Standalone bools set every flag.
         assert_eq!(
@@ -22119,6 +29500,188 @@ mod tests {
         ));
         let rendered = out.trim_end().split(" = ").nth(1).unwrap().to_string();
         assert_eq!(ShellIntegrationFeatures::parse_cli(&rendered), Ok(original));
+    }
+
+    #[test]
+    fn packed_flags_config_parser_family_oracle() {
+        fn config_line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        }
+
+        for value in ["true", "1", "t", "T"] {
+            assert_eq!(
+                ScrollToBottom::parse_cli(value),
+                Ok(ScrollToBottom {
+                    keystroke: true,
+                    output: true,
+                })
+            );
+        }
+        for value in ["false", "0", "f", "F"] {
+            assert_eq!(
+                ScrollToBottom::parse_cli(value),
+                Ok(ScrollToBottom {
+                    keystroke: false,
+                    output: false,
+                })
+            );
+        }
+
+        assert_eq!(
+            BellFeatures::parse_cli("system,audio,no-title"),
+            Ok(BellFeatures {
+                system: true,
+                audio: true,
+                attention: true,
+                title: false,
+                border: false,
+            })
+        );
+        assert_eq!(
+            AppNotifications::parse_cli("no-clipboard-copy,config-reload"),
+            Ok(AppNotifications {
+                clipboard_copy: false,
+                config_reload: true,
+            })
+        );
+        assert_eq!(
+            FontShapingBreak::parse_cli("no-cursor"),
+            Ok(FontShapingBreak { cursor: false })
+        );
+        assert_eq!(
+            FontSyntheticStyle::parse_cli("no-bold-italic,no-italic,bold"),
+            Ok(FontSyntheticStyle {
+                bold: true,
+                italic: false,
+                bold_italic: false,
+            })
+        );
+        assert_eq!(
+            FreetypeLoadFlags::parse_cli("no-hinting,force-autohint,no-light"),
+            Ok(FreetypeLoadFlags {
+                hinting: false,
+                force_autohint: true,
+                monochrome: false,
+                autohint: true,
+                light: false,
+            })
+        );
+        assert_eq!(
+            NotifyOnCommandFinishAction::parse_cli("no-bell,notify"),
+            Ok(NotifyOnCommandFinishAction {
+                bell: false,
+                notify: true,
+            })
+        );
+        assert_eq!(
+            ScrollToBottom::parse_cli(" output , no-keystroke "),
+            Ok(ScrollToBottom {
+                keystroke: false,
+                output: true,
+            })
+        );
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("ssh-env,ssh-terminfo,no-title"),
+            Ok(ShellIntegrationFeatures {
+                cursor: true,
+                sudo: false,
+                title: false,
+                ssh_env: true,
+                ssh_terminfo: true,
+                path: true,
+            })
+        );
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("navigation"),
+            Ok(SplitPreserveZoom { navigation: true })
+        );
+
+        assert_eq!(
+            ScrollToBottom::parse_cli("output,no-output,output"),
+            Ok(ScrollToBottom {
+                keystroke: true,
+                output: true,
+            })
+        );
+
+        for value in ["", ",", "output,", "nope", "TRUE", "true\n", "output\n"] {
+            assert_eq!(
+                ScrollToBottom::parse_cli(value),
+                Err(FlagsParseError::InvalidValue),
+                "ScrollToBottom rejects {value:?}"
+            );
+        }
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("ssh_env"),
+            Err(FlagsParseError::InvalidValue)
+        );
+        assert_eq!(
+            FreetypeLoadFlags::parse_cli("force_autohint"),
+            Err(FlagsParseError::InvalidValue)
+        );
+
+        let default = Config::default();
+        for key in [
+            "app-notifications",
+            "bell-features",
+            "font-shaping-break",
+            "font-synthetic-style",
+            "freetype-load-flags",
+            "notify-on-command-finish-action",
+            "scroll-to-bottom",
+            "shell-integration-features",
+            "split-preserve-zoom",
+        ] {
+            let mut cfg = Config::default();
+            assert_eq!(cfg.set(key, None), Err(ConfigSetError::ValueRequired));
+            cfg.set(key, Some("true")).unwrap();
+            cfg.set(key, Some("")).unwrap();
+            assert_eq!(
+                config_line(&cfg, key),
+                config_line(&default, key),
+                "{key} raw empty value resets to the default"
+            );
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("shell-integration-features", Some("no-cursor,sudo,ssh-env"))
+            .unwrap();
+        assert_eq!(
+            config_line(&cfg, "shell-integration-features"),
+            "shell-integration-features = no-cursor,sudo,title,ssh-env,no-ssh-terminfo,path"
+        );
+        cfg.set(
+            "freetype-load-flags",
+            Some("no-hinting,force-autohint,no-light"),
+        )
+        .unwrap();
+        assert_eq!(
+            config_line(&cfg, "freetype-load-flags"),
+            "freetype-load-flags = no-hinting,force-autohint,no-monochrome,autohint,no-light"
+        );
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str("scroll-to-bottom = output\nscroll-to-bottom = nope\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "scroll-to-bottom".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(
+            cfg.scroll_to_bottom,
+            ScrollToBottom {
+                keystroke: true,
+                output: true,
+            }
+        );
     }
 
     #[test]

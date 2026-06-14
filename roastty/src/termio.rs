@@ -247,7 +247,15 @@ impl Termio {
             bytes_read = read.bytes_read;
             eof = read.eof;
             if !self.output_buf.is_empty() {
-                self.terminal.next_slice(&self.output_buf)?;
+                match self.terminal.next_slice(&self.output_buf) {
+                    Ok(()) => {}
+                    Err(TerminalStreamError::ManagedCellUnsupported) => {
+                        crate::append_ui_key_trace(
+                            "rust termio_pump ignored managed-cell render error",
+                        );
+                    }
+                    Err(err) => return Err(err.into()),
+                }
                 self.collect_terminal_response();
             }
         } else {
@@ -362,7 +370,16 @@ impl TermioWorker {
         pump_timeout_ms: i32,
         max_read_bytes: usize,
     ) -> Result<Self, TermioWorkerError> {
+        crate::append_ui_key_trace(format!(
+            "rust termio_worker_spawn begin pump_timeout_ms={} max_read_bytes={} has_callbacks={}",
+            pump_timeout_ms,
+            max_read_bytes,
+            termio.terminal.has_effect_callbacks()
+        ));
         if termio.terminal.has_effect_callbacks() {
+            crate::append_ui_key_trace(
+                "rust termio_worker_spawn result=error reason=terminal-callbacks-installed",
+            );
             return Err(TermioWorkerError::TerminalCallbacksInstalled);
         }
 
@@ -372,6 +389,7 @@ impl TermioWorker {
         let thread_termio = Arc::clone(&termio);
 
         let join = thread::spawn(move || {
+            crate::append_ui_key_trace("rust termio_worker_thread begin");
             run_termio_worker(
                 thread_termio,
                 command_rx,
@@ -379,8 +397,10 @@ impl TermioWorker {
                 pump_timeout_ms,
                 max_read_bytes,
             );
+            crate::append_ui_key_trace("rust termio_worker_thread end");
         });
 
+        crate::append_ui_key_trace("rust termio_worker_spawn result=success");
         Ok(Self {
             termio,
             commands: command_tx,
@@ -444,7 +464,10 @@ fn run_termio_worker(
     loop {
         match drain_worker_commands(&termio, &commands, &events) {
             WorkerCommandState::Continue => {}
-            WorkerCommandState::Stop => break,
+            WorkerCommandState::Stop => {
+                crate::append_ui_key_trace("rust termio_worker_loop exit reason=command-stop");
+                break;
+            }
         }
 
         let pump = {
@@ -472,13 +495,27 @@ fn run_termio_worker(
                     || pump.eof
                     || pump.child_exited;
                 if should_emit && events.send(TermioWorkerEvent::Pump(pump)).is_err() {
+                    crate::append_ui_key_trace(
+                        "rust termio_worker_loop exit reason=event-receiver-disconnected",
+                    );
                     break;
                 }
                 if pump.eof || pump.child_exited {
+                    crate::append_ui_key_trace(format!(
+                        "rust termio_worker_loop exit reason=pump-terminal eof={} child_exited={} bytes_read={} bytes_written={} pending_write={}",
+                        pump.eof,
+                        pump.child_exited,
+                        pump.bytes_read,
+                        pump.bytes_written,
+                        pump.pending_write_bytes
+                    ));
                     break;
                 }
             }
             Err(err) => {
+                crate::append_ui_key_trace(format!(
+                    "rust termio_worker_loop exit reason=pump-error error={err:?}"
+                ));
                 let _ = events.send(TermioWorkerEvent::Error(format!("{err:?}")));
                 break;
             }
@@ -499,22 +536,39 @@ fn drain_worker_commands(
     loop {
         match commands.try_recv() {
             Ok(TermioWorkerCommand::Write(bytes)) => {
+                crate::append_ui_key_trace(format!(
+                    "rust termio_worker_command write len={}",
+                    bytes.len()
+                ));
                 let mut termio = termio.lock().expect("termio worker mutex poisoned");
                 termio.queue_write(&bytes);
             }
             Ok(TermioWorkerCommand::ResizePty(size)) => {
+                crate::append_ui_key_trace(format!(
+                    "rust termio_worker_command resize rows={} cols={} width_px={} height_px={}",
+                    size.rows, size.cols, size.width_px, size.height_px
+                ));
                 let result = {
                     let termio = termio.lock().expect("termio worker mutex poisoned");
                     termio.resize_pty(size)
                 };
                 if let Err(err) = result {
+                    crate::append_ui_key_trace(format!(
+                        "rust termio_worker_command resize-error error={err:?}"
+                    ));
                     let _ = events.send(TermioWorkerEvent::Error(format!("{err:?}")));
                     return WorkerCommandState::Stop;
                 }
             }
-            Ok(TermioWorkerCommand::Shutdown) => return WorkerCommandState::Stop,
+            Ok(TermioWorkerCommand::Shutdown) => {
+                crate::append_ui_key_trace("rust termio_worker_command shutdown");
+                return WorkerCommandState::Stop;
+            }
             Err(mpsc::TryRecvError::Empty) => return WorkerCommandState::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => return WorkerCommandState::Stop,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                crate::append_ui_key_trace("rust termio_worker_command disconnected");
+                return WorkerCommandState::Stop;
+            }
         }
     }
 }

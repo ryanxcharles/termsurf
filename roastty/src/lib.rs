@@ -3817,10 +3817,25 @@ impl Surface {
     }
 
     fn start_termio(&mut self) -> c_int {
+        append_ui_key_trace(format!(
+            "rust surface_start_termio begin app_null={} has_worker={} initial_surface={} process_exited={} size={}x{} rows={} cols={}",
+            self.app.is_null(),
+            self.termio_worker.is_some(),
+            self.initial_surface,
+            self.process_exited,
+            self.size.width_px,
+            self.size.height_px,
+            self.size.rows,
+            self.size.columns
+        ));
         if self.app.is_null() {
+            append_ui_key_trace("rust surface_start_termio result=invalid reason=app-null");
             return ROASTTY_INVALID_VALUE;
         }
         if self.termio_worker.is_some() {
+            append_ui_key_trace(
+                "rust surface_start_termio result=success reason=already-has-worker",
+            );
             return ROASTTY_SUCCESS;
         }
 
@@ -3841,6 +3856,21 @@ impl Surface {
         } else {
             None
         };
+        append_ui_key_trace(format!(
+            "rust surface_start_termio command={} initial_command={} cwd={} env_count={} term={}",
+            command.unwrap_or("<default-shell>"),
+            initial_command
+                .map(|command| match command {
+                    config::Command::Shell(_) => "shell",
+                    config::Command::Direct(_) => "direct",
+                })
+                .unwrap_or("none"),
+            cwd.as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            self.env_vars.len(),
+            config.term
+        ));
 
         let options = termio::TermioSpawnOptions {
             cwd,
@@ -3886,15 +3916,28 @@ impl Surface {
             ),
         };
         let Ok(termio) = termio else {
+            append_ui_key_trace(
+                "rust surface_start_termio result=invalid reason=termio-spawn-failed",
+            );
             return ROASTTY_INVALID_VALUE;
         };
 
         let worker = termio::TermioWorker::spawn(termio, 10, 4096);
         let Ok(worker) = worker else {
+            append_ui_key_trace(
+                "rust surface_start_termio result=invalid reason=worker-spawn-failed",
+            );
             return ROASTTY_INVALID_VALUE;
         };
         if let Some(initial_input) = &self.initial_input {
+            append_ui_key_trace(format!(
+                "rust surface_start_termio initial_input_len={}",
+                initial_input.len()
+            ));
             if worker.queue_write(initial_input).is_err() {
+                append_ui_key_trace(
+                    "rust surface_start_termio result=invalid reason=initial-input-disconnected",
+                );
                 return ROASTTY_INVALID_VALUE;
             }
         }
@@ -3907,6 +3950,7 @@ impl Surface {
         // with a live terminal. (Continuous live updates need the slice-2 CVDisplayLink driver.)
         self.present_live();
         self.last_termio_error = None;
+        append_ui_key_trace("rust surface_start_termio result=success reason=worker-assigned");
         ROASTTY_SUCCESS
     }
 
@@ -6741,19 +6785,34 @@ impl Surface {
 
     fn write_encoded_key_event(&mut self, event: &key::KeyEvent) -> bool {
         let encoded = key_encode::encode(event, self.key_encode_options());
+        append_ui_key_trace(format!(
+            "rust write_encoded_key_event encoded_len={} encoded_hex={} utf8_hex={} readonly={} has_worker={}",
+            encoded.len(),
+            trace_hex(&encoded),
+            trace_hex(&event.utf8),
+            self.readonly,
+            self.termio_worker.is_some()
+        ));
         if encoded.is_empty() {
+            append_ui_key_trace("rust write_encoded_key_event result=false reason=empty-encoded");
             return false;
         }
         if self.readonly {
+            append_ui_key_trace("rust write_encoded_key_event result=true reason=readonly");
             return true;
         }
         let Some(worker) = self.termio_worker.as_ref() else {
+            append_ui_key_trace("rust write_encoded_key_event result=false reason=no-worker");
             return false;
         };
         if let Err(err) = worker.queue_write(&encoded) {
+            append_ui_key_trace(format!(
+                "rust write_encoded_key_event result=false reason=queue-write-error error={err:?}"
+            ));
             self.apply_termio_event(termio::TermioWorkerEvent::Error(format!("{err:?}")));
             return false;
         }
+        append_ui_key_trace("rust write_encoded_key_event result=true reason=queued");
         if event.key == key::Key::Escape
             || (self.selection_clear_on_typing && !key_is_modifier(event.key))
         {
@@ -6829,6 +6888,13 @@ impl Surface {
             }
         }
 
+        if !events.is_empty() {
+            append_ui_key_trace(format!(
+                "rust surface_drain_termio_events count={}",
+                events.len()
+            ));
+        }
+
         for event in events {
             self.apply_termio_event(event);
         }
@@ -6837,6 +6903,14 @@ impl Surface {
     fn apply_termio_event(&mut self, event: termio::TermioWorkerEvent) {
         match event {
             termio::TermioWorkerEvent::Pump(pump) => {
+                append_ui_key_trace(format!(
+                    "rust surface_apply_termio_event pump bytes_read={} bytes_written={} pending_write={} eof={} child_exited={}",
+                    pump.bytes_read,
+                    pump.bytes_written,
+                    pump.pending_write_bytes,
+                    pump.eof,
+                    pump.child_exited
+                ));
                 if pump.bytes_read > 0 {
                     self.reset_cursor_blink_for_output(std::time::Instant::now());
                 }
@@ -6853,11 +6927,13 @@ impl Surface {
                 }
             }
             termio::TermioWorkerEvent::Error(err) => {
+                append_ui_key_trace(format!("rust surface_apply_termio_event error={err}"));
                 self.last_termio_error = Some(err);
                 self.process_exited = true;
                 self.dirty = true;
             }
             termio::TermioWorkerEvent::Clipboard(event) => {
+                append_ui_key_trace("rust surface_apply_termio_event clipboard");
                 self.handle_terminal_clipboard_event(event);
             }
         }
@@ -9192,12 +9268,30 @@ fn parse_config_keybind(value: &[u8]) -> Result<ConfigKeybind, ConfigKeybindPars
 fn parse_config_keybind_binding(
     value: &[u8],
 ) -> Result<ParsedConfigKeybindBinding, ConfigKeybindParseError> {
-    let separator = value
+    let mut saw_separator = false;
+    let mut last_error = ConfigKeybindParseError::MissingSeparator;
+    for separator in value
         .iter()
-        .position(|byte| *byte == b'=')
-        .ok_or(ConfigKeybindParseError::MissingSeparator)?;
-    let trigger = &value[..separator];
-    let action = &value[separator + 1..];
+        .enumerate()
+        .filter_map(|(index, byte)| (*byte == b'=').then_some(index))
+    {
+        saw_separator = true;
+        match parse_config_keybind_binding_parts(&value[..separator], &value[separator + 1..]) {
+            Ok(binding) => return Ok(binding),
+            Err(error) => last_error = error,
+        }
+    }
+    if saw_separator {
+        Err(last_error)
+    } else {
+        Err(ConfigKeybindParseError::MissingSeparator)
+    }
+}
+
+fn parse_config_keybind_binding_parts(
+    trigger: &[u8],
+    action: &[u8],
+) -> Result<ParsedConfigKeybindBinding, ConfigKeybindParseError> {
     if trigger.is_empty() {
         return Err(ConfigKeybindParseError::MissingTrigger);
     }
@@ -9268,6 +9362,31 @@ fn parse_config_keybind_flags(trigger: &[u8]) -> Result<(u8, usize), ConfigKeybi
 }
 
 fn parse_config_keybind_trigger(trigger: &[u8]) -> Option<RoasttyInputTrigger> {
+    if trigger == b"+" {
+        return Some(unicode_trigger(b'+' as u32, ROASTTY_MODS_NONE));
+    }
+    if trigger.ends_with(b"+") {
+        if trigger.len() < 2 || trigger[trigger.len() - 2] != b'+' {
+            return None;
+        }
+        let mut mods = ROASTTY_MODS_NONE;
+        let prefix = &trigger[..trigger.len() - 2];
+        if prefix.is_empty() {
+            return None;
+        }
+        for part in prefix.split(|byte| *byte == b'+') {
+            if part.is_empty() {
+                return None;
+            }
+            let modifier = config_keybind_modifier(part)?;
+            if mods & modifier != 0 {
+                return None;
+            }
+            mods |= modifier;
+        }
+        return Some(unicode_trigger(b'+' as u32, mods));
+    }
+
     let mut mods = ROASTTY_MODS_NONE;
     let mut key = None;
     for part in trigger.split(|byte| *byte == b'+') {
@@ -9436,14 +9555,14 @@ const fn default_unicode_entry(
 const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
     default_unicode_entry(
         b',' as u32,
-        ROASTTY_MODS_SUPER,
-        b"open_config",
+        ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+        b"reload_config",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
         b',' as u32,
-        ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
-        b"reload_config",
+        ROASTTY_MODS_SUPER,
+        b"open_config",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_physical_entry(
@@ -9456,12 +9575,6 @@ const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
         key::Key::Paste,
         ROASTTY_MODS_NONE,
         b"paste_from_clipboard",
-        ROASTTY_KEYBIND_FLAGS_DEFAULT,
-    ),
-    default_physical_entry(
-        key::Key::Insert,
-        ROASTTY_MODS_SHIFT,
-        b"paste_from_selection",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
@@ -9503,19 +9616,19 @@ const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
     default_unicode_entry(
         b'j' as u32,
         ROASTTY_MODS_SHIFT | ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
-        b"write_screen_file:copy",
+        b"write_screen_file:copy,plain",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
         b'j' as u32,
         ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
-        b"write_screen_file:paste",
+        b"write_screen_file:paste,plain",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
         b'j' as u32,
         ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
-        b"write_screen_file:open",
+        b"write_screen_file:open,plain",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_physical_entry(
@@ -9578,10 +9691,22 @@ const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
         b"next_tab",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
+    default_physical_entry(
+        key::Key::Digit1,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:1",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
     default_unicode_entry(
         b'1' as u32,
         ROASTTY_MODS_SUPER,
         b"goto_tab:1",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
+    default_physical_entry(
+        key::Key::Digit2,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:2",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
@@ -9590,10 +9715,22 @@ const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
         b"goto_tab:2",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
+    default_physical_entry(
+        key::Key::Digit3,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:3",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
     default_unicode_entry(
         b'3' as u32,
         ROASTTY_MODS_SUPER,
         b"goto_tab:3",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
+    default_physical_entry(
+        key::Key::Digit4,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:4",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
@@ -9602,10 +9739,22 @@ const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
         b"goto_tab:4",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
+    default_physical_entry(
+        key::Key::Digit5,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:5",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
     default_unicode_entry(
         b'5' as u32,
         ROASTTY_MODS_SUPER,
         b"goto_tab:5",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
+    default_physical_entry(
+        key::Key::Digit6,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:6",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
@@ -9614,10 +9763,22 @@ const DEFAULT_BINDINGS: &[DefaultBindingEntry] = &[
         b"goto_tab:6",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
+    default_physical_entry(
+        key::Key::Digit7,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:7",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
     default_unicode_entry(
         b'7' as u32,
         ROASTTY_MODS_SUPER,
         b"goto_tab:7",
+        ROASTTY_KEYBIND_FLAGS_DEFAULT,
+    ),
+    default_physical_entry(
+        key::Key::Digit8,
+        ROASTTY_MODS_SUPER,
+        b"goto_tab:8",
         ROASTTY_KEYBIND_FLAGS_DEFAULT,
     ),
     default_unicode_entry(
@@ -12945,6 +13106,11 @@ pub extern "C" fn roastty_info() -> RoasttyInfo {
         version: VERSION.as_ptr().cast::<c_char>(),
         version_len: VERSION.len() - 1,
     }
+}
+
+#[no_mangle]
+pub extern "C" fn roastty_translate(msgid: *const c_char) -> *const c_char {
+    msgid
 }
 
 fn version_component(index: usize) -> usize {
@@ -17988,15 +18154,68 @@ fn input_key_to_event(k: &RoasttyInputKey) -> KeyEvent {
     KeyEvent { event: ev }
 }
 
+fn trace_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn trace_input_text_hex(event: &RoasttyInputKey) -> String {
+    if event.text.is_null() {
+        return String::new();
+    }
+
+    trace_hex(unsafe { CStr::from_ptr(event.text) }.to_bytes())
+}
+
+pub(crate) fn append_ui_key_trace(line: impl AsRef<str>) {
+    let Some(path) = std::env::var_os("ROASTTY_UI_KEY_TRACE_PATH") else {
+        return;
+    };
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+
+    let _ = writeln!(file, "{}", line.as_ref());
+}
+
 /// Embedded by-value `surface_key` (the app's path) — supersedes the opaque
 /// `*_handle` variant (kept for the existing tests).
 #[no_mangle]
 pub extern "C" fn roastty_surface_key(surface: RoasttySurface, event: RoasttyInputKey) -> bool {
     let Some(surface) = surface_from_handle(surface) else {
+        append_ui_key_trace(format!(
+            "rust roastty_surface_key result=false reason=no-surface action={} keycode={} mods={} consumed_mods={} composing={} text_hex={}",
+            event.action,
+            event.keycode,
+            event.mods,
+            event.consumed_mods,
+            event.composing,
+            trace_input_text_hex(&event)
+        ));
         return false;
     };
     let ev = input_key_to_event(&event);
-    surface.key(&ev)
+    let result = surface.key(&ev);
+    append_ui_key_trace(format!(
+        "rust roastty_surface_key result={} action={} keycode={} mods={} consumed_mods={} composing={} text_hex={} utf8_hex={}",
+        result,
+        event.action,
+        event.keycode,
+        event.mods,
+        event.consumed_mods,
+        event.composing,
+        trace_input_text_hex(&event),
+        trace_hex(&ev.event.utf8)
+    ));
+    result
 }
 
 /// Embedded by-value `app_key`. Handles configured global keybinds, direct
@@ -18022,6 +18241,14 @@ pub extern "C" fn roastty_app_keyboard_changed(app: RoasttyApp) {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn roastty_app_open_config(app: RoasttyApp) {
+    let Some(app_ref) = app_from_handle(app) else {
+        return;
+    };
+    let _ = app_ref.perform_app_runtime_action_result(app, ROASTTY_ACTION_OPEN_CONFIG, [0usize; 8]);
+}
+
 #[cfg(test)]
 fn set_app_keyboard_layout_for_test(app: RoasttyApp, layout: input_keyboard::Layout) {
     if let Some(app) = app_from_handle(app) {
@@ -18044,6 +18271,14 @@ pub extern "C" fn roastty_set_window_background_blur(app: RoasttyApp, window: *m
     let _ = (app, window);
 }
 
+/// Roastty does not currently ship Ghostty's benchmark CLI. Keep the copied
+/// macOS benchmark test linkable while reporting unsupported actions honestly.
+#[no_mangle]
+pub extern "C" fn roastty_benchmark_cli(action_name: *const c_char, args: *const c_char) -> bool {
+    let _ = (action_name, args);
+    false
+}
+
 /// Initialize the inspector's Metal renderer. Returns `false` — the inspector's
 /// live Metal path is not yet wired (a documented Phase-C item). The app does not
 /// gate on the result, so the inspector simply renders nothing.
@@ -18064,6 +18299,13 @@ pub extern "C" fn roastty_inspector_metal_render(
     descriptor: *mut c_void,
 ) {
     let _ = (inspector, command_buffer, descriptor);
+}
+
+/// Shut down the inspector's Metal renderer. The current Roastty inspector has
+/// no Metal backend state, so a valid handle is already shut down.
+#[no_mangle]
+pub extern "C" fn roastty_inspector_metal_shutdown(inspector: RoasttyInspector) -> bool {
+    inspector_from_handle(inspector).is_some()
 }
 
 #[no_mangle]
@@ -21965,6 +22207,39 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_keybind_defaults_preserve_equal_and_plus_keys() {
+        let equal = parse_config_keybind(b"super+==increase_font_size:1").unwrap();
+        assert_eq!(equal.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { equal.trigger.key.unicode }, b'=' as u32);
+        assert_eq!(equal.trigger.mods, ROASTTY_MODS_SUPER);
+        assert_eq!(equal.first_action(), b"increase_font_size:1");
+
+        let plus = parse_config_keybind(b"super++=increase_font_size:1").unwrap();
+        assert_eq!(plus.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { plus.trigger.key.unicode }, b'+' as u32);
+        assert_eq!(plus.trigger.mods, ROASTTY_MODS_SUPER);
+        assert_eq!(plus.first_action(), b"increase_font_size:1");
+
+        let ctrl_equal = parse_config_keybind(b"super+ctrl+==equalize_splits").unwrap();
+        assert_eq!(ctrl_equal.trigger.tag, ROASTTY_TRIGGER_UNICODE);
+        assert_eq!(unsafe { ctrl_equal.trigger.key.unicode }, b'=' as u32);
+        assert_eq!(
+            ctrl_equal.trigger.mods,
+            ROASTTY_MODS_SUPER | ROASTTY_MODS_CTRL
+        );
+        assert_eq!(ctrl_equal.first_action(), b"equalize_splits");
+
+        assert_eq!(
+            parse_config_keybind(b"super+=increase_font_size:1").err(),
+            Some(ConfigKeybindParseError::InvalidTrigger)
+        );
+        assert_eq!(
+            parse_config_keybind(b"++=ignore").err(),
+            Some(ConfigKeybindParseError::InvalidTrigger)
+        );
+    }
+
+    #[test]
     fn parse_config_keybind_key_table_rejects_invalid_trigger() {
         assert_eq!(
             parse_config_keybind_entry(b"foo/a+b=quit").err().unwrap(),
@@ -23179,14 +23454,14 @@ mod tests {
 
         u!(
             b',',
-            ROASTTY_MODS_SUPER,
-            b"open_config",
+            ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
+            b"reload_config",
             ROASTTY_KEYBIND_FLAGS_DEFAULT
         );
         u!(
             b',',
-            ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
-            b"reload_config",
+            ROASTTY_MODS_SUPER,
+            b"open_config",
             ROASTTY_KEYBIND_FLAGS_DEFAULT
         );
         p!(
@@ -23199,12 +23474,6 @@ mod tests {
             key::Key::Paste,
             ROASTTY_MODS_NONE,
             b"paste_from_clipboard",
-            ROASTTY_KEYBIND_FLAGS_DEFAULT
-        );
-        p!(
-            key::Key::Insert,
-            ROASTTY_MODS_SHIFT,
-            b"paste_from_selection",
             ROASTTY_KEYBIND_FLAGS_DEFAULT
         );
         u!(
@@ -23246,19 +23515,19 @@ mod tests {
         u!(
             b'j',
             ROASTTY_MODS_SHIFT | ROASTTY_MODS_CTRL | ROASTTY_MODS_SUPER,
-            b"write_screen_file:copy",
+            b"write_screen_file:copy,plain",
             ROASTTY_KEYBIND_FLAGS_DEFAULT
         );
         u!(
             b'j',
             ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER,
-            b"write_screen_file:paste",
+            b"write_screen_file:paste,plain",
             ROASTTY_KEYBIND_FLAGS_DEFAULT
         );
         u!(
             b'j',
             ROASTTY_MODS_SHIFT | ROASTTY_MODS_ALT | ROASTTY_MODS_SUPER,
-            b"write_screen_file:open",
+            b"write_screen_file:open,plain",
             ROASTTY_KEYBIND_FLAGS_DEFAULT
         );
 
@@ -23295,6 +23564,23 @@ mod tests {
         for digit in b'1'..=b'8' {
             let action = format!("goto_tab:{}", digit - b'0').into_bytes();
             let action: &'static [u8] = Box::leak(action.into_boxed_slice());
+            let physical = match digit {
+                b'1' => key::Key::Digit1,
+                b'2' => key::Key::Digit2,
+                b'3' => key::Key::Digit3,
+                b'4' => key::Key::Digit4,
+                b'5' => key::Key::Digit5,
+                b'6' => key::Key::Digit6,
+                b'7' => key::Key::Digit7,
+                b'8' => key::Key::Digit8,
+                _ => unreachable!(),
+            };
+            expected.push(default_physical_entry(
+                physical,
+                ROASTTY_MODS_SUPER,
+                action,
+                ROASTTY_KEYBIND_FLAGS_DEFAULT,
+            ));
             expected.push(default_unicode_entry(
                 digit as u32,
                 ROASTTY_MODS_SUPER,

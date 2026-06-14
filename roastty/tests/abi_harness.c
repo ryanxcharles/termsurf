@@ -4321,6 +4321,11 @@ int main(int argc, char **argv) {
   roastty_info_s info = roastty_info();
   assert(info.version != NULL);
   assert(info.version_len > 0);
+  const char translate_input[] = "Roastty ABI";
+  const char *translated = roastty_translate(translate_input);
+  assert(translated == translate_input);
+  assert(roastty_translate(NULL) == NULL);
+  assert(!roastty_benchmark_cli("throughput", ""));
 
   roastty_config_t config = roastty_config_new();
   assert(config != NULL);
@@ -4516,6 +4521,14 @@ int main(int argc, char **argv) {
   assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
   assert(trigger.key.unicode == ',');
   assert(trigger.mods == (ROASTTY_MODS_SHIFT | ROASTTY_MODS_SUPER));
+  action_cb_count = 0;
+  action_cb_result = true;
+  roastty_app_open_config(app);
+  assert(action_cb_count == 1);
+  assert(action_last_app == app);
+  assert(action_last_target.tag == ROASTTY_TARGET_APP);
+  assert(action_last_target.target.surface == NULL);
+  assert(action_last_action.tag == ROASTTY_ACTION_OPEN_CONFIG);
   trigger = roastty_config_trigger(config, "copy_to_clipboard", 17);
   assert(trigger.tag == ROASTTY_TRIGGER_UNICODE);
   assert(trigger.key.unicode == 'c');
@@ -5757,6 +5770,10 @@ int main(int argc, char **argv) {
   roastty_inspector_t inspector = roastty_surface_inspector(surface);
   assert(inspector != NULL);
   assert(roastty_surface_inspector(surface) == inspector);
+  assert(!roastty_inspector_metal_init(inspector, NULL));
+  roastty_inspector_metal_render(inspector, NULL, NULL);
+  assert(roastty_inspector_metal_shutdown(inspector));
+  assert(!roastty_inspector_metal_shutdown(NULL));
   roastty_inspector_set_focus(inspector, true);
   roastty_inspector_set_content_scale(inspector, 2.0, 2.0);
   roastty_inspector_set_size(inspector, 640, 480);

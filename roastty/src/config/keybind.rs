@@ -120,7 +120,6 @@ impl Keybinds {
                 && table.sequences.bindings.is_empty()
                 && table.sequences.leaders.is_empty()
             {
-                formatter.entry_str(&format!("{table_name}/"));
                 continue;
             }
             for entry in format_set(&table.sequences, Some(&table_name)) {
@@ -143,7 +142,7 @@ impl Keybinds {
                     && table.sequences.bindings.is_empty()
                     && table.sequences.leaders.is_empty()
                 {
-                    1
+                    0
                 } else {
                     format_set(
                         &table.sequences,
@@ -372,19 +371,6 @@ fn format_binding(
     table: Option<&str>,
 ) -> Vec<String> {
     let mut trigger = String::new();
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_GLOBAL != 0 {
-        trigger.push_str("global:");
-    }
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_ALL != 0 {
-        trigger.push_str("all:");
-    }
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_CONSUMED == 0 {
-        trigger.push_str("unconsumed:");
-    }
-    if binding.flags & crate::ROASTTY_KEYBIND_FLAG_PERFORMABLE != 0 {
-        trigger.push_str("performable:");
-    }
-
     if let Some(table) = table {
         trigger.push_str(table);
         trigger.push('/');
@@ -404,7 +390,7 @@ fn format_binding(
 
     let mut entries = Vec::new();
     for (index, action) in binding.actions.iter().enumerate() {
-        let action = String::from_utf8_lossy(action);
+        let action = format_action(action);
         if index == 0 {
             entries.push(format!("{trigger}={action}"));
         } else {
@@ -414,10 +400,18 @@ fn format_binding(
     entries
 }
 
+fn format_action(action: &[u8]) -> String {
+    if matches!(action, b"previous_tab" | b"next_tab" | b"last_tab") {
+        return String::from_utf8_lossy(action).into_owned();
+    }
+    crate::canonical_config_binding_action(action)
+        .unwrap_or_else(|| String::from_utf8_lossy(action).into_owned())
+}
+
 fn format_trigger(trigger: crate::RoasttyInputTrigger) -> String {
     let mut parts = Vec::new();
-    if trigger.mods & crate::ROASTTY_MODS_SHIFT != 0 {
-        parts.push("shift".to_string());
+    if trigger.mods & crate::ROASTTY_MODS_SUPER != 0 {
+        parts.push("super".to_string());
     }
     if trigger.mods & crate::ROASTTY_MODS_CTRL != 0 {
         parts.push("ctrl".to_string());
@@ -425,8 +419,8 @@ fn format_trigger(trigger: crate::RoasttyInputTrigger) -> String {
     if trigger.mods & crate::ROASTTY_MODS_ALT != 0 {
         parts.push("alt".to_string());
     }
-    if trigger.mods & crate::ROASTTY_MODS_SUPER != 0 {
-        parts.push("super".to_string());
+    if trigger.mods & crate::ROASTTY_MODS_SHIFT != 0 {
+        parts.push("shift".to_string());
     }
     parts.push(match trigger.tag {
         crate::ROASTTY_TRIGGER_PHYSICAL => {
@@ -435,7 +429,7 @@ fn format_trigger(trigger: crate::RoasttyInputTrigger) -> String {
                 .iter()
                 .copied()
                 .find(|key| *key as i32 == raw)
-                .map_or("Unidentified".to_string(), |key| key.w3c().to_string())
+                .map_or("unidentified".to_string(), format_physical_key)
         }
         crate::ROASTTY_TRIGGER_UNICODE => {
             let codepoint = unsafe { trigger.key.unicode };
@@ -447,4 +441,8 @@ fn format_trigger(trigger: crate::RoasttyInputTrigger) -> String {
         _ => "Unidentified".to_string(),
     });
     parts.join("+")
+}
+
+fn format_physical_key(key: key::Key) -> String {
+    key.snake().to_string()
 }

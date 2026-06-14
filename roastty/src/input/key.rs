@@ -438,6 +438,10 @@ impl Key {
         KEY_INFOS[self as usize].w3c
     }
 
+    pub(crate) fn snake(self) -> &'static str {
+        KEY_INFOS[self as usize].snake
+    }
+
     pub(crate) fn from_w3c(code: &str) -> Option<Self> {
         KEY_INFOS
             .iter()
