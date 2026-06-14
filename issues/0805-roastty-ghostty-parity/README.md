@@ -563,3 +563,5 @@ remains open.
   — **Pass**
 - [Experiment 33: Selection word chars parser oracle](33-selection-word-chars-parser-oracle.md)
   — **Pass**
+- [Experiment 34: Window decoration parser oracle](34-window-decoration-parser-oracle.md)
+  — **Designed**
