@@ -366,6 +366,12 @@ experiment files until they are proven.
   `Config::set` plus `format_config` output, raw-empty resets, and local order
   while keeping `background-image`, `background-image-opacity`, and
   `background-image-repeat` outside the family.
+- **GTK enum formatter rows should include compatibility inputs without
+  expanding the family.** Experiment 81 promoted `gtk-single-instance`,
+  `gtk-tabs-location`, `gtk-toolbar-style`, and `gtk-titlebar-style` by proving
+  enum keyword output, config-level output, raw-empty resets, and compatibility
+  shims such as `desktop`, `hidden`, and `adw-toolbar-style`, while leaving GTK
+  booleans and `gtk-custom-css` out of the promoted family.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -918,4 +924,4 @@ remains open.
 - [Experiment 80: Background image enum formatter oracle](80-background-image-enum-formatter-oracle.md)
   — **Pass**
 - [Experiment 81: GTK enum formatter oracle](81-gtk-enum-formatter-oracle.md) —
-  **Designed**
+  **Pass**

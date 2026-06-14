@@ -159,3 +159,87 @@ Reviewer evidence:
 - Verification includes a focused Rust test, existing GTK/parser coverage,
   inventory regeneration with expected counts, a non-vacuous matrix assertion,
   `py_compile`, `cargo fmt --check`, Prettier, and `git diff --check`.
+
+## Result
+
+**Result:** Pass
+
+Implemented the GTK enum formatter oracle and promoted exactly the four planned
+CFG-218 rows:
+
+- `gtk-single-instance`;
+- `gtk-tabs-location`;
+- `gtk-toolbar-style`;
+- `gtk-titlebar-style`.
+
+The regenerated formatter inventory reports:
+
+- `ghostty_canonical=203`;
+- `roastty_formatter_rows=203`;
+- `missing_canonical_formatter_rows=0`;
+- `extra_formatter_rows=0`;
+- `oracle_complete=176`;
+- `audit_covered=27`;
+- `gap=0`.
+
+The matrix assertion passed and confirmed that adjacent rows `gtk-opengl-debug`,
+`gtk-titlebar`, `gtk-titlebar-hide-when-maximized`, `gtk-wide-tabs`, and
+`gtk-custom-css` were not classified as `gtk enum`.
+
+Verification run:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml`
+- `cargo test --manifest-path roastty/Cargo.toml gtk_enum_config_formatter_family_oracle`
+  — passed, 1 test.
+- `cargo test --manifest-path roastty/Cargo.toml gtk_chrome_config_parse_format_compat_reset_and_diagnose`
+  — passed, 1 test.
+- `cargo test --manifest-path roastty/Cargo.toml config_compatibility_alias_semantics`
+  — passed, 1 test.
+- `cargo test --manifest-path roastty/Cargo.toml config_gtk_single_instance_finalize`
+  — passed, 4 tests.
+- `cargo test --manifest-path roastty/Cargo.toml enum_from_keyword_round_trips_misc`
+  — passed, matching the existing
+  `config::tests::enum_from_keyword_round_trips_misc_fullscreen` test.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle` —
+  passed, 1 test.
+- Formatter inventory regeneration — passed with the expected counts above.
+- Matrix assertion — passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_formatter_inventory.py`
+  — passed, then the generated `__pycache__/` artifact was removed.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` — passed.
+- `prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/81-gtk-enum-formatter-oracle.md`
+  — passed.
+- `git diff --check` — passed.
+
+## Conclusion
+
+GTK enum formatting is now a durable CFG-218 oracle covering direct enum output,
+config-level output, raw-empty resets, local ordering, and the compatibility
+inputs that normalize into the same formatter rows. The remaining formatter gap
+is 27 `Audit covered` rows and 0 formatter-dispatch gaps; CFG-218 correctly
+remains `Gap` until those remaining rows receive focused formatter oracles.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Verdict: Approved.
+
+Findings:
+
+- No findings.
+
+Reviewer verification:
+
+- The corrected working-tree diff was reviewed, and `git status --short`
+  confirmed the result was still uncommitted during review.
+- The implementation stays within scope, promotes exactly the four GTK enum
+  rows, leaves adjacent GTK rows out of the family, keeps CFG-218 as `Gap`, and
+  updates README status and Learnings.
+- Focused GTK enum oracle test passed with 1 test.
+- Claimed related Cargo tests passed with the claimed counts.
+- Matrix assertion passed.
+- `cargo fmt --check`, `prettier --check`, and `git diff --check` passed.
+
+The reviewer did not rerun inventory regeneration or `py_compile` because those
+commands can write generated artifacts and the review was read-only.

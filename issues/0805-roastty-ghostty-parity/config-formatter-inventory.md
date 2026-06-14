@@ -8,8 +8,8 @@ for Issue 805 formatter-facet experiments.
 | Category | Count |
 | --- | ---: |
 | Canonical formatter rows | 203 |
-| Oracle complete rows | 172 |
-| Audit covered rows | 31 |
+| Oracle complete rows | 176 |
+| Audit covered rows | 27 |
 | Gap rows | 0 |
 | Intentional no-output rows | 1 |
 
@@ -25,7 +25,7 @@ for Issue 805 formatter-facet experiments.
 | color | 2 |
 | command notification | 3 |
 | command palette | 1 |
-| custom format_entry | 31 |
+| custom format_entry | 27 |
 | direct color | 6 |
 | float | 8 |
 | font repeatable string | 5 |
@@ -33,6 +33,7 @@ for Issue 805 formatter-facet experiments.
 | font shaping break | 1 |
 | font style | 5 |
 | font variation | 4 |
+| gtk enum | 4 |
 | integer | 6 |
 | key binding | 1 |
 | key remap | 1 |
@@ -146,12 +147,12 @@ for Issue 805 formatter-facet experiments.
 | FORMAT-084 | `gtk-opengl-debug` | `entry_bool` | boolean | Oracle complete | Primitive formatter oracle covers direct boolean, integer, float, and string config rows using Ghostty-compatible true/false, decimal integer, shortest float, lowercase nan, byte-preserving string text, and representative order checks; `roastty/src/config/mod.rs:1117` | None for direct primitive formatter rows. |
 | FORMAT-085 | `gtk-quick-terminal-layer` | `.format_entry` | quick terminal enum | Oracle complete | Quick terminal enum formatter oracle covers every QuickTerminalPosition, QuickTerminalLayer, QuickTerminalScreen, QuickTerminalSpaceBehavior, and QuickTerminalKeyboardInteractivity keyword; direct enum formatter output; representative Config::set plus format_config output; raw-empty resets to defaults; and representative order checks; `roastty/src/config/mod.rs:1035` | None for quick terminal enum formatter rows. |
 | FORMAT-086 | `gtk-quick-terminal-namespace` | `entry_str` | string | Oracle complete | Primitive formatter oracle covers direct boolean, integer, float, and string config rows using Ghostty-compatible true/false, decimal integer, shortest float, lowercase nan, byte-preserving string text, and representative order checks; `roastty/src/config/mod.rs:1036` | None for direct primitive formatter rows. |
-| FORMAT-087 | `gtk-single-instance` | `.format_entry` | custom format_entry | Audit covered | Formatter dispatch path identified; non-default oracle still required; `roastty/src/config/mod.rs:1119` | Full non-default value formatting, repeatable/empty forms where applicable, and order are not yet proven. |
-| FORMAT-088 | `gtk-tabs-location` | `.format_entry` | custom format_entry | Audit covered | Formatter dispatch path identified; non-default oracle still required; `roastty/src/config/mod.rs:1122` | Full non-default value formatting, repeatable/empty forms where applicable, and order are not yet proven. |
+| FORMAT-087 | `gtk-single-instance` | `.format_entry` | gtk enum | Oracle complete | GTK enum formatter oracle covers every GtkSingleInstance, GtkTabsLocation, GtkToolbarStyle, and GtkTitlebarStyle keyword; direct enum formatter output; representative Config::set plus format_config output; compatibility inputs; raw-empty resets to defaults; and representative order checks; `roastty/src/config/mod.rs:1119` | None for GTK enum formatter rows. |
+| FORMAT-088 | `gtk-tabs-location` | `.format_entry` | gtk enum | Oracle complete | GTK enum formatter oracle covers every GtkSingleInstance, GtkTabsLocation, GtkToolbarStyle, and GtkTitlebarStyle keyword; direct enum formatter output; representative Config::set plus format_config output; compatibility inputs; raw-empty resets to defaults; and representative order checks; `roastty/src/config/mod.rs:1122` | None for GTK enum formatter rows. |
 | FORMAT-089 | `gtk-titlebar` | `entry_bool` | boolean | Oracle complete | Primitive formatter oracle covers direct boolean, integer, float, and string config rows using Ghostty-compatible true/false, decimal integer, shortest float, lowercase nan, byte-preserving string text, and representative order checks; `roastty/src/config/mod.rs:1120` | None for direct primitive formatter rows. |
 | FORMAT-090 | `gtk-titlebar-hide-when-maximized` | `entry_bool` | boolean | Oracle complete | Primitive formatter oracle covers direct boolean, integer, float, and string config rows using Ghostty-compatible true/false, decimal integer, shortest float, lowercase nan, byte-preserving string text, and representative order checks; `roastty/src/config/mod.rs:1123` | None for direct primitive formatter rows. |
-| FORMAT-091 | `gtk-titlebar-style` | `.format_entry` | custom format_entry | Audit covered | Formatter dispatch path identified; non-default oracle still required; `roastty/src/config/mod.rs:1128` | Full non-default value formatting, repeatable/empty forms where applicable, and order are not yet proven. |
-| FORMAT-092 | `gtk-toolbar-style` | `.format_entry` | custom format_entry | Audit covered | Formatter dispatch path identified; non-default oracle still required; `roastty/src/config/mod.rs:1126` | Full non-default value formatting, repeatable/empty forms where applicable, and order are not yet proven. |
+| FORMAT-091 | `gtk-titlebar-style` | `.format_entry` | gtk enum | Oracle complete | GTK enum formatter oracle covers every GtkSingleInstance, GtkTabsLocation, GtkToolbarStyle, and GtkTitlebarStyle keyword; direct enum formatter output; representative Config::set plus format_config output; compatibility inputs; raw-empty resets to defaults; and representative order checks; `roastty/src/config/mod.rs:1128` | None for GTK enum formatter rows. |
+| FORMAT-092 | `gtk-toolbar-style` | `.format_entry` | gtk enum | Oracle complete | GTK enum formatter oracle covers every GtkSingleInstance, GtkTabsLocation, GtkToolbarStyle, and GtkTitlebarStyle keyword; direct enum formatter output; representative Config::set plus format_config output; compatibility inputs; raw-empty resets to defaults; and representative order checks; `roastty/src/config/mod.rs:1126` | None for GTK enum formatter rows. |
 | FORMAT-093 | `gtk-wide-tabs` | `entry_bool` | boolean | Oracle complete | Primitive formatter oracle covers direct boolean, integer, float, and string config rows using Ghostty-compatible true/false, decimal integer, shortest float, lowercase nan, byte-preserving string text, and representative order checks; `roastty/src/config/mod.rs:1129` | None for direct primitive formatter rows. |
 | FORMAT-094 | `image-storage-limit` | `entry_int` | integer | Oracle complete | Primitive formatter oracle covers direct boolean, integer, float, and string config rows using Ghostty-compatible true/false, decimal integer, shortest float, lowercase nan, byte-preserving string text, and representative order checks; `roastty/src/config/mod.rs:1008` | None for direct primitive formatter rows. |
 | FORMAT-095 | `initial-command` | `entry_optional, .format_entry` | optional command | Oracle complete | Optional command formatter oracle covers optional void output, shell command output, explicit shell-prefix normalization, direct command output, direct empty payload output, raw-empty resets, and representative order checks; `roastty/src/config/mod.rs:902` | None for optional command formatter rows. |

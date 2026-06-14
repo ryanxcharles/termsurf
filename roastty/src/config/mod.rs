@@ -14595,6 +14595,157 @@ mod tests {
     }
 
     #[test]
+    fn gtk_enum_config_formatter_family_oracle() {
+        let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
+            let mut out = String::new();
+            let mut f = EntryFormatter::new("a", &mut out);
+            v(&mut f);
+            out
+        };
+        let formatted_lines = |cfg: &Config| -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(str::to_string).collect()
+        };
+        let line = |lines: &[String], key: &str| -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+                .clone()
+        };
+        let index = |lines: &[String], key: &str| -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted config line for {key}"))
+        };
+
+        for (variant, kw) in [
+            (GtkSingleInstance::False, "false"),
+            (GtkSingleInstance::True, "true"),
+            (GtkSingleInstance::Detect, "detect"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GtkTabsLocation::Top, "top"),
+            (GtkTabsLocation::Bottom, "bottom"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GtkToolbarStyle::Flat, "flat"),
+            (GtkToolbarStyle::Raised, "raised"),
+            (GtkToolbarStyle::RaisedBorder, "raised-border"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+        for (variant, kw) in [
+            (GtkTitlebarStyle::Native, "native"),
+            (GtkTitlebarStyle::Tabs, "tabs"),
+        ] {
+            assert_eq!(fmt(&|f| variant.format_entry(f)), format!("a = {kw}\n"));
+        }
+
+        let default_lines = formatted_lines(&Config::default());
+        assert_eq!(
+            line(&default_lines, "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+        assert_eq!(
+            line(&default_lines, "gtk-tabs-location"),
+            "gtk-tabs-location = top"
+        );
+        assert_eq!(
+            line(&default_lines, "gtk-toolbar-style"),
+            "gtk-toolbar-style = raised"
+        );
+        assert_eq!(
+            line(&default_lines, "gtk-titlebar-style"),
+            "gtk-titlebar-style = native"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("gtk-single-instance", Some("true")).unwrap();
+        cfg.set("gtk-tabs-location", Some("bottom")).unwrap();
+        cfg.set("gtk-toolbar-style", Some("raised-border")).unwrap();
+        cfg.set("gtk-titlebar-style", Some("tabs")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "gtk-single-instance"),
+            "gtk-single-instance = true"
+        );
+        assert_eq!(
+            line(&lines, "gtk-tabs-location"),
+            "gtk-tabs-location = bottom"
+        );
+        assert_eq!(
+            line(&lines, "gtk-toolbar-style"),
+            "gtk-toolbar-style = raised-border"
+        );
+        assert_eq!(
+            line(&lines, "gtk-titlebar-style"),
+            "gtk-titlebar-style = tabs"
+        );
+
+        cfg.set("gtk-single-instance", Some("desktop")).unwrap();
+        assert_eq!(
+            line(&formatted_lines(&cfg), "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+        cfg.set("adw-toolbar-style", Some("flat")).unwrap();
+        assert_eq!(
+            line(&formatted_lines(&cfg), "gtk-toolbar-style"),
+            "gtk-toolbar-style = flat"
+        );
+        cfg.set("gtk-tabs-location", Some("hidden")).unwrap();
+        let compat_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&compat_lines, "gtk-tabs-location"),
+            "gtk-tabs-location = bottom"
+        );
+        assert_eq!(cfg.window_show_tab_bar, WindowShowTabBar::Never);
+
+        cfg.set("gtk-single-instance", Some("")).unwrap();
+        cfg.set("gtk-tabs-location", Some("")).unwrap();
+        cfg.set("gtk-toolbar-style", Some("")).unwrap();
+        cfg.set("gtk-titlebar-style", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&reset_lines, "gtk-single-instance"),
+            "gtk-single-instance = detect"
+        );
+        assert_eq!(
+            line(&reset_lines, "gtk-tabs-location"),
+            "gtk-tabs-location = top"
+        );
+        assert_eq!(
+            line(&reset_lines, "gtk-toolbar-style"),
+            "gtk-toolbar-style = raised"
+        );
+        assert_eq!(
+            line(&reset_lines, "gtk-titlebar-style"),
+            "gtk-titlebar-style = native"
+        );
+
+        assert!(index(&lines, "gtk-opengl-debug") < index(&lines, "gtk-single-instance"));
+        assert!(index(&lines, "gtk-single-instance") < index(&lines, "gtk-titlebar"));
+        assert!(index(&lines, "gtk-titlebar") < index(&lines, "gtk-tabs-location"));
+        assert!(
+            index(&lines, "gtk-tabs-location") < index(&lines, "gtk-titlebar-hide-when-maximized")
+        );
+        assert!(
+            index(&lines, "gtk-titlebar-hide-when-maximized") < index(&lines, "gtk-toolbar-style")
+        );
+        assert!(index(&lines, "gtk-toolbar-style") < index(&lines, "gtk-titlebar-style"));
+        assert!(index(&lines, "gtk-titlebar-style") < index(&lines, "gtk-wide-tabs"));
+        assert!(index(&lines, "gtk-wide-tabs") < index(&lines, "gtk-custom-css"));
+    }
+
+    #[test]
     fn enum_format_entries_misc() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();
