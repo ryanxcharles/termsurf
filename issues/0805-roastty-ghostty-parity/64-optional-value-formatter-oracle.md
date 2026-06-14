@@ -129,3 +129,82 @@ experiment has the required sections, the scope is exactly the six
 `optional value` formatter rows, the expected 105/98/0 to 111/92/0 count
 movement is plausible, and the verification criteria check both promotion and
 adjacent unpromoted families.
+
+## Result
+
+**Result:** Pass
+
+Added `optional_value_config_formatter_family_oracle`, detected that oracle in
+the formatter inventory generator, and promoted only the six `optional value`
+formatter rows.
+
+The new oracle proves:
+
+- optional defaults format as void lines (`key = `) for all six rows;
+- `auto-update` and `auto-update-channel` format as enum keywords;
+- `macos-icon-screen-color` formats as comma-joined lowercase `#rrggbb` colors;
+- `quit-after-last-window-closed-delay` formats as a decomposed duration string;
+- `theme` formats as either one name or `light:{name},dark:{name}`;
+- `working-directory` formats as a keyword or path;
+- raw-empty values reset all six rows back to void output;
+- representative row order is stable within formatter order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=111
+audit_covered=92
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 92 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml optional_value_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml duration_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml working_directory_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml theme_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml color_list_parse_cli_parses_comma_separated_colors`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 111 `Oracle complete`, 92 `Audit covered`,
+  and 0 `Gap`.
+- Matrix assertion passed: CFG-218 remains `Gap`; all six `optional value`
+  formatter rows are `Oracle complete`; representative font and custom
+  `format_entry` rows remain `Audit covered`.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer confirmed that exactly the six `optional value` rows are promoted,
+the generated inventory reports 203 canonical rows, 203 Roastty rows, 111
+`Oracle complete`, 92 `Audit covered`, and 0 formatter gaps, CFG-218 remains
+`Gap` and owned by Experiment 64, README status is `Pass`, and changed files are
+limited to the requested source, generator, and issue artifacts. The reviewer
+also reran the focused optional value formatter oracle, the representative
+parser/default tests, `cargo fmt --check`, `git diff --check`, and read-only
+matrix/table assertions.
+
+## Conclusion
+
+The optional value formatter rows are now oracle-complete. CFG-218 remains open
+with 92 audit-covered formatter rows: 22 font rows and 70 custom `format_entry`
+rows.

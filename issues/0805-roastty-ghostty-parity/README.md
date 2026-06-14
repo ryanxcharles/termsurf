@@ -525,6 +525,13 @@ experiment files until they are proven.
   string, explicit `shell:` prefixes normalize away, direct commands format as
   `direct:` plus space-joined argv items, direct empty payloads format as
   `direct:`, and raw-empty values reset to void output.
+- **Optional value rows are a mixed wrapper family.** Experiment 64 promoted
+  `auto-update`, `auto-update-channel`, `macos-icon-screen-color`,
+  `quit-after-last-window-closed-delay`, `theme`, and `working-directory`. These
+  rows share optional void and raw-empty reset behavior, while their inner
+  formatters emit enum keywords, comma-joined lowercase color lists, decomposed
+  duration strings, single or light/dark theme names, and working-directory
+  keywords or paths.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -784,4 +791,4 @@ remains open.
 - [Experiment 63: Optional command formatter oracle](63-optional-command-formatter-oracle.md)
   — **Pass**
 - [Experiment 64: Optional value formatter oracle](64-optional-value-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

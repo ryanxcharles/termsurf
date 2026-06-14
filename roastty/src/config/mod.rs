@@ -18282,6 +18282,121 @@ mod tests {
     }
 
     #[test]
+    fn optional_value_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "auto-update",
+            "auto-update-channel",
+            "macos-icon-screen-color",
+            "quit-after-last-window-closed-delay",
+            "theme",
+            "working-directory",
+        ] {
+            assert_eq!(line(&default_lines, key), format!("{key} = "));
+        }
+
+        cfg.set("auto-update", Some("download")).unwrap();
+        cfg.set("auto-update-channel", Some("stable")).unwrap();
+        cfg.set("macos-icon-screen-color", Some("#0A0B0C,white"))
+            .unwrap();
+        cfg.set("quit-after-last-window-closed-delay", Some("1m30s"))
+            .unwrap();
+        cfg.set("theme", Some("light:Light Theme,dark:Dark Theme"))
+            .unwrap();
+        cfg.set("working-directory", Some("home")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "auto-update"), "auto-update = download");
+        assert_eq!(
+            line(&lines, "auto-update-channel"),
+            "auto-update-channel = stable"
+        );
+        assert_eq!(
+            line(&lines, "macos-icon-screen-color"),
+            "macos-icon-screen-color = #0a0b0c,#ffffff"
+        );
+        assert_eq!(
+            line(&lines, "quit-after-last-window-closed-delay"),
+            "quit-after-last-window-closed-delay = 1m 30s"
+        );
+        assert_eq!(
+            line(&lines, "theme"),
+            "theme = light:Light Theme,dark:Dark Theme"
+        );
+        assert_eq!(
+            line(&lines, "working-directory"),
+            "working-directory = home"
+        );
+
+        cfg.set("theme", Some("TokyoNight")).unwrap();
+        cfg.set("working-directory", Some("\"/tmp/roast dir\""))
+            .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "theme"), "theme = TokyoNight");
+        assert_eq!(
+            line(&lines, "working-directory"),
+            "working-directory = /tmp/roast dir"
+        );
+
+        for key in [
+            "auto-update",
+            "auto-update-channel",
+            "macos-icon-screen-color",
+            "quit-after-last-window-closed-delay",
+            "theme",
+            "working-directory",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "auto-update",
+            "auto-update-channel",
+            "macos-icon-screen-color",
+            "quit-after-last-window-closed-delay",
+            "theme",
+            "working-directory",
+        ] {
+            assert_eq!(line(&reset_lines, key), format!("{key} = "));
+        }
+
+        assert!(index(&lines, "theme") < index(&lines, "working-directory"));
+        assert!(
+            index(&lines, "working-directory")
+                < index(&lines, "quit-after-last-window-closed-delay")
+        );
+        assert!(
+            index(&lines, "quit-after-last-window-closed-delay")
+                < index(&lines, "macos-icon-screen-color")
+        );
+        assert!(index(&lines, "macos-icon-screen-color") < index(&lines, "auto-update"));
+        assert!(index(&lines, "auto-update") < index(&lines, "auto-update-channel"));
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();
