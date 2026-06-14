@@ -1074,3 +1074,5 @@ remains open.
   — **Pass**
 - [Experiment 99: Source precedence load inventory](99-source-precedence-load-inventory.md)
   — **Pass**
+- [Experiment 100: Default config template creation](100-default-config-template-creation.md)
+  — **Designed**
