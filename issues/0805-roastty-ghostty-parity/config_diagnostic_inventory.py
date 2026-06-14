@@ -96,6 +96,13 @@ STRING_DIAGNOSTIC_ORACLE_OPTIONS = {
     "x11-instance-name",
 }
 
+DURATION_DIAGNOSTIC_ORACLE_OPTIONS = {
+    "notify-on-command-finish-after",
+    "quit-after-last-window-closed-delay",
+    "resize-overlay-duration",
+    "undo-timeout",
+}
+
 
 @dataclasses.dataclass(frozen=True)
 class ParserInventoryRow:
@@ -177,6 +184,20 @@ def diagnostic_family(row: ParserInventoryRow) -> str:
 
 def diagnostic_override_evidence(option: str, row: ParserInventoryRow) -> str | None:
     if option not in BOOLEAN_DIAGNOSTIC_ORACLE_OPTIONS:
+        if option in DURATION_DIAGNOSTIC_ORACLE_OPTIONS:
+            if row.family != "duration":
+                raise ValueError(
+                    f"{option} is listed in the Experiment 90 duration diagnostic oracle "
+                    f"but parser family is {row.family!r}"
+                )
+            return (
+                "Experiment 90 shared duration diagnostic oracle covers "
+                "representative non-default values, zero-duration formatting, "
+                "empty resets, missing-value diagnostics, config-file invalid-value "
+                "diagnostics with line/key/error, CLI invalid-value diagnostics with "
+                "argument position/key/error, and diagnostic state retention; "
+                "`roastty/src/config/mod.rs::config_duration_diagnostic_family_oracle`"
+            )
         if option in STRING_DIAGNOSTIC_ORACLE_OPTIONS:
             if row.family != "string":
                 raise ValueError(
@@ -301,6 +322,7 @@ def build_rows(
         | INTEGER_DIAGNOSTIC_ORACLE_OPTIONS
         | FLOAT_DIAGNOSTIC_ORACLE_OPTIONS
         | STRING_DIAGNOSTIC_ORACLE_OPTIONS
+        | DURATION_DIAGNOSTIC_ORACLE_OPTIONS
     )
     missing_overrides = sorted(override_options - set(canonical_options))
     if missing_overrides:

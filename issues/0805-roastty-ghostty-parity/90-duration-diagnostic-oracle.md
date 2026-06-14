@@ -134,3 +134,57 @@ Read-only checks performed by the reviewer:
 - Confirmed CFG-219 is still `Gap`.
 - Confirmed `prettier --check` passed for the README and this experiment.
 - Confirmed `git diff --check` passed for the reviewed diff.
+
+## Result
+
+**Result:** Pass
+
+The shared duration diagnostic oracle now covers the four duration options that
+were still `Audit covered` after Experiment 89. The oracle verifies every
+option's representative non-default duration acceptance and formatted output,
+zero-duration formatting plus internal zero state, empty reset to the option's
+default, missing-value config-file diagnostics with line/key/error,
+invalid-value config-file diagnostics with line/key/error, missing-value CLI
+diagnostics with argument position/key/error, invalid-value CLI diagnostics with
+argument position/key/error, and diagnostic state retention.
+
+The diagnostic inventory generator now has an exact Experiment 90 override list
+for those four options and validates that every override still maps to a
+canonical duration parser-family row. Regeneration moved the duration diagnostic
+rows to `Oracle complete`. CFG-219 remains `Gap` because 10 non-duration
+diagnostic rows are still incomplete.
+
+Verification output:
+
+```text
+test config::tests::config_duration_diagnostic_family_oracle ... ok
+ghostty_canonical=203
+diagnostic_rows=203
+missing_canonical_diagnostic_rows=0
+extra_diagnostic_rows=0
+oracle_complete=193
+audit_covered=10
+gap=0
+```
+
+Additional checks passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml config_duration_diagnostic_family_oracle
+```
+
+## Conclusion
+
+Duration diagnostic parity is now proven for CFG-219. The useful lesson is that
+duration zero values are formatted as empty values, so tests must assert the
+internal zero state separately from formatted output when distinguishing zero
+from empty-reset behavior.
+
+## Completion Review
+
+Adversarial reviewer: Codex subagent with fresh context.
+
+Verdict: Approved.
+
+Findings: None.

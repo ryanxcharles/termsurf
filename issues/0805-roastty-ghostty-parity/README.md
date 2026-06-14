@@ -417,6 +417,13 @@ experiment files until they are proven.
   including NUL-containing strings, are accepted; missing values report
   `ConfigSetError::ValueRequired` and preserve prior state. CFG-219 now has 189
   `Oracle complete` rows and 14 remaining incomplete diagnostic rows.
+- **Duration zero values need internal-state checks.** Experiment 90 promoted
+  the four duration diagnostic rows and confirmed that invalid duration values
+  report `ConfigSetError::InvalidValue`, missing values report
+  `ConfigSetError::ValueRequired`, and both preserve prior state. Duration zero
+  formats as an empty value, so tests must also assert internal zero state to
+  distinguish zero from empty-reset semantics. CFG-219 now has 193
+  `Oracle complete` rows and 10 remaining incomplete diagnostic rows.
 - **`py_compile` creates bytecode even with `PYTHONDONTWRITEBYTECODE=1`.** Treat
   `issues/0805-roastty-ghostty-parity/__pycache__/` as a generated verification
   artifact and remove it after running the inventory script compile check.
@@ -987,4 +994,4 @@ remains open.
 - [Experiment 89: String diagnostic oracle](89-string-diagnostic-oracle.md) —
   **Pass**
 - [Experiment 90: Duration diagnostic oracle](90-duration-diagnostic-oracle.md)
-  — **Designed**
+  — **Pass**

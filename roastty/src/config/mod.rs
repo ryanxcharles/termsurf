@@ -28071,6 +28071,192 @@ mod tests {
     }
 
     #[test]
+    fn config_duration_diagnostic_family_oracle() {
+        struct DurationDiagnosticCase {
+            key: &'static str,
+            valid: &'static str,
+            invalid: &'static str,
+            expected_valid_line: &'static str,
+            get_line: fn(&Config) -> Option<String>,
+            zero_is_set: fn(&Config) -> bool,
+        }
+
+        fn config_line(cfg: &Config, key: &str) -> Option<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .map(str::to_string)
+        }
+
+        let cases = [
+            DurationDiagnosticCase {
+                key: "notify-on-command-finish-after",
+                valid: "2s",
+                invalid: "forever",
+                expected_valid_line: "notify-on-command-finish-after = 2s",
+                get_line: |cfg| config_line(cfg, "notify-on-command-finish-after"),
+                zero_is_set: |cfg| cfg.notify_on_command_finish_after == Duration { duration: 0 },
+            },
+            DurationDiagnosticCase {
+                key: "quit-after-last-window-closed-delay",
+                valid: "1s 250ms",
+                invalid: "forever",
+                expected_valid_line: "quit-after-last-window-closed-delay = 1s 250ms",
+                get_line: |cfg| config_line(cfg, "quit-after-last-window-closed-delay"),
+                zero_is_set: |cfg| {
+                    cfg.quit_after_last_window_closed_delay == Some(Duration { duration: 0 })
+                },
+            },
+            DurationDiagnosticCase {
+                key: "resize-overlay-duration",
+                valid: "250ms",
+                invalid: "forever",
+                expected_valid_line: "resize-overlay-duration = 250ms",
+                get_line: |cfg| config_line(cfg, "resize-overlay-duration"),
+                zero_is_set: |cfg| cfg.resize_overlay_duration == Duration { duration: 0 },
+            },
+            DurationDiagnosticCase {
+                key: "undo-timeout",
+                valid: "1m 30s",
+                invalid: "forever",
+                expected_valid_line: "undo-timeout = 1m 30s",
+                get_line: |cfg| config_line(cfg, "undo-timeout"),
+                zero_is_set: |cfg| cfg.undo_timeout == Duration { duration: 0 },
+            },
+        ];
+        assert_eq!(cases.len(), 4);
+
+        for case in cases {
+            let default_line = (case.get_line)(&Config::default());
+
+            let mut cfg = Config::default();
+            cfg.set(case.key, Some(case.valid)).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg).as_deref(),
+                Some(case.expected_valid_line),
+                "{} accepts representative non-default duration",
+                case.key
+            );
+
+            cfg.set(case.key, Some("0")).unwrap();
+            let expected_zero_line = format!("{} = ", case.key);
+            assert_eq!(
+                (case.get_line)(&cfg).as_deref(),
+                Some(expected_zero_line.as_str()),
+                "{} formats zero duration as an empty value",
+                case.key
+            );
+            assert!(
+                (case.zero_is_set)(&cfg),
+                "{} zero duration remains explicitly configured",
+                case.key
+            );
+
+            cfg.set(case.key, Some("")).unwrap();
+            assert_eq!(
+                (case.get_line)(&cfg),
+                default_line,
+                "{} empty value resets to default",
+                case.key
+            );
+
+            assert_eq!(
+                cfg.set(case.key, None),
+                Err(ConfigSetError::ValueRequired),
+                "{} bare missing value is required",
+                case.key
+            );
+
+            let mut file_cfg = Config::default();
+            file_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&file_cfg);
+            let diagnostics = file_cfg.load_str(&format!("\n{}\n", case.key));
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 2,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::ValueRequired,
+                }],
+                "{} file missing-value diagnostic preserves line/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&file_cfg),
+                before,
+                "{} missing file value preserves previous state",
+                case.key
+            );
+
+            let mut file_cfg = Config::default();
+            file_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&file_cfg);
+            let diagnostics = file_cfg.load_str(&format!("\n{} = {}\n", case.key, case.invalid));
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 2,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::InvalidValue,
+                }],
+                "{} file invalid-value diagnostic preserves line/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&file_cfg),
+                before,
+                "{} invalid file value preserves previous state",
+                case.key
+            );
+
+            let mut cli_cfg = Config::default();
+            cli_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&cli_cfg);
+            let arg = format!("--{}", case.key);
+            let diagnostics = cli_cfg.set_cli_args([arg.as_str()]);
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 1,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::ValueRequired,
+                }],
+                "{} CLI missing-value diagnostic preserves argument position/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&cli_cfg),
+                before,
+                "{} missing CLI value preserves previous state",
+                case.key
+            );
+
+            let mut cli_cfg = Config::default();
+            cli_cfg.set(case.key, Some(case.valid)).unwrap();
+            let before = (case.get_line)(&cli_cfg);
+            let arg = format!("--{}={}", case.key, case.invalid);
+            let diagnostics = cli_cfg.set_cli_args([arg.as_str()]);
+            assert_eq!(
+                diagnostics,
+                vec![ConfigDiagnostic {
+                    line: 1,
+                    key: case.key.to_string(),
+                    error: ConfigSetError::InvalidValue,
+                }],
+                "{} CLI invalid-value diagnostic preserves argument position/key/error",
+                case.key
+            );
+            assert_eq!(
+                (case.get_line)(&cli_cfg),
+                before,
+                "{} invalid CLI value preserves previous state",
+                case.key
+            );
+        }
+    }
+
+    #[test]
     fn duration_config_parser_family_oracle() {
         let dur = |duration| Ok(Duration { duration });
 
