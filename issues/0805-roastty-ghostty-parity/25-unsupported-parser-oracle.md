@@ -136,3 +136,94 @@ git diff --check
 
 Fresh-context adversarial design review approved the experiment plan with no
 findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a focused unsupported parser family oracle for the one
+unsupported parser row, canonical `link`. The oracle proves pinned Ghostty's
+current `RepeatableLink.parseCLI` boundary:
+
+- `link` is a recognized config key;
+- missing `link` values return `ConfigSetError::NotImplemented`;
+- non-empty `link` values return `ConfigSetError::NotImplemented`;
+- the recognized not-implemented parser error is distinct from `UnknownField`;
+- raw-empty `link =` resets the link list to the default and succeeds;
+- load-string diagnostics report `NotImplemented` for invalid `link` lines,
+  preserve the default links after `link =`, and still report truly unknown keys
+  as `UnknownField`.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml unsupported_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::unsupported_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4915 filtered out; finished in 0.00s
+```
+
+The existing link-recognition regression test also passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml link_config_parser_recognizes_not_implemented_and_empty_reset
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::link_config_parser_recognizes_not_implemented_and_empty_reset ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4915 filtered out; finished in 0.00s
+```
+
+The parser inventory generator passed and moved the unsupported `link` row to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=88
+audit_covered=115
+gap=0
+```
+
+Matrix assertion output:
+
+```text
+parser_rows=203 unsupported_oracle=1 cfg217=Gap
+```
+
+## Conclusion
+
+The unsupported parser family is now `Oracle complete`. CFG-217 remains `Gap`
+because 115 parser rows are still audit-covered only. The next parser-family
+experiment should continue reducing that count with another bounded family.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no
+findings.

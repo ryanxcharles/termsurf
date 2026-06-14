@@ -20932,6 +20932,48 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_config_parser_family_oracle() {
+        let mut cfg = Config::default();
+        let default_links = cfg.link.clone();
+        assert_eq!(default_links.len(), 1);
+
+        assert_eq!(cfg.set("link", None), Err(ConfigSetError::NotImplemented));
+        assert_eq!(
+            cfg.set("link", Some("regex=https://example.invalid")),
+            Err(ConfigSetError::NotImplemented)
+        );
+        assert_eq!(cfg.link, default_links);
+        assert_eq!(
+            cfg.set("unknown-link", Some("x")),
+            Err(ConfigSetError::UnknownField)
+        );
+
+        cfg.link.clear();
+        assert!(cfg.link.is_empty());
+        cfg.set("link", Some("")).unwrap();
+        assert_eq!(cfg.link, default_links);
+
+        let diagnostics =
+            cfg.load_str("link = https://example.invalid\nlink =\nunknown-link = x\n");
+        assert_eq!(cfg.link, default_links);
+        assert_eq!(
+            diagnostics,
+            vec![
+                ConfigDiagnostic {
+                    line: 1,
+                    key: "link".to_string(),
+                    error: ConfigSetError::NotImplemented,
+                },
+                ConfigDiagnostic {
+                    line: 3,
+                    key: "unknown-link".to_string(),
+                    error: ConfigSetError::UnknownField,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn boolean_config_parser_family_oracle() {
         fn line(cfg: &Config, key: &str) -> String {
             let mut out = String::new();

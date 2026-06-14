@@ -430,6 +430,12 @@ experiment files until they are proven.
   token, raw-empty option values reset to defaults, invalid tokens are rejected,
   diagnostics preserve earlier valid values, and formatter output follows
   upstream field order.
+- **Unsupported parser rows can still be oracle-complete.** Experiment 25
+  promoted canonical `link` by proving pinned Ghostty's current
+  `RepeatableLink.parseCLI` boundary: `link` is recognized, bare and non-empty
+  values return the not-implemented parser error, raw-empty `link =` resets to
+  defaults before parser dispatch, diagnostics preserve that distinction, and
+  truly unknown keys still report `UnknownField`.
 
 ## Verification
 
@@ -485,4 +491,4 @@ remains open.
 - [Experiment 24: Packed flags parser oracle](24-packed-flags-parser-oracle.md)
   — **Pass**
 - [Experiment 25: Unsupported parser oracle](25-unsupported-parser-oracle.md) —
-  **Designed**
+  **Pass**
