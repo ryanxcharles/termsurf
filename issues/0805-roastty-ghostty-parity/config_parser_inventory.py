@@ -52,6 +52,7 @@ ENV_ORACLE_TEST = "env_config_parser_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_parser_family_oracle"
 INPUT_ORACLE_TEST = "input_config_parser_family_oracle"
 REPEATABLE_STRING_FONT_ORACLE_TEST = "repeatable_string_font_config_parser_family_oracle"
+FONT_STYLE_ORACLE_TEST = "font_style_config_parser_family_oracle"
 
 REPEATABLE_STRING_FONT_OPTIONS = {
     "font-family",
@@ -59,6 +60,13 @@ REPEATABLE_STRING_FONT_OPTIONS = {
     "font-family-italic",
     "font-family-bold-italic",
     "font-feature",
+}
+
+FONT_STYLE_OPTIONS = {
+    "font-style",
+    "font-style-bold",
+    "font-style-italic",
+    "font-style-bold-italic",
 }
 
 
@@ -356,6 +364,7 @@ def build_rows(
     repeatable_path_oracle_present: bool,
     input_oracle_present: bool,
     repeatable_string_font_oracle_present: bool,
+    font_style_oracle_present: bool,
 ) -> tuple[list[ParserRow], list[str], list[str], list[str]]:
     arm_by_key: dict[str, ParserArm] = {}
     for arm in arms:
@@ -626,6 +635,15 @@ def build_rows(
                 "equality, and clone semantics"
             )
             missing_evidence = "None for direct repeatable string font parser semantics."
+        elif font_style_oracle_present and option in FONT_STYLE_OPTIONS:
+            status = "Oracle complete"
+            evidence = (
+                "Font style parser oracle covers missing values, exact default "
+                "and false tokens, arbitrary named styles including empty direct "
+                "parser values, empty config resets, diagnostics, CLI, formatting, "
+                "enabled/name helpers, and clone semantics"
+            )
+            missing_evidence = "None for direct font-style parser semantics."
         elif option == "config-default-files":
             missing_evidence = (
                 "Direct parser and effective default-file load-order semantics must "
@@ -693,6 +711,7 @@ def main() -> int:
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
     input_oracle_present = INPUT_ORACLE_TEST in roastty_source
     repeatable_string_font_oracle_present = REPEATABLE_STRING_FONT_ORACLE_TEST in roastty_source
+    font_style_oracle_present = FONT_STYLE_ORACLE_TEST in roastty_source
     rows, missing, compatibility_only, noncanonical = build_rows(
         upstream,
         aliases,
@@ -725,13 +744,16 @@ def main() -> int:
         repeatable_path_oracle_present,
         input_oracle_present,
         repeatable_string_font_oracle_present,
+        font_style_oracle_present,
     )
     emit_inventory(rows, compatibility_only, args.output)
     incomplete = [row for row in rows if row.status != "Oracle complete"]
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        42
+        43
+        if font_style_oracle_present
+        else 42
         if repeatable_string_font_oracle_present
         else 41
         if input_oracle_present

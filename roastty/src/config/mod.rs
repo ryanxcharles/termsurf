@@ -14382,7 +14382,13 @@ mod tests {
     }
 
     #[test]
-    fn font_style_parse_cli() {
+    fn font_style_config_parser_family_oracle() {
+        let formatted = |style: FontStyle| {
+            let mut out = String::new();
+            style.format_entry(&mut EntryFormatter::new("a", &mut out));
+            out
+        };
+
         assert_eq!(
             FontStyle::parse_cli(None),
             Err(FontStyleParseError::ValueRequired)
@@ -14396,21 +14402,111 @@ mod tests {
             FontStyle::parse_cli(Some("bold")),
             Ok(FontStyle::Name("bold".to_string()))
         );
+        assert_eq!(
+            FontStyle::parse_cli(Some("False")),
+            Ok(FontStyle::Name("False".to_string()))
+        );
+        assert_eq!(
+            FontStyle::parse_cli(Some("  default  ")),
+            Ok(FontStyle::Name("  default  ".to_string()))
+        );
+        assert_eq!(
+            FontStyle::parse_cli(Some("Semi-Bold!")),
+            Ok(FontStyle::Name("Semi-Bold!".to_string()))
+        );
         // Any non-default/false value (including empty) is a named style; the
         // set-but-empty reset is a separate dispatch branch.
         assert_eq!(
             FontStyle::parse_cli(Some("")),
             Ok(FontStyle::Name(String::new()))
         );
+        assert!(FontStyle::Default.enabled());
+        assert!(FontStyle::Name("Bold".to_string()).enabled());
+        assert!(!FontStyle::False.enabled());
+        assert_eq!(FontStyle::Default.name_value(), None);
+        assert_eq!(FontStyle::False.name_value(), None);
+        assert_eq!(
+            FontStyle::Name("Italic".to_string()).name_value(),
+            Some("Italic")
+        );
 
         // Round-trip: parse_cli then format_entry recovers the formatted line for
         // each of the three formatted cases.
-        for value in ["default", "false", "bold"] {
+        for value in ["default", "false", "bold", "Semi-Bold!"] {
             let parsed = FontStyle::parse_cli(Some(value)).unwrap();
-            let mut out = String::new();
-            parsed.format_entry(&mut EntryFormatter::new("a", &mut out));
-            assert_eq!(out, format!("a = {}\n", value));
+            assert_eq!(formatted(parsed), format!("a = {}\n", value));
         }
+
+        let line = |cfg: &Config, key: &str| -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{key} = ")))
+                .unwrap()
+                .to_string()
+        };
+
+        let mut cfg = Config::default();
+        cfg.set("font-style", Some("false")).unwrap();
+        cfg.set("font-style-bold", Some("Bold")).unwrap();
+        cfg.set("font-style-italic", Some("default")).unwrap();
+        cfg.set("font-style-bold-italic", Some("  Fancy Italic  "))
+            .unwrap();
+        assert_eq!(cfg.font_style, FontStyle::False);
+        assert_eq!(cfg.font_style_bold, FontStyle::Name("Bold".to_string()));
+        assert_eq!(cfg.font_style_italic, FontStyle::Default);
+        assert_eq!(
+            cfg.font_style_bold_italic,
+            FontStyle::Name("  Fancy Italic  ".to_string())
+        );
+        assert_eq!(line(&cfg, "font-style"), "font-style = false");
+        assert_eq!(line(&cfg, "font-style-bold"), "font-style-bold = Bold");
+        assert_eq!(
+            line(&cfg, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&cfg, "font-style-bold-italic"),
+            "font-style-bold-italic =   Fancy Italic  "
+        );
+
+        cfg.set("font-style", Some("")).unwrap();
+        assert_eq!(cfg.font_style, FontStyle::Default);
+        assert_eq!(line(&cfg, "font-style"), "font-style = default");
+        assert_eq!(
+            cfg.set("font-style-bold", None),
+            Err(ConfigSetError::ValueRequired)
+        );
+
+        let diagnostics = cfg.load_str("font-style-bold = false\nfont-style-italic\n");
+        assert_eq!(cfg.font_style_bold, FontStyle::False);
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "font-style-italic".to_string(),
+                error: ConfigSetError::ValueRequired,
+            }]
+        );
+
+        let diagnostics = cfg.set_cli_args([
+            "--font-style=Book",
+            "--font-style-bold=Heavy",
+            "--font-style-italic=false",
+            "--font-style-bold-italic=default",
+        ]);
+        assert!(diagnostics.is_empty());
+        assert_eq!(cfg.font_style, FontStyle::Name("Book".to_string()));
+        assert_eq!(cfg.font_style_bold, FontStyle::Name("Heavy".to_string()));
+        assert_eq!(cfg.font_style_italic, FontStyle::False);
+        assert_eq!(cfg.font_style_bold_italic, FontStyle::Default);
+
+        let cloned = cfg.clone();
+        assert_eq!(cloned, cfg);
+        assert_eq!(cloned.font_style, cfg.font_style);
+        assert_eq!(cloned.font_style_bold, cfg.font_style_bold);
+        assert_eq!(cloned.font_style_italic, cfg.font_style_italic);
+        assert_eq!(cloned.font_style_bold_italic, cfg.font_style_bold_italic);
     }
 
     #[test]

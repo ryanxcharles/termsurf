@@ -166,3 +166,116 @@ Reviewed by an adversarial Codex subagent with fresh context.
 **Verdict:** Approved.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now exposes a focused `font_style_config_parser_family_oracle` that
+covers the direct `FontStyle::parse_cli` parser boundary, formatter output,
+helper semantics, and config/CLI dispatch for all four canonical `font-style*`
+fields. The oracle proves missing-value errors, exact `default` and `false`
+tokens, arbitrary named styles without trimming or validation, direct empty
+parser input as an empty name, set-but-empty config resets to `default`,
+diagnostics, CLI parsing, formatting, `enabled()`, `name_value()`, and clone
+semantics.
+
+The parser inventory generator now detects that oracle and promotes only the
+four canonical `font-style*` rows to `Oracle complete`. The regenerated CFG-217
+parser inventory reports 203 parser rows, 193 `Oracle complete`, 10
+`Audit covered`, and 0 `Gap`. CFG-217 remains `Gap` because the remaining
+audit-only parser rows still need their own upstream-derived oracles.
+
+Verification run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml font_style_config_parser_family_oracle
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+python3 - <<'PY'
+from pathlib import Path
+
+rows = []
+for line in Path('issues/0805-roastty-ghostty-parity/config-parser-inventory.md').read_text().splitlines():
+    if line.startswith('| PARSE-'):
+        rows.append([cell.strip() for cell in line.strip('|').split('|')])
+
+assert len(rows) == 203, len(rows)
+assert sum(row[4] == 'Oracle complete' for row in rows) == 193
+assert sum(row[4] == 'Audit covered' for row in rows) == 10
+assert not [row for row in rows if row[4] == 'Gap']
+expected_audit = {
+    '`clipboard-codepoint-map`',
+    '`config-default-files`',
+    '`font-codepoint-map`',
+    '`font-variation`',
+    '`font-variation-bold`',
+    '`font-variation-bold-italic`',
+    '`font-variation-italic`',
+    '`key-remap`',
+    '`keybind`',
+    '`theme`',
+}
+actual_audit = {row[1] for row in rows if row[4] == 'Audit covered'}
+assert actual_audit == expected_audit, sorted(actual_audit ^ expected_audit)
+for option in {
+    '`font-style`',
+    '`font-style-bold`',
+    '`font-style-italic`',
+    '`font-style-bold-italic`',
+}:
+    row = next(row for row in rows if row[1] == option)
+    assert row[4] == 'Oracle complete', row
+
+cfg217 = None
+for line in Path('issues/0805-roastty-ghostty-parity/config-matrix.md').read_text().splitlines():
+    if line.startswith('| CFG-217 |'):
+        cfg217 = [cell.strip() for cell in line.strip('|').split('|')]
+        break
+assert cfg217 is not None
+assert cfg217[4] == 'Gap', cfg217
+assert cfg217[11] == 'Experiment 43', cfg217
+assert '193 parser rows Oracle complete' in cfg217[12], cfg217
+print('font_style_rows=4 oracle_complete=193 cfg217=Gap')
+PY
+cargo fmt --manifest-path roastty/Cargo.toml
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/config_parser_inventory.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+prettier --write --prose-wrap always --print-width 80 \
+  issues/0805-roastty-ghostty-parity/README.md \
+  issues/0805-roastty-ghostty-parity/43-font-style-parser-oracle.md \
+  issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  issues/0805-roastty-ghostty-parity/config-matrix.md
+git diff --check
+```
+
+Observed key outputs:
+
+- `test config::tests::font_style_config_parser_family_oracle ... ok`
+- `oracle_complete=193`
+- `audit_covered=10`
+- `gap=0`
+- `font_style_rows=4 oracle_complete=193 cfg217=Gap`
+
+## Conclusion
+
+The four `font-style*` parser rows are no longer audit-only. Future parser work
+can focus on the 10 remaining audit-only rows: codepoint maps, font-variation,
+key remap/keybind, theme, and `config-default-files`.
+
+## Completion Review
+
+Reviewed by an adversarial Codex subagent with fresh context.
+
+**Verdict:** Approved.
+
+Findings: none.
+
+The reviewer independently verified the focused Rust oracle,
+`cargo fmt --check`, Python compile check, absence of `__pycache__`/`.pyc`
+artifacts, `git diff --check`, matrix assertion, and that the result commit had
+not yet been made.

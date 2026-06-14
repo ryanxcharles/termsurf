@@ -551,6 +551,12 @@ experiment files until they are proven.
   `overwrite_next` clears only before the next append and then resets,
   clones/equality ignore `overwrite_next`, CLI font-family values replace file
   values, and CLI font-feature values append normally.
+- **Font style parsing treats most input as a name.** Experiment 43 proved
+  canonical `font-style`, `font-style-bold`, `font-style-italic`, and
+  `font-style-bold-italic`: missing values are required, exact `default` and
+  `false` tokens select their special variants, every other supplied value is a
+  named style without trimming or validation, direct empty input is an empty
+  name, while set-but-empty config dispatch resets the field to `default`.
 
 ## Verification
 
@@ -636,4 +642,4 @@ remains open.
 - [Experiment 42: Repeatable string font parser oracle](42-repeatable-string-font-parser-oracle.md)
   — **Pass**
 - [Experiment 43: Font style parser oracle](43-font-style-parser-oracle.md) —
-  **Designed**
+  **Pass**
