@@ -854,3 +854,5 @@ remains open.
   — **Pass**
 - [Experiment 72: Clipboard access formatter oracle](72-clipboard-access-formatter-oracle.md)
   — **Pass**
+- [Experiment 73: Direct color formatter oracle](73-direct-color-formatter-oracle.md)
+  — **Designed**
