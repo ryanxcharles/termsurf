@@ -127,3 +127,47 @@ experiment has the required sections, scope is limited to the four
 expected 127/76/0 to 131/72/0 count movement is plausible, pinned Ghostty
 behavior matches the design, and referenced existing filters resolve in
 `roastty/src/config/mod.rs`.
+
+## Result
+
+**Result:** Pass
+
+Implemented `font_variation_config_formatter_family_oracle` and promoted the
+four `font variation` formatter rows in the CFG-218 inventory.
+
+Verification commands:
+
+- `cargo test --manifest-path roastty/Cargo.toml font_variation_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml font_variation_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported:
+  - `ghostty_canonical=203`;
+  - `roastty_formatter_rows=203`;
+  - `missing_canonical_formatter_rows=0`;
+  - `extra_formatter_rows=0`;
+  - `oracle_complete=131`;
+  - `audit_covered=72`;
+  - `gap=0`;
+  - `no_output_rows=1`.
+- The matrix assertion passed.
+
+## Conclusion
+
+The four `font-variation*` formatter rows now have a focused formatter oracle.
+CFG-218 remains `Gap`, but its formatter inventory moved from 127
+`Oracle complete` / 76 `Audit covered` / 0 gaps to 131 `Oracle complete` / 72
+`Audit covered` / 0 gaps. The remaining font-classified formatter rows are
+`font-codepoint-map` and `font-shaping-break`; the other 70 incomplete formatter
+rows remain `custom format_entry` rows.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.

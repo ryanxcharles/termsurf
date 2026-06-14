@@ -18695,6 +18695,97 @@ mod tests {
     }
 
     #[test]
+    fn font_variation_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn lines_for(lines: &[String], key: &str) -> Vec<String> {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .filter(|line| line.starts_with(&prefix))
+                .cloned()
+                .collect()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        for key in [
+            "font-variation",
+            "font-variation-bold",
+            "font-variation-italic",
+            "font-variation-bold-italic",
+        ] {
+            assert_eq!(lines_for(&default_lines, key), vec![format!("{key} = ")]);
+        }
+
+        cfg.set("font-variation", Some("wght=200")).unwrap();
+        cfg.set("font-variation", Some("slnt=-15")).unwrap();
+        cfg.set("font-variation", Some("NAN1=nAn")).unwrap();
+        cfg.set("font-variation", Some("INF1=+Inf")).unwrap();
+        cfg.set("font-variation-bold", Some("wght=700")).unwrap();
+        cfg.set("font-variation-italic", Some("ital=0x1.8p1"))
+            .unwrap();
+        cfg.set("font-variation-bold-italic", Some("wdth=90"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            lines_for(&lines, "font-variation"),
+            vec![
+                "font-variation = wght=200",
+                "font-variation = slnt=-15",
+                "font-variation = NAN1=nan",
+                "font-variation = INF1=inf",
+            ]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-variation-bold"),
+            vec!["font-variation-bold = wght=700"]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-variation-italic"),
+            vec!["font-variation-italic = ital=3"]
+        );
+        assert_eq!(
+            lines_for(&lines, "font-variation-bold-italic"),
+            vec!["font-variation-bold-italic = wdth=90"]
+        );
+
+        cfg.set("font-variation", Some("")).unwrap();
+        cfg.set("font-variation-bold", Some("")).unwrap();
+        cfg.set("font-variation-italic", Some("")).unwrap();
+        cfg.set("font-variation-bold-italic", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "font-variation",
+            "font-variation-bold",
+            "font-variation-italic",
+            "font-variation-bold-italic",
+        ] {
+            assert_eq!(lines_for(&reset_lines, key), vec![format!("{key} = ")]);
+        }
+
+        assert!(index(&lines, "font-variation") < index(&lines, "font-variation-bold"));
+        assert!(index(&lines, "font-variation-bold") < index(&lines, "font-variation-italic"));
+        assert!(
+            index(&lines, "font-variation-italic") < index(&lines, "font-variation-bold-italic")
+        );
+        assert!(index(&lines, "font-variation-bold-italic") < index(&lines, "font-codepoint-map"));
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

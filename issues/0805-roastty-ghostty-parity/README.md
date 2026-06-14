@@ -550,6 +550,12 @@ experiment files until they are proven.
   `default`, `false`, and named styles exactly, including whitespace-preserving
   names and raw-empty reset to `default`; `FontSyntheticStyle` formats all flags
   with `no-` prefixes for disabled flags and resets to all enabled.
+- **Font variation rows share `axis=value` repeatable formatting.** Experiment
+  68 promoted `font-variation`, `font-variation-bold`, `font-variation-italic`,
+  and `font-variation-bold-italic`. Empty lists format as one void line,
+  populated lists format one `axis=value` line per item in insertion order,
+  hexadecimal floats normalize to decimal output, infinities and `nan` use
+  canonical lowercase display, and raw-empty values reset to void output.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -817,4 +823,4 @@ remains open.
 - [Experiment 67: Font style formatter oracle](67-font-style-formatter-oracle.md)
   — **Pass**
 - [Experiment 68: Font variation formatter oracle](68-font-variation-formatter-oracle.md)
-  — **Designed**
+  — **Pass**
