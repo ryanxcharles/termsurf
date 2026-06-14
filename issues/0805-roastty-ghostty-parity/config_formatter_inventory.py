@@ -36,6 +36,7 @@ CODEPOINT_MAP_ORACLE_TEST = "codepoint_map_config_formatter_family_oracle"
 FONT_SHAPING_BREAK_ORACLE_TEST = "font_shaping_break_config_formatter_family_oracle"
 KEYWORD_ENUM_ORACLE_TEST = "keyword_enum_config_formatter_family_oracle"
 CLIPBOARD_ACCESS_ORACLE_TEST = "clipboard_access_config_formatter_family_oracle"
+DIRECT_COLOR_ORACLE_TEST = "direct_color_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
@@ -90,6 +91,14 @@ KEYWORD_ENUM_OPTIONS = {
 CLIPBOARD_ACCESS_OPTIONS = {
     "clipboard-read",
     "clipboard-write",
+}
+DIRECT_COLOR_OPTIONS = {
+    "background",
+    "foreground",
+    "search-foreground",
+    "search-background",
+    "search-selected-foreground",
+    "search-selected-background",
 }
 OPTIONAL_COLOR_OPTIONS = {
     "bold-color",
@@ -209,6 +218,8 @@ def formatter_family(option: str, path_text: str, call_text: str) -> str:
         return "keyword enum"
     if option in CLIPBOARD_ACCESS_OPTIONS:
         return "clipboard access"
+    if option in DIRECT_COLOR_OPTIONS:
+        return "direct color"
     if "font_" in call_text or "Font" in call_text:
         return "font"
     if "window_padding" in call_text:
@@ -369,6 +380,7 @@ def build_rows(
     font_shaping_break_oracle_present: bool,
     keyword_enum_oracle_present: bool,
     clipboard_access_oracle_present: bool,
+    direct_color_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
@@ -570,6 +582,15 @@ def build_rows(
                 "order checks"
             )
             missing_evidence = "None for clipboard access formatter rows."
+        elif direct_color_oracle_present and family == "direct color":
+            status = "Oracle complete"
+            evidence = (
+                "Direct color formatter oracle covers background and foreground "
+                "Color output; search TerminalColor explicit color, "
+                "cell-foreground, and cell-background output; raw-empty resets "
+                "for all six direct color rows; and representative order checks"
+            )
+            missing_evidence = "None for direct color formatter rows."
         elif metric_modifier_oracle_present and family == "metric modifier":
             status = "Oracle complete"
             evidence = (
@@ -684,6 +705,7 @@ def main() -> int:
     font_shaping_break_oracle_present = FONT_SHAPING_BREAK_ORACLE_TEST in roastty_source
     keyword_enum_oracle_present = KEYWORD_ENUM_ORACLE_TEST in roastty_source
     clipboard_access_oracle_present = CLIPBOARD_ACCESS_ORACLE_TEST in roastty_source
+    direct_color_oracle_present = DIRECT_COLOR_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
@@ -709,6 +731,7 @@ def main() -> int:
         font_shaping_break_oracle_present,
         keyword_enum_oracle_present,
         clipboard_access_oracle_present,
+        direct_color_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
@@ -724,7 +747,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        72
+        73
+        if direct_color_oracle_present
+        else 72
         if clipboard_access_oracle_present
         else 71
         if keyword_enum_oracle_present

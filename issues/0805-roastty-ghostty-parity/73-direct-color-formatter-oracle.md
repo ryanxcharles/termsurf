@@ -147,3 +147,62 @@ Reviewed by a fresh-context Codex adversarial subagent.
 Verdict: **Approved**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Implemented `direct_color_config_formatter_family_oracle` and promoted exactly
+the six direct color formatter rows:
+
+- `background`;
+- `foreground`;
+- `search-foreground`;
+- `search-background`;
+- `search-selected-foreground`;
+- `search-selected-background`.
+
+Verification commands:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml` ran after the Rust edits.
+- `cargo test --manifest-path roastty/Cargo.toml direct_color_config_formatter_family_oracle`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml color_format_entry_writes_hex_string`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml terminal_and_bold_color_format_entry`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml color_config_parser_family_oracle`
+  passed and ran 2 unit tests because the filter also matched
+  `macos_icon_screen_color_config_parser_family_oracle`.
+- `cargo test --manifest-path roastty/Cargo.toml search_color_config_defaults_parse_format_and_diagnose`
+  passed and ran 1 unit test.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed and ran 1 unit test.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported:
+  - `ghostty_canonical=203`;
+  - `roastty_formatter_rows=203`;
+  - `missing_canonical_formatter_rows=0`;
+  - `extra_formatter_rows=0`;
+  - `oracle_complete=146`;
+  - `audit_covered=57`;
+  - `gap=0`.
+- The planned matrix assertion passed.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --check --prose-wrap always --print-width 80` passed on the changed
+  Markdown files.
+- `git diff --check` passed.
+
+## Conclusion
+
+The direct color formatter family is now proven for `background`, `foreground`,
+and the four search color rows. CFG-218 remains `Gap` because 57 custom
+formatter rows still need non-default formatter oracles.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.

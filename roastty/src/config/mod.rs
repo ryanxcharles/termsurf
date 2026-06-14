@@ -14965,6 +14965,121 @@ mod tests {
     }
 
     #[test]
+    fn direct_color_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let default = Config::default();
+        let default_lines = formatted_lines(&default);
+        assert_eq!(line(&default_lines, "background"), "background = #282c34");
+        assert_eq!(line(&default_lines, "foreground"), "foreground = #ffffff");
+        assert_eq!(
+            line(&default_lines, "search-foreground"),
+            "search-foreground = #000000"
+        );
+        assert_eq!(
+            line(&default_lines, "search-background"),
+            "search-background = #ffe082"
+        );
+        assert_eq!(
+            line(&default_lines, "search-selected-foreground"),
+            "search-selected-foreground = #000000"
+        );
+        assert_eq!(
+            line(&default_lines, "search-selected-background"),
+            "search-selected-background = #f2a57e"
+        );
+
+        let mut cfg = Config::default();
+        cfg.set("background", Some("#010203")).unwrap();
+        cfg.set("foreground", Some("ForestGreen")).unwrap();
+        cfg.set("search-foreground", Some("cell-foreground"))
+            .unwrap();
+        cfg.set("search-background", Some("#0a0b0c")).unwrap();
+        cfg.set("search-selected-foreground", Some("cell-background"))
+            .unwrap();
+        cfg.set("search-selected-background", Some("#aabbcc"))
+            .unwrap();
+
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "background"), "background = #010203");
+        assert_eq!(line(&lines, "foreground"), "foreground = #228b22");
+        assert_eq!(
+            line(&lines, "search-foreground"),
+            "search-foreground = cell-foreground"
+        );
+        assert_eq!(
+            line(&lines, "search-background"),
+            "search-background = #0a0b0c"
+        );
+        assert_eq!(
+            line(&lines, "search-selected-foreground"),
+            "search-selected-foreground = cell-background"
+        );
+        assert_eq!(
+            line(&lines, "search-selected-background"),
+            "search-selected-background = #aabbcc"
+        );
+
+        for key in [
+            "background",
+            "foreground",
+            "search-foreground",
+            "search-background",
+            "search-selected-foreground",
+            "search-selected-background",
+        ] {
+            cfg.set(key, Some("")).unwrap();
+        }
+
+        let reset_lines = formatted_lines(&cfg);
+        for key in [
+            "background",
+            "foreground",
+            "search-foreground",
+            "search-background",
+            "search-selected-foreground",
+            "search-selected-background",
+        ] {
+            assert_eq!(line(&reset_lines, key), line(&default_lines, key));
+        }
+
+        assert!(index(&lines, "theme") < index(&lines, "background"));
+        assert!(index(&lines, "background") < index(&lines, "foreground"));
+        assert!(index(&lines, "foreground") < index(&lines, "background-image"));
+        assert!(index(&lines, "selection-word-chars") < index(&lines, "palette"));
+        assert!(index(&lines, "palette") < index(&lines, "cursor-color"));
+        assert!(index(&lines, "split-preserve-zoom") < index(&lines, "search-foreground"));
+        assert!(index(&lines, "search-foreground") < index(&lines, "search-background"));
+        assert!(index(&lines, "search-background") < index(&lines, "search-selected-foreground"));
+        assert!(
+            index(&lines, "search-selected-foreground")
+                < index(&lines, "search-selected-background")
+        );
+        assert!(index(&lines, "search-selected-background") < index(&lines, "command"));
+    }
+
+    #[test]
     fn enum_format_entries_shader_mouse() {
         let fmt = |v: &dyn Fn(&mut EntryFormatter)| {
             let mut out = String::new();

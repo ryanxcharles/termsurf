@@ -322,6 +322,11 @@ experiment files until they are proven.
   Ghostty's `ClipboardAccess` enum, but the proof still checked each option's
   distinct default and exact row ownership so unrelated enum-like formatters did
   not advance by accident.
+- **Direct color formatter rows are separate from optional color rows.**
+  Experiment 73 proved `background`, `foreground`, and the four search color
+  rows through `Color`/`TerminalColor` `format_config` output while keeping
+  palette, cursor/selection colors, window titlebar colors, and other optional
+  color rows outside the promotion.
 - **Full-header ABI gaps must be split into symbol and semantic outcomes.**
   Experiment 5 proved the mapped Ghostty header can be closed at the
   declaration/export level while still recording honest semantic divergences for
@@ -855,4 +860,4 @@ remains open.
 - [Experiment 72: Clipboard access formatter oracle](72-clipboard-access-formatter-oracle.md)
   — **Pass**
 - [Experiment 73: Direct color formatter oracle](73-direct-color-formatter-oracle.md)
-  — **Designed**
+  — **Pass**
