@@ -13808,12 +13808,40 @@ mod tests {
     }
 
     #[test]
-    fn palette_config_parse_format_reset_and_diagnose() {
+    fn palette_config_parser_family_oracle() {
         let mut cfg = Config::default();
         assert_eq!(cfg.palette.value[0], Rgb::new(0x1d, 0x1f, 0x21));
         assert!(cfg.palette.mask.is_empty());
         assert!(!cfg.palette_generate);
         assert!(!cfg.palette_harmonious);
+
+        let mut direct = Palette::default();
+        assert_eq!(
+            direct.parse_cli(None),
+            Err(PaletteParseError::ValueRequired)
+        );
+        assert_eq!(
+            direct.parse_cli(Some("0")),
+            Err(PaletteParseError::InvalidValue)
+        );
+        assert_eq!(direct.parse_cli(Some("1=red")), Ok(()));
+        assert_eq!(direct.value[1], Rgb::new(0xff, 0x00, 0x00));
+        assert!(direct.mask.get(1));
+        assert_eq!(
+            direct.parse_cli(Some("2=#010203=ignored")),
+            Err(PaletteParseError::InvalidValue)
+        );
+        assert!(!direct.mask.get(2));
+        assert_eq!(
+            direct.parse_cli(Some("2=nope")),
+            Err(PaletteParseError::InvalidValue)
+        );
+        assert!(!direct.mask.get(2));
+        assert_eq!(
+            direct.parse_cli(Some("256=#ffffff")),
+            Err(PaletteParseError::Overflow)
+        );
+        assert!(!direct.mask.get(255));
 
         cfg.set("palette", Some("0=#aabbcc")).unwrap();
         cfg.set("palette", Some("0x10=#112233")).unwrap();

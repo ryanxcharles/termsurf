@@ -519,6 +519,12 @@ experiment files until they are proven.
   command, exact `direct:` and `shell:` prefixes select parser mode, unknown
   colon prefixes remain shell commands, and direct payloads split naively on
   ASCII spaces.
+- **Palette parser mutates only after key and color parse.** Experiment 38
+  proved canonical `palette`: values require the first `=`, keys trim ASCII
+  space/tab and parse with Zig base-0 `u8` syntax, color suffixes parse through
+  `Color.parseCLI`, failed key or color parses leave prior palette values and
+  mask bits unchanged, explicit empty config values reset to the default palette
+  through optional dispatch, and formatting emits all 256 entries.
 
 ## Verification
 
@@ -596,5 +602,4 @@ remains open.
 - [Experiment 36: Quick terminal size parser oracle](36-quick-terminal-size-parser-oracle.md)
   — **Pass**
 - [Experiment 37: Command parser oracle](37-command-parser-oracle.md) — **Pass**
-- [Experiment 38: Palette parser oracle](38-palette-parser-oracle.md) —
-  **Designed**
+- [Experiment 38: Palette parser oracle](38-palette-parser-oracle.md) — **Pass**

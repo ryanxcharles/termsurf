@@ -167,3 +167,103 @@ prettier --write --prose-wrap always --print-width 80 \
   issues/0805-roastty-ghostty-parity/config-matrix.md
 git diff --check
 ```
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a focused palette parser family oracle for the canonical
+`palette` row.
+
+Implementation notes:
+
+- Renamed and extended the existing config-routing regression as
+  `palette_config_parser_family_oracle`.
+- Added direct parser coverage for required values, missing `=`, first-`=`
+  splitting, named color parsing, failed color/key parse atomicity, and overflow
+  behavior.
+- Taught `config_parser_inventory.py` to detect the palette oracle, promote only
+  `palette`, and make CFG-217's owner `Experiment 38` when this oracle is
+  present.
+
+Verification commands run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml palette_config_parser_family_oracle
+cargo test --manifest-path roastty/Cargo.toml palette_parse_cli_sets_indices_and_mask
+cargo test --manifest-path roastty/Cargo.toml palette_parse_cli_key_matches_zig_parse_int
+cargo test --manifest-path roastty/Cargo.toml palette_format_entry_writes_all_256
+cargo test --manifest-path roastty/Cargo.toml palette_config_replay_preserves_cli_and_file_values
+```
+
+Results:
+
+```text
+test config::tests::palette_config_parser_family_oracle ... ok
+test config::tests::palette_parse_cli_sets_indices_and_mask ... ok
+test config::tests::palette_parse_cli_key_matches_zig_parse_int ... ok
+test config::tests::palette_format_entry_writes_all_256 ... ok
+test config::tests::palette_config_replay_preserves_cli_and_file_values ... ok
+```
+
+The `palette_config_parser_family_oracle` filter also matched the existing
+`command_palette_config_parser_family_oracle`; both tests passed in that run.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Result:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=180
+audit_covered=23
+gap=0
+```
+
+The matrix assertion passed and printed:
+
+```text
+palette_oracle_rows=1 oracle_complete=180 cfg217=Gap
+```
+
+Additional hygiene checks passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+python3 -m py_compile issues/0805-roastty-ghostty-parity/config_parser_inventory.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+```
+
+## Conclusion
+
+The `palette` parser row is now oracle-complete for CFG-217. The important
+upstream boundary is that `Palette.parseCLI` splits on the first `=`, trims only
+the key with ASCII space/tab, parses a Zig base-0 `u8` key and `Color.parseCLI`
+color suffix, and mutates the palette only after both parse successfully.
+CFG-217 remains `Gap` because 23 parser rows are still only audit-covered.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer independently verified the palette-focused tests, Rust format
+check, prettier check, `git diff --check`, generated inventory counts, `palette`
+row promotion, CFG-217's `Gap` status and Experiment 38 ownership, and that the
+result commit had not yet been made.
