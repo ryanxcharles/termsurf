@@ -26,6 +26,7 @@ PRIMITIVE_ORACLE_TEST = "primitive_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
+COLOR_KEYWORD_ORACLE_TEST = "color_keyword_config_formatter_family_oracle"
 PRIMITIVE_FAMILIES = {"boolean", "integer", "float", "string"}
 REPEATABLE_PATH_OPTIONS = {"config-file", "custom-shader", "gtk-custom-css"}
 
@@ -258,6 +259,7 @@ def build_rows(
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
+    color_keyword_oracle_present: bool,
 ) -> tuple[list[FormatterRow], list[str], list[str]]:
     call_by_key = {call.key: call for call in calls}
     canonical = set(upstream)
@@ -343,6 +345,13 @@ def build_rows(
                 "values, raw-empty resets, and representative order checks"
             )
             missing_evidence = "None for repeatable path formatter rows."
+        elif color_keyword_oracle_present and family == "color":
+            status = "Oracle complete"
+            evidence = (
+                "Color keyword formatter oracle covers osc color report keywords, "
+                "window colorspace keywords, empty resets, and representative order checks"
+            )
+            missing_evidence = "None for color keyword formatter rows."
         rows.append(
             FormatterRow(
                 option=option,
@@ -387,6 +396,7 @@ def main() -> int:
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
+    color_keyword_oracle_present = COLOR_KEYWORD_ORACLE_TEST in roastty_source
     rows, missing, extra = build_rows(
         upstream,
         calls,
@@ -394,6 +404,7 @@ def main() -> int:
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
+        color_keyword_oracle_present,
     )
     emit_inventory(rows, extra, args.output)
 
@@ -401,7 +412,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        54
+        55
+        if color_keyword_oracle_present
+        else 54
         if repeatable_path_oracle_present
         else 53
         if window_padding_oracle_present

@@ -25,8 +25,8 @@ non-default formatter oracles.
   - Prove `window-colorspace` formats `srgb` and `display-p3`.
   - Prove raw-empty values reset both rows to their defaults and then format
     those defaults.
-  - Prove representative formatter order keeps `osc-color-report-format` before
-    `window-colorspace`.
+  - Prove representative formatter order between `window-colorspace` and
+    `osc-color-report-format`.
 - `issues/0805-roastty-ghostty-parity/config_formatter_inventory.py`
   - Detect the color keyword formatter oracle.
   - Promote only formatter rows whose family is `color`.
@@ -68,6 +68,74 @@ Pass criteria:
 - `git diff --check` passes.
 
 ## Design Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Added `color_keyword_config_formatter_family_oracle` and promoted only formatter
+inventory rows whose family is `color`.
+
+The oracle proves representative color keyword formatter behavior through
+`Config::format_config`:
+
+- `osc-color-report-format` formats `none`, `8-bit`, and `16-bit`;
+- `window-colorspace` formats `srgb` and `display-p3`;
+- raw-empty values reset both rows to their defaults and then format those
+  defaults;
+- the two rows remain in the actual formatter order: `window-colorspace`, then
+  `osc-color-report-format`.
+
+The implementation discovered that the original design's explicit order
+expectation was backwards. `Config::format_config` emits `window-colorspace`
+before `osc-color-report-format`, so the oracle was corrected to prove the
+actual local formatter order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=76
+audit_covered=127
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 127 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml color_keyword_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`; all
+  previously promoted formatter families remain `Oracle complete`; all `color`
+  formatter rows are `Oracle complete`; representative non-target formatter
+  families remain `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/55-color-keyword-formatter-oracle.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-formatter-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  completed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The color keyword formatter family is now oracle-complete. CFG-218 remains open
+with 127 audit-covered formatter rows. The next small formatter experiments
+should target another compact family such as key remap, key binding, command
+palette, or no-output `link`.
+
+## Completion Review
 
 Reviewed by a fresh-context Codex adversarial subagent.
 

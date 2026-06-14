@@ -18123,6 +18123,75 @@ mod tests {
     }
 
     #[test]
+    fn color_keyword_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "osc-color-report-format"),
+            "osc-color-report-format = 16-bit"
+        );
+        assert_eq!(
+            line(&lines, "window-colorspace"),
+            "window-colorspace = srgb"
+        );
+
+        for (value, expected) in [
+            ("none", "osc-color-report-format = none"),
+            ("8-bit", "osc-color-report-format = 8-bit"),
+            ("16-bit", "osc-color-report-format = 16-bit"),
+        ] {
+            cfg.set("osc-color-report-format", Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, "osc-color-report-format"), expected);
+        }
+
+        for (value, expected) in [
+            ("srgb", "window-colorspace = srgb"),
+            ("display-p3", "window-colorspace = display-p3"),
+        ] {
+            cfg.set("window-colorspace", Some(value)).unwrap();
+            let lines = formatted_lines(&cfg);
+            assert_eq!(line(&lines, "window-colorspace"), expected);
+        }
+
+        cfg.set("osc-color-report-format", Some("")).unwrap();
+        cfg.set("window-colorspace", Some("")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "osc-color-report-format"),
+            "osc-color-report-format = 16-bit"
+        );
+        assert_eq!(
+            line(&lines, "window-colorspace"),
+            "window-colorspace = srgb"
+        );
+        assert!(index(&lines, "window-colorspace") < index(&lines, "osc-color-report-format"));
+    }
+
+    #[test]
     fn config_default_parser_oracle() {
         let fixture = include_str!("../../testdata/issue805-ghostty-default-config.txt");
         let lines: Vec<&str> = fixture.lines().collect();

@@ -477,6 +477,11 @@ experiment files until they are proven.
   positive because its Rust identifier contains `custom_shader`; the actual
   repeatable path formatter family is `config-file`, `custom-shader`, and
   `gtk-custom-css`.
+- **Color formatter rows are keyword rows in this inventory.** Experiment 55
+  promoted `osc-color-report-format` and `window-colorspace`; these are
+  keyword/enum-style rows associated with color behavior, not arbitrary RGB
+  color formatters. The actual `Config::format_config` order is
+  `window-colorspace` before `osc-color-report-format`.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -718,4 +723,4 @@ remains open.
 - [Experiment 54: Repeatable path formatter oracle](54-repeatable-path-formatter-oracle.md)
   — **Pass**
 - [Experiment 55: Color keyword formatter oracle](55-color-keyword-formatter-oracle.md)
-  — **Designed**
+  — **Pass**
