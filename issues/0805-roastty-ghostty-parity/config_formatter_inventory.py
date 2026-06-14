@@ -28,6 +28,7 @@ WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
 COLOR_KEYWORD_ORACLE_TEST = "color_keyword_config_formatter_family_oracle"
 KEY_REMAP_ORACLE_TEST = "key_remap_config_formatter_family_oracle"
+LINK_NO_OUTPUT_ORACLE_TEST = "link_no_output_config_formatter_oracle"
 PRIMITIVE_FAMILIES = {"boolean", "integer", "float", "string"}
 REPEATABLE_PATH_OPTIONS = {"config-file", "custom-shader", "gtk-custom-css"}
 
@@ -262,6 +263,7 @@ def build_rows(
     repeatable_path_oracle_present: bool,
     color_keyword_oracle_present: bool,
     key_remap_oracle_present: bool,
+    link_no_output_oracle_present: bool,
 ) -> tuple[list[FormatterRow], list[str], list[str]]:
     call_by_key = {call.key: call for call in calls}
     canonical = set(upstream)
@@ -270,17 +272,23 @@ def build_rows(
 
     for option in upstream:
         if option in NO_OUTPUT_FORMATTERS:
+            status = "Oracle complete" if link_no_output_oracle_present else "Audit covered"
+            missing_evidence = (
+                "None for canonical no-output formatter rows."
+                if link_no_output_oracle_present
+                else (
+                    "Non-default formatter parity for this no-output canonical "
+                    "option is not yet independently proven."
+                )
+            )
             rows.append(
                 FormatterRow(
                     option=option,
                     formatter_path="canonical no-output formatter",
                     family="no-output",
-                    status="Audit covered",
+                    status=status,
                     evidence=NO_OUTPUT_FORMATTERS[option],
-                    missing_evidence=(
-                        "Non-default formatter parity for this no-output canonical "
-                        "option is not yet independently proven."
-                    ),
+                    missing_evidence=missing_evidence,
                     source_line=None,
                 )
             )
@@ -408,6 +416,7 @@ def main() -> int:
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
     color_keyword_oracle_present = COLOR_KEYWORD_ORACLE_TEST in roastty_source
     key_remap_oracle_present = KEY_REMAP_ORACLE_TEST in roastty_source
+    link_no_output_oracle_present = LINK_NO_OUTPUT_ORACLE_TEST in roastty_source
     rows, missing, extra = build_rows(
         upstream,
         calls,
@@ -417,6 +426,7 @@ def main() -> int:
         repeatable_path_oracle_present,
         color_keyword_oracle_present,
         key_remap_oracle_present,
+        link_no_output_oracle_present,
     )
     emit_inventory(rows, extra, args.output)
 
@@ -424,7 +434,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        56
+        57
+        if link_no_output_oracle_present
+        else 56
         if key_remap_oracle_present
         else 55
         if color_keyword_oracle_present

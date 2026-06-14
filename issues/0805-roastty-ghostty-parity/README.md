@@ -487,6 +487,11 @@ experiment files until they are proven.
   as `control`, `command`, and `option` format as concrete side-specific names,
   and one observed CLI normalized order is `right_ctrl=left_super`,
   `right_alt=left_ctrl`, then `left_ctrl=left_super`.
+- **Canonical `link` is a proven no-output formatter row.** Experiment 57
+  promoted the single `no-output` formatter row. Pinned Ghostty's
+  `RepeatableLink.formatEntry` intentionally emits nothing because `link` cannot
+  currently be set; Roastty now has an oracle proving `format_config` emits no
+  `link = ` line while adjacent `link-url` still formats normally.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -732,4 +737,4 @@ remains open.
 - [Experiment 56: Key remap formatter oracle](56-key-remap-formatter-oracle.md)
   — **Pass**
 - [Experiment 57: Link no-output formatter oracle](57-link-no-output-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

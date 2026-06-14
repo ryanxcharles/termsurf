@@ -18265,6 +18265,52 @@ mod tests {
     }
 
     #[test]
+    fn link_no_output_config_formatter_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn assert_no_link_formatter_line(lines: &[String]) {
+            assert!(
+                lines.iter().all(|line| !line.starts_with("link = ")),
+                "link formatter unexpectedly emitted output: {lines:?}"
+            );
+        }
+
+        let mut cfg = Config::default();
+        let default_links = cfg.link.clone();
+        assert_eq!(default_links.len(), 1);
+
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = true"));
+
+        assert_eq!(
+            cfg.set("link", Some("regex=https://example.invalid")),
+            Err(ConfigSetError::NotImplemented)
+        );
+        assert_eq!(cfg.link, default_links);
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = true"));
+
+        cfg.link.clear();
+        assert!(cfg.link.is_empty());
+        cfg.set("link", Some("")).unwrap();
+        assert_eq!(cfg.link, default_links);
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = true"));
+
+        cfg.set("link-url", Some("false")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_no_link_formatter_line(&lines);
+        assert!(lines.iter().any(|line| line == "link-url = false"));
+    }
+
+    #[test]
     fn config_default_parser_oracle() {
         let fixture = include_str!("../../testdata/issue805-ghostty-default-config.txt");
         let lines: Vec<&str> = fixture.lines().collect();

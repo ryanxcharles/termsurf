@@ -78,3 +78,67 @@ Reviewed by a fresh-context Codex adversarial subagent.
 Verdict: **Approved**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Added `link_no_output_config_formatter_oracle` and promoted only formatter
+inventory rows whose family is `no-output`.
+
+The oracle proves the intentional no-output formatter behavior for canonical
+`link` through `Config::format_config`:
+
+- default config emits no `link = ` formatter line;
+- non-empty `link` values remain recognized but not implemented and do not
+  introduce formatter output;
+- raw-empty `link =` resets the default link list and still emits no formatter
+  output;
+- adjacent `link-url` formatter output still emits normally, proving the oracle
+  distinguishes canonical no-output `link` from link-related formatter rows.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=78
+audit_covered=125
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 125 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml link_no_output_config_formatter_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- Matrix assertion passed: CFG-217 remains `Pass`; CFG-218 remains `Gap`; all
+  previously promoted formatter families remain `Oracle complete`; the
+  `no-output` formatter row is `Oracle complete`; `link-url` remains a separate
+  formatter row; representative non-target formatter families remain
+  `Audit covered`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` passed.
+- `prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/57-link-no-output-formatter-oracle.md issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/config-formatter-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md`
+  completed.
+- `git diff --check` passed.
+
+## Conclusion
+
+The canonical no-output `link` formatter row is now oracle-complete. CFG-218
+remains open with 125 audit-covered formatter rows. The next compact formatter
+experiments should target `keybind` or `command-palette-entry`.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
