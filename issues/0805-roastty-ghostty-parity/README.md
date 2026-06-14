@@ -660,3 +660,5 @@ remains open.
   — **Pass**
 - [Experiment 45: Codepoint map parser oracle](45-codepoint-map-parser-oracle.md)
   — **Pass**
+- [Experiment 46: Key remap parser oracle](46-key-remap-parser-oracle.md) —
+  **Designed**
