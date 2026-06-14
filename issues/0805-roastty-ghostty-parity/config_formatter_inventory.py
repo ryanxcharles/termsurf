@@ -30,6 +30,7 @@ OPTIONAL_COMMAND_ORACLE_TEST = "optional_command_config_formatter_family_oracle"
 OPTIONAL_VALUE_ORACLE_TEST = "optional_value_config_formatter_family_oracle"
 FONT_SCALAR_ORACLE_TEST = "font_scalar_config_formatter_family_oracle"
 FONT_REPEATABLE_STRING_ORACLE_TEST = "font_repeatable_string_config_formatter_family_oracle"
+FONT_STYLE_ORACLE_TEST = "font_style_config_formatter_family_oracle"
 METRIC_MODIFIER_ORACLE_TEST = "metric_modifier_config_formatter_family_oracle"
 WINDOW_PADDING_ORACLE_TEST = "window_padding_config_formatter_family_oracle"
 REPEATABLE_PATH_ORACLE_TEST = "repeatable_path_config_formatter_family_oracle"
@@ -56,6 +57,13 @@ FONT_REPEATABLE_STRING_OPTIONS = {
     "font-family-italic",
     "font-family-bold-italic",
     "font-feature",
+}
+FONT_STYLE_OPTIONS = {
+    "font-style",
+    "font-style-bold",
+    "font-style-italic",
+    "font-style-bold-italic",
+    "font-synthetic-style",
 }
 OPTIONAL_COLOR_OPTIONS = {
     "bold-color",
@@ -163,6 +171,8 @@ def formatter_family(option: str, path_text: str, call_text: str) -> str:
         return "font scalar"
     if option in FONT_REPEATABLE_STRING_OPTIONS:
         return "font repeatable string"
+    if option in FONT_STYLE_OPTIONS:
+        return "font style"
     if "font_" in call_text or "Font" in call_text:
         return "font"
     if "window_padding" in call_text:
@@ -317,6 +327,7 @@ def build_rows(
     optional_value_oracle_present: bool,
     font_scalar_oracle_present: bool,
     font_repeatable_string_oracle_present: bool,
+    font_style_oracle_present: bool,
     metric_modifier_oracle_present: bool,
     window_padding_oracle_present: bool,
     repeatable_path_oracle_present: bool,
@@ -459,6 +470,16 @@ def build_rows(
                 "string output, and representative order checks"
             )
             missing_evidence = "None for font repeatable string formatter rows."
+        elif font_style_oracle_present and family == "font style":
+            status = "Oracle complete"
+            evidence = (
+                "Font style formatter oracle covers FontStyle default, false, "
+                "named style, whitespace-preserving named style, raw-empty "
+                "reset output, FontSyntheticStyle default all-flags output, "
+                "disabled all-flags output, mixed `[no-]flag` output, "
+                "raw-empty reset output, and representative order checks"
+            )
+            missing_evidence = "None for font style formatter rows."
         elif metric_modifier_oracle_present and family == "metric modifier":
             status = "Oracle complete"
             evidence = (
@@ -567,6 +588,7 @@ def main() -> int:
     font_repeatable_string_oracle_present = (
         FONT_REPEATABLE_STRING_ORACLE_TEST in roastty_source
     )
+    font_style_oracle_present = FONT_STYLE_ORACLE_TEST in roastty_source
     metric_modifier_oracle_present = METRIC_MODIFIER_ORACLE_TEST in roastty_source
     window_padding_oracle_present = WINDOW_PADDING_ORACLE_TEST in roastty_source
     repeatable_path_oracle_present = REPEATABLE_PATH_ORACLE_TEST in roastty_source
@@ -586,6 +608,7 @@ def main() -> int:
         optional_value_oracle_present,
         font_scalar_oracle_present,
         font_repeatable_string_oracle_present,
+        font_style_oracle_present,
         metric_modifier_oracle_present,
         window_padding_oracle_present,
         repeatable_path_oracle_present,
@@ -601,7 +624,9 @@ def main() -> int:
     oracle_count = sum(row.status == "Oracle complete" for row in rows)
     gap_count = sum(row.status == "Gap" for row in rows)
     owner_experiment = (
-        66
+        67
+        if font_style_oracle_present
+        else 66
         if font_repeatable_string_oracle_present
         else 65
         if font_scalar_oracle_present

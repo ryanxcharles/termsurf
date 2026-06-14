@@ -18587,6 +18587,114 @@ mod tests {
     }
 
     #[test]
+    fn font_style_config_formatter_family_oracle() {
+        fn formatted_lines(cfg: &Config) -> Vec<String> {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines().map(ToString::to_string).collect()
+        }
+
+        fn line(lines: &[String], key: &str) -> String {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+                .clone()
+        }
+
+        fn index(lines: &[String], key: &str) -> usize {
+            let prefix = format!("{key} = ");
+            lines
+                .iter()
+                .position(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing formatted line for {key}"))
+        }
+
+        let mut cfg = Config::default();
+        let default_lines = formatted_lines(&cfg);
+        assert_eq!(line(&default_lines, "font-style"), "font-style = default");
+        assert_eq!(
+            line(&default_lines, "font-style-bold"),
+            "font-style-bold = default"
+        );
+        assert_eq!(
+            line(&default_lines, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&default_lines, "font-style-bold-italic"),
+            "font-style-bold-italic = default"
+        );
+        assert_eq!(
+            line(&default_lines, "font-synthetic-style"),
+            "font-synthetic-style = bold,italic,bold-italic"
+        );
+
+        cfg.set("font-style", Some("false")).unwrap();
+        cfg.set("font-style-bold", Some("Bold")).unwrap();
+        cfg.set("font-style-italic", Some("default")).unwrap();
+        cfg.set("font-style-bold-italic", Some("  Fancy Italic  "))
+            .unwrap();
+        cfg.set("font-synthetic-style", Some("false")).unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(line(&lines, "font-style"), "font-style = false");
+        assert_eq!(line(&lines, "font-style-bold"), "font-style-bold = Bold");
+        assert_eq!(
+            line(&lines, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&lines, "font-style-bold-italic"),
+            "font-style-bold-italic =   Fancy Italic  "
+        );
+        assert_eq!(
+            line(&lines, "font-synthetic-style"),
+            "font-synthetic-style = no-bold,no-italic,no-bold-italic"
+        );
+
+        cfg.set(
+            "font-synthetic-style",
+            Some("no-bold,italic,no-bold-italic"),
+        )
+        .unwrap();
+        let lines = formatted_lines(&cfg);
+        assert_eq!(
+            line(&lines, "font-synthetic-style"),
+            "font-synthetic-style = no-bold,italic,no-bold-italic"
+        );
+
+        cfg.set("font-style", Some("")).unwrap();
+        cfg.set("font-style-bold", Some("")).unwrap();
+        cfg.set("font-style-italic", Some("")).unwrap();
+        cfg.set("font-style-bold-italic", Some("")).unwrap();
+        cfg.set("font-synthetic-style", Some("")).unwrap();
+        let reset_lines = formatted_lines(&cfg);
+        assert_eq!(line(&reset_lines, "font-style"), "font-style = default");
+        assert_eq!(
+            line(&reset_lines, "font-style-bold"),
+            "font-style-bold = default"
+        );
+        assert_eq!(
+            line(&reset_lines, "font-style-italic"),
+            "font-style-italic = default"
+        );
+        assert_eq!(
+            line(&reset_lines, "font-style-bold-italic"),
+            "font-style-bold-italic = default"
+        );
+        assert_eq!(
+            line(&reset_lines, "font-synthetic-style"),
+            "font-synthetic-style = bold,italic,bold-italic"
+        );
+
+        assert!(index(&lines, "font-style") < index(&lines, "font-style-bold"));
+        assert!(index(&lines, "font-style-bold") < index(&lines, "font-style-italic"));
+        assert!(index(&lines, "font-style-italic") < index(&lines, "font-style-bold-italic"));
+        assert!(index(&lines, "font-style-bold-italic") < index(&lines, "font-synthetic-style"));
+    }
+
+    #[test]
     fn metric_modifier_config_formatter_family_oracle() {
         fn formatted_lines(cfg: &Config) -> Vec<String> {
             let mut out = String::new();

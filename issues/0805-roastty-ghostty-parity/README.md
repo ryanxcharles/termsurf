@@ -544,6 +544,12 @@ experiment files until they are proven.
   `font-family-bold-italic`, and `font-feature`. Empty lists format as one void
   line, populated lists format one line per item in insertion order, raw-empty
   values reset to void output, and strings are byte-preserving.
+- **Font style rows share keyword/name and packed-flag formatting.** Experiment
+  67 promoted `font-style`, `font-style-bold`, `font-style-italic`,
+  `font-style-bold-italic`, and `font-synthetic-style`. `FontStyle` rows format
+  `default`, `false`, and named styles exactly, including whitespace-preserving
+  names and raw-empty reset to `default`; `FontSyntheticStyle` formats all flags
+  with `no-` prefixes for disabled flags and resets to all enabled.
 - **Enum parser rows share exact keyword semantics plus compatibility
   branches.** Experiment 26 proved the 52 enum rows: required and optional enum
   fields accept exact keywords only, missing values are required, raw-empty
@@ -809,4 +815,4 @@ remains open.
 - [Experiment 66: Font repeatable string formatter oracle](66-font-repeatable-string-formatter-oracle.md)
   — **Pass**
 - [Experiment 67: Font style formatter oracle](67-font-style-formatter-oracle.md)
-  — **Designed**
+  — **Pass**

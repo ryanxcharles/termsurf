@@ -128,3 +128,77 @@ experiment has the required sections, the scope is limited to the five intended
 style-shaped font rows, adjacent unpromoted rows are explicitly guarded, the
 expected 122/81/0 to 127/76/0 count movement is plausible, and the referenced
 existing test filters resolve in `roastty/src/config/mod.rs`.
+
+## Result
+
+**Result:** Pass
+
+Added `font_style_config_formatter_family_oracle`, split the five style-shaped
+font rows into a `font style` formatter family, and promoted only that family.
+
+The new oracle proves:
+
+- `FontStyle` default output formats as `default`;
+- `FontStyle` disabled output formats as `false`;
+- named styles format exactly, including whitespace-preserving names;
+- raw-empty values reset all four `FontStyle` rows to `default`;
+- `FontSyntheticStyle` default all-flags output formats with every flag enabled;
+- all-disabled synthetic style output formats every flag with `no-` prefixes;
+- mixed synthetic style output preserves each `[no-]flag` state;
+- raw-empty synthetic style resets to all enabled;
+- representative row order is stable within formatter order.
+
+The regenerated formatter inventory now reports:
+
+```text
+ghostty_canonical=203
+roastty_formatter_rows=203
+missing_canonical_formatter_rows=0
+extra_formatter_rows=0
+oracle_complete=127
+audit_covered=76
+gap=0
+no_output_rows=1
+```
+
+CFG-218 remains `Gap`, as intended, because 76 formatter rows still need
+dedicated non-default formatter oracles.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml font_style_config_formatter_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml font_style_format_entry`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml font_style_config_parser_family_oracle`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_font_synthetic_style_and_size_parse_and_format`
+  passed.
+- `cargo test --manifest-path roastty/Cargo.toml config_default_format_oracle`
+  passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_formatter_inventory.py --upstream vendor/ghostty/src/config/Config.zig --upstream-formatter-file vendor/ghostty/src/config/formatter_file.zig --upstream-formatter vendor/ghostty/src/config/formatter.zig --roastty roastty/src/config/mod.rs --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/config-formatter-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  reported the expected 203/203 rows, 127 `Oracle complete`, 76 `Audit covered`,
+  and 0 `Gap`.
+- Matrix assertion passed: CFG-218 remains `Gap`; all five `font style`
+  formatter rows are `Oracle complete`; representative complex font rows and
+  custom `format_entry` rows remain `Audit covered`.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer reran all five requested `cargo test` filters, `cargo fmt --check`,
+`git diff --check`, `prettier --check`, and static inventory assertions. The
+reviewer confirmed 203 canonical rows, 203 Roastty rows, 127 `Oracle complete`,
+76 `Audit covered`, 0 gaps, exactly five `font style` rows, and CFG-218 still
+`Gap` and owned by Experiment 67.
+
+## Conclusion
+
+The style-shaped font formatter rows are now oracle-complete. CFG-218 remains
+open with 76 audit-covered formatter rows: 6 complex font rows and 70 custom
+`format_entry` rows.
