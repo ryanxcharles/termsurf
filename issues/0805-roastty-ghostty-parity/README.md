@@ -986,3 +986,5 @@ remains open.
   **Pass**
 - [Experiment 89: String diagnostic oracle](89-string-diagnostic-oracle.md) —
   **Pass**
+- [Experiment 90: Duration diagnostic oracle](90-duration-diagnostic-oracle.md)
+  — **Designed**
