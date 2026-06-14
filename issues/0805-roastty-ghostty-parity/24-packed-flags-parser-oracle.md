@@ -153,3 +153,110 @@ git diff --check
 
 Fresh-context adversarial design review approved the experiment plan with no
 findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has a focused packed-flags parser family oracle for the 9 direct
+packed-flags parser rows. The oracle proves pinned Ghostty's packed bool struct
+parser boundary:
+
+- standalone upstream bool spellings set every flag;
+- comma-separated flag lists start from struct defaults;
+- `no-` prefixes disable named flags;
+- spaces and tabs are trimmed around comma parts;
+- hyphenated field names such as `ssh-env`, `ssh-terminfo`, `force-autohint`,
+  and `bold-italic` are exact;
+- duplicate flags use the later token;
+- missing option values are `ValueRequired`;
+- raw empty option values reset each packed field to its default;
+- unknown flags, snake-case aliases, empty strings, empty comma parts, uppercase
+  bool words, newline-padded bools, and newline-padded flag names are rejected;
+- formatter output follows upstream field order;
+- load-string diagnostics preserve valid earlier values while reporting invalid
+  later lines.
+
+Focused Roastty verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml packed_flags_config_parser_family_oracle
+```
+
+Output summary:
+
+```text
+running 1 test
+test config::tests::packed_flags_config_parser_family_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4914 filtered out; finished in 0.02s
+```
+
+Existing packed-flags regression tests also passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml packed_flags_parse_cli
+cargo test --manifest-path roastty/Cargo.toml packed_flags_parse_cli_shell_notify
+```
+
+Output summaries:
+
+```text
+running 2 tests
+test config::tests::packed_flags_parse_cli ... ok
+test config::tests::packed_flags_parse_cli_shell_notify ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4913 filtered out; finished in 0.00s
+```
+
+```text
+running 1 test
+test config::tests::packed_flags_parse_cli_shell_notify ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4914 filtered out; finished in 0.00s
+```
+
+The parser inventory generator passed and moved all 9 packed-flags rows to
+`Oracle complete`:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_parser_inventory.py \
+  --upstream vendor/ghostty/src/config/Config.zig \
+  --roastty roastty/src/config/mod.rs \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/config-parser-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+ghostty_canonical=203
+roastty_parser_rows=203
+missing_canonical_parser_rows=0
+missing_dispatch_rows=0
+extra_parser_rows=0
+compatibility_only_parser_arms=5
+noncanonical_noncompat_parser_arms=0
+oracle_complete=87
+audit_covered=116
+gap=0
+```
+
+Matrix assertion output:
+
+```text
+parser_rows=203 packed_flags_oracle=9 cfg217=Gap
+```
+
+## Conclusion
+
+The packed-flags parser family is now `Oracle complete`. CFG-217 remains `Gap`
+because 116 parser rows are still audit-covered only. The next parser-family
+experiment should continue reducing that count with another bounded non-scalar
+family.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result with no
+findings.

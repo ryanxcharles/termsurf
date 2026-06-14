@@ -422,6 +422,14 @@ experiment files until they are proven.
   spaces and tabs are trimmed around values, raw-empty option values reset to
   defaults, invalid numeric/pair forms are rejected, and formatter output
   collapses equal sides to one value.
+- **Packed flag parser rows share one packed-struct parser.** Experiment 24
+  proved the direct parser boundary for the 9 packed-flags rows: standalone
+  Ghostty bool spellings set every flag, comma lists start from struct defaults,
+  `no-` prefixes disable named flags, only spaces and tabs are trimmed around
+  comma parts, hyphenated field names are exact, duplicate flags use the later
+  token, raw-empty option values reset to defaults, invalid tokens are rejected,
+  diagnostics preserve earlier valid values, and formatter output follows
+  upstream field order.
 
 ## Verification
 
@@ -475,4 +483,4 @@ remains open.
 - [Experiment 23: Window padding parser oracle](23-window-padding-parser-oracle.md)
   — **Pass**
 - [Experiment 24: Packed flags parser oracle](24-packed-flags-parser-oracle.md)
-  — **Designed**
+  — **Pass**

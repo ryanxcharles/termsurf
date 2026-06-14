@@ -23361,6 +23361,188 @@ mod tests {
     }
 
     #[test]
+    fn packed_flags_config_parser_family_oracle() {
+        fn config_line(cfg: &Config, key: &str) -> String {
+            let mut out = String::new();
+            cfg.format_config(&mut out);
+            out.lines()
+                .find(|line| line.starts_with(&format!("{} = ", key)))
+                .unwrap()
+                .to_string()
+        }
+
+        for value in ["true", "1", "t", "T"] {
+            assert_eq!(
+                ScrollToBottom::parse_cli(value),
+                Ok(ScrollToBottom {
+                    keystroke: true,
+                    output: true,
+                })
+            );
+        }
+        for value in ["false", "0", "f", "F"] {
+            assert_eq!(
+                ScrollToBottom::parse_cli(value),
+                Ok(ScrollToBottom {
+                    keystroke: false,
+                    output: false,
+                })
+            );
+        }
+
+        assert_eq!(
+            BellFeatures::parse_cli("system,audio,no-title"),
+            Ok(BellFeatures {
+                system: true,
+                audio: true,
+                attention: true,
+                title: false,
+                border: false,
+            })
+        );
+        assert_eq!(
+            AppNotifications::parse_cli("no-clipboard-copy,config-reload"),
+            Ok(AppNotifications {
+                clipboard_copy: false,
+                config_reload: true,
+            })
+        );
+        assert_eq!(
+            FontShapingBreak::parse_cli("no-cursor"),
+            Ok(FontShapingBreak { cursor: false })
+        );
+        assert_eq!(
+            FontSyntheticStyle::parse_cli("no-bold-italic,no-italic,bold"),
+            Ok(FontSyntheticStyle {
+                bold: true,
+                italic: false,
+                bold_italic: false,
+            })
+        );
+        assert_eq!(
+            FreetypeLoadFlags::parse_cli("no-hinting,force-autohint,no-light"),
+            Ok(FreetypeLoadFlags {
+                hinting: false,
+                force_autohint: true,
+                monochrome: false,
+                autohint: true,
+                light: false,
+            })
+        );
+        assert_eq!(
+            NotifyOnCommandFinishAction::parse_cli("no-bell,notify"),
+            Ok(NotifyOnCommandFinishAction {
+                bell: false,
+                notify: true,
+            })
+        );
+        assert_eq!(
+            ScrollToBottom::parse_cli(" output , no-keystroke "),
+            Ok(ScrollToBottom {
+                keystroke: false,
+                output: true,
+            })
+        );
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("ssh-env,ssh-terminfo,no-title"),
+            Ok(ShellIntegrationFeatures {
+                cursor: true,
+                sudo: false,
+                title: false,
+                ssh_env: true,
+                ssh_terminfo: true,
+                path: true,
+            })
+        );
+        assert_eq!(
+            SplitPreserveZoom::parse_cli("navigation"),
+            Ok(SplitPreserveZoom { navigation: true })
+        );
+
+        assert_eq!(
+            ScrollToBottom::parse_cli("output,no-output,output"),
+            Ok(ScrollToBottom {
+                keystroke: true,
+                output: true,
+            })
+        );
+
+        for value in ["", ",", "output,", "nope", "TRUE", "true\n", "output\n"] {
+            assert_eq!(
+                ScrollToBottom::parse_cli(value),
+                Err(FlagsParseError::InvalidValue),
+                "ScrollToBottom rejects {value:?}"
+            );
+        }
+        assert_eq!(
+            ShellIntegrationFeatures::parse_cli("ssh_env"),
+            Err(FlagsParseError::InvalidValue)
+        );
+        assert_eq!(
+            FreetypeLoadFlags::parse_cli("force_autohint"),
+            Err(FlagsParseError::InvalidValue)
+        );
+
+        let default = Config::default();
+        for key in [
+            "app-notifications",
+            "bell-features",
+            "font-shaping-break",
+            "font-synthetic-style",
+            "freetype-load-flags",
+            "notify-on-command-finish-action",
+            "scroll-to-bottom",
+            "shell-integration-features",
+            "split-preserve-zoom",
+        ] {
+            let mut cfg = Config::default();
+            assert_eq!(cfg.set(key, None), Err(ConfigSetError::ValueRequired));
+            cfg.set(key, Some("true")).unwrap();
+            cfg.set(key, Some("")).unwrap();
+            assert_eq!(
+                config_line(&cfg, key),
+                config_line(&default, key),
+                "{key} raw empty value resets to the default"
+            );
+        }
+
+        let mut cfg = Config::default();
+        cfg.set("shell-integration-features", Some("no-cursor,sudo,ssh-env"))
+            .unwrap();
+        assert_eq!(
+            config_line(&cfg, "shell-integration-features"),
+            "shell-integration-features = no-cursor,sudo,title,ssh-env,no-ssh-terminfo,path"
+        );
+        cfg.set(
+            "freetype-load-flags",
+            Some("no-hinting,force-autohint,no-light"),
+        )
+        .unwrap();
+        assert_eq!(
+            config_line(&cfg, "freetype-load-flags"),
+            "freetype-load-flags = no-hinting,force-autohint,no-monochrome,autohint,no-light"
+        );
+
+        let mut cfg = Config::default();
+        let diagnostics = cfg.load_str("scroll-to-bottom = output\nscroll-to-bottom = nope\n");
+        assert_eq!(
+            diagnostics,
+            vec![ConfigDiagnostic {
+                line: 2,
+                key: "scroll-to-bottom".to_string(),
+                error: ConfigSetError::InvalidValue,
+            }]
+        );
+        assert_eq!(
+            cfg.scroll_to_bottom,
+            ScrollToBottom {
+                keystroke: true,
+                output: true,
+            }
+        );
+    }
+
+    #[test]
     fn parse_bool_field_and_string_field() {
         // bool: a bare flag (no value) is `true`.
         assert_eq!(parse_bool_field(None), Ok(true));
