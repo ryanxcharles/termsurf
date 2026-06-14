@@ -1234,3 +1234,5 @@ remains open.
   — **Pass**
 - [Experiment 121: macOS quit lifecycle policy split](121-macos-quit-lifecycle-policy-split.md)
   — **Pass**
+- [Experiment 122: Title report runtime split](122-title-report-runtime-split.md)
+  — **Designed**
