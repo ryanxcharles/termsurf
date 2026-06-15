@@ -651,6 +651,11 @@ experiment files until they are proven.
   callback ENQ handling can remain for direct terminal users, but live
   PTY-backed parity needs owned terminal response state populated from parsed
   config, passed through `TermioSpawnOptions`, and updated on app config reload.
+- **OSC color report format is terminal response state.** Experiment 136 found
+  that `osc-color-report-format` belongs on the live terminal, not only in the
+  parser: OSC 4/10/11/12 query replies must use the configured `none`, `8-bit`,
+  or `16-bit` response format at startup and after app config updates, while
+  set/reset color operations still run when query replies are disabled.
 - **Shell integration parity has a proven Termio env slice.** Experiment 124
   split terminal identity, resource-backed `TERMINFO`, explicit env override
   ordering, shell feature env, and zsh bootstrap behavior out of the broader
@@ -1344,4 +1349,4 @@ remains open.
 - [Experiment 135: Enquiry response runtime](135-enquiry-response-runtime.md) —
   **Pass**
 - [Experiment 136: OSC color report format runtime](136-osc-color-report-format-runtime.md)
-  — **Designed**
+  — **Pass**

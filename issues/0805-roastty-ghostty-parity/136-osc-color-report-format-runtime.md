@@ -136,3 +136,99 @@ as `Designed`, the design has the required sections, the scope is narrow to
 query behavior, and the verification plan includes focused tests, PTY coverage,
 app/surface startup and live update propagation, inventory regeneration, static
 guard, fmt, Prettier, and `git diff --check` while keeping CFG-223 as `Gap`.
+
+## Result
+
+**Result:** Pass
+
+Implemented config-driven `osc-color-report-format` runtime parity for the
+scoped OSC color query slice:
+
+- `Terminal` now owns `osc_color_report_format` through `TerminalInitOptions`
+  and uses it when answering OSC 4 palette and OSC 10/11/12 dynamic color
+  queries.
+- Default behavior remains 16-bit `rgb:rrrr/gggg/bbbb`.
+- `8-bit` emits `rgb:rr/gg/bb`.
+- `none` suppresses color query replies without suppressing color set/reset
+  operations.
+- `TermioSpawnOptions` carries the report format into PTY-backed terminals, and
+  a child-visible PTY test proves a process can read the configured response.
+- Surface startup and live app config updates propagate parsed
+  `osc-color-report-format` into the active terminal runtime.
+- `RUNTIME-009B2B2B3B2B2A` is now `Oracle complete`; the reduced terminal gap is
+  `RUNTIME-009B2B2B3B2B2B`.
+- CFG-223 remains `Gap` with 45 runtime rows, 38 Oracle-complete rows, 40 closed
+  rows, 5 incomplete rows, and 5 runtime gaps.
+
+Verification:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc_color_report_format
+# 3 passed; 0 failed
+
+cargo test --manifest-path roastty/Cargo.toml termio_osc_color_report_format
+# 1 passed; 0 failed
+
+cargo test --manifest-path roastty/Cargo.toml surface_osc_color_report_format
+# 1 passed; 0 failed
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc_color_report_format_runtime_parity.py
+# osc_color_report_format_runtime_parity=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+# runtime_rows=45
+# oracle_complete=38
+# closed=40
+# audit_covered=0
+# incomplete=5
+# gap=5
+# cfg223=Gap
+
+cargo fmt --manifest-path roastty/Cargo.toml --check
+# pass
+
+prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/136-osc-color-report-format-runtime.md issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md
+# pass
+
+git diff --check
+# pass
+```
+
+Additional consistency checks passed:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/shell_startup_rewrite_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/enquiry_response_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_edge_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/scrollback_byte_limit_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/surface_title_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_pwd_fallback_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_pwd_normalization_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_grid_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/renderer_control_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/renderer_knobs_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/cursor_renderer_runtime_parity.py
+python3 -m py_compile issues/0805-roastty-ghostty-parity/osc_color_report_format_runtime_parity.py issues/0805-roastty-ghostty-parity/config_runtime_inventory.py
+```
+
+The `py_compile` run created `issues/0805-roastty-ghostty-parity/__pycache__/`;
+that generated artifact was removed after verification.
+
+## Conclusion
+
+The `osc-color-report-format` runtime slice is now closed with terminal-core,
+PTY-backed, app/surface config, and static upstream/Roastty guard evidence.
+Remaining CFG-223 terminal behavior work should continue from
+`RUNTIME-009B2B2B3B2B2B`, which is limited to other remaining terminal behavior
+effects.
+
+## Result Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Verdict:** Approved.
+
+The reviewer found no issues. It independently reran the focused terminal,
+Termio, and surface tests; the OSC color report-format static guard; runtime
+inventory regeneration to `/tmp`; `cargo fmt --check`; and `git diff --check`.
+It also confirmed the result commit had not been made before the review.

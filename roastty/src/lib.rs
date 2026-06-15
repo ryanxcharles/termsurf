@@ -3733,6 +3733,7 @@ impl Surface {
                 terminal.set_palette_default(Some(palette_color_tuples(palette)));
                 terminal.set_title_report(parsed.title_report);
                 terminal.set_enquiry_response(parsed.enquiry_response.as_bytes().to_vec());
+                terminal.set_osc_color_report_format(parsed.osc_color_report_format);
             });
             self.dirty = true;
         }
@@ -4000,6 +4001,7 @@ impl Surface {
             palette: derived_config_palette(&config),
             title_report: config.title_report,
             enquiry_response: config.enquiry_response.as_bytes().to_vec(),
+            osc_color_report_format: config.osc_color_report_format,
         };
 
         let termio = match (surface_command, initial_command, config_command) {
@@ -22332,6 +22334,54 @@ mod tests {
                 terminal.next_slice(b"\x05").unwrap();
                 terminal.pty_response().to_vec()
             })
+    }
+
+    fn surface_osc_color_report_response(surface: RoasttySurface) -> Vec<u8> {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                let terminal = termio.terminal_mut();
+                terminal.clear_pty_response();
+                terminal
+                    .next_slice(b"\x1b]4;4;#123456\x1b\\\x1b]4;4;?\x1b\\")
+                    .unwrap();
+                terminal.pty_response().to_vec()
+            })
+    }
+
+    #[test]
+    fn surface_osc_color_report_format_runtime_startup_and_update() {
+        let _guard = pty_command_lock();
+
+        let config =
+            new_test_config_from_str("osc-color-report-format = 8-bit\ncommand = sleep 5\n");
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert_eq!(
+            surface_osc_color_report_response(surface),
+            b"\x1b]4;4;rgb:12/34/56\x1b\\"
+        );
+
+        let updated = new_test_config_from_str("osc-color-report-format = 16-bit\n");
+        roastty_app_update_config(app, updated);
+        assert_eq!(
+            surface_osc_color_report_response(surface),
+            b"\x1b]4;4;rgb:1212/3434/5656\x1b\\"
+        );
+
+        let disabled = new_test_config_from_str("osc-color-report-format = none\n");
+        roastty_app_update_config(app, disabled);
+        assert_eq!(surface_osc_color_report_response(surface), b"");
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(disabled);
+        roastty_config_free(updated);
+        roastty_config_free(config);
     }
 
     #[test]

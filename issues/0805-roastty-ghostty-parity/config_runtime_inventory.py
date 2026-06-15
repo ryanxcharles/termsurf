@@ -708,14 +708,47 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_enquiry_response && cargo test --manifest-path roastty/Cargo.toml termio_enquiry_response && cargo test --manifest-path roastty/Cargo.toml surface_enquiry_response && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/enquiry_response_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2B3B2B2",
+        id="RUNTIME-009B2B2B3B2B2A",
+        behavior="`osc-color-report-format` runtime effects on OSC palette and dynamic color query replies",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `osc-color-report-format`; `vendor/ghostty/src/termio/Termio.zig` derived config; `vendor/ghostty/src/termio/stream_handler.zig` `changeConfig` and OSC color query formatting",
+        roastty_reference="`roastty/src/config/mod.rs` `osc-color-report-format`; `roastty/src/terminal/terminal.rs` OSC color query formatting; `roastty/src/termio.rs` spawn options; `roastty/src/lib.rs` surface config startup/update wiring",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 136 proves config-driven OSC color report-format "
+            "runtime parity. "
+            "`terminal_stream_osc_color_report_format_defaults_to_16_bit` "
+            "proves the default 16-bit `rgb:rrrr/gggg/bbbb` response. "
+            "`terminal_stream_osc_color_report_format_8_bit_and_runtime_update` "
+            "proves configured 8-bit `rgb:rr/gg/bb` responses and live "
+            "terminal updates. "
+            "`terminal_stream_osc_color_report_format_none_suppresses_queries_only` "
+            "proves `none` suppresses OSC color query replies without "
+            "suppressing set/reset operations. "
+            "`termio_osc_color_report_format_reaches_child_pty` proves a "
+            "PTY-backed child can read the configured response. "
+            "`surface_osc_color_report_format_runtime_startup_and_update` "
+            "proves parsed app config reaches initial surfaces and live app "
+            "config updates. "
+            "`osc_color_report_format_runtime_parity.py` statically checks "
+            "pinned Ghostty config, derived-config, `changeConfig`, and color "
+            "query formatting markers plus Roastty parser/runtime/update "
+            "guards."
+        ),
+        missing_evidence="None for `osc-color-report-format` runtime effects on OSC palette and dynamic color query replies.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc_color_report_format && cargo test --manifest-path roastty/Cargo.toml termio_osc_color_report_format && cargo test --manifest-path roastty/Cargo.toml surface_osc_color_report_format && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc_color_report_format_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3B2B2B",
         behavior="other remaining terminal behavior effects",
         ghostty_reference="remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiments 117, 122, 124, 126, 127, 128, 129, 130, 131, and 135 "
+            "Experiments 117, 122, 124, 126, 127, 128, 129, 130, 131, 135, "
+            "and 136 "
             "split out zero/no-history scrollback, nonzero scrollback byte "
             "quota, alternate-screen no-scrollback, CSI `21t` title-report "
             "gating, shell-integration feature env and terminal identity, "
@@ -724,7 +757,8 @@ ROWS = [
             "stored-PWD title fallback/empty title app dispatch, common local "
             "OSC 7 PWD validation, path normalization, surface PWD dispatch, "
             "title fallback path behavior, and remaining OSC 7 URI edge "
-            "semantics, and config-driven ENQ `enquiry-response` replies. "
+            "semantics, config-driven ENQ `enquiry-response` replies, and "
+            "`osc-color-report-format` OSC color query replies. "
             "Other remaining terminal behavior toggles still need focused "
             "CFG-223 runtime proof or fixes."
         ),
@@ -1026,7 +1060,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2B3B1",
     "RUNTIME-009B2B2B3B2A",
     "RUNTIME-009B2B2B3B2B1",
-    "RUNTIME-009B2B2B3B2B2",
+    "RUNTIME-009B2B2B3B2B2A",
+    "RUNTIME-009B2B2B3B2B2B",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

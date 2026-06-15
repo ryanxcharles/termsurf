@@ -42,6 +42,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) palette: color::Palette,
     pub(crate) title_report: bool,
     pub(crate) enquiry_response: Vec<u8>,
+    pub(crate) osc_color_report_format: crate::config::OscColorReportFormat,
 }
 
 impl Default for TermioSpawnOptions {
@@ -59,6 +60,7 @@ impl Default for TermioSpawnOptions {
             palette: color::DEFAULT_PALETTE,
             title_report: false,
             enquiry_response: Vec::new(),
+            osc_color_report_format: crate::config::OscColorReportFormat::Bits16,
         }
     }
 }
@@ -193,6 +195,7 @@ impl Termio {
                 cursor_blink: options.cursor_blink,
                 title_report: options.title_report,
                 enquiry_response: options.enquiry_response,
+                osc_color_report_format: options.osc_color_report_format,
             },
         )?;
         terminal.set_palette_default(Some(palette_tuple(options.palette)));
@@ -939,6 +942,30 @@ mod tests {
             .terminal()
             .plain_screen(false)
             .contains("got:roastty-enq-42"));
+    }
+
+    #[test]
+    fn termio_osc_color_report_format_reaches_child_pty() {
+        let _guard = pty_command_lock();
+        let mut termio = Termio::spawn_with_options(
+            "/bin/bash",
+            [
+                "-lc",
+                "printf '\\033]4;4;#123456\\033\\\\\\033]4;4;?\\033\\\\'; IFS= read -r -d '\\\\' response; case \"$response\" in *'rgb:12/34/56'*) printf got-8-bit;; *) printf 'bad:%s' \"$response\";; esac",
+            ],
+            TermioSpawnOptions {
+                osc_color_report_format: crate::config::OscColorReportFormat::Bits8,
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio with OSC color report format");
+
+        pump_until(&mut termio, |termio, _| {
+            termio.terminal().plain_screen(false).contains("got-8-bit")
+        });
+
+        assert!(termio.terminal().plain_screen(false).contains("got-8-bit"));
     }
 
     #[test]

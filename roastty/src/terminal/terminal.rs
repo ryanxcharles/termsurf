@@ -39,6 +39,7 @@ use super::stream::{self, Action, Handler};
 use super::style;
 use super::tabstops;
 use super::tmux;
+use crate::config::OscColorReportFormat;
 use crate::font::run::RunOptions;
 
 const TABSTOP_INTERVAL: usize = 8;
@@ -67,6 +68,7 @@ pub(crate) struct Terminal {
     mouse_shape: mouse::MouseShape,
     title_report: bool,
     enquiry_response: Vec<u8>,
+    osc_color_report_format: OscColorReportFormat,
     next_implicit_hyperlink_id: u32,
     previous_char: Option<char>,
     pending_clipboard_events: Vec<TerminalClipboardEvent>,
@@ -792,6 +794,7 @@ pub(crate) struct TerminalInitOptions {
     pub(crate) cursor_blink: Option<bool>,
     pub(crate) title_report: bool,
     pub(crate) enquiry_response: Vec<u8>,
+    pub(crate) osc_color_report_format: OscColorReportFormat,
 }
 
 impl Default for TerminalInitOptions {
@@ -801,6 +804,7 @@ impl Default for TerminalInitOptions {
             cursor_blink: None,
             title_report: false,
             enquiry_response: Vec::new(),
+            osc_color_report_format: OscColorReportFormat::Bits16,
         }
     }
 }
@@ -821,6 +825,7 @@ struct TerminalStreamHandler<'a> {
     mouse_shape: &'a mut mouse::MouseShape,
     title_report: &'a bool,
     enquiry_response: &'a Vec<u8>,
+    osc_color_report_format: &'a OscColorReportFormat,
     next_implicit_hyperlink_id: &'a mut u32,
     previous_char: &'a mut Option<char>,
     dcs: &'a mut dcs::Handler,
@@ -1089,6 +1094,7 @@ impl Terminal {
             mouse_shape: mouse::MouseShape::Text,
             title_report: options.title_report,
             enquiry_response: options.enquiry_response,
+            osc_color_report_format: options.osc_color_report_format,
             next_implicit_hyperlink_id: 0,
             previous_char: None,
             pending_clipboard_events: Vec::new(),
@@ -1121,6 +1127,7 @@ impl Terminal {
             mouse_shape,
             title_report,
             enquiry_response,
+            osc_color_report_format,
             next_implicit_hyperlink_id,
             previous_char,
             pending_clipboard_events,
@@ -1146,6 +1153,7 @@ impl Terminal {
             mouse_shape,
             title_report,
             enquiry_response,
+            osc_color_report_format,
             next_implicit_hyperlink_id,
             previous_char,
             dcs,
@@ -1249,6 +1257,10 @@ impl Terminal {
 
     pub(crate) fn set_enquiry_response(&mut self, response: impl Into<Vec<u8>>) {
         self.enquiry_response = response.into();
+    }
+
+    pub(crate) fn set_osc_color_report_format(&mut self, format: OscColorReportFormat) {
+        self.osc_color_report_format = format;
     }
 
     pub(crate) fn set_size_callback(&mut self, callback: Option<TerminalSizeCallback>) {
@@ -4237,14 +4249,11 @@ impl TerminalStreamHandler<'_> {
     }
 
     fn write_palette_query_response(&mut self, index: u8, terminator: osc::Terminator) {
+        let Some(format) = color_report_format(*self.osc_color_report_format) else {
+            return;
+        };
         let rgb = self.colors.palette.current()[index as usize];
-        let response = format!(
-            "\x1b]4;{};rgb:{:04x}/{:04x}/{:04x}",
-            index,
-            u16::from(rgb.r) * 257,
-            u16::from(rgb.g) * 257,
-            u16::from(rgb.b) * 257
-        );
+        let response = format!("\x1b]4;{};{}", index, format.rgb(rgb));
         self.write_pty_response(&response);
         self.write_pty_response_bytes(terminator.bytes());
     }
@@ -4257,13 +4266,10 @@ impl TerminalStreamHandler<'_> {
         let Some(rgb) = self.dynamic_color(target) else {
             return;
         };
-        let response = format!(
-            "\x1b]{};rgb:{:04x}/{:04x}/{:04x}",
-            target.number(),
-            u16::from(rgb.r) * 257,
-            u16::from(rgb.g) * 257,
-            u16::from(rgb.b) * 257
-        );
+        let Some(format) = color_report_format(*self.osc_color_report_format) else {
+            return;
+        };
+        let response = format!("\x1b]{};{}", target.number(), format.rgb(rgb));
         self.write_pty_response(&response);
         self.write_pty_response_bytes(terminator.bytes());
     }
@@ -4979,6 +4985,34 @@ fn append_kitty_color_response(
     output.push('=');
     if let Some(rgb) = rgb {
         output.push_str(&format!("rgb:{:02x}/{:02x}/{:02x}", rgb.r, rgb.g, rgb.b));
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorReportFormat {
+    Bits8,
+    Bits16,
+}
+
+impl ColorReportFormat {
+    fn rgb(self, rgb: color::Rgb) -> String {
+        match self {
+            Self::Bits8 => format!("rgb:{:02x}/{:02x}/{:02x}", rgb.r, rgb.g, rgb.b),
+            Self::Bits16 => format!(
+                "rgb:{:04x}/{:04x}/{:04x}",
+                u16::from(rgb.r) * 257,
+                u16::from(rgb.g) * 257,
+                u16::from(rgb.b) * 257
+            ),
+        }
+    }
+}
+
+fn color_report_format(format: OscColorReportFormat) -> Option<ColorReportFormat> {
+    match format {
+        OscColorReportFormat::None => None,
+        OscColorReportFormat::Bits8 => Some(ColorReportFormat::Bits8),
+        OscColorReportFormat::Bits16 => Some(ColorReportFormat::Bits16),
     }
 }
 
@@ -10995,6 +11029,91 @@ mod tests {
         assert_eq!(
             terminal.pty_response_for_tests(),
             b"\x1b]12;rgb:0101/0202/0303\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc_color_report_format_defaults_to_16_bit() {
+        let mut terminal = Terminal::init(5, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]4;4;#123456\x1b\\\x1b]4;4;?\x1b\\")
+            .unwrap();
+
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            b"\x1b]4;4;rgb:1212/3434/5656\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc_color_report_format_8_bit_and_runtime_update() {
+        let mut terminal = Terminal::init_with_options(
+            5,
+            2,
+            None,
+            TerminalInitOptions {
+                osc_color_report_format: OscColorReportFormat::Bits8,
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal
+            .next_slice(b"\x1b]10;#123456\x1b\\\x1b]10;?\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_pty_response_for_tests(),
+            b"\x1b]10;rgb:12/34/56\x07"
+        );
+
+        terminal.set_osc_color_report_format(OscColorReportFormat::Bits16);
+        terminal.next_slice(b"\x1b]10;?\x1b\\").unwrap();
+        assert_eq!(
+            terminal.take_pty_response_for_tests(),
+            b"\x1b]10;rgb:1212/3434/5656\x1b\\"
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc_color_report_format_none_suppresses_queries_only() {
+        let mut terminal = Terminal::init_with_options(
+            5,
+            2,
+            None,
+            TerminalInitOptions {
+                osc_color_report_format: OscColorReportFormat::None,
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal
+            .next_slice(b"\x1b]4;4;#123456\x1b\\\x1b]4;4;?\x1b\\")
+            .unwrap();
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert_eq!(
+            terminal.colors.palette.current()[4],
+            color::Rgb::new(0x12, 0x34, 0x56)
+        );
+
+        terminal.next_slice(b"\x1b]104;4\x1b\\").unwrap();
+        assert_eq!(
+            terminal.colors.palette.current()[4],
+            color::DEFAULT_PALETTE[4]
+        );
+
+        terminal.set_osc_color_report_format(OscColorReportFormat::Bits8);
+        terminal.next_slice(b"\x1b]4;4;?\x1b\\").unwrap();
+        assert_eq!(
+            terminal.pty_response_for_tests(),
+            format!(
+                "\x1b]4;4;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+                color::DEFAULT_PALETTE[4].r,
+                color::DEFAULT_PALETTE[4].g,
+                color::DEFAULT_PALETTE[4].b
+            )
+            .as_bytes()
         );
     }
 
