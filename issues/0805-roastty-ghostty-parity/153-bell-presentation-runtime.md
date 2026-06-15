@@ -133,3 +133,110 @@ Re-review verdict: `APPROVED`.
 
 The reviewer confirmed the prior finding was resolved and found no new required
 issues.
+
+## Result
+
+**Result:** Pass
+
+Implemented the static copied macOS bell presentation parity guard and split the
+notification/link/bell runtime inventory:
+
+- `RUNTIME-012B2B1`: **Oracle complete** for copied macOS bell presentation
+  plumbing.
+- `RUNTIME-012B2B2`: **Gap** for remaining notification/link/bell GUI effects:
+  command-finish notifications, app-notifications, native desktop notification
+  presentation and rate limiting, actual audio/dock/border/title GUI effects,
+  hover/cursor UI, link previews, and context/menu link flows.
+
+The new guard proves that Roastty preserves pinned Ghostty's copied macOS bell
+presentation plumbing after expected product renames. It checks aggregate window
+bell-state publishing, close-time bell clearing, terminal-window bell
+observation, dock badge counting, surface bell-state updates, border overlay
+gating, focused-surface title/bell recomputation, and separate
+`bell-features = system`, `audio`, `attention`, `title`, and `border` gates.
+
+Verification passed:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_runtime_dispatch_parity.py
+```
+
+Output:
+
+```text
+bell_runtime_dispatch_parity=pass
+```
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_presentation_runtime_parity.py
+```
+
+Output:
+
+```text
+bell_presentation_runtime_parity=pass
+```
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+runtime_rows=61
+oracle_complete=55
+closed=57
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/desktop_notification_runtime_parity.py
+```
+
+Output:
+
+```text
+desktop_notification_runtime_parity=pass
+```
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py
+```
+
+Output:
+
+```text
+terminal_runtime_residual_audit=pass
+```
+
+## Conclusion
+
+Roastty preserves the copied macOS bell presentation plumbing for this bounded
+source-level slice. This closes the deterministic app-host bell wiring after the
+live BEL dispatch path without claiming actual macOS sound, dock, border,
+titlebar, native notification, or link GUI side effects.
+
+CFG-223 remains open with four unresolved runtime gaps: remaining font renderer
+output effects, remaining renderer-visible visual effects, remaining macOS app
+workflow/UI effects, and remaining notification/link/bell GUI effects.
+
+## Completion Review
+
+Adversarial subagent `019eca11-86ca-7e21-accd-c754a0d81226` reviewed the
+completed experiment with fresh context and returned `VERDICT: APPROVED`.
+
+Findings: none.
+
+The reviewer independently verified the BEL dispatch prerequisite guard, the new
+bell presentation parity guard, regenerated runtime inventory to `/tmp`, the
+full runtime parity guard loop, the terminal runtime residual audit, and
+`git diff --check`. The reviewer also confirmed that no result commit existed
+after plan commit `3dfda1aae`, that changes are confined to
+`issues/0805-roastty-ghostty-parity`, that the README marks Experiment 153 as
+`Pass`, and that the inventory split keeps `RUNTIME-012B2B1` source-level copied
+bell plumbing separate from `RUNTIME-012B2B2` remaining GUI/OS/audio/dock/
+border/title/notification/link gaps.

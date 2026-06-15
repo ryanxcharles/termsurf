@@ -200,7 +200,7 @@ ROWS = [
             "semantics; refreshes existing surfaces on config update; and "
             "does not bypass terminal mouse reporting."
         ),
-        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012B2.",
+        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012B2B2.",
         guard_tier="Tier 3",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml right_click_action`",
     ),
@@ -1440,10 +1440,33 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml desktop_notification_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/desktop_notification_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-012B2B",
-        behavior="bell feature UI/audio effects, command-finish notifications, app-notifications, native desktop notification presentation/rate limiting, hover/cursor UI, link previews, and context/menu link flows",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification, bell feature, link preview, and app-notification fields; `vendor/ghostty/src/Surface.zig` notification/link hover/menu paths; macOS app notification/bell feature handling",
-        roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling; app bell feature presentation beyond action dispatch",
+        id="RUNTIME-012B2B1",
+        behavior="copied macOS bell presentation plumbing",
+        ghostty_reference="`vendor/ghostty/macos/Sources/Features/Terminal/BaseTerminalController.swift`; `vendor/ghostty/macos/Sources/App/macOS/AppDelegate.swift`; `vendor/ghostty/macos/Sources/Ghostty/Surface View/SurfaceView*.swift` bell presentation handling",
+        roastty_reference="`roastty/macos/Sources/Features/Terminal/BaseTerminalController.swift`; `roastty/macos/Sources/App/macOS/AppDelegate.swift`; `roastty/macos/Sources/Roastty/Surface View/SurfaceView*.swift` bell presentation handling",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 153 split out copied macOS bell presentation plumbing "
+            "after the already-proven BEL-to-app-action path. "
+            "`bell_presentation_runtime_parity.py` proves the copied "
+            "`AppDelegate.swift` and `SurfaceView.swift` sources match pinned "
+            "Ghostty after expected renames, and checks focused-surface "
+            "title/bell recomputation, aggregate window bell-state publishing, "
+            "close-time clear notifications, dock badge counting, and the "
+            "separate `bell-features = system`, `bell-features = audio`, "
+            "`bell-features = attention`, `bell-features = title`, and "
+            "`bell-features = border` gates."
+        ),
+        missing_evidence="None for copied macOS bell presentation plumbing source parity; actual OS/audio/dock/border/title runtime side effects remain tracked by RUNTIME-012B2B2.",
+        guard_tier="Tier 0",
+        guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_runtime_dispatch_parity.py && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_presentation_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-012B2B2",
+        behavior="remaining notification/link/bell GUI effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification, link preview, and app-notification fields; `vendor/ghostty/src/Surface.zig` notification/link hover/menu paths; macOS native notification and link handling",
+        roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling beyond copied bell plumbing",
         family="notifications",
         status="Gap",
         evidence=(
@@ -1451,15 +1474,14 @@ ROWS = [
             "runtime slice. Experiment 123 split out terminal BEL to live "
             "surface ring-bell action dispatch. Experiment 141 split out "
             "deterministic OSC desktop notification runtime dispatch and the "
-            "`desktop-notifications` config gate. Bell feature UI/audio "
-            "effects such as system beep, custom audio, attention, "
-            "title/border presentation, command-finish notifications, "
-            "app-notifications, native desktop notification presentation/rate "
-            "limiting, link hover/cursor UI, link previews in the real app, "
-            "and context/menu link flows still need focused runtime or GUI "
-            "proof."
+            "`desktop-notifications` config gate. Experiment 153 split out "
+            "copied macOS bell presentation plumbing. Command-finish "
+            "notifications, app-notifications, native desktop notification "
+            "presentation/rate limiting, actual audio/dock/border/title GUI "
+            "effects, link hover/cursor UI, link previews in the real app, and "
+            "context/menu link flows still need focused runtime or GUI proof."
         ),
-        missing_evidence="Add bell feature UI/audio, notification, app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
+        missing_evidence="Add command-finish notification, app-notification, native notification, actual bell side-effect, app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 notification/link GUI or runtime experiment.",
     ),
@@ -1558,7 +1580,8 @@ EXPECTED_IDS = [
     "RUNTIME-012A",
     "RUNTIME-012B1",
     "RUNTIME-012B2A",
-    "RUNTIME-012B2B",
+    "RUNTIME-012B2B1",
+    "RUNTIME-012B2B2",
     "RUNTIME-013",
     "RUNTIME-014",
 ]

@@ -661,6 +661,13 @@ experiment files until they are proven.
   Live PTY-backed BEL parity therefore flows through terminal pending bell
   counts, `TermioPump::bell_count`, and surface `ROASTTY_ACTION_RING_BELL`
   dispatch with a 100ms repeated-BEL throttle.
+- **Copied macOS bell presentation has source-level gates.** Experiment 153
+  proved the copied macOS host preserves pinned Ghostty's aggregate window bell
+  publisher, close-time bell clear, dock badge count, surface border overlay,
+  title bell prefix, and separate `bell-features = system`, `audio`,
+  `attention`, `title`, and `border` gates after expected Roastty renames.
+  Actual OS/audio/dock/border/title side effects still need GUI or platform
+  walkthrough proof in `RUNTIME-012B2B2`.
 - **OSC desktop notifications need a PTY event queue.** Experiment 141 found
   that Roastty already parsed OSC 9 and OSC 777 desktop notification commands,
   but the live terminal path dropped them. PTY-backed parity now queues terminal
@@ -1482,4 +1489,4 @@ remains open.
 - [Experiment 152: Command palette runtime](152-command-palette-runtime.md) —
   **Pass**
 - [Experiment 153: Bell presentation runtime](153-bell-presentation-runtime.md)
-  — **Designed**
+  — **Pass**
