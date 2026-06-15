@@ -443,7 +443,41 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml font_variation_runtime && cargo test --manifest-path roastty/Cargo.toml font_variation_config_parser_family_oracle && cargo test --manifest-path roastty/Cargo.toml font_variation_config_formatter_family_oracle && cargo test --manifest-path roastty/Cargo.toml deferred_face_load_applies_variations && cargo test --manifest-path roastty/Cargo.toml set_variations_runs_on_face && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_variation_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-007B2B2B2",
+        id="RUNTIME-007B2B2B2A",
+        behavior="font metric modifier config propagation, key separation, and collection metric application",
+        ghostty_reference="`vendor/ghostty/src/font/SharedGridSet.zig` metric modifier fields, key construction, and key hashing; `vendor/ghostty/src/font/Collection.zig` `updateMetrics`; `vendor/ghostty/src/font/Metrics.zig` `Metrics.apply`",
+        roastty_reference="`roastty/src/font/shared_grid_set.rs` metric modifier derived config and key wiring; `roastty/src/font/collection.rs` `update_metrics`; `roastty/src/font/metrics.rs` `Metrics::apply`",
+        family="font",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 150 wires all 13 parsed `adjust-*` metric modifier "
+            "fields into the config-derived font grid key and collection "
+            "metrics calculation without claiming glyph pixel parity. "
+            "`font_metric_modifier_runtime_key_maps_all_adjust_fields` proves "
+            "each canonical `adjust-*` field maps to the intended "
+            "`font::metrics::Key`. "
+            "`font_metric_modifier_runtime_key_hash_changes_with_modifiers` "
+            "proves modifier differences split font-grid keys. "
+            "`font_metric_modifier_runtime_empty_set_preserves_metrics`, "
+            "`font_metric_modifier_runtime_update_metrics_applies_modifiers`, "
+            "and `font_metric_modifier_runtime_cell_height_recenters_metrics` "
+            "prove collection `update_metrics` applies configured modifiers "
+            "through `Metrics::apply` while preserving empty-set defaults. "
+            "`font_metric_modifier_runtime_build_grid_applies_config_modifiers` "
+            "and `font_metric_modifier_runtime_build_grid_recenters_cell_height` "
+            "prove `build_grid_from_config` returns modified grid metrics. "
+            "`font_metric_modifier_runtime_parity.py` statically checks "
+            "pinned Ghostty's derived config fields, modifier-set "
+            "construction, key hashing, collection application, and Metrics "
+            "apply markers against Roastty's wiring, tests, and inventory "
+            "split."
+        ),
+        missing_evidence="None for deterministic `adjust-*` metric modifier propagation into font-grid key separation and collection metric calculation.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml font_metric_modifier_runtime && cargo test --manifest-path roastty/Cargo.toml metric_modifier_config_parser_family_oracle && cargo test --manifest-path roastty/Cargo.toml metric_modifier_config_formatter_family_oracle && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_metric_modifier_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-007B2B2B2B",
         behavior="remaining font renderer output effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` font feature, variation, thicken, metric, and shaping fields; `vendor/ghostty/src/font` shaping/rendering paths",
         roastty_reference="`roastty/src/font`; `roastty/src/renderer` font shaping, metrics, glyph output, and visual renderer behavior",
@@ -466,13 +500,17 @@ ROWS = [
             "cache separation. Experiment 149 split out deterministic "
             "`font-variation*` style-specific descriptor propagation, "
             "font-grid key separation, deferred face loading, and CoreText "
-            "variation application mechanics. "
+            "variation application mechanics. Experiment 150 split out "
+            "deterministic `adjust-*` metric modifier propagation, font-grid "
+            "key separation, collection metric application, and modified "
+            "grid metrics returned by `build_grid_from_config`. "
             "Remaining font parity still needs focused runtime/renderer or GUI "
-            "proof for metric adjustment, fallback/shaping visual output, "
-            "bitmap/color font thickening edge cases, glyph metrics as seen "
-            "by the renderer, and broader renderer-visible font pixel parity."
+            "proof for fallback/shaping visual output, bitmap/color font "
+            "thickening edge cases, glyph metrics as seen by the renderer "
+            "beyond modifier math, and broader renderer-visible font pixel "
+            "parity."
         ),
-        missing_evidence="Add focused font renderer/runtime or GUI proof for metric adjustment, fallback/shaping visual output, bitmap/color font thickening edge cases, glyph metrics, and broader font pixel parity.",
+        missing_evidence="Add focused font renderer/runtime or GUI proof for fallback/shaping visual output, bitmap/color font thickening edge cases, glyph metrics beyond modifier math, and broader font pixel parity.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 font renderer experiment.",
     ),
@@ -1425,7 +1463,8 @@ EXPECTED_IDS = [
     "RUNTIME-007B2B1",
     "RUNTIME-007B2B2A",
     "RUNTIME-007B2B2B1",
-    "RUNTIME-007B2B2B2",
+    "RUNTIME-007B2B2B2A",
+    "RUNTIME-007B2B2B2B",
     "RUNTIME-008A",
     "RUNTIME-008B1",
     "RUNTIME-008B2A",

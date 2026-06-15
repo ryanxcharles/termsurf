@@ -512,6 +512,21 @@ impl Modifier {
     }
 }
 
+impl std::hash::Hash for Modifier {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Modifier::Percent(value) => {
+                0_u8.hash(state);
+                value.to_bits().hash(state);
+            }
+            Modifier::Absolute(value) => {
+                1_u8.hash(state);
+                value.hash(state);
+            }
+        }
+    }
+}
+
 fn parse_zig_i32_dec(input: &str) -> Result<i32, ModifierParseError> {
     let (negative, digits) = match input.as_bytes().first() {
         Some(b'+') => (false, &input[1..]),

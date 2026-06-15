@@ -8,7 +8,7 @@
 
 use crate::font::deferred_face::DeferredFace;
 use crate::font::face::coretext::Face;
-use crate::font::metrics::{FaceMetrics, Metrics};
+use crate::font::metrics::{FaceMetrics, Metrics, ModifierSet};
 use crate::font::{Presentation, Style};
 
 /// Bits used for the face index within an [`Index`]. `Style` is a 3-bit field,
@@ -437,6 +437,8 @@ pub(crate) struct Collection {
     /// The collection's grid metrics, derived from the primary face by
     /// [`update_metrics`](Self::update_metrics).
     metrics: Option<Metrics>,
+    /// User-configured modifiers applied after calculating primary-face metrics.
+    metric_modifiers: ModifierSet,
     /// Desired point size for loaded faces and future deferred loads.
     point_size: Option<f64>,
 }
@@ -462,22 +464,29 @@ impl Collection {
             faces: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
             primary_face_metrics: None,
             metrics: None,
+            metric_modifiers: ModifierSet::new(),
             point_size: None,
         }
     }
 
     /// Derive the collection's grid [`Metrics`] from the primary face (index 0)
     /// and cache the primary's `FaceMetrics`. Faithful port of upstream
-    /// `updateMetrics` (the `metric_modifiers` apply is deferred — the default
-    /// modifier set is identity). Errors if there's no loadable primary font.
+    /// `updateMetrics`. Errors if there's no loadable primary font.
     pub(crate) fn update_metrics(&mut self) -> Result<(), UpdateMetricsError> {
         let fm = self
             .get_face(Index::default())
             .map_err(|_| UpdateMetricsError::CannotLoadPrimaryFont)?
             .get_metrics();
         self.primary_face_metrics = Some(fm);
-        self.metrics = Some(Metrics::calc(fm));
+        let mut metrics = Metrics::calc(fm);
+        metrics.apply(&self.metric_modifiers);
+        self.metrics = Some(metrics);
         Ok(())
+    }
+
+    /// Replace the metric modifier set used by future [`update_metrics`] calls.
+    pub(crate) fn set_metric_modifiers(&mut self, modifiers: ModifierSet) {
+        self.metric_modifiers = modifiers;
     }
 
     /// The collection's grid metrics, if [`update_metrics`](Self::update_metrics)
@@ -901,7 +910,7 @@ impl Collection {
 mod tests {
     use super::*;
     use crate::font::discovery::Descriptor;
-    use crate::font::metrics::FaceMetrics;
+    use crate::font::metrics::{FaceMetrics, Key as MetricKey, Modifier};
 
     #[test]
     fn index_bit_layout() {
@@ -1723,6 +1732,57 @@ mod tests {
         // It matches calc'ing the primary face's metrics directly.
         let expected = Metrics::calc(c.get_face(Index::default()).unwrap().get_metrics());
         assert_eq!(*c.metrics().unwrap(), expected);
+    }
+
+    #[test]
+    fn font_metric_modifier_runtime_empty_set_preserves_metrics() {
+        let mut c = menlo_collection();
+        c.set_metric_modifiers(Default::default());
+        c.update_metrics().expect("update");
+
+        let expected = Metrics::calc(c.get_face(Index::default()).unwrap().get_metrics());
+        assert_eq!(*c.metrics().unwrap(), expected);
+    }
+
+    #[test]
+    fn font_metric_modifier_runtime_update_metrics_applies_modifiers() {
+        let mut c = menlo_collection();
+        let mut modifiers = ModifierSet::new();
+        modifiers.insert(MetricKey::CellWidth, Modifier::Absolute(3));
+        modifiers.insert(MetricKey::CursorThickness, Modifier::Absolute(4));
+        c.set_metric_modifiers(modifiers);
+        c.update_metrics().expect("update");
+
+        let mut expected = Metrics::calc(c.get_face(Index::default()).unwrap().get_metrics());
+        let original_width = expected.cell_width;
+        expected.cell_width += 3;
+        expected.cursor_thickness += 4;
+
+        let actual = *c.metrics().unwrap();
+        assert_eq!(actual.cell_width, original_width + 3);
+        assert_eq!(actual.cursor_thickness, expected.cursor_thickness);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn font_metric_modifier_runtime_cell_height_recenters_metrics() {
+        let mut c = menlo_collection();
+        let mut modifiers = ModifierSet::new();
+        modifiers.insert(MetricKey::CellHeight, Modifier::Absolute(5));
+        c.set_metric_modifiers(modifiers);
+        c.update_metrics().expect("update");
+
+        let mut expected = Metrics::calc(c.get_face(Index::default()).unwrap().get_metrics());
+        let before = expected;
+        let mut expected_modifiers = ModifierSet::new();
+        expected_modifiers.insert(MetricKey::CellHeight, Modifier::Absolute(5));
+        expected.apply(&expected_modifiers);
+
+        let actual = *c.metrics().unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(actual.cell_height, before.cell_height + 5);
+        assert_ne!(actual.cell_baseline, before.cell_baseline);
+        assert_ne!(actual.underline_position, before.underline_position);
     }
 
     #[test]

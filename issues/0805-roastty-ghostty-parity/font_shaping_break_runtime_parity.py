@@ -114,14 +114,13 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B2")
+    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B2B")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-007B2B2B2 status"),
-            ("bitmap/color font thickening edge cases", "RUNTIME-007B2B2B2 thicken edge gap"),
-            ("metric adjustment", "RUNTIME-007B2B2B2 metric gap"),
-            ("renderer-visible font pixel parity", "RUNTIME-007B2B2B2 pixel gap"),
+            ("Gap", "RUNTIME-007B2B2B2B status"),
+            ("bitmap/color font thickening edge cases", "RUNTIME-007B2B2B2B thicken edge gap"),
+            ("renderer-visible font pixel parity", "RUNTIME-007B2B2B2B pixel gap"),
         ],
     )
     if "RUNTIME-007B2 |" in runtime_inventory:
@@ -133,8 +132,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("51 rows Oracle complete", "CFG-223 oracle count"),
-            ("53 rows closed", "CFG-223 closed count"),
+            ("52 rows Oracle complete", "CFG-223 oracle count"),
+            ("54 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],
