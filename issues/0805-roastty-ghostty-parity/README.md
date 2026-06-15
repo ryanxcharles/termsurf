@@ -1528,3 +1528,5 @@ remains open.
   — **Pass**
 - [Experiment 157: Command-finished runtime](157-command-finished-runtime.md) —
   **Pass**
+- [Experiment 158: App notifications platform classification](158-app-notifications-platform-classification.md)
+  — **Designed**
