@@ -111,3 +111,95 @@ guard coverage, scope, and overclaiming risks.
 Verdict: **Approved**.
 
 Findings: none.
+
+## Result
+
+**Result:** Partial
+
+The live link-hover dispatch slice is now proven in the real debug macOS app,
+and the experiment found and fixed a Roastty parity bug.
+
+Roastty's copied macOS app sends mouse coordinates in AppKit points, but
+Roastty's renderer/grid geometry is stored in backing pixels. Before this
+experiment, live mouse movement reached `SurfaceView_AppKit.mouseMoved`, and
+Command modifiers arrived correctly, but the Rust core mapped the point-space
+coordinates directly against pixel-space grid geometry. On the 2x VM display,
+that missed the intended link cell and prevented live link hover dispatch.
+
+The fix applies the surface content scale before point-to-cell conversion in the
+Rust surface mouse paths. The regression guard
+`link_hover_preview_dispatch_scales_macos_point_coordinates` proves a
+point-space mouse coordinate only reaches the URL cell after the 2x scale is
+applied.
+
+`macos_live_link_hover_runtime.py` now launches the built debug app with an
+isolated config, creates a live terminal, prints
+`https://example.com/issue805-exp188-link-hover`, injects Command-modified mouse
+movement into the focused CGWindowID, and records the live app trace:
+
+- `mouseMoved ... mods=1048576`
+- `cursorShape raw=3 pointerStyle=link`
+- `mouseOverLink url=https://example.com/issue805-exp188-link-hover`
+
+This proves live regular-link hover dispatch, cursor-shape request construction,
+and exact hovered-URL routing to the macOS app. It does not prove native link
+preview display or real OS cursor pixels.
+
+Inventory outcome:
+
+- `runtime_rows=92`
+- `oracle_complete=88`
+- `closed=91`
+- `audit_covered=0`
+- `incomplete=1`
+- `gap=1`
+- `cfg223=Gap`
+- Remaining gap ID: `RUNTIME-012B2B2B2B2B3C`
+
+Verification performed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml link_hover_preview_dispatch -- --test-threads=1
+(cd roastty && macos/build.nu --action build)
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_live_link_hover_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/notification_link_bell_gui_residual_parity.py
+python3 -m py_compile issues/0805-roastty-ghostty-parity/*.py
+prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/188-live-link-hover-gui-proof.md issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md
+git diff --check
+```
+
+Evidence logs:
+
+- `logs/issue805-exp188-link-hover-rust-tests-2.log`
+- `logs/issue805-exp188-link-hover-scale-test-1.log`
+- `logs/issue805-exp188-build-5.log`
+- `logs/issue805-exp188-live-link-hover-7.log`
+- `logs/issue805-exp188-live-link-hover-rerun-1.log`
+- `logs/issue805-exp188-config-runtime-inventory-2.log`
+- `logs/issue805-exp188-residual-guard-2.log`
+- `logs/issue805-exp188-py-compile-2.log`
+- `logs/issue805-exp188-prettier-check-2.log`
+- `logs/issue805-exp188-diff-check-1.log`
+- `logs/issue805-exp188-broad-guard-sweep-failfast-3.log`
+
+## Conclusion
+
+Experiment 188 closes the live link-hover dispatch part of
+`RUNTIME-012B2B2B2B2B3C` and splits it into the new Oracle-complete row
+`RUNTIME-012B2B2B2B2B3C3`.
+
+The remaining CFG-223 gap is narrower: actual OS notification
+delivery/banner/sound, audible bell output, measurable dock-attention state,
+bell border/title visible effects, real OS cursor pixels, native link preview
+display, and external Launch Services handler delivery.
+
+## Completion Review
+
+Fresh-context Codex adversarial reviewer `Hypatia the 3rd` reviewed the
+completed experiment, implementation diff, issue workflow, matrix updates, and
+verification evidence.
+
+Verdict: **Approved**.
+
+Findings: none.

@@ -238,8 +238,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("87 rows Oracle complete", "CFG-223 oracle count"),
-            ("90 rows closed", "CFG-223 closed count"),
+            ("88 rows Oracle complete", "CFG-223 oracle count"),
+            ("91 rows closed", "CFG-223 closed count"),
             ("1 rows are incomplete", "CFG-223 incomplete count"),
             ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],

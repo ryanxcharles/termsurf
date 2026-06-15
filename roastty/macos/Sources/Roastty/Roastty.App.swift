@@ -1830,11 +1830,13 @@ extension Roastty {
                 guard let surface = target.target.surface else { return }
                 guard let surfaceView = self.surfaceView(from: surface) else { return }
                 guard v.len > 0 else {
+                    appendUITestTrace("mouseOverLink clear")
                     surfaceView.hoverUrl = nil
                     return
                 }
 
                 let buffer = Data(bytes: v.url!, count: v.len)
+                appendUITestTrace("mouseOverLink url=\(String(data: buffer, encoding: .utf8) ?? "<invalid>")")
                 surfaceView.hoverUrl = String(data: buffer, encoding: .utf8)
 
             default:

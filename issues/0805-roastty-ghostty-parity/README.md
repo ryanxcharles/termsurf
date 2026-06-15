@@ -1029,6 +1029,14 @@ experiment files until they are proven.
   path with an env-gated test action and suppressed final `NSWorkspace.open`.
   External Launch Services handler delivery remains an honest VM/OS-controlled
   gap in `RUNTIME-012B2B2B2B2B3C`.
+- **Live link hover needs AppKit point-to-pixel scaling.** Experiment 188 found
+  that the copied macOS app sends mouse coordinates in AppKit points while
+  Roastty's renderer/grid geometry is in backing pixels. Applying the surface
+  content scale before point-to-cell conversion fixed live regular-link hover
+  dispatch on Retina displays. The live guard now proves Command-modified mouse
+  movement over a deterministic URL emits `cursorShape raw=3 pointerStyle=link`
+  and the exact `mouseOverLink` URL in the real debug app. Native link preview
+  display and real OS cursor pixels remain in `RUNTIME-012B2B2B2B2B3C`.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1795,4 +1803,4 @@ remains open.
 - [Experiment 187: Native menu and URL-opening proof](187-native-menu-url-opening-proof.md)
   — **Partial**
 - [Experiment 188: Live link hover GUI proof](188-live-link-hover-gui-proof.md)
-  — **Designed**
+  — **Partial**

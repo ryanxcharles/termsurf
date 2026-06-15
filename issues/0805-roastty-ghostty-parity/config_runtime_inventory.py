@@ -2233,7 +2233,7 @@ ROWS = [
             "Ghostty key/modifier anchors, Roastty implementation markers, "
             "tests, and this inventory split."
         ),
-        missing_evidence="None for deterministic surface-side link hover preview dispatch. Native preview display and real pointer pixels remain tracked by RUNTIME-012B2B2B2B2B3C.",
+        missing_evidence="None for deterministic surface-side link hover preview dispatch. Native preview display, real OS cursor pixels, and live app dispatch remain tracked by RUNTIME-012B2B2B2B2B3C.",
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml link_hover_preview_dispatch -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml link_hover_modifier_refresh -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_hover_modifier_refresh_parity.py`",
     ),
@@ -2293,7 +2293,7 @@ ROWS = [
             "context-menu path constructs the expected menu items including "
             "`Paste`, split actions, and `Change Terminal Title...`."
         ),
-        missing_evidence="None for live native context-menu construction and item-list trace. Native link preview display and real pointer/link cursor pixels remain tracked by RUNTIME-012B2B2B2B2B3C.",
+        missing_evidence="None for live native context-menu construction and item-list trace. Native link preview display and real OS cursor pixels remain tracked by RUNTIME-012B2B2B2B2B3C.",
         guard_tier="Tier 3",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_native_context_menu_trace_runtime.py`",
     ),
@@ -2321,10 +2321,34 @@ ROWS = [
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_controlled_url_open_runtime.py`",
     ),
     RuntimeRow(
+        id="RUNTIME-012B2B2B2B2B3C3",
+        behavior="live macOS link hover URL and cursor-shape app dispatch",
+        ghostty_reference="Pinned Ghostty macOS link-hover mouse movement, Command-modified regular link detection, cursor-shape request, and hover URL app action",
+        roastty_reference="`roastty/src/lib.rs` point-to-pixel mouse coordinate mapping and link hover dispatch; `roastty/macos/Sources/Roastty/Roastty.App.swift` `setMouseOverLink`; `roastty/macos/Sources/Roastty/Surface View/SurfaceView_AppKit.swift` cursor-shape handling",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 188 fixes Roastty's live mouse point-to-cell mapping "
+            "to apply the macOS backing scale before using pixel-space grid "
+            "geometry. `link_hover_preview_dispatch_scales_macos_point_coordinates` "
+            "guards the Retina/AppKit point conversion in the Rust core. "
+            "`macos_live_link_hover_runtime.py` launches the built debug app "
+            "with an isolated config, prints a deterministic URL in a live "
+            "terminal, injects Command-modified mouse movement into the real "
+            "window, proves the focused CGWindowID and terminal resize, and "
+            "records `cursorShape raw=3 pointerStyle=link` plus the exact "
+            "`mouseOverLink url=https://example.com/issue805-exp188-link-hover` "
+            "from the live app trace."
+        ),
+        missing_evidence="None for live regular-link hover dispatch, cursor-shape request, and exact hovered URL routing to the app. Native link preview display and real OS cursor pixels remain tracked by RUNTIME-012B2B2B2B2B3C.",
+        guard_tier="Tier 3",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml link_hover_preview_dispatch_scales_macos_point_coordinates -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_live_link_hover_runtime.py`",
+    ),
+    RuntimeRow(
         id="RUNTIME-012B2B2B2B2B3C",
-        behavior="remaining OS-controlled notification, bell, link hover, preview, and external URL-handler GUI effects",
-        ghostty_reference="Pinned Ghostty macOS native notification, bell, link hover, preview, and external URL-handler behavior",
-        roastty_reference="`roastty/macos/Sources` native notification, bell, hover, preview, and `NSWorkspace.open` handling",
+        behavior="remaining OS-controlled notification, bell, native preview, cursor-pixel, and external URL-handler GUI effects",
+        ghostty_reference="Pinned Ghostty macOS native notification, bell, preview, cursor-pixel, and external URL-handler behavior",
+        roastty_reference="`roastty/macos/Sources` native notification, bell, preview, cursor, and `NSWorkspace.open` handling",
         family="notifications",
         status="Gap",
         evidence=(
@@ -2333,11 +2357,14 @@ ROWS = [
             "`RUNTIME-012B2B2B2B2B3A` and `RUNTIME-012B2B2B2B2B3B`. Experiment "
             "187 further splits live native context-menu construction into "
             "`RUNTIME-012B2B2B2B2B3C1` and controlled URL-opening request "
-            "construction into `RUNTIME-012B2B2B2B2B3C2`. The remaining "
-            "unproven behavior is limited to OS-controlled GUI effects that "
-            "the current VM run did not expose deterministically."
+            "construction into `RUNTIME-012B2B2B2B2B3C2`. Experiment 188 "
+            "splits live regular-link hover dispatch, cursor-shape request, "
+            "and exact hovered-URL app routing into "
+            "`RUNTIME-012B2B2B2B2B3C3`. The remaining unproven behavior is "
+            "limited to OS-controlled GUI effects that the current VM run did "
+            "not expose deterministically."
         ),
-        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, measurable dock-attention state, bell border/title visible effects, real link hover/cursor pixels, native link preview display, and external Launch Services handler delivery.",
+        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, measurable dock-attention state, bell border/title visible effects, real OS cursor pixels, native link preview display, and external Launch Services handler delivery.",
         guard_tier="Tier 3",
         guard_command="TBD by future focused OS/native GUI experiment.",
     ),
@@ -2468,6 +2495,7 @@ EXPECTED_IDS = [
     "RUNTIME-012B2B2B2B2B3B",
     "RUNTIME-012B2B2B2B2B3C1",
     "RUNTIME-012B2B2B2B2B3C2",
+    "RUNTIME-012B2B2B2B2B3C3",
     "RUNTIME-012B2B2B2B2B3C",
     "RUNTIME-013",
     "RUNTIME-014",

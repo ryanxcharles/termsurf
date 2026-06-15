@@ -3469,6 +3469,8 @@ struct MouseViewportGeometry {
     fallback_rows: u16,
     cell_width: u32,
     cell_height: u32,
+    scale_x: f64,
+    scale_y: f64,
 }
 
 fn mouse_viewport_from_geometry(
@@ -3508,6 +3510,8 @@ fn mouse_viewport_from_geometry(
         geometry.cell_height
     }
     .max(1);
+    let scale_x = Surface::sanitized_scale(geometry.scale_x);
+    let scale_y = Surface::sanitized_scale(geometry.scale_y);
 
     let geometry = mouse_encode::Geometry {
         screen: mouse_encode::PixelSize {
@@ -3520,6 +3524,11 @@ fn mouse_viewport_from_geometry(
         },
         padding: mouse_encode::Padding::default(),
     };
+    let x = x * scale_x;
+    let y = y * scale_y;
+    if !x.is_finite() || !y.is_finite() || x > f64::from(f32::MAX) || y > f64::from(f32::MAX) {
+        return None;
+    }
     let pos = mouse_encode::Position {
         x: x as f32,
         y: y as f32,
@@ -4464,6 +4473,8 @@ impl Surface {
             fallback_rows: self.pty_size().rows,
             cell_width: self.size.cell_width_px,
             cell_height: self.size.cell_height_px,
+            scale_x: self.scale_factor_x,
+            scale_y: self.scale_factor_y,
         };
         self.scroll_to_bottom_on_output_before_present(&config);
         let Some(live) = self.renderer.as_mut() else {
@@ -5269,10 +5280,7 @@ impl Surface {
         let uri = worker.with_termio(|termio| {
             let terminal = termio.terminal();
             let geometry = self.mouse_report_geometry(terminal)?;
-            let pos = mouse_encode::Position {
-                x: x as f32,
-                y: y as f32,
-            };
+            let pos = self.mouse_position_for_geometry(x, y)?;
             if geometry.pos_out_of_viewport(pos) {
                 return None;
             }
@@ -6295,10 +6303,7 @@ impl Surface {
         let selected = worker.with_termio_mut(|termio| {
             let terminal = termio.terminal();
             let geometry = self.mouse_report_geometry(terminal)?;
-            let pos = mouse_encode::Position {
-                x: x as f32,
-                y: y as f32,
-            };
+            let pos = self.mouse_position_for_geometry(x, y)?;
             if geometry.pos_out_of_viewport(pos) {
                 return None;
             }
@@ -6708,10 +6713,7 @@ impl Surface {
         y: f64,
     ) -> Option<point::Coordinate> {
         let geometry = self.mouse_report_geometry(terminal)?;
-        let pos = mouse_encode::Position {
-            x: x as f32,
-            y: y as f32,
-        };
+        let pos = self.mouse_position_for_geometry(x, y)?;
         if geometry.pos_out_of_viewport(pos) {
             return None;
         }
@@ -6728,10 +6730,7 @@ impl Surface {
         y: f64,
     ) -> Option<point::Coordinate> {
         let geometry = self.mouse_report_geometry(terminal)?;
-        Some(geometry.pos_to_cell(mouse_encode::Position {
-            x: x as f32,
-            y: y as f32,
-        }))
+        Some(geometry.pos_to_cell(self.mouse_position_for_geometry(x, y)?))
     }
 
     /// Geometry the drag gesture needs (cell width / padding / screen height for x-mapping + edge
@@ -7022,9 +7021,9 @@ impl Surface {
             action,
             button,
             mods: mouse_mods_from_key_mods(self.mouse.mods),
-            pos: mouse_encode::Position {
-                x: x as f32,
-                y: y as f32,
+            pos: match self.mouse_position_for_geometry(x, y) {
+                Some(pos) => pos,
+                None => return false,
             },
         };
         let encoded = mouse_encode::encode(
@@ -7151,6 +7150,18 @@ impl Surface {
         })
     }
 
+    fn mouse_position_for_geometry(&self, x: f64, y: f64) -> Option<mouse_encode::Position> {
+        let x = x * Self::sanitized_scale(self.scale_factor_x);
+        let y = y * Self::sanitized_scale(self.scale_factor_y);
+        if !x.is_finite() || !y.is_finite() || x > f64::from(f32::MAX) || y > f64::from(f32::MAX) {
+            return None;
+        }
+        Some(mouse_encode::Position {
+            x: x as f32,
+            y: y as f32,
+        })
+    }
+
     fn quicklook_word_text(&self) -> Result<RoasttyText, c_int> {
         if self.app.is_null() {
             return Err(ROASTTY_INVALID_VALUE);
@@ -7168,10 +7179,7 @@ impl Surface {
         let selection = worker.with_termio(|termio| {
             let terminal = termio.terminal();
             let geometry = self.mouse_report_geometry(terminal)?;
-            let pos = mouse_encode::Position {
-                x: x as f32,
-                y: y as f32,
-            };
+            let pos = self.mouse_position_for_geometry(x, y)?;
             if geometry.pos_out_of_viewport(pos) {
                 return None;
             }
@@ -25774,6 +25782,34 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(disabled);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn link_hover_preview_dispatch_scales_macos_point_coordinates() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_link_previews(config::LinkPreviews::True);
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 80, 5, 20, 40);
+        {
+            let surface_ref = surface_from_handle(surface).unwrap();
+            surface_ref.scale_factor_x = 2.0;
+            surface_ref.scale_factor_y = 2.0;
+        }
+        write_surface_worker_bytes(surface, b"go https://example.com now");
+
+        roastty_surface_mouse_pos(surface, 45.0, 5.0, ROASTTY_MODS_SUPER);
+
+        assert_eq!(mouse_shape_records(), vec![ROASTTY_MOUSE_SHAPE_POINTER]);
+        assert_eq!(
+            mouse_over_link_records(),
+            vec!["https://example.com".to_string()]
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
         roastty_config_free(config);
     }
 

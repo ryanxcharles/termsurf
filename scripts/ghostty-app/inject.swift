@@ -12,6 +12,21 @@ import Foundation
 
 let a = CommandLine.arguments
 func n(_ i: Int) -> CGFloat { CGFloat(Double(a[i]) ?? 0) }
+func flags(_ values: ArraySlice<String>) -> CGEventFlags {
+    var flags: CGEventFlags = []
+    for flag in values {
+        switch flag {
+        case "control": flags.insert(.maskControl)
+        case "command": flags.insert(.maskCommand)
+        case "shift": flags.insert(.maskShift)
+        case "option": flags.insert(.maskAlternate)
+        default:
+            FileHandle.standardError.write("unknown flag: \(flag)\n".data(using: .utf8)!)
+            exit(2)
+        }
+    }
+    return flags
+}
 func post(_ e: CGEvent?) { e?.post(tap: .cghidEventTap) }
 func key(_ code: CGKeyCode, _ down: Bool) -> CGEvent? {
     CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
@@ -26,7 +41,9 @@ guard a.count >= 2 else {
 
 switch a[1] {
 case "move":
-    post(ev(.mouseMoved, CGPoint(x: n(2), y: n(3)), .left))
+    let e = ev(.mouseMoved, CGPoint(x: n(2), y: n(3)), .left)
+    e?.flags = flags(a.dropFirst(4))
+    post(e)
 
 case "click":
     let p = CGPoint(x: n(2), y: n(3))
@@ -64,18 +81,7 @@ case "key":
         FileHandle.standardError.write("usage: inject key <virtual-key-code> [control] [command] [shift] [option]\n".data(using: .utf8)!)
         exit(2)
     }
-    var flags: CGEventFlags = []
-    for flag in a.dropFirst(3) {
-        switch flag {
-        case "control": flags.insert(.maskControl)
-        case "command": flags.insert(.maskCommand)
-        case "shift": flags.insert(.maskShift)
-        case "option": flags.insert(.maskAlternate)
-        default:
-            FileHandle.standardError.write("unknown key flag: \(flag)\n".data(using: .utf8)!)
-            exit(2)
-        }
-    }
+    let flags = flags(a.dropFirst(3))
     let down = key(CGKeyCode(code), true)
     down?.flags = flags
     post(down)

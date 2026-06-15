@@ -987,6 +987,9 @@ extension Roastty {
             mouseLocationInSurface = pos
 
             guard let surfaceModel else { return }
+            appendUITestKeyTrace(
+                "mouseMoved posX=\(pos.x) posY=\(pos.y) frameW=\(frame.width) frameH=\(frame.height) mods=\(event.modifierFlags.rawValue)"
+            )
 
             // Convert window position to view position. Note (0, 0) is bottom left.
             let mouseEvent = Roastty.Input.MousePosEvent(
