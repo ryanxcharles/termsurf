@@ -1794,3 +1794,5 @@ remains open.
   — **Partial**
 - [Experiment 187: Native menu and URL-opening proof](187-native-menu-url-opening-proof.md)
   — **Partial**
+- [Experiment 188: Live link hover GUI proof](188-live-link-hover-gui-proof.md)
+  — **Designed**
