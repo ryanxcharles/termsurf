@@ -22484,6 +22484,21 @@ mod tests {
     }
 
     #[test]
+    fn surface_osc7_pwd_edge_dispatches_raw_kitty_path() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(surface, test_pump_with_pwd("/surface%2Fraw?x#y"));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_PWD);
+        assert_eq!(records[0].pwd.as_deref(), Some("/surface%2Fraw?x#y"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
     fn surface_title_pwd_fallback_dispatches_multiple_titles_in_order() {
         let app = new_test_app_with_action(true);
         let surface = new_test_surface(app);

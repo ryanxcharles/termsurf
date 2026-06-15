@@ -123,3 +123,67 @@ was updated so normal `file` URLs trim query/fragment suffixes while
 
 The reviewer confirmed the corrected design matches pinned Ghostty's raw-path
 behavior and reported no new findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now has focused guards for the remaining OSC 7 URI edge semantics:
+
+- `terminal_stream_osc7_pwd_edge_file_paths_trim_and_decode` proves `file` paths
+  trim query/fragment suffixes and decode spaces, UTF-8, and encoded slash
+  bytes.
+- `terminal_stream_osc7_pwd_edge_kitty_raw_path_keeps_suffixes` proves
+  `kitty-shell-cwd` keeps percent escapes plus raw query/fragment suffixes in
+  the path, matching pinned Ghostty's raw-path parser mode.
+- `terminal_stream_osc7_pwd_edge_no_slash_dispatches_empty_path` proves a local
+  no-slash URL dispatches an empty PWD and title fallback event.
+- `termio_osc7_pwd_edge_worker_emits_raw_kitty_pwd_pump` proves an edge PWD path
+  travels through `TermioPump::pwd`.
+- `surface_osc7_pwd_edge_dispatches_raw_kitty_path` proves an edge PWD path
+  dispatches through `ROASTTY_ACTION_PWD`.
+- `osc7_edge_runtime_parity.py` statically checks pinned Ghostty's `reportPwd`
+  and raw-path URI markers plus Roastty's edge guards and CFG-223 row split.
+
+`config_runtime_inventory.py` now splits the old remaining terminal row into
+`RUNTIME-009B2B2B3B2A` as Oracle complete for OSC 7 edge behavior and
+`RUNTIME-009B2B2B3B2B` as the reduced remaining terminal behavior gap. The
+generated CFG-223 summary remains `Gap` with 40 runtime rows, 33 Oracle complete
+rows, 35 closed rows, and 5 remaining runtime gaps.
+
+Verification run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc7_pwd_edge
+cargo test --manifest-path roastty/Cargo.toml termio_osc7_pwd_edge
+cargo test --manifest-path roastty/Cargo.toml surface_osc7_pwd_edge
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_edge_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/surface_title_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/shell_startup_rewrite_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_pwd_normalization_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/scrollback_byte_limit_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_pwd_fallback_runtime_parity.py
+```
+
+## Conclusion
+
+The OSC 7 edge slice is no longer part of the CFG-223 gap. Pinned Ghostty's
+important distinction is that `file` URLs use normal decoded path semantics,
+while `kitty-shell-cwd` uses raw-path semantics that preserve percent escapes
+and query/fragment suffixes. Roastty now matches that behavior in terminal
+state, worker pump output, and app action dispatch. The remaining CFG-223 work
+should continue from `RUNTIME-009B2B2B3B2B`, which is limited to other terminal
+behavior effects.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Verdict:** Approved.
+
+The reviewer reported no Required findings. It independently ran the focused OSC
+7 edge Rust tests, `osc7_edge_runtime_parity.py`, the updated parity scripts,
+`cargo fmt --manifest-path roastty/Cargo.toml --check`, and `git diff --check`.
+It also confirmed the runtime inventory split: 40 runtime rows, 33 Oracle
+complete rows, 35 closed rows, 5 remaining gaps, new split IDs present, and the
+old split ID absent.

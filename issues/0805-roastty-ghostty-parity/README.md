@@ -351,8 +351,13 @@ experiment files until they are proven.
   `file` and `kitty-shell-cwd` OSC 7 URLs, requires a local hostname, stores the
   normalized path, dispatches that path as `pwd`, and uses that path for title
   fallback. Roastty now mirrors this common local path behavior through terminal
-  state, `TermioPump`, and `ROASTTY_ACTION_PWD`; exotic OSC 7 URI edge cases
-  remain part of the reduced terminal gap.
+  state, `TermioPump`, and `ROASTTY_ACTION_PWD`; exact URI edge semantics are
+  tracked and guarded separately.
+- **OSC 7 `file` and `kitty-shell-cwd` paths intentionally differ.** Pinned
+  Ghostty trims query/fragment suffixes and percent-decodes `file` paths, but
+  enables raw-path parsing for `kitty-shell-cwd`, preserving percent escapes and
+  query/fragment suffixes inside the path. Roastty now guards those edge
+  semantics through terminal-core, `TermioPump`, and `ROASTTY_ACTION_PWD` tests.
 - **`scrollback-limit` runtime parity has two tiers.** `scrollback-limit = 0`
   disables PTY-backed surface history, while nonzero parsed values must travel
   as byte quotas into terminal storage. Roastty now preserves nonzero parsed
@@ -1303,4 +1308,4 @@ remains open.
   — **Pass**
 - [Experiment 130: Shell startup rewrite runtime](130-shell-startup-rewrite-runtime.md)
   — **Pass**
-- [Experiment 131: OSC 7 edge runtime](131-osc7-edge-runtime.md) — **Designed**
+- [Experiment 131: OSC 7 edge runtime](131-osc7-edge-runtime.md) — **Pass**

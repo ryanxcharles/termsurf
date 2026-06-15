@@ -4549,19 +4549,27 @@ fn normalize_report_pwd_url(url: &str) -> Option<String> {
         return None;
     }
 
-    let path = if rest.as_bytes().get(host_end) == Some(&b'/') {
-        let path_with_suffix = &rest[host_end..];
-        let path_end = path_with_suffix
-            .find(|c| matches!(c, '?' | '#'))
-            .unwrap_or(path_with_suffix.len());
-        &path_with_suffix[..path_end]
-    } else {
-        ""
-    };
-
     match scheme {
-        "file" => percent_decode_path(path),
-        "kitty-shell-cwd" => Some(path.to_string()),
+        "file" => {
+            let path = if rest.as_bytes().get(host_end) == Some(&b'/') {
+                let path_with_suffix = &rest[host_end..];
+                let path_end = path_with_suffix
+                    .find(|c| matches!(c, '?' | '#'))
+                    .unwrap_or(path_with_suffix.len());
+                &path_with_suffix[..path_end]
+            } else {
+                ""
+            };
+            percent_decode_path(path)
+        }
+        "kitty-shell-cwd" => {
+            let path = if rest.as_bytes().get(host_end) == Some(&b'/') {
+                &rest[host_end..]
+            } else {
+                ""
+            };
+            Some(path.to_string())
+        }
         _ => None,
     }
 }
@@ -9842,6 +9850,74 @@ mod tests {
             assert!(terminal.take_pending_pwd_updates().is_empty());
             assert!(terminal.take_pending_title_updates().is_empty());
         }
+    }
+
+    #[test]
+    fn terminal_stream_osc7_pwd_edge_file_paths_trim_and_decode() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]7;file://localhost/tmp/edge%20name?ignored#ignored\x07")
+            .unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("/tmp/edge name"));
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/tmp/edge name".to_string()]
+        );
+        assert_eq!(terminal.title_for_tests(), "/tmp/edge name");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["/tmp/edge name".to_string()]
+        );
+
+        terminal
+            .next_slice(b"\x1b]7;file://localhost/tmp/%E2%82%AC%2Fpath\x07")
+            .unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("/tmp/\u{20ac}/path"));
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/tmp/\u{20ac}/path".to_string()]
+        );
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["/tmp/\u{20ac}/path".to_string()]
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc7_pwd_edge_kitty_raw_path_keeps_suffixes() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]7;kitty-shell-cwd://localhost/tmp/raw%2Fpath?ignored#fragment\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.pwd_for_tests(),
+            Some("/tmp/raw%2Fpath?ignored#fragment")
+        );
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/tmp/raw%2Fpath?ignored#fragment".to_string()]
+        );
+        assert_eq!(
+            terminal.title_for_tests(),
+            "/tmp/raw%2Fpath?ignored#fragment"
+        );
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["/tmp/raw%2Fpath?ignored#fragment".to_string()]
+        );
+    }
+
+    #[test]
+    fn terminal_stream_osc7_pwd_edge_no_slash_dispatches_empty_path() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal.next_slice(b"\x1b]7;file://localhost\x07").unwrap();
+        assert_eq!(terminal.pwd_for_tests(), None);
+        assert_eq!(terminal.take_pending_pwd_updates(), vec!["".to_string()]);
+        assert_eq!(terminal.title_for_tests(), "");
+        assert_eq!(terminal.take_pending_title_updates(), vec!["".to_string()]);
     }
 
     #[test]

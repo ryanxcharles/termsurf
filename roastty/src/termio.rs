@@ -1627,6 +1627,29 @@ mod tests {
     }
 
     #[test]
+    fn termio_osc7_pwd_edge_worker_emits_raw_kitty_pwd_pump() {
+        let _guard = pty_command_lock();
+        let mut worker =
+            spawn_worker("printf '\\033]7;kitty-shell-cwd://localhost/termio%%2Fraw?x#y\\007'");
+
+        let event = worker_event_until(
+            &worker,
+            |_, event| matches!(event, TermioWorkerEvent::Pump(pump) if pump.pwd.iter().any(|pwd| pwd == "/termio%2Fraw?x#y")),
+        );
+
+        assert!(matches!(
+            event,
+            TermioWorkerEvent::Pump(pump) if pump.pwd.iter().any(|pwd| pwd == "/termio%2Fraw?x#y")
+                && pump.titles.iter().any(|title| title == "/termio%2Fraw?x#y")
+        ));
+        assert_eq!(
+            worker.with_termio(|termio| termio.terminal().pwd().map(str::to_owned)),
+            Some("/termio%2Fraw?x#y".to_string())
+        );
+        worker.shutdown().expect("shutdown worker");
+    }
+
+    #[test]
     fn termio_title_pwd_fallback_worker_preserves_multiple_title_events() {
         let _guard = pty_command_lock();
         let mut worker =

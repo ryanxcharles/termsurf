@@ -65,8 +65,10 @@ def main() -> int:
             ("fn normalize_report_pwd_url(url: &str) -> Option<String>", "Roastty OSC 7 normalizer"),
             ("scheme != \"file\" && scheme != \"kitty-shell-cwd\"", "Roastty scheme gate"),
             ("hostname::is_local(host.as_bytes())", "Roastty local-host validation"),
-            ("\"file\" => percent_decode_path(path)", "Roastty file path decoding"),
-            ("\"kitty-shell-cwd\" => Some(path.to_string())", "Roastty kitty raw path"),
+            ("\"file\" => {", "Roastty file branch"),
+            ("percent_decode_path(path)", "Roastty file path decoding"),
+            ("\"kitty-shell-cwd\" => {", "Roastty kitty branch"),
+            ("Some(path.to_string())", "Roastty kitty raw path"),
             ("terminal_stream_osc7_pwd_normalization_accepts_local_paths", "terminal accept test"),
             ("terminal_stream_osc7_pwd_normalization_rejects_invalid_urls", "terminal reject test"),
         ],
@@ -112,12 +114,11 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-009B2B2B3B2")
+    row_gap = require_row(runtime_inventory, "RUNTIME-009B2B2B3B2B")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-009B2B2B3B2 status"),
-            ("unproven exotic OSC 7 URI edge cases", "remaining OSC 7 edge gap"),
+            ("Gap", "RUNTIME-009B2B2B3B2B status"),
             ("other remaining terminal behavior effects", "remaining terminal gap"),
         ],
     )
@@ -128,8 +129,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("32 rows Oracle complete", "CFG-223 oracle count"),
-            ("34 rows closed", "CFG-223 closed count"),
+            ("33 rows Oracle complete", "CFG-223 oracle count"),
+            ("35 rows closed", "CFG-223 closed count"),
             ("5 rows are incomplete", "CFG-223 incomplete count"),
             ("5 rows are runtime gaps", "CFG-223 gap count"),
         ],

@@ -487,7 +487,7 @@ ROWS = [
             "surfaces, and `osc7_pwd_normalization_runtime_parity.py` "
             "statically checks pinned Ghostty and Roastty markers."
         ),
-        missing_evidence="None for this local OSC 7 PWD validation, normalization, PWD dispatch, and title fallback path dispatch slice. Remaining terminal gaps stay in RUNTIME-009B2B2B3B2.",
+        missing_evidence="None for this local OSC 7 PWD validation, normalization, PWD dispatch, and title fallback path dispatch slice. Remaining terminal gaps stay in RUNTIME-009B2B2B3B2B.",
         guard_tier="Tier 2",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc7_pwd_normalization && cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml termio_osc7_pwd_normalization && cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml surface_osc7_pwd_normalization && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_pwd_normalization_runtime_parity.py`",
     ),
@@ -545,26 +545,55 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml shell_integration && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/shell_startup_rewrite_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2B3B2",
-        behavior="unproven exotic OSC 7 URI edge cases and other remaining terminal behavior effects",
+        id="RUNTIME-009B2B2B3B2A",
+        behavior="OSC 7 query/fragment, UTF-8 percent-decoding, encoded slash, raw kitty path, and empty-path edge behavior",
+        ghostty_reference="`vendor/ghostty/src/termio/stream_handler.zig::reportPwd`; `vendor/ghostty/src/os/uri.zig` raw-path parse behavior",
+        roastty_reference="`roastty/src/terminal/terminal.rs` OSC 7 edge tests; `roastty/src/termio.rs` OSC 7 edge pump test; `roastty/src/lib.rs` OSC 7 edge surface dispatch test",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 131 proves remaining OSC 7 URI edge semantics. "
+            "`terminal_stream_osc7_pwd_edge_file_paths_trim_and_decode` "
+            "proves `file` paths trim query/fragment suffixes while decoding "
+            "spaces, UTF-8, and encoded slash bytes. "
+            "`terminal_stream_osc7_pwd_edge_kitty_raw_path_keeps_suffixes` "
+            "proves `kitty-shell-cwd` keeps percent escapes and raw "
+            "query/fragment suffixes in the path, matching pinned Ghostty's "
+            "`raw_path` mode. "
+            "`terminal_stream_osc7_pwd_edge_no_slash_dispatches_empty_path` "
+            "proves local no-slash URLs dispatch an empty path and title "
+            "fallback event. `termio_osc7_pwd_edge_*` and "
+            "`surface_osc7_pwd_edge_*` prove an edge path travels through "
+            "`TermioPump::pwd` and `ROASTTY_ACTION_PWD`. "
+            "`osc7_edge_runtime_parity.py` statically checks pinned Ghostty's "
+            "`reportPwd` and raw-path parser markers plus Roastty's edge "
+            "guards."
+        ),
+        missing_evidence="None for OSC 7 query/fragment, UTF-8 percent-decoding, encoded slash, raw kitty path, and empty-path edge behavior covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc7_pwd_edge && cargo test --manifest-path roastty/Cargo.toml termio_osc7_pwd_edge && cargo test --manifest-path roastty/Cargo.toml surface_osc7_pwd_edge && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_edge_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3B2B",
+        behavior="other remaining terminal behavior effects",
         ghostty_reference="remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiments 117, 122, 124, 126, 127, 128, 129, and 130 split out "
-            "zero/no-history scrollback, nonzero scrollback byte quota, "
-            "alternate-screen no-scrollback, CSI `21t` title-report gating, "
-            "shell-integration feature env and terminal identity, "
+            "Experiments 117, 122, 124, 126, 127, 128, 129, 130, and 131 "
+            "split out zero/no-history scrollback, nonzero scrollback byte "
+            "quota, alternate-screen no-scrollback, CSI `21t` title-report "
+            "gating, shell-integration feature env and terminal identity, "
             "per-shell helper rewrite coverage, zsh bootstrap, "
             "configured/static non-empty surface title behavior, "
-            "and stored-PWD title fallback/empty title app dispatch, plus the "
-            "common local OSC 7 PWD validation, path normalization, surface "
-            "PWD dispatch, and title fallback path behavior. Unproven exotic "
-            "OSC 7 URI edge cases and other remaining terminal behavior "
-            "toggles still need focused CFG-223 runtime proof or fixes."
+            "stored-PWD title fallback/empty title app dispatch, common local "
+            "OSC 7 PWD validation, path normalization, surface PWD dispatch, "
+            "title fallback path behavior, and remaining OSC 7 URI edge "
+            "semantics. Other remaining terminal behavior toggles still need "
+            "focused CFG-223 runtime proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for unproven exotic OSC 7 URI edge cases and other remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for other remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -857,7 +886,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2B2",
     "RUNTIME-009B2B2B3A",
     "RUNTIME-009B2B2B3B1",
-    "RUNTIME-009B2B2B3B2",
+    "RUNTIME-009B2B2B3B2A",
+    "RUNTIME-009B2B2B3B2B",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",
