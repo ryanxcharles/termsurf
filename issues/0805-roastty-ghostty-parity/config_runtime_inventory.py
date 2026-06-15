@@ -771,7 +771,47 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_device_attributes_clipboard_write && cargo test --manifest-path roastty/Cargo.toml termio_device_attributes_clipboard_write && cargo test --manifest-path roastty/Cargo.toml surface_device_attributes_clipboard_write && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/clipboard_device_attributes_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2B3B2B2B2",
+        id="RUNTIME-009B2B2B3B2B2B2A",
+        behavior="`cursor-style` and `cursor-style-blink` default cursor runtime effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `cursor-style` and `cursor-style-blink`; `vendor/ghostty/src/termio/Termio.zig` derived config; `vendor/ghostty/src/termio/stream_handler.zig` `changeConfig`, `setCursorStyle(.default)`, and DEC mode 12 gating",
+        roastty_reference="`roastty/src/config/mod.rs` cursor config; `roastty/src/terminal/terminal.rs` default cursor runtime state; `roastty/src/termio.rs`; `roastty/src/lib.rs` surface config startup/update wiring",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 138 proves live `cursor-style` and "
+            "`cursor-style-blink` default cursor runtime parity. "
+            "`terminal_cursor_default_runtime_update_applies_when_default` "
+            "proves live config updates immediately affect the visible cursor "
+            "while it remains in the default DECSCUSR state. "
+            "`terminal_cursor_default_runtime_update_preserves_program_cursor_until_reset` "
+            "proves explicit program DECSCUSR cursor state survives live "
+            "config update until a later default reset applies the updated "
+            "default. "
+            "`terminal_cursor_default_runtime_blink_update_controls_dec_mode_12_gate` "
+            "proves live blink config updates continue to gate DEC mode 12 "
+            "when explicit, and unset blink falls back to blinking. "
+            "`terminal_cursor_default_runtime_direct_reset_does_not_apply_configured_default` "
+            "and "
+            "`terminal_cursor_default_runtime_ris_preserves_program_cursor_state_until_reset` "
+            "prove direct reset/RIS do not incorrectly reapply configured "
+            "cursor defaults. "
+            "`termio_cursor_default_runtime_spawn_options_reach_terminal` "
+            "proves PTY-backed initial spawn options reach the terminal "
+            "runtime. "
+            "`surface_cursor_default_runtime_startup_and_update` proves "
+            "parsed app config reaches initial surfaces and live app config "
+            "updates. "
+            "`cursor_default_runtime_parity.py` statically checks pinned "
+            "Ghostty config, derived-config, `changeConfig`, default cursor, "
+            "and DEC mode 12 markers plus Roastty parser/runtime/update "
+            "guards."
+        ),
+        missing_evidence="None for live `cursor-style` and `cursor-style-blink` default cursor runtime effects.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_cursor_default_runtime && cargo test --manifest-path roastty/Cargo.toml termio_cursor_default_runtime && cargo test --manifest-path roastty/Cargo.toml surface_cursor_default_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/cursor_default_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3B2B2B2B",
         behavior="other remaining terminal behavior effects",
         ghostty_reference="remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
@@ -791,7 +831,8 @@ ROWS = [
             "semantics, config-driven ENQ `enquiry-response` replies, and "
             "`osc-color-report-format` OSC color query replies, and "
             "`clipboard-write` primary device-attributes clipboard capability "
-            "advertisement. "
+            "advertisement, and live `cursor-style`/`cursor-style-blink` "
+            "default cursor runtime effects. "
             "Other remaining terminal behavior toggles still need focused "
             "CFG-223 runtime proof or fixes."
         ),
@@ -1095,7 +1136,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2B3B2B1",
     "RUNTIME-009B2B2B3B2B2A",
     "RUNTIME-009B2B2B3B2B2B1",
-    "RUNTIME-009B2B2B3B2B2B2",
+    "RUNTIME-009B2B2B3B2B2B2A",
+    "RUNTIME-009B2B2B3B2B2B2B",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

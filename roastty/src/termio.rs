@@ -1481,6 +1481,37 @@ mod tests {
     }
 
     #[test]
+    fn termio_cursor_default_runtime_spawn_options_reach_terminal() {
+        let _guard = pty_command_lock();
+        let mut termio = Termio::spawn_with_options(
+            "/bin/sleep",
+            ["1"],
+            TermioSpawnOptions {
+                cursor_visual_style: cursor::VisualStyle::Bar,
+                cursor_blink: Some(true),
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio with cursor defaults");
+
+        assert_eq!(
+            termio.terminal().cursor_visual_style(),
+            cursor::VisualStyle::Bar
+        );
+        assert!(termio.terminal().cursor_blinking());
+
+        termio
+            .terminal_mut()
+            .set_cursor_defaults(cursor::VisualStyle::Underline, Some(false));
+        assert_eq!(
+            termio.terminal().cursor_visual_style(),
+            cursor::VisualStyle::Underline
+        );
+        assert!(!termio.terminal().cursor_blinking());
+    }
+
+    #[test]
     fn spawn_with_options_initializes_palette_defaults() {
         let _guard = pty_command_lock();
         let mut palette = color::DEFAULT_PALETTE;

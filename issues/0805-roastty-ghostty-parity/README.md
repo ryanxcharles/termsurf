@@ -285,6 +285,11 @@ experiment files until they are proven.
   `clipboard-write != deny`. Roastty now treats that as terminal runtime state:
   deny suppresses `52`, while ask and allow advertise it. This is distinct from
   app-level clipboard read/write policy tests.
+- **Default cursor config is live terminal state.** Pinned Ghostty reloads
+  `cursor-style` and `cursor-style-blink` into the active stream handler, but
+  applies the visible cursor immediately only while the cursor is still in the
+  default DECSCUSR state. Roastty now mirrors that: explicit program cursor
+  choices survive reload until a default cursor reset is received.
 - **The pinned A/B build/render rig works.** Experiment 1 proved the debug
   Ghostty and Roastty apps can both build, launch side by side, render the same
   startup recipe through the live A/B smoke harness, capture comparable
@@ -1358,4 +1363,4 @@ remains open.
 - [Experiment 137: Clipboard device attributes runtime](137-clipboard-device-attributes-runtime.md)
   — **Pass**
 - [Experiment 138: Cursor default runtime](138-cursor-default-runtime.md) —
-  **Designed**
+  **Pass**

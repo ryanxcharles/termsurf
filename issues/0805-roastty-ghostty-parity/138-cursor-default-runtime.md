@@ -137,3 +137,85 @@ Fail criteria:
 **Verdict:** Approved.
 
 The reviewer found no findings.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now mirrors pinned Ghostty's live default cursor config behavior for
+`cursor-style` and `cursor-style-blink`. Active terminals store the configured
+default cursor visual style and blink setting. Live config updates apply
+immediately while the cursor is still in the default DECSCUSR state, but do not
+overwrite an explicit program-selected cursor style until the program sends a
+default DECSCUSR reset (`CSI 0 q` / `CSI q`).
+
+The implementation also preserves Ghostty's DEC mode 12 behavior: when
+`cursor-style-blink` is explicitly configured, DEC mode 12 remains gated; when
+the blink config is unset, the cursor falls back to blinking and DEC mode 12 can
+change the blink mode. Direct terminal reset and RIS/full reset are guarded so
+they do not incorrectly behave like a configured DECSCUSR default cursor reset.
+
+The CFG-223 inventory now splits `RUNTIME-009B2B2B3B2B2B2` into:
+
+- `RUNTIME-009B2B2B3B2B2B2A`: **Oracle complete** for live `cursor-style` and
+  `cursor-style-blink` default cursor runtime effects.
+- `RUNTIME-009B2B2B3B2B2B2B`: **Gap** for other remaining terminal behavior
+  effects.
+
+Verification passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml terminal_cursor_default_runtime
+cargo test --manifest-path roastty/Cargo.toml termio_cursor_default_runtime
+cargo test --manifest-path roastty/Cargo.toml surface_cursor_default_runtime
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/cursor_default_runtime_parity.py
+for f in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$f" >/tmp/$(basename "$f").out || { echo FAIL:$f; cat /tmp/$(basename "$f").out; exit 1; }; done; echo all_runtime_parity_guards=pass
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+The regenerated inventory reported:
+
+```text
+runtime_rows=47
+oracle_complete=40
+closed=42
+audit_covered=0
+incomplete=5
+gap=5
+cfg223=Gap
+```
+
+## Conclusion
+
+Default cursor style is live terminal runtime state in pinned Ghostty. Roastty
+now updates that state on active surfaces, applies it immediately only for the
+default cursor, preserves explicit program cursor control, and keeps
+`cursor-style-blink` gating consistent after reload. RIS/full reset remains
+separate from DECSCUSR default cursor reset, matching pinned Ghostty. Renderer
+cursor pixels and password/preedit priority remain separate CFG-223 renderer
+gaps.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Initial verdict:** Changes required.
+
+The reviewer found one required issue: the first implementation treated direct
+terminal reset and RIS/full reset like a configured DECSCUSR default cursor
+reset by marking the cursor default and reapplying configured cursor
+style/blink. That was broader than the experiment scope and diverged from pinned
+Ghostty's full-reset path.
+
+**Fix:** Removed configured cursor default reapplication from direct reset and
+RIS/full reset, then added focused regression tests for both paths.
+
+**Final verdict:** Approved.
+
+The reviewer confirmed the prior finding was resolved and no new required
+findings were introduced. The reviewer also verified the focused terminal,
+Termio, and surface tests, the updated static guard, all runtime parity guards,
+`cargo fmt --check`, and `git diff --check`.

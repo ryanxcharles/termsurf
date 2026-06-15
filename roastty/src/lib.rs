@@ -3735,6 +3735,10 @@ impl Surface {
                 terminal.set_enquiry_response(parsed.enquiry_response.as_bytes().to_vec());
                 terminal.set_osc_color_report_format(parsed.osc_color_report_format);
                 terminal.set_clipboard_write(parsed.clipboard_write);
+                terminal.set_cursor_defaults(
+                    parsed.cursor_style.to_terminal(),
+                    parsed.cursor_style_blink,
+                );
             });
             self.dirty = true;
         }
@@ -22366,6 +22370,57 @@ mod tests {
                 terminal.next_slice(b"\x1b[c").unwrap();
                 terminal.pty_response().to_vec()
             })
+    }
+
+    fn surface_cursor_default_state(surface: RoasttySurface) -> (cursor::VisualStyle, bool) {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| {
+                (
+                    termio.terminal().cursor_visual_style(),
+                    termio.terminal().cursor_blinking(),
+                )
+            })
+    }
+
+    #[test]
+    fn surface_cursor_default_runtime_startup_and_update() {
+        let _guard = pty_command_lock();
+
+        let config = new_test_config_from_str(
+            "cursor-style = bar\ncursor-style-blink = false\ncommand = sleep 5\n",
+        );
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert_eq!(
+            surface_cursor_default_state(surface),
+            (cursor::VisualStyle::Bar, false)
+        );
+
+        let update =
+            new_test_config_from_str("cursor-style = underline\ncursor-style-blink = true\n");
+        roastty_app_update_config(app, update);
+        assert_eq!(
+            surface_cursor_default_state(surface),
+            (cursor::VisualStyle::Underline, true)
+        );
+
+        let unset = new_test_config_from_str("cursor-style = block\ncursor-style-blink = \n");
+        roastty_app_update_config(app, unset);
+        assert_eq!(
+            surface_cursor_default_state(surface),
+            (cursor::VisualStyle::Block, true)
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(unset);
+        roastty_config_free(update);
+        roastty_config_free(config);
     }
 
     #[test]

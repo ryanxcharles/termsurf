@@ -74,6 +74,7 @@ pub(crate) struct Terminal {
     previous_char: Option<char>,
     pending_clipboard_events: Vec<TerminalClipboardEvent>,
     pending_bell_count: usize,
+    default_cursor: bool,
     default_cursor_visual_style: cursor::VisualStyle,
     default_cursor_blink: Option<bool>,
 }
@@ -840,6 +841,7 @@ struct TerminalStreamHandler<'a> {
     flags: &'a mut TerminalFlags,
     pending_clipboard_events: &'a mut Vec<TerminalClipboardEvent>,
     pending_bell_count: &'a mut usize,
+    default_cursor: &'a mut bool,
     default_cursor_visual_style: cursor::VisualStyle,
     default_cursor_blink: Option<bool>,
 }
@@ -1104,6 +1106,7 @@ impl Terminal {
             previous_char: None,
             pending_clipboard_events: Vec::new(),
             pending_bell_count: 0,
+            default_cursor: true,
             default_cursor_visual_style: options.cursor_visual_style,
             default_cursor_blink: options.cursor_blink,
         })
@@ -1138,6 +1141,7 @@ impl Terminal {
             previous_char,
             pending_clipboard_events,
             pending_bell_count,
+            default_cursor,
             flags,
             default_cursor_visual_style,
             default_cursor_blink,
@@ -1171,6 +1175,7 @@ impl Terminal {
             flags,
             pending_clipboard_events,
             pending_bell_count,
+            default_cursor,
             default_cursor_visual_style: *default_cursor_visual_style,
             default_cursor_blink: *default_cursor_blink,
         };
@@ -1272,6 +1277,22 @@ impl Terminal {
 
     pub(crate) fn set_clipboard_write(&mut self, access: ClipboardAccess) {
         self.clipboard_write = access;
+    }
+
+    pub(crate) fn set_cursor_defaults(
+        &mut self,
+        visual_style: cursor::VisualStyle,
+        blink: Option<bool>,
+    ) {
+        self.default_cursor_visual_style = visual_style;
+        self.default_cursor_blink = blink;
+        if self.default_cursor {
+            self.screens
+                .active_mut()
+                .set_cursor_visual_style(visual_style);
+            self.modes
+                .set(modes::Mode::CursorBlinking, blink.unwrap_or(true));
+        }
     }
 
     pub(crate) fn set_size_callback(&mut self, callback: Option<TerminalSizeCallback>) {
@@ -3257,11 +3278,17 @@ impl Handler for TerminalStreamHandler<'_> {
             }
             Action::CursorVisualStyle { style, blinking } => {
                 let (style, blinking) = match style {
-                    Some(style) => (style, blinking),
-                    None => (
-                        self.default_cursor_visual_style,
-                        self.default_cursor_blink.unwrap_or(true),
-                    ),
+                    Some(style) => {
+                        *self.default_cursor = false;
+                        (style, blinking)
+                    }
+                    None => {
+                        *self.default_cursor = true;
+                        (
+                            self.default_cursor_visual_style,
+                            self.default_cursor_blink.unwrap_or(true),
+                        )
+                    }
                 };
                 self.modes.set(modes::Mode::CursorBlinking, blinking);
                 self.screens.active_mut().set_cursor_visual_style(style);
@@ -8115,6 +8142,159 @@ mod tests {
             cursor::VisualStyle::Underline
         );
         assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+    }
+
+    #[test]
+    fn terminal_cursor_default_runtime_update_applies_when_default() {
+        let mut terminal = Terminal::init_with_options(
+            10,
+            2,
+            None,
+            TerminalInitOptions {
+                cursor_visual_style: cursor::VisualStyle::Block,
+                cursor_blink: Some(true),
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal.set_cursor_defaults(cursor::VisualStyle::Bar, Some(false));
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Bar
+        );
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+
+        terminal.set_cursor_defaults(cursor::VisualStyle::Underline, Some(true));
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Underline
+        );
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+    }
+
+    #[test]
+    fn terminal_cursor_default_runtime_update_preserves_program_cursor_until_reset() {
+        let mut terminal = Terminal::init_with_options(
+            10,
+            2,
+            None,
+            TerminalInitOptions {
+                cursor_visual_style: cursor::VisualStyle::Block,
+                cursor_blink: Some(true),
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal.next_slice(b"\x1b[5 q").unwrap();
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Bar
+        );
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+
+        terminal.set_cursor_defaults(cursor::VisualStyle::Underline, Some(false));
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Bar
+        );
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+
+        terminal.next_slice(b"\x1b[0 q").unwrap();
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Underline
+        );
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+    }
+
+    #[test]
+    fn terminal_cursor_default_runtime_direct_reset_does_not_apply_configured_default() {
+        let mut terminal = Terminal::init_with_options(
+            10,
+            2,
+            None,
+            TerminalInitOptions {
+                cursor_visual_style: cursor::VisualStyle::Underline,
+                cursor_blink: Some(false),
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal.reset();
+
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Block
+        );
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+    }
+
+    #[test]
+    fn terminal_cursor_default_runtime_ris_preserves_program_cursor_state_until_reset() {
+        let mut terminal = Terminal::init_with_options(
+            10,
+            2,
+            None,
+            TerminalInitOptions {
+                cursor_visual_style: cursor::VisualStyle::Block,
+                cursor_blink: Some(true),
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal.next_slice(b"\x1b[5 q\x1bc").unwrap();
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Block
+        );
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+
+        terminal.set_cursor_defaults(cursor::VisualStyle::Underline, Some(false));
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Block
+        );
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+
+        terminal.next_slice(b"\x1b[0 q").unwrap();
+        assert_eq!(
+            terminal.cursor_visual_style_for_tests(),
+            cursor::VisualStyle::Underline
+        );
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+    }
+
+    #[test]
+    fn terminal_cursor_default_runtime_blink_update_controls_dec_mode_12_gate() {
+        let mut terminal = Terminal::init_with_options(
+            10,
+            2,
+            None,
+            TerminalInitOptions {
+                cursor_visual_style: cursor::VisualStyle::Block,
+                cursor_blink: None,
+                ..TerminalInitOptions::default()
+            },
+        )
+        .unwrap();
+
+        terminal.set_cursor_defaults(cursor::VisualStyle::Block, Some(false));
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+        terminal.next_slice(b"\x1b[?12h").unwrap();
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+        terminal.next_slice(b"\x1b[?12l").unwrap();
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+
+        terminal.set_cursor_defaults(cursor::VisualStyle::Block, None);
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
+        terminal.next_slice(b"\x1b[?12l").unwrap();
+        assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+        terminal.next_slice(b"\x1b[?12h").unwrap();
+        assert!(terminal.get_mode_for_tests(Mode::CursorBlinking));
     }
 
     #[test]
