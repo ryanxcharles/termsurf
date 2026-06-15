@@ -457,6 +457,15 @@ experiment files until they are proven.
   for start and preserve Ghostty's exit-code mapping: absent or malformed values
   map to `0`, parsed out-of-range values map to `1`, and valid `0..255` values
   are preserved.
+- **Link context-menu selection has deterministic core semantics.** Pinned
+  Ghostty's right-click `context-menu` path calls `linkAtPos` before word
+  fallback, and configured regex links are searched only within the clicked line
+  with semantic prompt boundaries. Roastty must select configured regex links
+  and ctrl/super OSC 8 links before returning unhandled to the native menu
+  layer. Regular link preview predicates are gated by `link-previews = true`,
+  while OSC 8 preview predicates are gated by `link-previews != false`; actual
+  `mouse_over_link` dispatch and native preview/menu display remain GUI/runtime
+  gaps.
 - **Packed-flag formatter rows need family-column assertions, not broad text
   grep.** Experiment 79 promoted the six remaining packed-flag formatter rows
   while keeping already-proven packed rows unpromoted. The matrix assertion must
@@ -1544,4 +1553,4 @@ remains open.
 - [Experiment 159: macOS link hover banner plumbing](159-macos-link-hover-banner-plumbing.md)
   — **Pass**
 - [Experiment 160: Link preview context runtime](160-link-preview-context-runtime.md)
-  — **Designed**
+  — **Pass**

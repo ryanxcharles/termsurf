@@ -200,7 +200,7 @@ ROWS = [
             "semantics; refreshes existing surfaces on config update; and "
             "does not bypass terminal mouse reporting."
         ),
-        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012B2B2B2B2B.",
+        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior is tracked by RUNTIME-012B2B2B2B2B1.",
         guard_tier="Tier 3",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml right_click_action`",
     ),
@@ -1609,12 +1609,46 @@ ROWS = [
             "`hoverUrl`, published hover state, `URLHoverBanner(url:)` rendering, "
             "middle truncation, and left/right banner hover switch."
         ),
-        missing_evidence="None for copied macOS link-hover banner source plumbing; live mouse hover delivery, pointer cursor changes, link preview policy, and context/menu link interactions remain tracked by RUNTIME-012B2B2B2B2B.",
+        missing_evidence="None for copied macOS link-hover banner source plumbing; live mouse hover delivery, pointer cursor changes, live app link preview display, and native context/menu link interactions remain tracked by RUNTIME-012B2B2B2B2B2.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_link_hover_banner_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-012B2B2B2B2B",
+        id="RUNTIME-012B2B2B2B2B1",
+        behavior="link preview config predicates and link-specific context-menu selection runtime",
+        ghostty_reference="`vendor/ghostty/src/Surface.zig` `linkAtPos`, `link_previews == .true`, `link_previews != .false`, and right-click `context-menu` link selection before word fallback",
+        roastty_reference="`roastty/src/config/mod.rs::LinkPreviews`; `roastty/src/lib.rs` `context_menu_action`, link selection helpers, and `link_preview_context_runtime_*` tests",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 160 splits out deterministic link preview predicates "
+            "and context-menu runtime semantics. "
+            "`link_preview_context_runtime_gates_preview_by_link_kind` proves "
+            "regular detected links use a preview predicate only for "
+            "`link-previews = true` while OSC 8 links use a preview predicate "
+            "for `true` and `osc8`, matching pinned "
+            "Ghostty's `link_previews == .true` and `link_previews != .false` "
+            "conditions. `link_preview_context_runtime_context_menu_selects_regex_link` "
+            "proves right-click `context-menu` selects the configured detected "
+            "link at the cursor with ctrl/super modifiers and returns unhandled. "
+            "`link_preview_context_runtime_context_menu_regex_is_line_scoped` "
+            "proves configured regex link selection is scoped to the clicked "
+            "line with semantic prompt boundaries rather than the whole "
+            "viewport. "
+            "`link_preview_context_runtime_context_menu_preserves_containing_link_selection` "
+            "proves an existing containing selection is preserved, and "
+            "`link_preview_context_runtime_context_menu_selects_osc8_with_ctrl_or_super` "
+            "proves the OSC 8 branch selects the hovered cell when ctrl/super is "
+            "active. `link_preview_context_runtime_parity.py` statically checks "
+            "the pinned Ghostty conditions, Roastty implementation markers, "
+            "tests, and this inventory split."
+        ),
+        missing_evidence="None for deterministic link preview config predicates and link-specific context-menu selection runtime semantics. Actual `mouse_over_link` preview dispatch, GUI hover/cursor, native preview display, native menu display, and OS URL opening remain tracked by RUNTIME-012B2B2B2B2B2.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml link_preview_context_runtime -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-012B2B2B2B2B2",
         behavior="remaining notification/link/bell GUI effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification and link preview fields; `vendor/ghostty/src/Surface.zig` notification/link hover/menu paths; macOS native notification and link handling",
         roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling beyond copied bell and user-notification plumbing",
@@ -1633,12 +1667,15 @@ ROWS = [
             "termio, surface action, and ABI dispatch. Experiment 158 split "
             "out GTK-only `app-notifications` as not applicable to Roastty's "
             "macOS runtime. Experiment 159 split out copied macOS link-hover "
-            "banner source plumbing. Actual OS banner/sound delivery, actual "
+            "banner source plumbing. Experiment 160 split out deterministic "
+            "link preview config predicates and link-specific context-menu "
+            "selection runtime semantics. Actual OS banner/sound delivery, actual "
             "audio/dock/border/title GUI effects, real app link hover/cursor "
-            "UI, link previews in the real app, and context/menu link flows "
-            "still need focused runtime or GUI proof."
+            "UI, runtime `mouse_over_link` preview dispatch, native link preview "
+            "display, native context/menu display, and OS URL-opening flows "
+            "still need focused GUI, runtime, or OS proof."
         ),
-        missing_evidence="Add live OS notification delivery, actual bell side-effect, real app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
+        missing_evidence="Add live OS notification delivery, actual bell side-effect, real app hover/cursor, runtime preview dispatch, native preview display, native context/menu display, and OS URL-opening walkthrough guards.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 notification/link GUI or runtime experiment.",
     ),
@@ -1744,7 +1781,8 @@ EXPECTED_IDS = [
     "RUNTIME-012B2B2B2A",
     "RUNTIME-012B2B2B2B1",
     "RUNTIME-012B2B2B2B2A",
-    "RUNTIME-012B2B2B2B2B",
+    "RUNTIME-012B2B2B2B2B1",
+    "RUNTIME-012B2B2B2B2B2",
     "RUNTIME-013",
     "RUNTIME-014",
 ]

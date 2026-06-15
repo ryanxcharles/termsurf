@@ -6118,6 +6118,7 @@ impl Surface {
             return false;
         };
         let boundary_codepoints = self.selection_word_boundaries().to_vec();
+        let mouse_mods = self.mouse_mods_with_capture();
         let selected = worker.with_termio_mut(|termio| {
             let terminal = termio.terminal();
             let geometry = self.mouse_report_geometry(terminal)?;
@@ -6140,10 +6141,14 @@ impl Surface {
                     return Some(false);
                 }
             }
-            let ref_ = terminal.grid_ref(TerminalPointTag::Viewport, cell)?;
-            let selection = terminal
-                .select_word(ref_, Some(&boundary_codepoints))
-                .ok()??;
+            let selection = self
+                .link_selection_at_viewport_cell(terminal, cell, mouse_mods)
+                .or_else(|| {
+                    let ref_ = terminal.grid_ref(TerminalPointTag::Viewport, cell)?;
+                    terminal
+                        .select_word(ref_, Some(&boundary_codepoints))
+                        .ok()?
+                })?;
             termio.terminal_mut().set_selection(Some(selection)).ok()?;
             Some(true)
         });
@@ -6151,6 +6156,90 @@ impl Surface {
             self.request_render();
         }
         false
+    }
+
+    fn link_selection_at_viewport_cell(
+        &self,
+        terminal: &InnerTerminal,
+        cell: point::Coordinate,
+        mouse_mods: key_mods::Mods,
+    ) -> Option<TerminalSelection> {
+        if mouse_mods == key_mods::ctrl_or_super(key_mods::Mods::new()) {
+            if let Some(selection) = self.osc8_link_selection_at_viewport_cell(terminal, cell) {
+                return Some(selection);
+            }
+        }
+        self.regex_link_selection_at_viewport_cell(terminal, cell, mouse_mods)
+    }
+
+    fn osc8_link_selection_at_viewport_cell(
+        &self,
+        terminal: &InnerTerminal,
+        cell: point::Coordinate,
+    ) -> Option<TerminalSelection> {
+        let ref_ = terminal.grid_ref(TerminalPointTag::Viewport, cell)?;
+        let uri = ref_.hyperlink_uri().ok()?;
+        if uri.is_empty() {
+            return None;
+        }
+        Some(TerminalSelection {
+            start: ref_,
+            end: ref_,
+            rectangle: false,
+        })
+    }
+
+    fn regex_link_selection_at_viewport_cell(
+        &self,
+        terminal: &InnerTerminal,
+        cell: point::Coordinate,
+        mouse_mods: key_mods::Mods,
+    ) -> Option<TerminalSelection> {
+        let config = app_from_handle(self.app)?;
+        let ref_ = terminal.grid_ref(TerminalPointTag::Viewport, cell)?;
+        let line = terminal.select_line(ref_, None, true).ok()??;
+        let map = terminal.selection_viewport_string_map(line, false).ok()?;
+        for link in &config.parsed_config.link {
+            match link.highlight {
+                input::link::Highlight::Always | input::link::Highlight::Hover => {}
+                input::link::Highlight::AlwaysMods(mods)
+                | input::link::Highlight::HoverMods(mods) => {
+                    if mods != mouse_mods {
+                        continue;
+                    }
+                }
+            }
+
+            let Ok(pattern) = std::str::from_utf8(&link.regex) else {
+                continue;
+            };
+            let Ok(regex) = onig::Regex::new(pattern) else {
+                continue;
+            };
+            for (start, end) in regex.find_iter(&map.string) {
+                if end <= start || end > map.map.len() {
+                    continue;
+                }
+                let matched = &map.map[start..end];
+                if !matched.contains(&cell) {
+                    continue;
+                }
+                return Some(TerminalSelection {
+                    start: terminal.grid_ref(TerminalPointTag::Viewport, matched[0])?,
+                    end: terminal.grid_ref(TerminalPointTag::Viewport, *matched.last()?)?,
+                    rectangle: false,
+                });
+            }
+        }
+        None
+    }
+
+    fn mouse_mods_with_capture(&self) -> key_mods::Mods {
+        let mut mods = self.mouse.mods;
+        if self.mouse_report_context().is_some() && mods.shift && !self.mouse_shift_capture() {
+            mods.shift = false;
+        }
+        mods
     }
 
     fn has_active_selection(&self) -> bool {
@@ -20178,6 +20267,19 @@ mod tests {
         handle
     }
 
+    fn new_test_config_with_right_click_action_and_links(
+        right_click_action: config::RightClickAction,
+        links: Vec<input::link::Link>,
+    ) -> RoasttyConfig {
+        let handle = roastty_config_new();
+        let config = config_from_handle(handle).unwrap();
+        config.parsed.right_click_action = right_click_action;
+        config.parsed.link_url = false;
+        config.parsed.link = links;
+        config.sync_from_parsed_config();
+        handle
+    }
+
     fn new_test_config_with_mouse_hide_while_typing(enabled: bool) -> RoasttyConfig {
         let handle = roastty_config_new();
         let config = config_from_handle(handle).unwrap();
@@ -21809,6 +21911,17 @@ mod tests {
             });
     }
 
+    fn write_surface_worker_bytes(surface: RoasttySurface, bytes: &[u8]) {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                termio.terminal_mut().next_slice(bytes).unwrap();
+            });
+    }
+
     fn release_left_at_cell(surface: RoasttySurface, column: u16, row: u32) -> bool {
         roastty_surface_mouse_pos(
             surface,
@@ -21834,11 +21947,15 @@ mod tests {
     }
 
     fn press_right(surface: RoasttySurface) -> bool {
+        press_right_with_mods(surface, ROASTTY_MODS_NONE)
+    }
+
+    fn press_right_with_mods(surface: RoasttySurface, mods: c_int) -> bool {
         roastty_surface_mouse_button(
             surface,
             ROASTTY_MOUSE_BUTTON_PRESS,
             mouse_button_to_int(mouse::MouseButton::Right),
-            ROASTTY_MODS_NONE,
+            mods,
         )
     }
 
@@ -24834,6 +24951,119 @@ mod tests {
             surface_selection_plain_text(surface).as_deref(),
             Some("word next")
         );
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn link_preview_context_runtime_gates_preview_by_link_kind() {
+        use config::LinkPreviews;
+
+        assert!(!LinkPreviews::False.previews_regular_link());
+        assert!(!LinkPreviews::False.previews_osc8_link());
+        assert!(LinkPreviews::True.previews_regular_link());
+        assert!(LinkPreviews::True.previews_osc8_link());
+        assert!(!LinkPreviews::Osc8.previews_regular_link());
+        assert!(LinkPreviews::Osc8.previews_osc8_link());
+    }
+
+    #[test]
+    fn link_preview_context_runtime_context_menu_selects_regex_link() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::ContextMenu);
+        let app = new_test_app_with_clipboard_read_write_config(0x1109, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 80, 5, 10, 20);
+        write_surface_worker_bytes(surface, b"go https://example.com now");
+        roastty_surface_mouse_pos(surface, 65.0, 5.0, ROASTTY_MODS_SUPER);
+
+        assert!(!press_right_with_mods(surface, ROASTTY_MODS_SUPER));
+        assert_eq!(
+            surface_selection_plain_text(surface).as_deref(),
+            Some("https://example.com")
+        );
+        assert!(clipboard_read_records().is_empty());
+        assert!(clipboard_write_records().is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn link_preview_context_runtime_context_menu_regex_is_line_scoped() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action_and_links(
+            config::RightClickAction::ContextMenu,
+            vec![input::link::Link {
+                regex: b"AAA\nBBB".to_vec(),
+                action: input::link::Action::Open,
+                highlight: input::link::Highlight::Always,
+            }],
+        );
+        let app = new_test_app_with_clipboard_read_write_config(0x1112, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 80, 5, 10, 20);
+        write_surface_worker_bytes(surface, b"AAA\r\nBBB");
+        roastty_surface_mouse_pos(surface, 5.0, 5.0, ROASTTY_MODS_NONE);
+
+        assert!(!press_right(surface));
+        assert_eq!(
+            surface_selection_plain_text(surface).as_deref(),
+            Some("AAA")
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn link_preview_context_runtime_context_menu_preserves_containing_link_selection() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::ContextMenu);
+        let app = new_test_app_with_clipboard_read_write_config(0x1110, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 80, 5, 10, 20);
+        write_surface_worker_bytes(surface, b"go https://example.com now");
+        set_surface_worker_active_selection(
+            surface,
+            Some(surface_worker_selection(surface, (3, 0), (21, 0))),
+        );
+        roastty_surface_mouse_pos(surface, 65.0, 5.0, ROASTTY_MODS_SUPER);
+
+        assert!(!press_right_with_mods(surface, ROASTTY_MODS_SUPER));
+        assert_eq!(
+            surface_selection_plain_text(surface).as_deref(),
+            Some("https://example.com")
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn link_preview_context_runtime_context_menu_selects_osc8_with_ctrl_or_super() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_with_right_click_action(config::RightClickAction::ContextMenu);
+        let app = new_test_app_with_clipboard_read_write_config(0x1111, true, false, config);
+        let surface = new_test_surface(app);
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker("sleep 1"));
+        set_surface_test_geometry(surface, 80, 5, 10, 20);
+        write_surface_worker_bytes(
+            surface,
+            b"\x1b]8;;https://osc8.example\x1b\\link\x1b]8;;\x1b\\ plain",
+        );
+        roastty_surface_mouse_pos(surface, 15.0, 5.0, ROASTTY_MODS_SUPER);
+
+        assert!(!press_right_with_mods(surface, ROASTTY_MODS_SUPER));
+        assert_eq!(surface_selection_plain_text(surface).as_deref(), Some("i"));
+
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);

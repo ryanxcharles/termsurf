@@ -2351,6 +2351,20 @@ impl Terminal {
             .map_err(Into::into)
     }
 
+    pub(crate) fn selection_viewport_string_map(
+        &self,
+        selection: TerminalSelection,
+        trim: bool,
+    ) -> Result<super::string_map::ViewportStringMap, TerminalGridRefPointError> {
+        let screen = self.screens.active();
+        let selection = screen.selection_from_grid_refs(
+            selection.start.into(),
+            selection.end.into(),
+            selection.rectangle,
+        )?;
+        Ok(screen.selection_viewport_string_map(selection, trim))
+    }
+
     pub(crate) fn select_all(&self) -> Option<TerminalSelection> {
         Self::selection_from_tuple(self.screens.active().select_all())
     }

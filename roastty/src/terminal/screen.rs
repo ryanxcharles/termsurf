@@ -320,6 +320,37 @@ impl Screen {
         StringMap::from_page_string(page_string)
     }
 
+    pub(in crate::terminal) fn selection_viewport_string_map(
+        &self,
+        selection: selection::Selection,
+        trim: bool,
+    ) -> ViewportStringMap {
+        let page_string = self.pages.screen_format_string_with_pin_map(
+            Some(selection),
+            trim,
+            true,
+            PageOutputFormat::Plain,
+            None,
+            None,
+        );
+
+        let mut map = Vec::with_capacity(page_string.pin_map.len());
+        for pin in page_string.pin_map {
+            let grid_ref = GridRef::from(pin);
+            let Ok(coord) = self.point_from_grid_ref(
+                grid_ref.node,
+                grid_ref.x,
+                grid_ref.y,
+                point::Tag::Viewport,
+            ) else {
+                return ViewportStringMap::new(String::new(), Vec::new());
+            };
+            map.push(coord);
+        }
+
+        ViewportStringMap::new(page_string.text, map)
+    }
+
     /// Flatten the visible viewport to text plus one viewport coordinate per
     /// byte. Renderer link matching uses this to map regex byte offsets back to
     /// cells without exposing page-list pins outside the terminal module.
