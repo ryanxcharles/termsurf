@@ -1804,3 +1804,5 @@ remains open.
   — **Partial**
 - [Experiment 188: Live link hover GUI proof](188-live-link-hover-gui-proof.md)
   — **Partial**
+- [Experiment 189: Live link hover banner pixels](189-live-link-hover-banner-pixels.md)
+  — **Designed**
