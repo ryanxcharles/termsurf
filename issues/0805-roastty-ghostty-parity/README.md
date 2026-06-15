@@ -290,6 +290,11 @@ experiment files until they are proven.
   applies the visible cursor immediately only while the cursor is still in the
   default DECSCUSR state. Roastty now mirrors that: explicit program cursor
   choices survive reload until a default cursor reset is received.
+- **Kitty image storage quota is PTY-backed terminal config.** Pinned Ghostty
+  applies `image-storage-limit` at terminal startup and live config update, and
+  live updates restore kitty image loading limits to all media. Roastty now
+  threads the parsed quota through `TermioSpawnOptions` and active surface
+  config updates.
 - **The pinned A/B build/render rig works.** Experiment 1 proved the debug
   Ghostty and Roastty apps can both build, launch side by side, render the same
   startup recipe through the live A/B smoke harness, capture comparable
@@ -1365,4 +1370,4 @@ remains open.
 - [Experiment 138: Cursor default runtime](138-cursor-default-runtime.md) —
   **Pass**
 - [Experiment 139: Image storage limit runtime](139-image-storage-limit-runtime.md)
-  — **Designed**
+  — **Pass**

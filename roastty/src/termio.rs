@@ -40,6 +40,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) term: String,
     pub(crate) max_scrollback_bytes: Option<usize>,
     pub(crate) palette: color::Palette,
+    pub(crate) image_storage_limit: usize,
     pub(crate) title_report: bool,
     pub(crate) enquiry_response: Vec<u8>,
     pub(crate) osc_color_report_format: crate::config::OscColorReportFormat,
@@ -59,6 +60,7 @@ impl Default for TermioSpawnOptions {
             term: "xterm-roastty".to_string(),
             max_scrollback_bytes: None,
             palette: color::DEFAULT_PALETTE,
+            image_storage_limit: crate::terminal::kitty::graphics_storage::DEFAULT_TOTAL_LIMIT,
             title_report: false,
             enquiry_response: Vec::new(),
             osc_color_report_format: crate::config::OscColorReportFormat::Bits16,
@@ -202,6 +204,16 @@ impl Termio {
             },
         )?;
         terminal.set_palette_default(Some(palette_tuple(options.palette)));
+        terminal.set_kitty_image_storage_limit(options.image_storage_limit);
+        terminal.set_kitty_image_medium(crate::terminal::terminal::KittyImageMedium::File, true);
+        terminal.set_kitty_image_medium(
+            crate::terminal::terminal::KittyImageMedium::TemporaryFile,
+            true,
+        );
+        terminal.set_kitty_image_medium(
+            crate::terminal::terminal::KittyImageMedium::SharedMemory,
+            true,
+        );
         let mut command = PtyCommand::new(program, size);
         for arg in &args {
             command.arg(arg);
@@ -1509,6 +1521,32 @@ mod tests {
             cursor::VisualStyle::Underline
         );
         assert!(!termio.terminal().cursor_blinking());
+    }
+
+    #[test]
+    fn termio_image_storage_limit_runtime_spawn_options_reach_terminal() {
+        let _guard = pty_command_lock();
+        let termio = Termio::spawn_with_options(
+            "/bin/sleep",
+            ["1"],
+            TermioSpawnOptions {
+                image_storage_limit: 12345,
+                ..TermioSpawnOptions::default()
+            },
+            test_size(),
+        )
+        .expect("spawn termio with image storage limit");
+
+        assert_eq!(termio.terminal().kitty_image_storage_limit(), 12345);
+        assert!(termio
+            .terminal()
+            .kitty_image_medium_enabled(crate::terminal::terminal::KittyImageMedium::File));
+        assert!(termio.terminal().kitty_image_medium_enabled(
+            crate::terminal::terminal::KittyImageMedium::TemporaryFile
+        ));
+        assert!(termio
+            .terminal()
+            .kitty_image_medium_enabled(crate::terminal::terminal::KittyImageMedium::SharedMemory));
     }
 
     #[test]

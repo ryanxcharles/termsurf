@@ -123,3 +123,67 @@ Fail criteria:
 **Verdict:** Approved.
 
 The reviewer found no findings.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now threads parsed `image-storage-limit` into PTY-backed terminal
+startup and live app config updates. `TermioSpawnOptions` carries the configured
+limit into the initialized terminal, and `Surface::apply_config` updates the
+active terminal's kitty image storage quota when app config changes.
+
+The implementation also mirrors pinned Ghostty's live config behavior of
+restoring kitty image loading limits to all enabled media when
+`image-storage-limit` is applied.
+
+The CFG-223 inventory now splits `RUNTIME-009B2B2B3B2B2B2B` into:
+
+- `RUNTIME-009B2B2B3B2B2B2B1`: **Oracle complete** for `image-storage-limit`
+  kitty graphics storage quota startup and live update effects.
+- `RUNTIME-009B2B2B3B2B2B2B2`: **Gap** for other remaining terminal behavior
+  effects.
+
+Verification passed:
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo test --manifest-path roastty/Cargo.toml termio_image_storage_limit_runtime
+cargo test --manifest-path roastty/Cargo.toml surface_image_storage_limit_runtime
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/image_storage_limit_runtime_parity.py
+for f in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$f" >/tmp/$(basename "$f").out || { echo FAIL:$f; cat /tmp/$(basename "$f").out; exit 1; }; done; echo all_runtime_parity_guards=pass
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+The regenerated inventory reported:
+
+```text
+runtime_rows=48
+oracle_complete=41
+closed=43
+audit_covered=0
+incomplete=5
+gap=5
+cfg223=Gap
+```
+
+## Conclusion
+
+`image-storage-limit` is config-derived terminal runtime state in pinned
+Ghostty. Roastty now applies the parsed limit at PTY-backed terminal startup and
+live config update, while resetting kitty image loading media to all enabled on
+live update. This closes the storage-quota runtime effect only; kitty graphics
+protocol behavior and renderer-visible image output remain separate parity
+surfaces.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Verdict:** Approved.
+
+The reviewer found no findings and confirmed the result commit had not yet been
+made. The reviewer specifically confirmed that `HEAD` was still
+`0a2a4df47 Plan image limit parity` with result changes uncommitted.

@@ -3739,6 +3739,10 @@ impl Surface {
                     parsed.cursor_style.to_terminal(),
                     parsed.cursor_style_blink,
                 );
+                terminal.set_kitty_image_storage_limit(parsed.image_storage_limit as usize);
+                terminal.set_kitty_image_medium(KittyImageMedium::File, true);
+                terminal.set_kitty_image_medium(KittyImageMedium::TemporaryFile, true);
+                terminal.set_kitty_image_medium(KittyImageMedium::SharedMemory, true);
             });
             self.dirty = true;
         }
@@ -4004,6 +4008,7 @@ impl Surface {
             term: config.term.clone(),
             max_scrollback_bytes: scrollback_limit_to_bytes(config.scrollback_limit),
             palette: derived_config_palette(&config),
+            image_storage_limit: config.image_storage_limit as usize,
             title_report: config.title_report,
             enquiry_response: config.enquiry_response.as_bytes().to_vec(),
             osc_color_report_format: config.osc_color_report_format,
@@ -22384,6 +22389,61 @@ mod tests {
                     termio.terminal().cursor_blinking(),
                 )
             })
+    }
+
+    fn surface_image_storage_state(surface: RoasttySurface) -> (usize, bool, bool, bool) {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| {
+                let terminal = termio.terminal();
+                (
+                    terminal.kitty_image_storage_limit(),
+                    terminal.kitty_image_medium_enabled(KittyImageMedium::File),
+                    terminal.kitty_image_medium_enabled(KittyImageMedium::TemporaryFile),
+                    terminal.kitty_image_medium_enabled(KittyImageMedium::SharedMemory),
+                )
+            })
+    }
+
+    #[test]
+    fn surface_image_storage_limit_runtime_startup_and_update() {
+        let _guard = pty_command_lock();
+
+        let config = new_test_config_from_str("image-storage-limit = 12345\ncommand = sleep 5\n");
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+        assert_eq!(
+            surface_image_storage_state(surface),
+            (12345, true, true, true)
+        );
+
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| {
+                let terminal = termio.terminal_mut();
+                terminal.set_kitty_image_medium(KittyImageMedium::File, false);
+                terminal.set_kitty_image_medium(KittyImageMedium::TemporaryFile, false);
+                terminal.set_kitty_image_medium(KittyImageMedium::SharedMemory, false);
+            });
+
+        let update = new_test_config_from_str("image-storage-limit = 67890\n");
+        roastty_app_update_config(app, update);
+        assert_eq!(
+            surface_image_storage_state(surface),
+            (67890, true, true, true)
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(update);
+        roastty_config_free(config);
     }
 
     #[test]

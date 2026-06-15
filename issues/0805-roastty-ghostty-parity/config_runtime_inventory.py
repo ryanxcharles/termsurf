@@ -811,7 +811,33 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_cursor_default_runtime && cargo test --manifest-path roastty/Cargo.toml termio_cursor_default_runtime && cargo test --manifest-path roastty/Cargo.toml surface_cursor_default_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/cursor_default_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2B3B2B2B2B",
+        id="RUNTIME-009B2B2B3B2B2B2B1",
+        behavior="`image-storage-limit` kitty graphics storage quota startup and live update effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `image-storage-limit`; `vendor/ghostty/src/termio/Termio.zig` derived config, terminal init, and `changeConfig` kitty graphics size-limit update",
+        roastty_reference="`roastty/src/config/mod.rs` `image-storage-limit`; `roastty/src/termio.rs` spawn options; `roastty/src/lib.rs` surface config startup/update wiring; `roastty/src/terminal/terminal.rs` kitty image storage limit setters",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 139 proves `image-storage-limit` kitty graphics "
+            "storage quota runtime parity for startup and live config update. "
+            "`termio_image_storage_limit_runtime_spawn_options_reach_terminal` "
+            "proves non-default spawn options reach the PTY-backed terminal "
+            "runtime and enable all kitty image loading media. "
+            "`surface_image_storage_limit_runtime_startup_and_update` proves "
+            "parsed app config reaches initial surfaces, live app config "
+            "updates refresh the active terminal quota, and live updates "
+            "restore all kitty image loading media. "
+            "`image_storage_limit_runtime_parity.py` statically checks pinned "
+            "Ghostty config, derived-config, terminal init, and live "
+            "`setKittyGraphicsSizeLimit`/`setKittyGraphicsLoadingLimits(.all)` "
+            "markers plus Roastty parser/runtime/update guards."
+        ),
+        missing_evidence="None for `image-storage-limit` kitty graphics storage quota startup and live update effects.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml termio_image_storage_limit_runtime && cargo test --manifest-path roastty/Cargo.toml surface_image_storage_limit_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/image_storage_limit_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3B2B2B2B2",
         behavior="other remaining terminal behavior effects",
         ghostty_reference="remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
@@ -832,7 +858,8 @@ ROWS = [
             "`osc-color-report-format` OSC color query replies, and "
             "`clipboard-write` primary device-attributes clipboard capability "
             "advertisement, and live `cursor-style`/`cursor-style-blink` "
-            "default cursor runtime effects. "
+            "default cursor runtime effects, and `image-storage-limit` kitty "
+            "graphics storage quota startup/live update effects. "
             "Other remaining terminal behavior toggles still need focused "
             "CFG-223 runtime proof or fixes."
         ),
@@ -1137,7 +1164,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2B3B2B2A",
     "RUNTIME-009B2B2B3B2B2B1",
     "RUNTIME-009B2B2B3B2B2B2A",
-    "RUNTIME-009B2B2B3B2B2B2B",
+    "RUNTIME-009B2B2B3B2B2B2B1",
+    "RUNTIME-009B2B2B3B2B2B2B2",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",
