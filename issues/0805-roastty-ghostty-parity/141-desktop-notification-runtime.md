@@ -100,3 +100,48 @@ name used by the verification filter.
 
 Re-review returned **Approved**. The reviewer confirmed both prior findings were
 resolved and found no new required issues.
+
+## Result
+
+**Result:** Pass
+
+Roastty now carries OSC desktop notifications from the terminal parser through
+the PTY-backed runtime path. Terminal OSC 9 and OSC 777 desktop notification
+events are retained in a pending queue, `TermioPump` exposes them to surfaces,
+and live surfaces dispatch `ROASTTY_ACTION_DESKTOP_NOTIFICATION` when
+`desktop-notifications` is enabled. The action payload is prepared as
+nul-terminated C strings with pinned Ghostty's 63-byte title and 255-byte body
+limits before the app callback receives it.
+
+Verification completed:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml -- --check` — pass.
+- `cargo test --manifest-path roastty/Cargo.toml desktop_notification_runtime` —
+  pass: 5 tests passed, 0 failed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/desktop_notification_runtime_parity.py`
+  — pass.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  — pass: `runtime_rows=50`, `oracle_complete=43`, `closed=45`, `incomplete=5`,
+  `gap=5`, `cfg223=Gap`.
+- `git diff --check` — pass.
+
+CFG-223 remains a gap overall, but the completed runtime inventory count moved
+from 42 to 43 oracle-complete rows. The remaining notification/link GUI gap is
+now `RUNTIME-012B2B`.
+
+## Conclusion
+
+The deterministic OSC desktop notification dispatch slice is now covered.
+Roastty already had OSC parser coverage and the copied Swift app action handler;
+the missing piece was the live terminal-to-termio-to-surface event queue plus
+the Ghostty-sized C-string payload for the app callback. Native OS notification
+presentation, rate limiting, command-finish notifications, app notification
+toasts, bell UI/audio, link hover/cursor UI, link previews, and context/menu
+link flows remain in `RUNTIME-012B2B`.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **Approved** with no
+required findings. The reviewer independently ran the formatter check, focused
+Rust test, static parity guard, inventory generation to `/tmp`, and
+`git diff --check`, and confirmed the result commit had not yet been made.

@@ -661,6 +661,12 @@ experiment files until they are proven.
   Live PTY-backed BEL parity therefore flows through terminal pending bell
   counts, `TermioPump::bell_count`, and surface `ROASTTY_ACTION_RING_BELL`
   dispatch with a 100ms repeated-BEL throttle.
+- **OSC desktop notifications need a PTY event queue.** Experiment 141 found
+  that Roastty already parsed OSC 9 and OSC 777 desktop notification commands,
+  but the live terminal path dropped them. PTY-backed parity now queues terminal
+  desktop notification events through `TermioPump`, applies the
+  `desktop-notifications` gate at the surface, and dispatches the app action
+  with Ghostty's fixed 63-byte title and 255-byte body C-string truncation.
 - **ENQ responses must avoid terminal callbacks in worker PTYs.** Experiment 135
   found the same worker constraint applies to `enquiry-response`: embedded
   callback ENQ handling can remain for direct terminal users, but live
@@ -1379,4 +1385,4 @@ remains open.
 - [Experiment 140: Grapheme width method runtime](140-grapheme-width-method-runtime.md)
   — **Pass**
 - [Experiment 141: Desktop notification runtime](141-desktop-notification-runtime.md)
-  — **Designed**
+  — **Pass**

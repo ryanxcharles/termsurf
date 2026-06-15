@@ -1101,20 +1101,50 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml bell_runtime && cargo test --manifest-path roastty/Cargo.toml termio_bell && cargo test --manifest-path roastty/Cargo.toml surface_bell && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_runtime_dispatch_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-012B2",
-        behavior="bell feature UI/audio effects, command-finish notifications, app-notifications, hover/cursor UI, link previews, and context/menu link flows",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification, bell feature, link preview, and app-notification fields; `vendor/ghostty/src/Surface.zig` link hover/menu paths; macOS app notification/bell feature handling",
+        id="RUNTIME-012B2A",
+        behavior="OSC desktop notification runtime dispatch and desktop-notifications gate",
+        ghostty_reference="`vendor/ghostty/src/terminal/osc/parsers/osc9.zig`; `vendor/ghostty/src/terminal/osc/parsers/rxvt_extension.zig`; `vendor/ghostty/src/termio/stream_handler.zig`; `vendor/ghostty/src/Surface.zig` `desktop-notifications` gate",
+        roastty_reference="`roastty/src/terminal/osc.rs`; `roastty/src/terminal/terminal.rs`; `roastty/src/termio.rs`; `roastty/src/lib.rs` desktop notification action dispatch",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 141 proves deterministic OSC desktop notification "
+            "runtime dispatch. `terminal_desktop_notification_runtime_*` "
+            "proves OSC 9 and OSC 777 notifications are captured without "
+            "terminal display side effects. "
+            "`termio_desktop_notification_runtime_*` proves child PTY OSC "
+            "notification output reaches `TermioPump`. "
+            "`surface_desktop_notification_runtime_*` proves live surface "
+            "action dispatch, `desktop-notifications = false` suppression, "
+            "target surface routing, typed title/body payloads, and pinned "
+            "Ghostty 63-byte title / 255-byte body truncation. "
+            "`desktop_notification_runtime_parity.py` statically checks the "
+            "pinned Ghostty parser, stream-handler, fixed buffers, surface "
+            "gate, and Roastty parser/runtime/action/inventory guards."
+        ),
+        missing_evidence="None for OSC desktop notification runtime dispatch and `desktop-notifications` gate behavior.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml desktop_notification_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/desktop_notification_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-012B2B",
+        behavior="bell feature UI/audio effects, command-finish notifications, app-notifications, native desktop notification presentation/rate limiting, hover/cursor UI, link previews, and context/menu link flows",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification, bell feature, link preview, and app-notification fields; `vendor/ghostty/src/Surface.zig` notification/link hover/menu paths; macOS app notification/bell feature handling",
         roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling; app bell feature presentation beyond action dispatch",
         family="notifications",
         status="Gap",
         evidence=(
             "Experiment 115 split out the proven deterministic link/open-url "
             "runtime slice. Experiment 123 split out terminal BEL to live "
-            "surface ring-bell action dispatch. Bell feature UI/audio effects "
-            "such as system beep, custom audio, attention, title/border "
-            "presentation, command-finish notifications, app-notifications, "
-            "link hover/cursor UI, link previews in the real app, and "
-            "context/menu link flows still need focused runtime or GUI proof."
+            "surface ring-bell action dispatch. Experiment 141 split out "
+            "deterministic OSC desktop notification runtime dispatch and the "
+            "`desktop-notifications` config gate. Bell feature UI/audio "
+            "effects such as system beep, custom audio, attention, "
+            "title/border presentation, command-finish notifications, "
+            "app-notifications, native desktop notification presentation/rate "
+            "limiting, link hover/cursor UI, link previews in the real app, "
+            "and context/menu link flows still need focused runtime or GUI "
+            "proof."
         ),
         missing_evidence="Add bell feature UI/audio, notification, app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
         guard_tier="Tier 3",
@@ -1204,7 +1234,8 @@ EXPECTED_IDS = [
     "RUNTIME-011",
     "RUNTIME-012A",
     "RUNTIME-012B1",
-    "RUNTIME-012B2",
+    "RUNTIME-012B2A",
+    "RUNTIME-012B2B",
     "RUNTIME-013",
     "RUNTIME-014",
 ]

@@ -73,6 +73,7 @@ pub(crate) struct Terminal {
     next_implicit_hyperlink_id: u32,
     previous_char: Option<char>,
     pending_clipboard_events: Vec<TerminalClipboardEvent>,
+    pending_desktop_notifications: Vec<TerminalDesktopNotification>,
     pending_bell_count: usize,
     default_cursor: bool,
     default_cursor_visual_style: cursor::VisualStyle,
@@ -778,6 +779,12 @@ pub(crate) enum TerminalStreamError {
     UnsupportedCodepoint(char),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TerminalDesktopNotification {
+    pub(crate) title: Vec<u8>,
+    pub(crate) body: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KittyImageMedium {
     File,
@@ -842,6 +849,7 @@ struct TerminalStreamHandler<'a> {
     kitty_config: &'a mut KittyGraphicsConfig,
     flags: &'a mut TerminalFlags,
     pending_clipboard_events: &'a mut Vec<TerminalClipboardEvent>,
+    pending_desktop_notifications: &'a mut Vec<TerminalDesktopNotification>,
     pending_bell_count: &'a mut usize,
     default_cursor: &'a mut bool,
     default_cursor_visual_style: cursor::VisualStyle,
@@ -1108,6 +1116,7 @@ impl Terminal {
             next_implicit_hyperlink_id: 0,
             previous_char: None,
             pending_clipboard_events: Vec::new(),
+            pending_desktop_notifications: Vec::new(),
             pending_bell_count: 0,
             default_cursor: true,
             default_cursor_visual_style: options.cursor_visual_style,
@@ -1143,6 +1152,7 @@ impl Terminal {
             next_implicit_hyperlink_id,
             previous_char,
             pending_clipboard_events,
+            pending_desktop_notifications,
             pending_bell_count,
             default_cursor,
             flags,
@@ -1177,6 +1187,7 @@ impl Terminal {
             kitty_config,
             flags,
             pending_clipboard_events,
+            pending_desktop_notifications,
             pending_bell_count,
             default_cursor,
             default_cursor_visual_style: *default_cursor_visual_style,
@@ -1199,12 +1210,19 @@ impl Terminal {
         self.flags = TerminalFlags::default();
         self.previous_char = None;
         self.pending_clipboard_events.clear();
+        self.pending_desktop_notifications.clear();
         self.pending_title_updates.clear();
         self.pending_pwd_updates.clear();
     }
 
     pub(crate) fn drain_clipboard_events(&mut self) -> Vec<TerminalClipboardEvent> {
         std::mem::take(&mut self.pending_clipboard_events)
+    }
+
+    pub(crate) fn take_pending_desktop_notifications(
+        &mut self,
+    ) -> Vec<TerminalDesktopNotification> {
+        std::mem::take(&mut self.pending_desktop_notifications)
     }
 
     pub(crate) fn take_pending_bell_count(&mut self) -> usize {
@@ -3383,7 +3401,13 @@ impl Handler for TerminalStreamHandler<'_> {
                     });
             }
             stream::OscAction::ContextSignal { .. } => {}
-            stream::OscAction::DesktopNotification { .. } => {}
+            stream::OscAction::DesktopNotification { title, body } => {
+                self.pending_desktop_notifications
+                    .push(TerminalDesktopNotification {
+                        title: title.to_vec(),
+                        body: body.to_vec(),
+                    });
+            }
             stream::OscAction::MouseShape { shape } => {
                 *self.mouse_shape = shape;
             }
@@ -4068,6 +4092,7 @@ impl TerminalStreamHandler<'_> {
         *self.flags = TerminalFlags::default();
         *self.previous_char = None;
         self.pending_clipboard_events.clear();
+        self.pending_desktop_notifications.clear();
         Ok(())
     }
 
@@ -10771,6 +10796,44 @@ mod tests {
         assert_eq!(terminal.cursor_position_for_tests(), (5, 1));
         assert!(terminal.get_mode_for_tests(Mode::Insert));
         assert_eq!(terminal.colors.foreground.get(), foreground);
+        assert!(terminal.pty_response_for_tests().is_empty());
+        assert!(!terminal.is_dirty_for_tests(0, 0));
+        assert!(!terminal.is_dirty_for_tests(9, 0));
+    }
+
+    #[test]
+    fn terminal_desktop_notification_runtime_captures_osc_events_without_side_effects() {
+        let mut terminal = Terminal::init(10, 3, None).unwrap();
+
+        terminal.next_slice(b"abc").unwrap();
+        terminal.set_mode_for_tests(Mode::Insert, true);
+        terminal
+            .screens
+            .active_mut()
+            .set_cursor_position_for_tests(5, 1);
+        terminal.clear_dirty_for_tests();
+
+        terminal
+            .next_slice(b"\x1b]9;Hello\x07\x1b]777;notify;Title;Body\x1b\\")
+            .unwrap();
+
+        assert_eq!(
+            terminal.take_pending_desktop_notifications(),
+            vec![
+                TerminalDesktopNotification {
+                    title: Vec::new(),
+                    body: b"Hello".to_vec(),
+                },
+                TerminalDesktopNotification {
+                    title: b"Title".to_vec(),
+                    body: b"Body".to_vec(),
+                },
+            ]
+        );
+        assert!(terminal.take_pending_desktop_notifications().is_empty());
+        assert_eq!(plain_with_unwrap(&terminal, false), "abc");
+        assert_eq!(terminal.cursor_position_for_tests(), (5, 1));
+        assert!(terminal.get_mode_for_tests(Mode::Insert));
         assert!(terminal.pty_response_for_tests().is_empty());
         assert!(!terminal.is_dirty_for_tests(0, 0));
         assert!(!terminal.is_dirty_for_tests(9, 0));

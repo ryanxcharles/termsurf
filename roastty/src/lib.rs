@@ -39,10 +39,10 @@ use terminal::selection_gesture::{
 use terminal::terminal::{
     ClearScreenResult, EmbeddedPointCoord, KittyImageMedium, PromptClickAction,
     Terminal as InnerTerminal, TerminalBellCallback, TerminalClipboardEvent, TerminalColorKind,
-    TerminalColorSchemeCallback, TerminalDeviceAttributesCallback, TerminalEnquiryCallback,
-    TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError, TerminalPointTag,
-    TerminalScreen, TerminalSelection, TerminalSelectionAdjustment, TerminalSelectionFormat,
-    TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
+    TerminalColorSchemeCallback, TerminalDesktopNotification, TerminalDeviceAttributesCallback,
+    TerminalEnquiryCallback, TerminalFormatterExtra, TerminalGridRef, TerminalGridRefPointError,
+    TerminalPointTag, TerminalScreen, TerminalSelection, TerminalSelectionAdjustment,
+    TerminalSelectionFormat, TerminalSelectionOrder, TerminalSizeCallback, TerminalStreamError,
     TerminalTitleChangedCallback, TerminalTrackedGridRef, TerminalWritePtyCallback,
     TerminalXtversionCallback,
 };
@@ -233,6 +233,8 @@ const ROASTTY_KEY_TABLE_DEACTIVATE: c_int = 1;
 const ROASTTY_KEY_TABLE_DEACTIVATE_ALL: c_int = 2;
 
 const MAX_ACTIVE_KEY_TABLES: usize = 8;
+const DESKTOP_NOTIFICATION_TITLE_LIMIT: usize = 63;
+const DESKTOP_NOTIFICATION_BODY_LIMIT: usize = 255;
 
 const ROASTTY_INSPECTOR_TOGGLE: c_int = 0;
 const ROASTTY_INSPECTOR_SHOW: c_int = 1;
@@ -1246,6 +1248,12 @@ pub struct RoasttyActionOpenUrl {
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct RoasttyActionDesktopNotification {
+    title: *const c_char,
+    body: *const c_char,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct RoasttyActionMoveTab {
     amount: isize,
 }
@@ -1320,6 +1328,7 @@ pub union RoasttyActionU {
     key_sequence: RoasttyActionKeySequence,
     mouse_visibility: c_int,
     child_exited: RoasttySurfaceMessageChildExited,
+    desktop_notification: RoasttyActionDesktopNotification,
 }
 
 #[repr(C)]
@@ -1355,6 +1364,12 @@ fn action_u_from_storage(tag: c_int, storage: [usize; 8]) -> RoasttyActionU {
                 kind: storage[0] as c_int,
                 url: storage[1] as *const c_char,
                 len: storage[2],
+            }
+        }
+        ROASTTY_ACTION_DESKTOP_NOTIFICATION => {
+            u.desktop_notification = RoasttyActionDesktopNotification {
+                title: storage[0] as *const c_char,
+                body: storage[1] as *const c_char,
             }
         }
         ROASTTY_ACTION_READONLY => u.readonly = storage[0] as c_int,
@@ -1437,6 +1452,10 @@ fn action_u_to_storage(tag: c_int, u: &RoasttyActionU) -> [usize; 8] {
                 s[0] = u.open_url.kind as usize;
                 s[1] = u.open_url.url as usize;
                 s[2] = u.open_url.len;
+            }
+            ROASTTY_ACTION_DESKTOP_NOTIFICATION => {
+                s[0] = u.desktop_notification.title as usize;
+                s[1] = u.desktop_notification.body as usize;
             }
             ROASTTY_ACTION_READONLY => s[0] = u.readonly as usize,
             ROASTTY_ACTION_INSPECTOR => s[0] = u.inspector as usize,
@@ -2689,6 +2708,7 @@ struct Surface {
     confirm_close_surface: config::ConfirmCloseSurface,
     clipboard_read: config::ClipboardAccess,
     clipboard_write: config::ClipboardAccess,
+    desktop_notifications: bool,
     clipboard_paste_protection: bool,
     clipboard_paste_bracketed_safe: bool,
     copy_on_select: config::CopyOnSelect,
@@ -3699,6 +3719,7 @@ impl Surface {
             self.config_conditional_state,
         );
         self.confirm_close_surface = config.confirm_close_surface;
+        self.desktop_notifications = parsed.desktop_notifications;
         self.clipboard_paste_protection = parsed.clipboard_paste_protection;
         self.clipboard_paste_bracketed_safe = parsed.clipboard_paste_bracketed_safe;
         self.copy_on_select = parsed.copy_on_select;
@@ -4548,6 +4569,19 @@ impl Surface {
         storage[1] = url.as_ptr() as usize;
         storage[2] = url.len();
         self.perform_action_result(ROASTTY_ACTION_OPEN_URL, storage)
+    }
+
+    fn perform_desktop_notification(&self, notification: &TerminalDesktopNotification) -> bool {
+        if !self.desktop_notifications {
+            return false;
+        }
+
+        let title = nul_terminated_truncated(&notification.title, DESKTOP_NOTIFICATION_TITLE_LIMIT);
+        let body = nul_terminated_truncated(&notification.body, DESKTOP_NOTIFICATION_BODY_LIMIT);
+        let mut storage = [0usize; 8];
+        storage[0] = title.as_ptr() as usize;
+        storage[1] = body.as_ptr() as usize;
+        self.perform_action_result(ROASTTY_ACTION_DESKTOP_NOTIFICATION, storage)
     }
 
     fn perform_targeted_action_result(
@@ -7294,11 +7328,12 @@ impl Surface {
         match event {
             termio::TermioWorkerEvent::Pump(pump) => {
                 append_ui_key_trace(format!(
-                    "rust surface_apply_termio_event pump bytes_read={} bell_count={} titles={} pwd={} bytes_written={} pending_write={} eof={} child_exited={}",
+                    "rust surface_apply_termio_event pump bytes_read={} bell_count={} titles={} pwd={} desktop_notifications={} bytes_written={} pending_write={} eof={} child_exited={}",
                     pump.bytes_read,
                     pump.bell_count,
                     pump.titles.len(),
                     pump.pwd.len(),
+                    pump.desktop_notifications.len(),
                     pump.bytes_written,
                     pump.pending_write_bytes,
                     pump.eof,
@@ -7318,10 +7353,14 @@ impl Surface {
                 for pwd in &pump.pwd {
                     self.set_pwd(pwd.as_bytes());
                 }
+                for notification in &pump.desktop_notifications {
+                    let _ = self.perform_desktop_notification(notification);
+                }
                 if pump.bytes_read > 0
                     || pump.bell_count > 0
                     || !pump.titles.is_empty()
                     || !pump.pwd.is_empty()
+                    || !pump.desktop_notifications.is_empty()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
@@ -7543,6 +7582,13 @@ fn copied_config_string(ptr: *const c_char) -> Option<String> {
         .to_str()
         .ok()
         .map(str::to_owned)
+}
+
+fn nul_terminated_truncated(bytes: &[u8], limit: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(limit.saturating_add(1));
+    out.extend_from_slice(&bytes[..bytes.len().min(limit)]);
+    out.push(0);
+    out
 }
 
 fn config_startup_input_bytes(input: &config::RepeatableReadableIo) -> Option<Vec<u8>> {
@@ -18011,6 +18057,7 @@ pub extern "C" fn roastty_surface_new(
         click_repeat_interval_ns,
         parsed_wait_after_command,
         parsed_abnormal_command_exit_runtime,
+        desktop_notifications,
         window_vsync,
         config_conditional_state,
     ) = app_from_handle(app)
@@ -18040,6 +18087,7 @@ pub extern "C" fn roastty_surface_new(
                 click_repeat_interval_ns(&parsed),
                 parsed.wait_after_command,
                 parsed.abnormal_command_exit_runtime,
+                parsed.desktop_notifications,
                 parsed.window_vsync,
                 app.config_conditional_state,
             )
@@ -18065,6 +18113,7 @@ pub extern "C" fn roastty_surface_new(
             500_000_000,
             false,
             config::Config::default().abnormal_command_exit_runtime,
+            true,
             true,
             config::conditional::State::default(),
         ));
@@ -18118,6 +18167,7 @@ pub extern "C" fn roastty_surface_new(
         confirm_close_surface,
         clipboard_read,
         clipboard_write,
+        desktop_notifications,
         clipboard_paste_protection,
         clipboard_paste_bracketed_safe,
         copy_on_select,
@@ -19794,6 +19844,7 @@ mod tests {
         key_table: Option<(c_int, Vec<u8>)>,
         key_sequence: Option<(bool, c_int, usize, c_int)>,
         child_exited: Option<(u32, u64)>,
+        desktop_notification: Option<(String, String)>,
         close_count_at_action: usize,
     }
 
@@ -20261,6 +20312,28 @@ mod tests {
             };
             let child_exited = (action.tag == ROASTTY_ACTION_SHOW_CHILD_EXITED)
                 .then_some((storage[0] as u32, storage[1] as u64));
+            let desktop_notification = if action.tag == ROASTTY_ACTION_DESKTOP_NOTIFICATION {
+                let title = storage[0] as *const c_char;
+                let body = storage[1] as *const c_char;
+                Some((
+                    (!title.is_null())
+                        .then(|| {
+                            unsafe { CStr::from_ptr(title) }
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                        .unwrap_or_default(),
+                    (!body.is_null())
+                        .then(|| {
+                            unsafe { CStr::from_ptr(body) }
+                                .to_string_lossy()
+                                .into_owned()
+                        })
+                        .unwrap_or_default(),
+                ))
+            } else {
+                None
+            };
             records.borrow_mut().push(ActionRecord {
                 app,
                 target_tag: target.tag,
@@ -20274,6 +20347,7 @@ mod tests {
                 key_table,
                 key_sequence,
                 child_exited,
+                desktop_notification,
                 close_count_at_action: CLOSE_COUNT.load(Ordering::SeqCst),
             });
         });
@@ -21039,6 +21113,7 @@ mod tests {
             bell_count,
             titles: Vec::new(),
             pwd: Vec::new(),
+            desktop_notifications: Vec::new(),
             eof,
             bytes_written,
             pending_write_bytes,
@@ -21058,6 +21133,7 @@ mod tests {
             bell_count: 0,
             titles: titles.into_iter().map(ToOwned::to_owned).collect(),
             pwd: Vec::new(),
+            desktop_notifications: Vec::new(),
             eof: false,
             bytes_written: 0,
             pending_write_bytes: 0,
@@ -21073,6 +21149,7 @@ mod tests {
             bell_count: 0,
             titles: Vec::new(),
             pwd: vec![pwd.to_string()],
+            desktop_notifications: Vec::new(),
             eof: false,
             bytes_written: 0,
             pending_write_bytes: 0,
@@ -21085,6 +21162,24 @@ mod tests {
         surface_from_handle(surface)
             .unwrap()
             .apply_termio_event(termio::TermioWorkerEvent::Pump(pump));
+    }
+
+    fn test_pump_with_desktop_notifications(
+        notifications: Vec<TerminalDesktopNotification>,
+    ) -> termio::TermioPump {
+        termio::TermioPump {
+            readiness: PtyReadiness::default(),
+            bytes_read: 1,
+            bell_count: 0,
+            titles: Vec::new(),
+            pwd: Vec::new(),
+            desktop_notifications: notifications,
+            eof: false,
+            bytes_written: 0,
+            pending_write_bytes: 0,
+            child_exited: false,
+            child_exit: None,
+        }
     }
 
     fn render_state_text(state: RoasttyRenderStateHandle) -> String {
@@ -23218,6 +23313,84 @@ mod tests {
         let records = action_records();
         assert_eq!(records.len(), 2);
         assert_eq!(records[1].action_tag, ROASTTY_ACTION_RING_BELL);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_desktop_notification_runtime_dispatches_config_enabled_action() {
+        let config = new_test_config_from_str("desktop-notifications = true\n");
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(
+            surface,
+            test_pump_with_desktop_notifications(vec![TerminalDesktopNotification {
+                title: b"Title".to_vec(),
+                body: b"Body".to_vec(),
+            }]),
+        );
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].target_tag, ROASTTY_TARGET_SURFACE);
+        assert_eq!(records[0].surface, surface);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_DESKTOP_NOTIFICATION);
+        assert_eq!(
+            records[0].desktop_notification,
+            Some(("Title".to_string(), "Body".to_string()))
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_desktop_notification_runtime_suppresses_config_disabled_action() {
+        let config = new_test_config_from_str("desktop-notifications = false\n");
+        let app = new_test_app_with_action_config(true, config);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(
+            surface,
+            test_pump_with_desktop_notifications(vec![TerminalDesktopNotification {
+                title: b"Title".to_vec(),
+                body: b"Body".to_vec(),
+            }]),
+        );
+
+        assert!(action_records().is_empty());
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn surface_desktop_notification_runtime_truncates_overlong_payloads() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(
+            surface,
+            test_pump_with_desktop_notifications(vec![TerminalDesktopNotification {
+                title: vec![b'T'; DESKTOP_NOTIFICATION_TITLE_LIMIT + 10],
+                body: vec![b'B'; DESKTOP_NOTIFICATION_BODY_LIMIT + 10],
+            }]),
+        );
+
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        let (title, body) = records[0]
+            .desktop_notification
+            .as_ref()
+            .expect("desktop notification payload");
+        assert_eq!(title.len(), DESKTOP_NOTIFICATION_TITLE_LIMIT);
+        assert_eq!(body.len(), DESKTOP_NOTIFICATION_BODY_LIMIT);
+        assert!(title.bytes().all(|byte| byte == b'T'));
+        assert!(body.bytes().all(|byte| byte == b'B'));
 
         roastty_surface_free(surface);
         roastty_app_free(app);

@@ -13,7 +13,8 @@ use crate::os::pty::{PtyChild, PtyCommand, PtyReadiness, PtySize};
 use crate::terminal::color;
 use crate::terminal::cursor;
 use crate::terminal::terminal::{
-    Terminal, TerminalClipboardEvent, TerminalInitError, TerminalInitOptions, TerminalStreamError,
+    Terminal, TerminalClipboardEvent, TerminalDesktopNotification, TerminalInitError,
+    TerminalInitOptions, TerminalStreamError,
 };
 
 mod shell_integration;
@@ -98,6 +99,7 @@ pub(crate) struct TermioPump {
     pub(crate) bell_count: usize,
     pub(crate) titles: Vec<String>,
     pub(crate) pwd: Vec<String>,
+    pub(crate) desktop_notifications: Vec<TerminalDesktopNotification>,
     pub(crate) eof: bool,
     pub(crate) bytes_written: usize,
     pub(crate) pending_write_bytes: usize,
@@ -310,6 +312,7 @@ impl Termio {
         let bell_count = self.terminal.take_pending_bell_count();
         let titles = self.terminal.take_pending_title_updates();
         let pwd = self.terminal.take_pending_pwd_updates();
+        let desktop_notifications = self.terminal.take_pending_desktop_notifications();
 
         let bytes_written = self.flush_pending_write()?;
         if self.child_exit.is_none() {
@@ -329,6 +332,7 @@ impl Termio {
             bell_count,
             titles,
             pwd,
+            desktop_notifications,
             eof,
             bytes_written,
             pending_write_bytes: self.pending_write.len(),
@@ -559,6 +563,7 @@ fn run_termio_worker(
                     || pump.bell_count > 0
                     || !pump.titles.is_empty()
                     || !pump.pwd.is_empty()
+                    || !pump.desktop_notifications.is_empty()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
@@ -811,6 +816,28 @@ mod tests {
 
         assert_eq!(pump.bell_count, 2);
         assert_eq!(termio.terminal_mut().take_pending_bell_count(), 0);
+    }
+
+    #[test]
+    fn termio_desktop_notification_runtime_pump_reports_child_osc() {
+        let _guard = pty_command_lock();
+        let mut termio = spawn_shell("printf '\\033]9;Hello from pty\\007'");
+
+        let pump = pump_until(&mut termio, |_, pump| {
+            !pump.desktop_notifications.is_empty()
+        });
+
+        assert_eq!(
+            pump.desktop_notifications,
+            vec![TerminalDesktopNotification {
+                title: Vec::new(),
+                body: b"Hello from pty".to_vec(),
+            }]
+        );
+        assert!(termio
+            .terminal_mut()
+            .take_pending_desktop_notifications()
+            .is_empty());
     }
 
     #[test]
