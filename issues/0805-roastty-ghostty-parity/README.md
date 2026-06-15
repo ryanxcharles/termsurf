@@ -890,6 +890,14 @@ experiment files until they are proven.
   ScriptWindow IDs based on AppKit tab-group identity did not survive tab-group
   creation. Returned split-terminal object re-resolution and split focus/close
   commands remain in `RUNTIME-011B2B`.
+- **Live GUI guards must watch for crash reports.** A user-visible
+  `Roastty[DEBUG] quit unexpectedly` dialog after Experiment 167 corresponded to
+  fresh `roastty-*.ips` reports. The stack was `NSColor.getHue` →
+  `OSColor.darken(by:)` → `Roastty.Config.splitDividerColor` →
+  `TerminalSplitSubtreeView.body`, meaning the split side-effect guard passed
+  while the app still crashed during split rendering. Future live app guards
+  must snapshot macOS diagnostic reports and fail on new Roastty crash reports,
+  not only on missing command side effects.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1616,3 +1624,5 @@ remains open.
   — **Pass**
 - [Experiment 167: macOS AppleScript workflow runtime](167-macos-applescript-workflow-runtime.md)
   — **Pass**
+- [Experiment 168: Split divider color crash](168-split-divider-color-crash.md)
+  — **Designed**
