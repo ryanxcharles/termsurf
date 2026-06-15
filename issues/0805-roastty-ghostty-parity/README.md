@@ -1445,3 +1445,5 @@ remains open.
 - [Experiment 147: Font feature runtime](147-font-feature-runtime.md) — **Pass**
 - [Experiment 148: Window padding layout runtime](148-window-padding-layout-runtime.md)
   — **Pass**
+- [Experiment 149: Font variation runtime](149-font-variation-runtime.md) —
+  **Designed**
