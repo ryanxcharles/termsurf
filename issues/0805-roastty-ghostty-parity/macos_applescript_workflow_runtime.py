@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import os
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -69,6 +71,25 @@ def wait_for_crash_report_settle(before: set[Path]) -> set[Path]:
         time.sleep(0.5)
         observed.update(crash_reports() - before)
     return observed
+
+
+def wait_for_file(
+    path: Path,
+    description: str,
+    predicate: Callable[[bytes], bool] | None = None,
+    timeout: float = 10.0,
+) -> bytes:
+    deadline = time.monotonic() + timeout
+    observed = b"<missing>"
+    while time.monotonic() < deadline:
+        if path.exists():
+            observed = path.read_bytes()
+            if predicate is None:
+                return observed
+            if predicate(observed):
+                return observed
+        time.sleep(0.25)
+    raise AssertionError(f"{description} was not recorded: {observed!r}")
 
 
 def launch_app(config: Path) -> int:
@@ -161,6 +182,7 @@ def assert_inventory_split() -> None:
     require("| RUNTIME-011B2B" in runtime_inventory, "missing RUNTIME-011B2B row")
     require("| RUNTIME-011B2C" in runtime_inventory, "missing RUNTIME-011B2C row")
     require("| RUNTIME-011B2D" in runtime_inventory, "missing RUNTIME-011B2D row")
+    require("| RUNTIME-011B2E" in runtime_inventory, "missing RUNTIME-011B2E row")
     require(
         "live AppleScript-driven Roastty app workflow automation" in runtime_inventory,
         "missing AppleScript workflow evidence",
@@ -183,6 +205,16 @@ def assert_inventory_split() -> None:
         "missing split terminal close evidence",
     )
     require(
+        "controlled keyboard child process records exact raw bytes from `send key`"
+        in runtime_inventory,
+        "missing send key side-effect evidence",
+    )
+    require(
+        "controlled mouse child process records new terminal mouse-report bytes after each scripted"
+        in runtime_inventory,
+        "missing scripted mouse side-effect evidence",
+    )
+    require(
         "controlled child process records the `input text` marker" in runtime_inventory,
         "missing input side-effect evidence",
     )
@@ -202,8 +234,8 @@ def assert_inventory_split() -> None:
         "fails if a new Roastty crash report appears" in runtime_inventory,
         "missing new crash-report guard evidence",
     )
-    require("69 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("72 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require("70 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("73 rows closed" in config_matrix, "CFG-223 closed count not updated")
     require("4 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
     require("4 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require(cfg223 is not None and len(cfg223) > 4 and cfg223[4] == "Gap", "CFG-223 should remain Gap")
@@ -221,7 +253,81 @@ def main() -> int:
         marker_file = temp / "input-marker.txt"
         split_marker_file = temp / "split-marker.txt"
         split_input_marker_file = temp / "split-input-marker.txt"
+        key_capture_script = temp / "key_capture.py"
+        key_ready_file = temp / "key-ready.txt"
+        key_output_file = temp / "key-output.bin"
+        mouse_capture_script = temp / "mouse_capture.py"
+        mouse_ready_file = temp / "mouse-ready.txt"
+        mouse_output_file = temp / "mouse-output.bin"
         config.write_text("macos-applescript = true\nquit-after-last-window-closed = true\n")
+
+        key_capture_script.write_text(
+            textwrap.dedent(
+                f"""
+                import os
+                import sys
+                import termios
+                import time
+                import tty
+
+                ready = {str(key_ready_file)!r}
+                output = {str(key_output_file)!r}
+                fd = sys.stdin.fileno()
+                old = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    with open(ready, "w", encoding="utf-8") as handle:
+                        handle.write("ready")
+                    data = bytearray()
+                    while len(data) < 2:
+                        chunk = os.read(fd, 2 - len(data))
+                        if chunk:
+                            data.extend(chunk)
+                    with open(output, "wb") as handle:
+                        handle.write(data)
+                    time.sleep(30)
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                """
+            ).lstrip()
+        )
+
+        mouse_capture_script.write_text(
+            textwrap.dedent(
+                f"""
+                import os
+                import select
+                import sys
+                import termios
+                import time
+                import tty
+
+                ready = {str(mouse_ready_file)!r}
+                output = {str(mouse_output_file)!r}
+                fd = sys.stdin.fileno()
+                old = termios.tcgetattr(fd)
+                try:
+                    tty.setraw(fd)
+                    sys.stdout.write("\\x1b[?1000h\\x1b[?1002h\\x1b[?1003h\\x1b[?1006h")
+                    sys.stdout.flush()
+                    with open(ready, "w", encoding="utf-8") as handle:
+                        handle.write("ready")
+                    data = bytearray()
+                    deadline = time.time() + 8
+                    while time.time() < deadline and len(data) < 64:
+                        readable, _, _ = select.select([fd], [], [], 0.25)
+                        if readable:
+                            data.extend(os.read(fd, 64))
+                            with open(output, "wb") as handle:
+                                handle.write(data)
+                    time.sleep(30)
+                finally:
+                    sys.stdout.write("\\x1b[?1000l\\x1b[?1002l\\x1b[?1003l\\x1b[?1006l")
+                    sys.stdout.flush()
+                    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                """
+            ).lstrip()
+        )
 
         command = (
             "/bin/sh -c 'IFS= read -r line; "
@@ -235,6 +341,8 @@ def main() -> int:
             f"printf %s\\\\n \"$line\" > {split_input_marker_file}; "
             "sleep 30'"
         )
+        key_command = f"python3 {shlex.quote(str(key_capture_script))}"
+        mouse_command = f"python3 {shlex.quote(str(mouse_capture_script))}"
         pid = launch_app(config)
 
         try:
@@ -242,6 +350,8 @@ def main() -> int:
             app_literal = quote_applescript(APP)
             command_literal = quote_applescript(command)
             split_command_literal = quote_applescript(split_command)
+            key_command_literal = quote_applescript(key_command)
+            mouse_command_literal = quote_applescript(mouse_command)
             marker_literal = quote_applescript(MARKER)
             split_marker_literal = quote_applescript("ISSUE805_EXP170_SPLIT_INPUT_MARKER")
 
@@ -252,6 +362,8 @@ def main() -> int:
                   set originalWindowCount to count of windows
                   set cfg to new surface configuration from {{command:{command_literal}, wait after command:true}}
                   set splitCfg to new surface configuration from {{command:{split_command_literal}, wait after command:true}}
+                  set keyCfg to new surface configuration from {{command:{key_command_literal}, wait after command:true}}
+                  set mouseCfg to new surface configuration from {{command:{mouse_command_literal}, wait after command:true}}
                   new window with configuration cfg
                   delay 1
                   if (count of windows) < originalWindowCount + 1 then error "new window was not created"
@@ -290,53 +402,98 @@ def main() -> int:
                   on error errText number errNum
                     if errText starts with "closed split terminal id still resolved" then error errText number errNum
                   end try
+                  set keyWindow to new window with configuration keyCfg
+                  delay 1
+                  set keyTerminal to focused terminal of selected tab of keyWindow
+                  if (id of keyTerminal) is "" then error "key terminal id was empty"
+                  set mouseWindow to new window with configuration mouseCfg
+                  delay 1
+                  set mouseTerminal to focused terminal of selected tab of mouseWindow
+                  if (id of mouseTerminal) is "" then error "mouse terminal id was empty"
+                  return (id of keyTerminal) & linefeed & (id of mouseTerminal)
                 end tell
                 """
             )
-            run_osascript(workflow, timeout=45)
+            result = run_osascript(workflow, timeout=45)
+            terminal_ids = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            require(len(terminal_ids) == 2, f"expected key and mouse terminal ids: {result.stdout!r}")
+            key_terminal_id, mouse_terminal_id = terminal_ids
 
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                if marker_file.exists() and marker_file.read_text().strip() == MARKER:
-                    break
-                time.sleep(0.25)
-            else:
-                observed = marker_file.read_text() if marker_file.exists() else "<missing>"
-                raise AssertionError(
-                    f"input text marker was not recorded by child process: {observed!r}"
-                )
+            wait_for_file(
+                marker_file,
+                "input text marker",
+                lambda data: data.decode("utf-8").strip() == MARKER,
+            )
 
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                if split_marker_file.exists() and split_marker_file.read_text().strip() == "split-ok":
-                    break
-                time.sleep(0.25)
-            else:
-                observed = (
-                    split_marker_file.read_text() if split_marker_file.exists() else "<missing>"
-                )
-                raise AssertionError(
-                    f"split terminal command marker was not recorded: {observed!r}"
-                )
+            wait_for_file(
+                split_marker_file,
+                "split terminal command marker",
+                lambda data: data.decode("utf-8").strip() == "split-ok",
+            )
 
-            deadline = time.monotonic() + 10
             expected_split_input = "ISSUE805_EXP170_SPLIT_INPUT_MARKER"
-            while time.monotonic() < deadline:
-                if (
-                    split_input_marker_file.exists()
-                    and split_input_marker_file.read_text().strip() == expected_split_input
-                ):
-                    break
-                time.sleep(0.25)
-            else:
-                observed = (
-                    split_input_marker_file.read_text()
-                    if split_input_marker_file.exists()
-                    else "<missing>"
+            wait_for_file(
+                split_input_marker_file,
+                "split input marker",
+                lambda data: data.decode("utf-8").strip() == expected_split_input,
+            )
+
+            wait_for_file(key_ready_file, "keyboard capture readiness marker")
+            key_input = textwrap.dedent(
+                f"""
+                tell application {app_literal}
+                  set keyTerminal to terminal id {quote_applescript(key_terminal_id)}
+                  focus keyTerminal
+                  delay 0.25
+                  send key "a" to keyTerminal
+                  send key "b" to keyTerminal
+                end tell
+                """
+            )
+            run_osascript(key_input, timeout=15)
+            key_bytes = wait_for_file(
+                key_output_file,
+                "scripted send key bytes",
+                lambda data: data == b"ab",
+            )
+            require(key_bytes == b"ab", f"unexpected send key bytes: {key_bytes!r}")
+
+            wait_for_file(mouse_ready_file, "mouse capture readiness marker")
+
+            def send_mouse(script_line: str) -> None:
+                mouse_input = textwrap.dedent(
+                    f"""
+                    tell application {app_literal}
+                      set mouseTerminal to terminal id {quote_applescript(mouse_terminal_id)}
+                      focus mouseTerminal
+                      delay 0.25
+                      {script_line}
+                    end tell
+                    """
                 )
-                raise AssertionError(
-                    f"split input marker was not recorded by child process: {observed!r}"
+                run_osascript(mouse_input, timeout=15)
+
+            def wait_for_mouse_growth(previous_len: int, description: str) -> int:
+                mouse_bytes = wait_for_file(
+                    mouse_output_file,
+                    description,
+                    lambda data: len(data) > previous_len
+                    and (b"\x1b[" in data or b"\x1b[M" in data),
+                    timeout=12.0,
                 )
+                return len(mouse_bytes)
+
+            mouse_len = 0
+            send_mouse("send mouse position x 24 y 24 to mouseTerminal")
+            mouse_len = wait_for_mouse_growth(mouse_len, "scripted mouse position bytes")
+            send_mouse("send mouse button left button action press to mouseTerminal")
+            mouse_len = wait_for_mouse_growth(mouse_len, "scripted mouse button press bytes")
+            send_mouse("send mouse position x 40 y 24 to mouseTerminal")
+            mouse_len = wait_for_mouse_growth(mouse_len, "scripted mouse drag position bytes")
+            send_mouse("send mouse button left button action release to mouseTerminal")
+            mouse_len = wait_for_mouse_growth(mouse_len, "scripted mouse button release bytes")
+            send_mouse("send mouse scroll x 0 y -3 precision false momentum none to mouseTerminal")
+            wait_for_mouse_growth(mouse_len, "scripted mouse scroll bytes")
         finally:
             terminate_process(pid)
 

@@ -170,8 +170,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains gap"),
-            ("69 rows Oracle complete", "CFG-223 oracle count"),
-            ("72 rows closed", "CFG-223 closed count"),
+            ("70 rows Oracle complete", "CFG-223 oracle count"),
+            ("73 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

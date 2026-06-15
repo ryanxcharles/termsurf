@@ -1540,9 +1540,11 @@ ROWS = [
             "focused macOS GUI tests for native menu display/validation, "
             "titlebar/fullscreen/quick-terminal visuals, screenshot/pixel "
             "evidence, broader command-palette GUI behavior, split visual/"
-            "layout parity, and deeper input navigation/pixel walkthroughs."
+            "layout parity, and broader input navigation/pixel walkthroughs. "
+            "Experiment 171 split out lower-level AppleScript keyboard and "
+            "mouse command delivery with child-process side effects."
         ),
-        missing_evidence="Add focused live macOS app walkthrough rows and GUI guards for native menu display/validation, titlebar/fullscreen/quick-terminal visuals, screenshot/pixel evidence, broader command-palette GUI behavior, split visual/layout parity, and deeper input navigation/pixel walkthroughs.",
+        missing_evidence="Add focused live macOS app walkthrough rows and GUI guards for native menu display/validation, titlebar/fullscreen/quick-terminal visuals, screenshot/pixel evidence, broader command-palette GUI behavior, split visual/layout parity, and broader input navigation/pixel walkthroughs.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 macOS app walkthrough experiment.",
     ),
@@ -1593,7 +1595,34 @@ ROWS = [
             "The same live guard keeps the absolute app bundle launch, isolated "
             "config, scoped cleanup, and new-crash-report failure behavior."
         ),
-        missing_evidence="None for live AppleScript split-terminal object ID re-resolution, input, focus, and close behavior. Split visual/layout parity, menu/fullscreen/quick-terminal behavior, screenshots/pixels, broader command-palette GUI behavior, and deeper keyboard/mouse walkthroughs remain in RUNTIME-011B2B.",
+        missing_evidence="None for live AppleScript split-terminal object ID re-resolution, input, focus, and close behavior. Split visual/layout parity, menu/fullscreen/quick-terminal behavior, screenshots/pixels, broader command-palette GUI behavior, and broader keyboard/mouse walkthroughs remain in RUNTIME-011B2B.",
+        guard_tier="Tier 3",
+        guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-011B2E",
+        behavior="live AppleScript keyboard and mouse command delivery",
+        ghostty_reference="`vendor/ghostty/macos/Ghostty.sdef`; pinned Ghostty `send key`, `send mouse position`, `send mouse button`, and `send mouse scroll` scripting commands",
+        roastty_reference="`roastty/macos/Roastty.sdef`; `roastty/macos/Sources/Features/AppleScript/ScriptKeyEventCommand.swift`; `roastty/macos/Sources/Features/AppleScript/ScriptMousePosCommand.swift`; `roastty/macos/Sources/Features/AppleScript/ScriptMouseButtonCommand.swift`; `roastty/macos/Sources/Features/AppleScript/ScriptMouseScrollCommand.swift`; live debug `Roastty.app`",
+        family="macOS app",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 171 extends `macos_applescript_workflow_runtime.py` "
+            "with controlled child-process side effects for the lower-level "
+            "AppleScript input commands. The guard creates a keyboard capture "
+            "terminal running in raw mode, issues `send key \"a\"` and "
+            "`send key \"b\"`, and requires that the controlled keyboard child "
+            "process records exact raw bytes from `send key`. It also creates "
+            "a mouse capture terminal, enables terminal mouse reporting before "
+            "events are sent, issues `send mouse position`, "
+            "`send mouse button` press/release, and `send mouse scroll`, and "
+            "requires that the controlled mouse child process records new "
+            "terminal mouse-report bytes after each scripted position, button "
+            "press, drag-position, button release, and scroll phase. The same "
+            "live guard keeps the absolute app bundle launch, isolated config, "
+            "scoped cleanup, and new-crash-report failure behavior."
+        ),
+        missing_evidence="None for lower-level AppleScript keyboard and mouse command delivery to controlled child processes. Cursor/pointer pixels, native menu/fullscreen/quick-terminal visuals, screenshots, split visual/layout parity, broader command-palette GUI behavior, and broader keyboard/mouse walkthrough parity remain in RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py`",
     ),
@@ -2037,6 +2066,7 @@ EXPECTED_IDS = [
     "RUNTIME-011B2B",
     "RUNTIME-011B2C",
     "RUNTIME-011B2D",
+    "RUNTIME-011B2E",
     "RUNTIME-012A",
     "RUNTIME-012B1",
     "RUNTIME-012B2A",

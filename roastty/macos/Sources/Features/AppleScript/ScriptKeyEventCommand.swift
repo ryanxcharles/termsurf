@@ -64,13 +64,30 @@ final class ScriptKeyEventCommand: NSScriptCommand {
             mods = []
         }
 
+        let text = action == .release ? nil : key.scriptText
         let keyEvent = Roastty.Input.KeyEvent(
             key: key,
             action: action,
-            mods: mods
+            text: text,
+            mods: mods,
+            unshiftedCodepoint: text?.unicodeScalars.first?.value ?? 0
         )
         surface.sendKeyEvent(keyEvent)
 
         return nil
+    }
+}
+
+private extension Roastty.Input.Key {
+    var scriptText: String? {
+        if rawValue.count == 1 { return rawValue }
+
+        switch self {
+        case .backspace: return "\u{7F}"
+        case .enter: return "\r"
+        case .space: return " "
+        case .tab: return "\t"
+        default: return nil
+        }
     }
 }

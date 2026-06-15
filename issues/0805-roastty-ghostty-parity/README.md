@@ -269,6 +269,18 @@ experiment files until they are proven.
   screenshots, and cleanup against the current Roastty app after the required
   permissions were granted to Ghostty, the responsible host app for this Codex
   session.
+- **AppleScript `send key` needs text for printable keys.** Experiment 171
+  showed that sending only the physical key code is not enough for printable
+  AppleScript keyboard events to reach the child PTY as bytes. Roastty's
+  AppleScript key handler now attaches `text` and `unshiftedCodepoint` for
+  scriptable printable keys, and the live guard proves `send key "a"` plus
+  `send key "b"` records exact raw `ab` bytes.
+- **AppleScript mouse delivery can be proven through terminal mouse reports.**
+  Experiment 171 showed that a controlled child process can enable terminal
+  mouse reporting, then `send mouse position`, `send mouse button`, and
+  `send mouse scroll` can be proven by non-empty SGR/X10-style report bytes in
+  the child PTY. This is command-delivery proof, not cursor/pointer pixel or
+  full GUI walkthrough proof.
 - **Passing behavior needs a durable but cheap guard.** Future experiments
   should record the cheapest sufficient regression guard for each passing parity
   row. Prefer static checks and unit tests when they prove the behavior; reserve
@@ -1645,4 +1657,4 @@ remains open.
 - [Experiment 170: AppleScript split terminal lifecycle](170-applescript-split-terminal-lifecycle.md)
   — **Pass**
 - [Experiment 171: AppleScript keyboard and mouse events](171-applescript-keyboard-mouse-events.md)
-  — **Designed**
+  — **Pass**
