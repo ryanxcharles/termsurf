@@ -112,3 +112,115 @@ path as a new adjacent Oracle-complete macOS row starting at `RUNTIME-011B2K`,
 with 88 runtime rows, 83 Oracle-complete rows, 86 closed rows, 2 incomplete
 rows, and 2 runtime gaps. Fresh-context Codex re-reviewer `Carson the 3rd`
 reviewed the fixes and returned `VERDICT: APPROVED` with no findings.
+
+## Result
+
+**Result:** Pass
+
+The closure path was valid: `RUNTIME-011B2B` is now `Oracle complete`, and the
+new `macos_walkthrough_residual_parity.py` guard binds the row to copied macOS
+workflow source parity plus the existing live macOS app guards for
+window/tab/split/input automation, split-terminal ID lifecycle, keyboard and
+mouse side effects, native menu action dispatch, fullscreen and command-palette
+screenshots, Quick Terminal screenshots, right-split layout screenshots,
+hidden-titlebar traffic-light pixels, window-padding pixels, and GUI cursor
+pixels.
+
+Implementation notes:
+
+- `config_runtime_inventory.py` now closes `RUNTIME-011B2B` and keeps
+  `RUNTIME-012B2B2B2B2B3` as the only remaining CFG-223 runtime/UI gap.
+- `platform_runtime_classification.py` now points the macOS platform residual
+  classification at completed `RUNTIME-011B2B` evidence instead of treating it
+  as an open macOS app gap.
+- `macos_walkthrough_residual_parity.py` now runs the live macOS guard set by
+  default, so the `RUNTIME-011B2B` durable guard command fails if any cited live
+  proof fails. `--static-only` is available for fast source/inventory anchor
+  checks.
+- Existing runtime guard count assertions were updated to the new CFG-223
+  totals.
+- `macos_window_padding_pixel_runtime.py` now waits for the focused AX window
+  before sampling focus evidence. The first full live-guard pass exposed a
+  launch/focus race where `System Events` saw the Roastty process before
+  `window 1` existed; rerunning after this guard robustness fix passed.
+
+Verification passed:
+
+```bash
+(cd roastty && macos/build.nu --action build)
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_walkthrough_residual_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_split_layout_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_titlebar_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_gui_state_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_quick_terminal_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_native_menu_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_gui_cursor_pixel_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_window_padding_pixel_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/renderer_visual_residual_audit.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/platform_runtime_classification.py --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/platform-runtime-classification.md
+python3 -m py_compile issues/0805-roastty-ghostty-parity/*.py
+git diff --check
+```
+
+Inventory totals after regeneration:
+
+```text
+runtime_rows=87
+oracle_complete=83
+closed=86
+audit_covered=0
+incomplete=1
+gap=1
+cfg223=Gap
+```
+
+Platform classification totals:
+
+```text
+platform_options=32
+not_applicable=15
+oracle_complete=17
+```
+
+The remaining CFG-223 runtime/UI gap is only `RUNTIME-012B2B2B2B2B3`, covering
+live OS notification delivery, actual bell side effects, real app link
+hover/cursor UI, native preview display, native context/menu display, and OS
+URL-opening flows.
+
+## Conclusion
+
+The broad macOS walkthrough residual row no longer needs to remain open. The
+next experiment should focus on `RUNTIME-012B2B2B2B2B3` and split or close the
+remaining notification/link/bell GUI effects with concrete live OS or GUI proof.
+
+## Completion Review
+
+Fresh-context Codex adversarial reviewer `Sagan the 3rd` reviewed the completed
+experiment and returned `VERDICT: CHANGES REQUIRED` with two required findings:
+
+- `renderer_visual_residual_audit.py` still asserted that `RUNTIME-011B2B` was a
+  gap;
+- the durable `RUNTIME-011B2B` guard command only ran
+  `macos_walkthrough_residual_parity.py`, whose first implementation checked
+  source and inventory anchors but did not execute the live guards it cited.
+
+Both findings were real. The renderer residual audit now expects
+`RUNTIME-011B2B` to be `Oracle complete` and only `RUNTIME-012B2B2B2B2B3` to
+remain a gap. The macOS walkthrough residual guard now runs the live macOS app
+guards by default and keeps `--static-only` for fast anchor checks.
+
+Fix verification:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/renderer_visual_residual_audit.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_walkthrough_residual_parity.py --static-only
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_walkthrough_residual_parity.py
+python3 -m py_compile issues/0805-roastty-ghostty-parity/macos_walkthrough_residual_parity.py issues/0805-roastty-ghostty-parity/renderer_visual_residual_audit.py
+```
+
+Sagan re-reviewed the fixes and returned `VERDICT: APPROVED`: the renderer audit
+now requires completed `RUNTIME-011B2B` evidence and only the notification/link/
+bell row as a gap, while `macos_walkthrough_residual_parity.py` now runs the
+cited live guards by default and skips them only with `--static-only`.

@@ -293,7 +293,7 @@ def create_terminal_window(command: str) -> str:
     return run_osascript(script, timeout=30).stdout.strip()
 
 
-def focus_evidence(pid: int) -> dict[str, object]:
+def focus_evidence(pid: int, timeout: float = 15.0) -> dict[str, object]:
     app_literal = quote_applescript(APP)
     run_osascript(f"tell application {app_literal} to activate", timeout=10)
     script = textwrap.dedent(
@@ -319,7 +319,19 @@ def focus_evidence(pid: int) -> dict[str, object]:
         end tell
         """
     )
-    result = run_osascript(script, timeout=15)
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            result = run_osascript(script, timeout=5)
+            break
+        except AssertionError as err:
+            last_error = err
+            if "Invalid index" not in str(err) and "AXFocusedWindow" not in str(err):
+                raise
+            time.sleep(0.25)
+    else:
+        raise AssertionError(f"Roastty accessibility window did not become ready: {last_error}")
     parts = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     require(len(parts) == 7, f"unexpected focus evidence: {result.stdout!r}")
     require(int(parts[0]) == pid, f"frontmost PID mismatch: {parts}")
@@ -728,10 +740,10 @@ def assert_inventory_split() -> None:
     require(residual_row is not None, "missing renderer residual row")
     require("scroll-to-bottom.output" in residual_row, "scroll-to-bottom row missing evidence")
     require("background-image-opacity" not in residual_row, "background image still in renderer residual")
-    require("81 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("84 rows closed" in config_matrix, "CFG-223 closed count not updated")
-    require("3 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
-    require("3 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
+    require("83 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("86 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require("1 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
+    require("1 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require(cfg223 is not None and len(cfg223) > 4 and cfg223[4] == "Gap", "CFG-223 should remain Gap")
 
 

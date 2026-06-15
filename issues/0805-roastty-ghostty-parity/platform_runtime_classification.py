@@ -67,15 +67,15 @@ def macos_gap(option: str, family: str) -> PlatformRow:
         option=option,
         platform="macOS",
         applicability="Applicable to Roastty's copied macOS app.",
-        status="Gap",
+        status="Oracle complete",
         owner="RUNTIME-011B2B",
         evidence=(
             f"`{option}` affects macOS {family}. Parser/default/formatter coverage "
-            "exists, but real macOS app/runtime behavior remains owned by the "
-            "`RUNTIME-011B2B` walkthrough row."
+            "exists, and real macOS app/runtime behavior is covered by the "
+            "completed `RUNTIME-011B2B` walkthrough residual row."
         ),
         guard_tier="Tier 3",
-        guard="TBD by future CFG-223 macOS app walkthrough experiment.",
+        guard="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_walkthrough_residual_parity.py`",
     )
 
 

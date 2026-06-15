@@ -401,14 +401,15 @@ def main() -> int:
             ("font_renderer_residual_parity.py", "font residual guard"),
         ],
     )
-    require_row(runtime_inventory, "RUNTIME-011B2B")
-    require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B3")
-    for row_id, label in [
-        ("RUNTIME-011B2B", "macOS walkthrough gap"),
-        ("RUNTIME-012B2B2B2B2B3", "notification/link/bell gap"),
-    ]:
-        row = require_row(runtime_inventory, row_id)
-        require(row, "Gap", label)
+    macos_row = require_row(runtime_inventory, "RUNTIME-011B2B")
+    require(macos_row, "Oracle complete", "completed macOS walkthrough residual")
+    require(
+        macos_row,
+        "macos_walkthrough_residual_parity.py",
+        "completed macOS walkthrough guard",
+    )
+    notification_row = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B3")
+    require(notification_row, "Gap", "notification/link/bell gap")
 
     require_all(
         inventory_source,
@@ -438,10 +439,10 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains open"),
-            ("82 rows Oracle complete", "CFG-223 oracle count"),
-            ("85 rows closed", "CFG-223 closed count"),
-            ("2 rows are incomplete", "CFG-223 incomplete count"),
-            ("2 rows are runtime gaps", "CFG-223 gap count"),
+            ("83 rows Oracle complete", "CFG-223 oracle count"),
+            ("86 rows closed", "CFG-223 closed count"),
+            ("1 rows are incomplete", "CFG-223 incomplete count"),
+            ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 

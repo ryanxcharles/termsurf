@@ -426,10 +426,10 @@ def assert_inventory_split() -> None:
     require(remaining_row, "missing renderer residual row")
     require("scroll-to-bottom.output" in remaining_row, "scroll-to-bottom row missing evidence")
     require("GUI cursor pixels" not in remaining_row, "remaining renderer gap still claims GUI cursor pixels")
-    require("81 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("84 rows closed" in config_matrix, "CFG-223 closed count not updated")
-    require("3 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
-    require("3 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
+    require("83 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("86 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require("1 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
+    require("1 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require(cfg223 is not None and len(cfg223) > 4 and cfg223[4] == "Gap", "CFG-223 should remain Gap")
 
 

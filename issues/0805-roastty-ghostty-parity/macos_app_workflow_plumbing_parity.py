@@ -347,18 +347,14 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-011B2B")
+    row_macos_residual = require_row(runtime_inventory, "RUNTIME-011B2B")
     require_all(
-        row_gap,
+        row_macos_residual,
         [
-            ("Gap", "RUNTIME-011B2B status"),
-            ("broader titlebar behavior", "visual gap"),
-            ("screenshot/pixel evidence", "screenshot/pixel gap"),
-            ("broader split variants and interactions", "remaining split gap"),
-            (
-                "focused fullscreen, command-palette, Quick Terminal, and right-split layout proof",
-                "narrowed GUI evidence",
-            ),
+            ("Oracle complete", "RUNTIME-011B2B status"),
+            ("macOS walkthrough residual row", "RUNTIME-011B2B evidence"),
+            ("Experiment 185", "RUNTIME-011B2B experiment"),
+            ("macos_walkthrough_residual_parity.py", "RUNTIME-011B2B guard"),
         ],
     )
 
@@ -369,7 +365,8 @@ def main() -> int:
         inventory_source,
         [
             ('id="RUNTIME-011B1"', "source workflow-plumbing row"),
-            ('id="RUNTIME-011B2B"', "source reduced macOS GUI gap row"),
+            ('id="RUNTIME-011B2B"', "source macOS residual row"),
+            ("Experiment 185 closes the macOS walkthrough residual row", "source macOS residual closure"),
             ("macos_app_workflow_plumbing_parity.py", "source guard command"),
         ],
     )
@@ -377,16 +374,16 @@ def main() -> int:
         command_palette_guard,
         [
             ('require_row(runtime_inventory, "RUNTIME-011B2B")', "command palette gap id update"),
-            ("81 rows Oracle complete", "command palette CFG-223 oracle count"),
-            ("84 rows closed", "command palette CFG-223 closed count"),
+            ("83 rows Oracle complete", "command palette CFG-223 oracle count"),
+            ("86 rows closed", "command palette CFG-223 closed count"),
         ],
     )
     require_all(
         terminal_residual_guard,
         [
-            ('("RUNTIME-011B2B", "macOS gap remains tracked")', "terminal residual gap id update"),
-            ("81 rows Oracle complete", "terminal residual CFG-223 oracle count"),
-            ("84 rows closed", "terminal residual CFG-223 closed count"),
+            ('("RUNTIME-011B2B", "macOS residual row remains tracked")', "terminal residual macOS id update"),
+            ("83 rows Oracle complete", "terminal residual CFG-223 oracle count"),
+            ("86 rows closed", "terminal residual CFG-223 closed count"),
         ],
     )
 
@@ -394,10 +391,10 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("81 rows Oracle complete", "CFG-223 oracle count"),
-            ("84 rows closed", "CFG-223 closed count"),
-            ("3 rows are incomplete", "CFG-223 incomplete count"),
-            ("3 rows are runtime gaps", "CFG-223 gap count"),
+            ("83 rows Oracle complete", "CFG-223 oracle count"),
+            ("86 rows closed", "CFG-223 closed count"),
+            ("1 rows are incomplete", "CFG-223 incomplete count"),
+            ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 

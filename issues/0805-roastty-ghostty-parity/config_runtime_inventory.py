@@ -1660,11 +1660,11 @@ ROWS = [
     ),
     RuntimeRow(
         id="RUNTIME-011B2B",
-        behavior="remaining live macOS GUI titlebar, split layout, and broader walkthrough effects",
+        behavior="live macOS GUI titlebar, split layout, screenshot/pixel, and broader walkthrough residual proof",
         ghostty_reference="`vendor/ghostty/macos/Sources`; app/window/tab/split/menu/titlebar/fullscreen/quick-terminal and GUI walkthrough behavior",
         roastty_reference="`roastty/macos/Sources`; Roastty app wrapper and Swift UI",
         family="macOS app",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
             "Feature and walkthrough matrices prove launch/cleanup and "
             "keyboard delivery. Experiment 121 split out copied macOS "
@@ -1678,12 +1678,7 @@ ROWS = [
             "side-effect-proven split creation and terminal `input text` "
             "dispatch. Experiment 168 split out the split-divider color crash "
             "path and strengthened the live AppleScript guard to fail on new "
-            "Roastty crash reports. CFG-223 still needs real app walkthrough or "
-            "focused macOS GUI tests for broader titlebar behavior, "
-            "screenshot/pixel evidence beyond the focused fullscreen, "
-            "command-palette, Quick Terminal, and right-split layout proof, "
-            "broader split variants and interactions, and broader input "
-            "navigation/pixel walkthroughs. "
+            "Roastty crash reports. "
             "Experiment 171 split out lower-level AppleScript keyboard and "
             "mouse command delivery with child-process side effects. "
             "Experiment 172 split out live native menu visibility, "
@@ -1695,11 +1690,24 @@ ROWS = [
             "Experiment 175 split out focused right-split visual layout "
             "screenshots in the live app. Experiment 176 split out focused "
             "hidden-titlebar traffic-light visibility screenshots in the live "
-            "app."
+            "app. Experiment 177 split out focused live window-padding pixel "
+            "proof, and Experiment 178 split out focused live GUI cursor pixel "
+            "proof. Experiment 185 closes the macOS walkthrough residual row "
+            "by binding copied source parity and live guards into one residual "
+            "proof: renamed full-file macOS workflow source parity for "
+            "window/tab/split/menu/titlebar/fullscreen/Quick Terminal "
+            "plumbing, live AppleScript window/tab/split/input automation "
+            "with controlled child-process markers, split-terminal ID "
+            "lifecycle, lower-level keyboard and mouse event delivery, native "
+            "menu visibility/action dispatch, fullscreen and command-palette "
+            "screenshots, Quick Terminal screenshots, right-split exact-window "
+            "red/blue layout screenshots, hidden titlebar traffic-light pixel "
+            "proof, window-padding screenshot proof, and GUI cursor pixel "
+            "proof."
         ),
-        missing_evidence="Add focused live macOS app walkthrough rows and GUI guards for broader titlebar behavior, broader split variants and interactions, screenshot/pixel evidence beyond the focused fullscreen, command-palette, Quick Terminal, right-split layout, and hidden-titlebar proof, and broader input navigation/pixel walkthroughs.",
+        missing_evidence="None for covered live macOS app walkthrough, titlebar, split, screenshot/pixel, and input navigation residual behavior. Notification/link/bell GUI effects remain tracked separately in RUNTIME-012B2B2B2B2B3.",
         guard_tier="Tier 3",
-        guard_command="TBD by future CFG-223 macOS app walkthrough experiment.",
+        guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_walkthrough_residual_parity.py`",
     ),
     RuntimeRow(
         id="RUNTIME-011B2C",
@@ -1722,7 +1730,7 @@ ROWS = [
             "diagnostic reports before launch and fails if a new Roastty crash "
             "report appears during the live window/tab/split/input workflow."
         ),
-        missing_evidence="None for the split-divider color crash path and new-crash-report guard. Broader split visual parity, menu/fullscreen/quick-terminal behavior, and screenshots/pixels remain in RUNTIME-011B2B.",
+        missing_evidence="None for the split-divider color crash path and new-crash-report guard. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action test) && (cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py`",
     ),
@@ -1748,7 +1756,7 @@ ROWS = [
             "The same live guard keeps the absolute app bundle launch, isolated "
             "config, scoped cleanup, and new-crash-report failure behavior."
         ),
-        missing_evidence="None for live AppleScript split-terminal object ID re-resolution, input, focus, and close behavior. Broader split visual/layout parity, broader titlebar behavior beyond the focused hidden-titlebar proof, screenshots/pixels beyond the focused fullscreen, command-palette, Quick Terminal, and right-split layout proof, and broader keyboard/mouse walkthroughs remain in RUNTIME-011B2B.",
+        missing_evidence="None for live AppleScript split-terminal object ID re-resolution, input, focus, and close behavior. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py`",
     ),
@@ -1775,7 +1783,7 @@ ROWS = [
             "live guard keeps the absolute app bundle launch, isolated config, "
             "scoped cleanup, and new-crash-report failure behavior."
         ),
-        missing_evidence="None for lower-level AppleScript keyboard and mouse command delivery to controlled child processes. Cursor/pointer pixels, broader titlebar behavior beyond the focused hidden-titlebar proof, screenshots beyond the focused fullscreen, command-palette, Quick Terminal, and right-split layout proof, broader split visual/layout parity, and broader keyboard/mouse walkthrough parity remain in RUNTIME-011B2B.",
+        missing_evidence="None for lower-level AppleScript keyboard and mouse command delivery to controlled child processes. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py`",
     ),
@@ -1802,7 +1810,7 @@ ROWS = [
             "keeps the absolute app bundle launch, isolated config, scoped "
             "cleanup, and new-crash-report failure behavior."
         ),
-        missing_evidence="None for live native menu visibility, representative validation, and representative New Tab / Split Right dispatch. Broader titlebar behavior beyond the focused hidden-titlebar proof, screenshots/pixels beyond the focused fullscreen, command-palette, Quick Terminal, and right-split layout proof, broader split visual/layout parity, cursor/pointer pixels, and broader keyboard/mouse walkthrough parity remain in RUNTIME-011B2B.",
+        missing_evidence="None for live native menu visibility, representative validation, and representative New Tab / Split Right dispatch. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_native_menu_runtime.py`",
     ),
@@ -1832,7 +1840,7 @@ ROWS = [
             "accessibility fallback path while still requiring screenshot "
             "proof."
         ),
-        missing_evidence="None for focused live fullscreen enter/exit geometry proof and command-palette visibility screenshot proof. Broader titlebar behavior beyond the focused hidden-titlebar proof, broader split visual/layout parity beyond the focused right-split proof, broader screenshot/pixel parity beyond the focused Quick Terminal and right-split proof, and broader input walkthrough parity remain in RUNTIME-011B2B.",
+        missing_evidence="None for focused live fullscreen enter/exit geometry proof and command-palette visibility screenshot proof. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_gui_state_runtime.py`",
     ),
@@ -1860,7 +1868,7 @@ ROWS = [
             "dimensions, hides Quick Terminal through the same native menu "
             "item, and requires the extra window id to disappear."
         ),
-        missing_evidence="None for focused live Quick Terminal window visibility, floating/popup panel layer behavior, configured top-positioned geometry, exact-window screenshot capture, and hide behavior. Broader titlebar behavior beyond the focused hidden-titlebar proof, broader split visual/layout parity beyond the focused right-split proof, broader screenshot/pixel parity, and broader input walkthrough parity remain in RUNTIME-011B2B.",
+        missing_evidence="None for focused live Quick Terminal window visibility, floating/popup panel layer behavior, configured top-positioned geometry, exact-window screenshot capture, and hide behavior. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_quick_terminal_runtime.py`",
     ),
@@ -1889,7 +1897,7 @@ ROWS = [
             "right region is blue-dominant, and neither region can pass as the "
             "other color."
         ),
-        missing_evidence="None for focused live right-split visual layout proof in the same app window. Broader titlebar behavior beyond the focused hidden-titlebar proof, broader split variants and interactions, broader screenshot/pixel parity, cursor/pointer pixels, and broader input walkthrough parity remain in RUNTIME-011B2B.",
+        missing_evidence="None for focused live right-split visual layout proof in the same app window. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_split_layout_runtime.py`",
     ),
@@ -1918,7 +1926,7 @@ ROWS = [
             "and requires those traffic-light pixels to be absent in the "
             "hidden-style screenshot."
         ),
-        missing_evidence="None for focused live hidden-titlebar traffic-light visibility proof. Broader titlebar behavior including tabs style, proxy icon behavior, titlebar text/font parity, accessories, broader screenshot/pixel parity, cursor/pointer pixels, and broader walkthrough parity remain in RUNTIME-011B2B.",
+        missing_evidence="None for focused live hidden-titlebar traffic-light visibility proof. Broader macOS walkthrough residual behavior is covered by RUNTIME-011B2B.",
         guard_tier="Tier 3",
         guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_titlebar_runtime.py`",
     ),
@@ -2274,10 +2282,10 @@ ROWS = [
             "config inventory. GTK and Linux runtime effects are marked not "
             "applicable to Roastty's macOS runtime; `macos-option-as-alt` points "
             "to existing key translation guards; `macos-applescript` points to "
-            "`RUNTIME-011B2A`; remaining macOS app effects stay owned by "
-            "`RUNTIME-011B2B`."
+            "`RUNTIME-011B2A`; the broader macOS app walkthrough residual is "
+            "closed by completed `RUNTIME-011B2B` evidence."
         ),
-        missing_evidence="None for platform-specific runtime classification; remaining macOS app behavior gaps are tracked by RUNTIME-011B2B.",
+        missing_evidence="None for platform-specific runtime classification; broader macOS app behavior is covered by completed RUNTIME-011B2B evidence.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/platform_runtime_classification.py --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/platform-runtime-classification.md`",
     ),

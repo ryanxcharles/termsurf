@@ -1007,6 +1007,15 @@ experiment files until they are proven.
   components, added focused color tests, and made the live AppleScript guard
   snapshot macOS diagnostic reports and fail on new Roastty crash reports, not
   only on missing command side effects.
+- **Broad macOS walkthrough residuals can close by binding focused live guards
+  together.** Experiment 185 closed `RUNTIME-011B2B` by tying copied macOS
+  workflow source parity to live AppleScript window/tab/split/input automation,
+  split-terminal ID lifecycle proof, keyboard and mouse side effects, native
+  menu action dispatch, fullscreen/command-palette screenshots, Quick Terminal
+  screenshots, right-split layout screenshots, hidden-titlebar traffic-light
+  pixels, window-padding pixels, and GUI cursor pixels. CFG-223 now has only one
+  remaining runtime gap: notification/link/bell GUI effects in
+  `RUNTIME-012B2B2B2B2B3`.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1767,4 +1776,4 @@ remains open.
 - [Experiment 184: Font renderer residual proof](184-font-renderer-residual-proof.md)
   — **Pass**
 - [Experiment 185: macOS walkthrough residual proof](185-macos-walkthrough-residual-proof.md)
-  — **Designed**
+  — **Pass**

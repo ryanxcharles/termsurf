@@ -463,12 +463,12 @@ def assert_inventory_split() -> None:
     require("live right-split visual layout proof" in runtime_inventory, "missing split-layout evidence")
     require("red-dominant" in runtime_inventory, "missing red sampled-region evidence")
     require("blue-dominant" in runtime_inventory, "missing blue sampled-region evidence")
-    require("broader titlebar behavior" in runtime_inventory, "remaining macOS GUI gap omitted titlebar evidence")
-    require("broader split variants" in runtime_inventory, "remaining macOS GUI gap omitted broader split evidence")
-    require("81 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("84 rows closed" in config_matrix, "CFG-223 closed count not updated")
-    require("3 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
-    require("3 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
+    require("Experiment 185 closes the macOS walkthrough residual row" in runtime_inventory, "missing macOS residual closure evidence")
+    require("macos_walkthrough_residual_parity.py" in runtime_inventory, "missing macOS residual guard evidence")
+    require("83 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("86 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require("1 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
+    require("1 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require(cfg223 is not None and len(cfg223) > 4 and cfg223[4] == "Gap", "CFG-223 should remain Gap")
 
 
