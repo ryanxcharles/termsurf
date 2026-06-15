@@ -1371,3 +1371,5 @@ remains open.
   **Pass**
 - [Experiment 139: Image storage limit runtime](139-image-storage-limit-runtime.md)
   — **Pass**
+- [Experiment 140: Grapheme width method runtime](140-grapheme-width-method-runtime.md)
+  — **Designed**
