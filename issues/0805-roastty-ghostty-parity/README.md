@@ -1644,3 +1644,5 @@ remains open.
   — **Pass**
 - [Experiment 170: AppleScript split terminal lifecycle](170-applescript-split-terminal-lifecycle.md)
   — **Pass**
+- [Experiment 171: AppleScript keyboard and mouse events](171-applescript-keyboard-mouse-events.md)
+  — **Designed**
