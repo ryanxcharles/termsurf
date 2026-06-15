@@ -1534,8 +1534,10 @@ ROWS = [
             "focused split helper behavior, and Experiment 167 split out "
             "live AppleScript-driven app workflow automation with "
             "side-effect-proven split creation and terminal `input text` "
-            "dispatch. CFG-223 still needs real app walkthrough or focused "
-            "macOS GUI tests for native menu display/validation, "
+            "dispatch. Experiment 168 split out the split-divider color crash "
+            "path and strengthened the live AppleScript guard to fail on new "
+            "Roastty crash reports. CFG-223 still needs real app walkthrough or "
+            "focused macOS GUI tests for native menu display/validation, "
             "titlebar/fullscreen/quick-terminal visuals, screenshot/pixel "
             "evidence, returned split-terminal object re-resolution and "
             "focus/close commands, broader command-palette GUI behavior, and "
@@ -1544,6 +1546,31 @@ ROWS = [
         missing_evidence="Add focused live macOS app walkthrough rows and GUI guards for native menu display/validation, titlebar/fullscreen/quick-terminal visuals, screenshot/pixel evidence, returned split-terminal object re-resolution and focus/close commands, broader command-palette GUI behavior, and deeper input navigation/pixel walkthroughs.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 macOS app walkthrough experiment.",
+    ),
+    RuntimeRow(
+        id="RUNTIME-011B2C",
+        behavior="live split-divider color rendering crash guard",
+        ghostty_reference="`vendor/ghostty/macos/Sources/Helpers/Extensions/OSColor+Extension.swift`; `vendor/ghostty/macos/Sources/Ghostty/Ghostty.Config.swift` split divider color derivation",
+        roastty_reference="`roastty/macos/Sources/Helpers/Extensions/OSColor+Extension.swift`; `roastty/macos/Sources/Roastty/Roastty.Config.swift`; `roastty/macos/Tests/OSColorExtensionTests.swift`; live AppleScript split workflow guard",
+        family="macOS app",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 168 fixes the user-visible `Roastty[DEBUG] quit "
+            "unexpectedly` crash whose diagnostic reports showed "
+            "`NSColor.getHue` -> `OSColor.darken(by:)` -> "
+            "`Roastty.Config.splitDividerColor` -> "
+            "`TerminalSplitSubtreeView.body`. `OSColor.darken(by:)` now "
+            "converts AppKit colors to sRGB before reading HSB components and "
+            "returns unchanged colors that cannot be converted. "
+            "`OSColorExtensionTests` covers dynamic AppKit colors and "
+            "non-convertible pattern colors. "
+            "`macos_applescript_workflow_runtime.py` snapshots macOS "
+            "diagnostic reports before launch and fails if a new Roastty crash "
+            "report appears during the live window/tab/split/input workflow."
+        ),
+        missing_evidence="None for the split-divider color crash path and new-crash-report guard. Broader split visual parity, menu/fullscreen/quick-terminal behavior, screenshots/pixels, and split object re-resolution remain in RUNTIME-011B2B.",
+        guard_tier="Tier 3",
+        guard_command="`(cd roastty && macos/build.nu --action test) && (cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py`",
     ),
     RuntimeRow(
         id="RUNTIME-012A",
@@ -1983,6 +2010,7 @@ EXPECTED_IDS = [
     "RUNTIME-011B1",
     "RUNTIME-011B2A",
     "RUNTIME-011B2B",
+    "RUNTIME-011B2C",
     "RUNTIME-012A",
     "RUNTIME-012B1",
     "RUNTIME-012B2A",

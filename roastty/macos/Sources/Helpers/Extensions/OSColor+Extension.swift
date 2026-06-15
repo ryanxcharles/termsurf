@@ -83,7 +83,12 @@ extension OSColor {
 
     func darken(by amount: CGFloat) -> OSColor {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        self.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #if canImport(AppKit)
+        guard let hsbColor = self.usingColorSpace(.sRGB) else { return self }
+        #else
+        let hsbColor = self
+        #endif
+        hsbColor.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
         return OSColor(
             hue: h,
             saturation: s,

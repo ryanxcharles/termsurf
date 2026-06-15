@@ -16,6 +16,7 @@ ISSUE = ROOT / "issues/0805-roastty-ghostty-parity"
 APP = ROOT / "roastty/macos/build/Debug/Roastty.app"
 BINARY = APP / "Contents/MacOS/roastty"
 MARKER = "ISSUE805_EXP167_INPUT_MARKER"
+DIAGNOSTIC_REPORTS = Path.home() / "Library/Logs/DiagnosticReports"
 
 
 def require(condition: bool, message: str) -> None:
@@ -53,6 +54,21 @@ def scoped_pids() -> set[int]:
         capture_output=True,
     )
     return {int(pid_text) for pid_text in scoped.stdout.split()}
+
+
+def crash_reports() -> set[Path]:
+    if not DIAGNOSTIC_REPORTS.is_dir():
+        return set()
+    return set(DIAGNOSTIC_REPORTS.glob("roastty-*.ips"))
+
+
+def wait_for_crash_report_settle(before: set[Path]) -> set[Path]:
+    deadline = time.monotonic() + 5
+    observed: set[Path] = set()
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        observed.update(crash_reports() - before)
+    return observed
 
 
 def launch_app(config: Path) -> int:
@@ -135,6 +151,7 @@ def assert_inventory_split() -> None:
 
     require("| RUNTIME-011B2A" in runtime_inventory, "missing RUNTIME-011B2A row")
     require("| RUNTIME-011B2B" in runtime_inventory, "missing RUNTIME-011B2B row")
+    require("| RUNTIME-011B2C" in runtime_inventory, "missing RUNTIME-011B2C row")
     require(
         "live AppleScript-driven Roastty app workflow automation" in runtime_inventory,
         "missing AppleScript workflow evidence",
@@ -151,8 +168,12 @@ def assert_inventory_split() -> None:
         "titlebar/fullscreen/quick-terminal visuals" in runtime_inventory,
         "remaining macOS GUI gap omitted visual evidence",
     )
-    require("67 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("70 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require(
+        "fails if a new Roastty crash report appears" in runtime_inventory,
+        "missing new crash-report guard evidence",
+    )
+    require("68 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("71 rows closed" in config_matrix, "CFG-223 closed count not updated")
     require("4 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
     require("4 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require("| CFG-223 " in config_matrix and "| Gap    |" in config_matrix, "CFG-223 should remain Gap")
@@ -161,6 +182,8 @@ def assert_inventory_split() -> None:
 def main() -> int:
     require(APP.is_dir(), f"app not built: {APP}")
     require(BINARY.is_file(), f"app binary not built: {BINARY}")
+
+    crash_reports_before = crash_reports()
 
     with tempfile.TemporaryDirectory(prefix="termsurf-issue805-exp167-") as temp_dir:
         temp = Path(temp_dir)
@@ -236,6 +259,13 @@ def main() -> int:
                 )
         finally:
             terminate_process(pid)
+
+    new_crash_reports = wait_for_crash_report_settle(crash_reports_before)
+    require(
+        not new_crash_reports,
+        "Roastty wrote crash reports during AppleScript workflow: "
+        + ", ".join(str(path) for path in sorted(new_crash_reports)),
+    )
 
     assert_inventory_split()
     print("macos_applescript_workflow_runtime=pass")

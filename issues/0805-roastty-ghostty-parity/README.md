@@ -895,9 +895,11 @@ experiment files until they are proven.
   fresh `roastty-*.ips` reports. The stack was `NSColor.getHue` →
   `OSColor.darken(by:)` → `Roastty.Config.splitDividerColor` →
   `TerminalSplitSubtreeView.body`, meaning the split side-effect guard passed
-  while the app still crashed during split rendering. Future live app guards
-  must snapshot macOS diagnostic reports and fail on new Roastty crash reports,
-  not only on missing command side effects.
+  while the app still crashed during split rendering. Experiment 168 fixed
+  `OSColor.darken(by:)` to convert AppKit colors to sRGB before reading HSB
+  components, added focused color tests, and made the live AppleScript guard
+  snapshot macOS diagnostic reports and fail on new Roastty crash reports, not
+  only on missing command side effects.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1625,4 +1627,4 @@ remains open.
 - [Experiment 167: macOS AppleScript workflow runtime](167-macos-applescript-workflow-runtime.md)
   — **Pass**
 - [Experiment 168: Split divider color crash](168-split-divider-color-crash.md)
-  — **Designed**
+  — **Pass**

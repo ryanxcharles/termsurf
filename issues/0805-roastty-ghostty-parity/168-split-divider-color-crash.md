@@ -105,3 +105,101 @@ Fix:
 
 Re-review verdict: **Approved**. The reviewer confirmed the SwiftLint command is
 present and introduced no new required findings.
+
+## Result
+
+**Result:** Pass
+
+The split-divider crash path is fixed and guarded.
+
+Implementation:
+
+- `OSColor.darken(by:)` now converts AppKit colors to sRGB before calling
+  `getHue`. If AppKit cannot convert the color, the helper returns the original
+  color instead of raising through `getHue`.
+- `OSColorExtensionTests` covers a dynamic AppKit color and a non-convertible
+  pattern color, proving the helper does not terminate the test process on the
+  crash class.
+- `macos_applescript_workflow_runtime.py` now snapshots
+  `~/Library/Logs/DiagnosticReports/roastty-*.ips` before launching the debug
+  app and fails if a new crash report appears after the live window/tab/split/
+  input workflow and cleanup.
+- `RUNTIME-011B2C` records the split-divider color crash guard as
+  `Oracle complete`. `RUNTIME-011B2B` remains the broader live macOS GUI gap.
+
+Verification run:
+
+```text
+(cd roastty/macos && swiftlint)
+Done linting! Found 0 violations, 0 serious in 196 files.
+
+(cd roastty && macos/build.nu --action test)
+Test run with 221 tests in 24 suites passed after 1.518 seconds.
+** TEST SUCCEEDED **
+
+(cd roastty && macos/build.nu --action build)
+** BUILD SUCCEEDED **
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_applescript_workflow_runtime.py
+macos_applescript_workflow_runtime=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+runtime_rows=75
+oracle_complete=68
+closed=71
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+
+for f in issues/0805-roastty-ghostty-parity/*_runtime_parity.py issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py issues/0805-roastty-ghostty-parity/link_hover_modifier_refresh_parity.py issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py; do
+  PYTHONDONTWRITEBYTECODE=1 python3 "$f"
+done
+parity_guards=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/platform_runtime_classification.py --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/platform-runtime-classification.md
+platform_options=32
+gap=15
+not_applicable=15
+oracle_complete=2
+```
+
+The newest `~/Library/Logs/DiagnosticReports/roastty-*.ips` file after the live
+guard remained the pre-fix `roastty-2026-06-15-062015.ips`; the strengthened
+guard created no new crash report.
+
+The macOS build/test run still emits existing Swift 6/Main Thread Checker,
+pasteboard, terminfo, and linker deployment-version warnings, but the
+`xcodebuild` actions reported success.
+
+## Conclusion
+
+Roastty no longer crashes in the observed split-divider color path, and the live
+AppleScript workflow guard now treats new macOS crash reports as a first-class
+failure. This prevents a repeat of Experiment 167's narrow success condition,
+where terminal side effects could pass while the app still crashed during GUI
+rendering.
+
+The remaining `RUNTIME-011B2B` work is still broad live macOS GUI parity: native
+menu display/validation, titlebar/fullscreen/quick-terminal visuals,
+screenshot/pixel evidence, returned split-terminal object re-resolution and
+focus/close commands, broader command-palette GUI behavior, and deeper input
+navigation/pixel walkthroughs.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Initial verdict: **Changes required**.
+
+- Required: `wait_for_crash_report_settle` could return after the first
+  unchanged empty poll, creating a false negative for delayed crash reports.
+
+Fix:
+
+- Updated `wait_for_crash_report_settle` to poll for the full five-second window
+  and accumulate any new `roastty-*.ips` reports before returning.
+
+Re-review verdict: **Approved**. The reviewer confirmed the guard no longer
+returns early on an unchanged empty poll and introduced no new required
+findings.
