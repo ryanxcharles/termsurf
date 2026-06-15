@@ -9060,6 +9060,30 @@ mod tests {
     }
 
     #[test]
+    fn page_list_scrollback_byte_limit_prunes_by_page_size() {
+        let cols = STD_CAPACITY
+            .max_cols()
+            .expect("standard capacity should fit at least one row");
+        let mut list = PageList::init(cols, 1, Some(standard_page_size())).unwrap();
+
+        let page1 = list.first_node_ptr();
+        let page2 = list.grow().unwrap().unwrap();
+
+        assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.first_node_ptr(), page1);
+        assert_eq!(list.last_node_ptr(), page2);
+        assert!(list.page_size + standard_page_size() > list.max_size());
+
+        let reused = list.grow().unwrap().unwrap();
+
+        assert_eq!(list.pages.len(), 2);
+        assert_eq!(list.first_node_ptr(), page2);
+        assert_eq!(list.last_node_ptr(), page1);
+        assert_eq!(reused, page1);
+        list.verify_integrity().unwrap();
+    }
+
+    #[test]
     fn page_list_grow_prune_cached_viewport_inside_pruned_page_moves_top() {
         let cols = STD_CAPACITY
             .max_cols()

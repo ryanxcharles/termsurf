@@ -3995,7 +3995,7 @@ impl Surface {
             shell_integration_features: config.shell_integration_features,
             resource_dir: resource_dir.clone(),
             term: config.term.clone(),
-            max_scrollback_rows: scrollback_limit_to_rows(config.scrollback_limit),
+            max_scrollback_bytes: scrollback_limit_to_bytes(config.scrollback_limit),
             palette: derived_config_palette(&config),
             title_report: config.title_report,
         };
@@ -7563,8 +7563,8 @@ fn config_startup_input_bytes(input: &config::RepeatableReadableIo) -> Option<Ve
     Some(bytes)
 }
 
-fn scrollback_limit_to_rows(limit: usize) -> Option<usize> {
-    (limit == 0).then_some(0)
+fn scrollback_limit_to_bytes(limit: usize) -> Option<usize> {
+    Some(limit)
 }
 
 fn valid_env_key(key: &str) -> bool {
@@ -14729,12 +14729,12 @@ pub extern "C" fn roastty_terminal_new(
         return ROASTTY_INVALID_VALUE;
     }
 
-    let max_scrollback_rows = if max_scrollback_rows == usize::MAX {
+    let max_scrollback_bytes = if max_scrollback_rows == usize::MAX {
         None
     } else {
         Some(max_scrollback_rows)
     };
-    let terminal = match InnerTerminal::init(columns, rows, max_scrollback_rows) {
+    let terminal = match InnerTerminal::init(columns, rows, max_scrollback_bytes) {
         Ok(terminal) => terminal,
         Err(_) => return ROASTTY_OUT_OF_MEMORY,
     };
@@ -22266,6 +22266,42 @@ mod tests {
         roastty_surface_free(surface);
         roastty_app_free(app);
         roastty_config_free(config);
+    }
+
+    #[test]
+    fn config_scrollback_limit_runtime_nonzero_byte_limit_bounds_history() {
+        fn rows_for_limit(limit: usize, label: &str) -> usize {
+            let config = new_test_config_from_str(&format!(
+                "scrollback-limit = {limit}\ncommand = i=0; while [ $i -lt 5000 ]; do printf '{label}-%04d\\n' \"$i\"; i=$((i + 1)); done\n",
+            ));
+            let app = roastty_app_new(ptr::null(), config);
+            let surface = new_test_surface(app);
+
+            let text =
+                surface_snapshot_text_after_start_until(app, surface, &format!("{label}-4999"));
+            let scrollback_rows = surface_from_handle(surface)
+                .unwrap()
+                .termio_worker
+                .as_ref()
+                .unwrap()
+                .with_termio(|termio| termio.terminal().scrollback_rows());
+
+            assert!(text.contains(&format!("{label}-4999")));
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+            scrollback_rows
+        }
+
+        let _guard = pty_command_lock();
+        let small_rows = rows_for_limit(1, "small");
+        let large_rows = rows_for_limit(100_000_000, "large");
+
+        assert!(small_rows > 0, "{small_rows}");
+        assert!(
+            large_rows > small_rows,
+            "large_rows={large_rows} small_rows={small_rows}"
+        );
     }
 
     fn surface_title_report_response(surface: RoasttySurface, bytes: &[u8]) -> Vec<u8> {

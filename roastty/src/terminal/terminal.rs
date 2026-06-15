@@ -507,10 +507,10 @@ impl TerminalScreens {
     fn init(
         cols: CellCountInt,
         rows: CellCountInt,
-        max_scrollback_rows: Option<usize>,
+        max_scrollback_bytes: Option<usize>,
     ) -> Result<Self, PageListAllocError> {
         Ok(Self {
-            primary: Screen::init(cols, rows, max_scrollback_rows)?,
+            primary: Screen::init(cols, rows, max_scrollback_bytes)?,
             alternate: None,
             active: TerminalScreenKey::Primary,
             primary_generation: 0,
@@ -1029,12 +1029,12 @@ impl Terminal {
     pub(crate) fn init(
         cols: CellCountInt,
         rows: CellCountInt,
-        max_scrollback_rows: Option<usize>,
+        max_scrollback_bytes: Option<usize>,
     ) -> Result<Self, TerminalInitError> {
         Self::init_with_options(
             cols,
             rows,
-            max_scrollback_rows,
+            max_scrollback_bytes,
             TerminalInitOptions::default(),
         )
     }
@@ -1042,11 +1042,11 @@ impl Terminal {
     pub(crate) fn init_with_options(
         cols: CellCountInt,
         rows: CellCountInt,
-        max_scrollback_rows: Option<usize>,
+        max_scrollback_bytes: Option<usize>,
         options: TerminalInitOptions,
     ) -> Result<Self, TerminalInitError> {
         let size = TerminalSize { cols, rows };
-        let mut screens = TerminalScreens::init(cols, rows, max_scrollback_rows)
+        let mut screens = TerminalScreens::init(cols, rows, max_scrollback_bytes)
             .map_err(|_| TerminalInitError::PageAlloc)?;
         screens
             .active_mut()
@@ -14111,6 +14111,27 @@ mod tests {
         assert_eq!(plain_with_unwrap(&terminal, false), "BBBBB\nCCCCC");
         assert_eq!(terminal.full_screen_plain_for_tests(false), "BBBBB\nCCCCC");
         assert_eq!(terminal.scrollback_rows_for_tests(), 0);
+    }
+
+    #[test]
+    fn terminal_stream_scrollback_byte_limit_bounds_history() {
+        fn rows_for_limit(max_scrollback_bytes: Option<usize>) -> usize {
+            let mut terminal = Terminal::init(80, 24, max_scrollback_bytes).unwrap();
+            for i in 0..5000 {
+                let line = format!("line-{i:04}\n");
+                terminal.next_slice(line.as_bytes()).unwrap();
+            }
+            terminal.scrollback_rows_for_tests()
+        }
+
+        let small_rows = rows_for_limit(Some(1));
+        let large_rows = rows_for_limit(Some(100_000_000));
+
+        assert!(small_rows > 0, "{small_rows}");
+        assert!(
+            large_rows > small_rows,
+            "large_rows={large_rows} small_rows={small_rows}"
+        );
     }
 
     #[test]

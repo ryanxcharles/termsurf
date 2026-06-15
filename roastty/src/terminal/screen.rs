@@ -170,7 +170,7 @@ impl Screen {
     pub(super) fn init(
         cols: CellCountInt,
         rows: CellCountInt,
-        max_scrollback_rows: Option<usize>,
+        max_scrollback_bytes: Option<usize>,
     ) -> Result<Self, PageListAllocError> {
         Ok(Self {
             cursor: ScreenCursor::default(),
@@ -178,7 +178,7 @@ impl Screen {
             charset: ScreenCharsetState::default(),
             kitty_keyboard: kitty::KeyFlagStack::default(),
             kitty_images: ImageStorage::new(),
-            pages: PageList::init(cols, rows, max_scrollback_rows)?,
+            pages: PageList::init(cols, rows, max_scrollback_bytes)?,
             selection: None,
             prompt_click_mode: PromptClickMode::None,
         })

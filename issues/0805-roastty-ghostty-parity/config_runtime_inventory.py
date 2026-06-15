@@ -487,32 +487,58 @@ ROWS = [
             "surfaces, and `osc7_pwd_normalization_runtime_parity.py` "
             "statically checks pinned Ghostty and Roastty markers."
         ),
-        missing_evidence="None for this local OSC 7 PWD validation, normalization, PWD dispatch, and title fallback path dispatch slice. Remaining terminal gaps stay in RUNTIME-009B2B2B3.",
+        missing_evidence="None for this local OSC 7 PWD validation, normalization, PWD dispatch, and title fallback path dispatch slice. Remaining terminal gaps stay in RUNTIME-009B2B2B3B.",
         guard_tier="Tier 2",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc7_pwd_normalization && cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml termio_osc7_pwd_normalization && cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml surface_osc7_pwd_normalization && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_pwd_normalization_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-009B2B2B3",
-        behavior="exact nonzero scrollback byte quota, remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI edge cases, and other remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback; remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior and shell integration startup paths",
+        id="RUNTIME-009B2B2B3A",
+        behavior="nonzero scrollback byte quota terminal and PTY-backed surface effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/termio/Termio.zig` terminal init; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback",
+        roastty_reference="`roastty/src/lib.rs::scrollback_limit_to_bytes`, `roastty/src/termio.rs`, `roastty/src/terminal/terminal.rs`, `roastty/src/terminal/screen.rs`, and `roastty/src/terminal/page_list.rs`",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 129 proves parsed nonzero `scrollback-limit` values "
+            "are preserved as byte quotas from config startup through "
+            "`TermioSpawnOptions`, `Terminal`, `Screen`, and `PageList`. "
+            "`config_scrollback_limit_runtime_nonzero_byte_limit_bounds_history` "
+            "proves a PTY-backed surface keeps less history with a tiny "
+            "nonzero byte limit than with a large nonzero byte limit. "
+            "`terminal_stream_scrollback_byte_limit_bounds_history` proves "
+            "the same byte-limit behavior in terminal-core streaming, and "
+            "`page_list_scrollback_byte_limit_prunes_by_page_size` proves "
+            "PageList prunes/reuses pages when the byte-size quota would be "
+            "exceeded. `scrollback_byte_limit_runtime_parity.py` statically "
+            "checks pinned Ghostty's byte-quota semantics and Roastty's "
+            "config/startup/terminal/PageList wiring plus the regression "
+            "guards."
+        ),
+        missing_evidence="None for parsed nonzero scrollback-limit byte quota behavior covered by these guards.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml config_scrollback_limit_runtime && cargo test --manifest-path roastty/Cargo.toml terminal_stream_scrollback_byte_limit && cargo test --manifest-path roastty/Cargo.toml page_list_scrollback_byte_limit && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/scrollback_byte_limit_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3B",
+        behavior="remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI edge cases, and other remaining terminal behavior effects",
+        ghostty_reference="remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior and shell integration startup paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiments 117, 122, 124, 126, 127, and 128 split out "
-            "zero/no-history scrollback, alternate-screen no-scrollback, CSI "
-            "`21t` title-report gating, shell-integration feature env and "
-            "terminal identity, zsh bootstrap, configured/static non-empty "
-            "surface title behavior, and stored-PWD title fallback/empty "
-            "title app dispatch, plus the common local OSC 7 PWD validation, "
-            "path normalization, surface PWD dispatch, and title fallback "
-            "path behavior. Exact nonzero `scrollback-limit` byte quota "
-            "parity, remaining shell-specific startup rewrite coverage, "
-            "unproven exotic OSC 7 URI edge cases, and other remaining "
-            "terminal behavior toggles still need focused CFG-223 runtime "
-            "proof or fixes."
+            "Experiments 117, 122, 124, 126, 127, 128, and 129 split out "
+            "zero/no-history scrollback, nonzero scrollback byte quota, "
+            "alternate-screen no-scrollback, CSI `21t` title-report gating, "
+            "shell-integration feature env and terminal identity, zsh "
+            "bootstrap, configured/static non-empty surface title behavior, "
+            "and stored-PWD title fallback/empty title app dispatch, plus the "
+            "common local OSC 7 PWD validation, path normalization, surface "
+            "PWD dispatch, and title fallback path behavior. Remaining "
+            "shell-specific startup rewrite coverage, unproven exotic OSC 7 "
+            "URI edge cases, and other remaining terminal behavior toggles "
+            "still need focused CFG-223 runtime proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI edge cases, and other remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI edge cases, and other remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -803,7 +829,8 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2A",
     "RUNTIME-009B2B2B1",
     "RUNTIME-009B2B2B2",
-    "RUNTIME-009B2B2B3",
+    "RUNTIME-009B2B2B3A",
+    "RUNTIME-009B2B2B3B",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",

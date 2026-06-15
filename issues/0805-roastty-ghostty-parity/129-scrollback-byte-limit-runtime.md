@@ -121,3 +121,52 @@ Fail criteria:
 **Verdict:** Approved.
 
 The reviewer reported no findings.
+
+## Result
+
+**Result:** Pass.
+
+Roastty now preserves parsed nonzero `scrollback-limit` values as byte quotas
+instead of mapping them to unbounded history. The internal startup path now uses
+`max_scrollback_bytes` through `TermioSpawnOptions`, `Terminal`, `Screen`, and
+`PageList`; the public direct-terminal ABI argument name remains stable, but its
+local value is converted into the same byte-limit path.
+
+The implementation added three runtime guards:
+
+- `config_scrollback_limit_runtime_nonzero_byte_limit_bounds_history` proves a
+  PTY-backed surface keeps less history with `scrollback-limit = 1` than with a
+  large byte quota for the same 5,000-line workload.
+- `terminal_stream_scrollback_byte_limit_bounds_history` proves the same
+  bounded-history behavior in terminal-core streaming.
+- `page_list_scrollback_byte_limit_prunes_by_page_size` proves PageList prunes
+  and reuses pages when the byte-size quota would be exceeded.
+
+The inventory now splits the old terminal gap into `RUNTIME-009B2B2B3A` as
+Oracle complete for nonzero scrollback byte quotas and `RUNTIME-009B2B2B3B` as
+the reduced remaining terminal gap. `CFG-223` remains `Gap`.
+
+Verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml config_scrollback_limit_runtime
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_scrollback_byte_limit
+cargo test --manifest-path roastty/Cargo.toml page_list_scrollback_byte_limit
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/scrollback_byte_limit_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+## Conclusion
+
+The exact nonzero `scrollback-limit` byte-quota gap is closed. Remaining
+terminal CFG-223 work should continue from `RUNTIME-009B2B2B3B`: shell-specific
+startup rewrite coverage, exotic OSC 7 URI edge cases, and other still-unproven
+terminal behavior effects.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Verdict:** Approved.
+
+The reviewer reported no findings.
