@@ -138,7 +138,7 @@ def main() -> int:
             ("terminal_runtime_residual_audit.py", "source guard command"),
             ('id="RUNTIME-007B2B2B2B2"', "font gap remains tracked"),
             ("RUNTIME-008B2B2B2B2B", "renderer gap remains tracked"),
-            ("RUNTIME-011B", "macOS gap remains tracked"),
+            ("RUNTIME-011B2", "macOS gap remains tracked"),
             ("RUNTIME-012B2B2B2B2B3", "notification/link GUI gap remains tracked"),
         ],
     )
@@ -149,8 +149,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains open"),
-            ("65 rows Oracle complete", "CFG-223 oracle count"),
-            ("68 rows closed", "CFG-223 closed count"),
+            ("66 rows Oracle complete", "CFG-223 oracle count"),
+            ("69 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

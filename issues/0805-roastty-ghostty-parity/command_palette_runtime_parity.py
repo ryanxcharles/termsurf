@@ -230,19 +230,21 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-011B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-011B2")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-011B status"),
-            ("windows", "RUNTIME-011B window gap"),
-            ("tabs", "RUNTIME-011B tab gap"),
-            ("splits", "RUNTIME-011B split gap"),
-            ("menus", "RUNTIME-011B menu gap"),
-            ("titlebar", "RUNTIME-011B titlebar gap"),
-            ("fullscreen", "RUNTIME-011B fullscreen gap"),
-            ("quick terminal", "RUNTIME-011B quick terminal gap"),
-            ("broader command palette GUI", "RUNTIME-011B remaining command palette gap"),
+            ("Gap", "RUNTIME-011B2 status"),
+            (
+                "actual window/tab/split/menu/titlebar/fullscreen/quick-terminal GUI behavior",
+                "RUNTIME-011B2 live GUI gap",
+            ),
+            ("native menu validation/display", "RUNTIME-011B2 native menu gap"),
+            ("screenshot/pixel/input navigation", "RUNTIME-011B2 screenshot/input gap"),
+            (
+                "broader command-palette GUI behavior",
+                "RUNTIME-011B2 remaining command palette gap",
+            ),
         ],
     )
     if "RUNTIME-011 |" in runtime_inventory:
@@ -252,8 +254,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("65 rows Oracle complete", "CFG-223 oracle count"),
-            ("68 rows closed", "CFG-223 closed count"),
+            ("66 rows Oracle complete", "CFG-223 oracle count"),
+            ("69 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

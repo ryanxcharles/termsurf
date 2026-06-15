@@ -678,7 +678,8 @@ experiment files until they are proven.
   closure.** Experiment 112 generated a platform runtime manifest for every
   `gtk-*`, `linux-*`, and `macos-*` canonical option. GTK/Linux rows are not
   applicable to Roastty's macOS runtime, `macos-option-as-alt` is covered by
-  input guards, and remaining macOS app behavior stays owned by `RUNTIME-011`.
+  input guards, and after Experiment 166 the remaining live macOS app behavior
+  stays owned by `RUNTIME-011B2`.
 - **Broad runtime rows should split proven slices from real gaps.** Experiment
   113 split PTY/process launch coverage so initial-command, environment, and
   working-directory behavior are guarded separately while config-level command,
@@ -851,7 +852,7 @@ experiment files until they are proven.
   action filtering, shortcut display, and hosted action dispatch out of the
   macOS app gap. Windows, tabs, splits, menus, titlebar, fullscreen, quick
   terminal, broader command palette GUI/pixel/input navigation, and full app
-  walkthrough evidence remain in `RUNTIME-011B`.
+  walkthrough evidence now remain in `RUNTIME-011B2` after Experiment 166.
 - **Font variations are style-specific font descriptors.** Experiment 149 split
   deterministic `font-variation*` config propagation out of the remaining font
   renderer gap by threading the four parsed variation lists into regular, bold,
@@ -872,6 +873,13 @@ experiment files until they are proven.
   Broad fallback/shaping visual output, bitmap/color font thickening edge cases,
   renderer-visible glyph metrics, and broad font pixel parity remain in
   `RUNTIME-007B2B2B2B2`.
+- **Copied macOS workflow plumbing is not the same as live GUI parity.**
+  Experiment 166 split copied window/tab/split/menu/titlebar/fullscreen and
+  quick-terminal command/action/config plumbing out of the live macOS app gap.
+  Full-file renamed source parity plus focused split helper tests now guard that
+  plumbing, while actual GUI rendering, native menu display/validation,
+  screenshots/pixels, input navigation, fullscreen visuals, quick-terminal
+  visuals, and broader command-palette GUI behavior remain in `RUNTIME-011B2`.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1595,4 +1603,4 @@ remains open.
 - [Experiment 165: Font fallback render runtime](165-font-fallback-render-runtime.md)
   — **Pass**
 - [Experiment 166: macOS app workflow plumbing](166-macos-app-workflow-plumbing.md)
-  — **Designed**
+  — **Pass**

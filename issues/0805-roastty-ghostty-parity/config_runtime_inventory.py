@@ -237,7 +237,7 @@ ROWS = [
         ),
         missing_evidence=(
             "None for key remap/keybind dispatch runtime behavior; "
-            "command-palette UI dispatch remains tracked by `RUNTIME-011B`."
+            "command-palette UI dispatch remains tracked by `RUNTIME-011B2`."
         ),
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml surface_key_remap && cargo test --manifest-path roastty/Cargo.toml surface_key_table`",
@@ -1463,8 +1463,38 @@ ROWS = [
         guard_command="`xcodebuild test -project roastty/macos/Roastty.xcodeproj -scheme Roastty -testPlan Roastty -only-testing:RoasttyTests/CommandPaletteHostedTests && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/command_palette_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-011B",
-        behavior="remaining macOS app/window/tab/split/menu/titlebar/fullscreen/quick-terminal and broader command palette GUI effects",
+        id="RUNTIME-011B1",
+        behavior="copied macOS workflow plumbing for windows, tabs, splits, menus, titlebar, fullscreen, and quick terminal",
+        ghostty_reference="`vendor/ghostty/macos/Sources/Features/Terminal`; `vendor/ghostty/macos/Sources/Features/Splits`; `vendor/ghostty/macos/Sources/Features/QuickTerminal`; `vendor/ghostty/macos/Sources/App/macOS/AppDelegate.swift`; `vendor/ghostty/macos/Sources/Ghostty` action/config bridge files",
+        roastty_reference="`roastty/macos/Sources/Features/Terminal`; `roastty/macos/Sources/Features/Splits`; `roastty/macos/Sources/Features/QuickTerminal`; `roastty/macos/Sources/App/macOS/AppDelegate.swift`; `roastty/macos/Sources/Roastty` action/config bridge files; `roastty/macos/Tests/Splits`",
+        family="macOS app",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 166 splits copied macOS workflow plumbing out of the "
+            "broader live GUI walkthrough gap. "
+            "`macos_app_workflow_plumbing_parity.py` proves "
+            "`TerminalController.swift`, `TerminalWindow.swift`, the split "
+            "SwiftUI helpers, `QuickTerminalController.swift`, "
+            "`QuickTerminalIntent.swift`, `AppDelegate.swift`, "
+            "`Roastty.Config.swift`, `Roastty.App.swift`, "
+            "`RoasttyPackage.swift`, and `FullscreenMode+Extension.swift` "
+            "match pinned Ghostty after expected renames where full-file "
+            "identity is available. It checks `BaseTerminalController.swift` "
+            "workflow anchors for split, focus, resize, equalize, zoom, and "
+            "fullscreen dispatch without overclaiming full-file identity "
+            "because Experiment 152 already introduced a command-palette "
+            "testable extraction there. Existing `SplitTreeTests` and "
+            "`TerminalSplitDropZoneTests` prove focused split-tree, split "
+            "resize/equalize/focus, state coding, and drop-zone helper "
+            "behavior."
+        ),
+        missing_evidence="None for copied macOS workflow command/action/config plumbing and focused split helper behavior. Live GUI rendering, native menu display, screenshot/pixel evidence, and input navigation remain outside this slice.",
+        guard_tier="Tier 2",
+        guard_command="`(cd roastty && macos/build.nu --action test) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_app_workflow_plumbing_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-011B2",
+        behavior="remaining live macOS app/window/tab/split/menu/titlebar/fullscreen/quick-terminal and broader command palette GUI effects",
         ghostty_reference="`vendor/ghostty/macos/Sources`; app/window/tab/split/menu/titlebar/fullscreen/quick-terminal and GUI walkthrough behavior",
         roastty_reference="`roastty/macos/Sources`; Roastty app wrapper and Swift UI",
         family="macOS app",
@@ -1472,16 +1502,18 @@ ROWS = [
         evidence=(
             "Feature and walkthrough matrices prove launch/cleanup and "
             "keyboard delivery. Experiment 121 split out copied macOS "
-            "quit-after-last-window-closed config behavior, and Experiment 152 "
+            "quit-after-last-window-closed config behavior, Experiment 152 "
             "split out command palette runtime plumbing, custom command "
             "entries, hosted action dispatch, toggle notification delivery, "
-            "focus return, and keyboard-event shielding. CFG-223 still needs "
-            "real app walkthrough or focused macOS tests for config-driven "
-            "windows, tabs, splits, menus, titlebar, fullscreen, quick "
-            "terminal, and broader command palette GUI/pixel/input navigation "
-            "behavior."
+            "focus return, and keyboard-event shielding, and Experiment 166 "
+            "split out copied macOS workflow command/action/config plumbing "
+            "plus focused split helper behavior. CFG-223 still needs real app "
+            "walkthrough or focused macOS GUI tests for actual "
+            "window/tab/split/menu/titlebar/fullscreen/quick-terminal GUI "
+            "behavior, native menu validation/display, screenshot/pixel/input "
+            "navigation, and broader command-palette GUI behavior."
         ),
-        missing_evidence="Add focused macOS app walkthrough rows and GUI guards for windows, tabs, splits, menus, titlebar, fullscreen, quick terminal, and broader command palette GUI behavior.",
+        missing_evidence="Add focused live macOS app walkthrough rows and GUI guards for actual window/tab/split/menu/titlebar/fullscreen/quick-terminal GUI behavior, native menu validation/display, screenshot/pixel/input navigation, and broader command-palette GUI behavior.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 macOS app walkthrough experiment.",
     ),
@@ -1837,9 +1869,9 @@ ROWS = [
             "config inventory. GTK and Linux runtime effects are marked not "
             "applicable to Roastty's macOS runtime; `macos-option-as-alt` points "
             "to existing key translation guards; remaining macOS app effects "
-            "stay owned by `RUNTIME-011B`."
+            "stay owned by `RUNTIME-011B2`."
         ),
-        missing_evidence="None for platform-specific runtime classification; macOS app behavior gaps remain tracked by RUNTIME-011B.",
+        missing_evidence="None for platform-specific runtime classification; macOS app behavior gaps remain tracked by RUNTIME-011B2.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/platform_runtime_classification.py --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/platform-runtime-classification.md`",
     ),
@@ -1919,7 +1951,8 @@ EXPECTED_IDS = [
     "RUNTIME-010B2B2B1",
     "RUNTIME-010B2B2B2",
     "RUNTIME-011A",
-    "RUNTIME-011B",
+    "RUNTIME-011B1",
+    "RUNTIME-011B2",
     "RUNTIME-012A",
     "RUNTIME-012B1",
     "RUNTIME-012B2A",

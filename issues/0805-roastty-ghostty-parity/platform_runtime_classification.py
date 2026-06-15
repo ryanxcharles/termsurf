@@ -68,11 +68,11 @@ def macos_gap(option: str, family: str) -> PlatformRow:
         platform="macOS",
         applicability="Applicable to Roastty's copied macOS app.",
         status="Gap",
-        owner="RUNTIME-011",
+        owner="RUNTIME-011B2",
         evidence=(
             f"`{option}` affects macOS {family}. Parser/default/formatter coverage "
             "exists, but real macOS app/runtime behavior remains owned by the "
-            "`RUNTIME-011` walkthrough row."
+            "`RUNTIME-011B2` walkthrough row."
         ),
         guard_tier="Tier 3",
         guard="TBD by future CFG-223 macOS app walkthrough experiment.",

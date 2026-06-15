@@ -109,3 +109,97 @@ Fix:
 
 Re-review verdict: **Approved**. The reviewer confirmed the command-block
 finding is resolved and reported no new required findings.
+
+## Result
+
+**Result:** Pass
+
+`RUNTIME-011B` was split into:
+
+- `RUNTIME-011B1`: **Oracle complete** for copied macOS workflow plumbing for
+  windows, tabs, splits, menus, titlebar, fullscreen, and quick terminal.
+- `RUNTIME-011B2`: **Gap** for remaining live macOS GUI behavior: actual
+  window/tab/split/menu/titlebar/fullscreen/quick-terminal GUI behavior, native
+  menu validation/display, screenshot/pixel/input navigation, and broader
+  command-palette GUI behavior.
+
+The new `macos_app_workflow_plumbing_parity.py` guard proves the selected
+workflow source surface matches pinned Ghostty after expected renames for:
+
+- `TerminalController.swift`
+- `TerminalWindow.swift`
+- `SplitTree.swift`
+- `SplitView.swift`
+- `SplitView.Divider.swift`
+- `TerminalSplitTreeView.swift`
+- `QuickTerminalController.swift`
+- `QuickTerminalIntent.swift`
+- `AppDelegate.swift`
+- `Roastty.Config.swift`
+- `Roastty.App.swift`
+- `RoasttyPackage.swift`
+- `FullscreenMode+Extension.swift`
+
+It checks workflow anchors in `BaseTerminalController.swift` instead of
+full-file identity because Experiment 152 already introduced a command-palette
+testable extraction there.
+
+Verification run:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+runtime_rows=73
+oracle_complete=66
+closed=69
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_app_workflow_plumbing_parity.py
+macos_app_workflow_plumbing_parity=pass
+
+(cd roastty && macos/build.nu --action test)
+Test run with 219 tests in 23 suites passed after 1.989 seconds.
+** TEST SUCCEEDED **
+
+for f in issues/0805-roastty-ghostty-parity/*_runtime_parity.py issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py issues/0805-roastty-ghostty-parity/link_hover_modifier_refresh_parity.py issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py; do
+  PYTHONDONTWRITEBYTECODE=1 python3 "$f"
+done
+```
+
+The full runtime guard loop passed. The macOS test run emitted existing Main
+Thread Checker and pasteboard background-thread warnings, but `xcodebuild`
+reported `TEST SUCCEEDED`.
+
+## Conclusion
+
+Copied macOS app workflow command/action/config plumbing now has a durable
+source-parity guard and focused split helper tests. This does not close the live
+app walkthrough gap: actual GUI rendering, native menu display/validation,
+screenshots/pixels, input navigation, fullscreen visuals, quick-terminal
+visuals, and broader command-palette GUI behavior remain in `RUNTIME-011B2`.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer independently verified that:
+
+- Experiment 166 records `Pass`, has Result and Conclusion sections, and the
+  issue README links it as `Pass`.
+- `RUNTIME-011B1` is `Oracle complete`.
+- `RUNTIME-011B2` remains `Gap` for live GUI parity.
+- CFG-223 remains `Gap` with `runtime_rows=73`, `oracle_complete=66`,
+  `closed=69`, `incomplete=4`, and `gap=4`.
+- The new guard is non-vacuous and passed.
+- The full runtime parity guard loop passed.
+- `prettier --check` and `git diff --check` passed.
+- The result commit had not been made before review.
+
+The reviewer did not rerun the generated-inventory write command because it
+mutates markdown during a read-only review.
