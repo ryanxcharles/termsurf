@@ -1350,3 +1350,5 @@ remains open.
   **Pass**
 - [Experiment 136: OSC color report format runtime](136-osc-color-report-format-runtime.md)
   — **Pass**
+- [Experiment 137: Clipboard device attributes runtime](137-clipboard-device-attributes-runtime.md)
+  — **Designed**
