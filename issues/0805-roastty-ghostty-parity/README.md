@@ -1860,3 +1860,5 @@ remains open.
   — **Partial**
 - [Experiment 193: Live Quick Look definition dispatch](193-live-quicklook-definition.md)
   — **Pass**
+- [Experiment 194: Launch Services URL handler delivery](194-launch-services-url-handler-delivery.md)
+  — **Designed**
