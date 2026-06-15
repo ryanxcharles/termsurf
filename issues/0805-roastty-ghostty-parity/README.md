@@ -667,13 +667,21 @@ experiment files until they are proven.
   title bell prefix, and separate `bell-features = system`, `audio`,
   `attention`, `title`, and `border` gates after expected Roastty renames.
   Actual OS/audio/dock/border/title side effects still need GUI or platform
-  walkthrough proof in `RUNTIME-012B2B2`.
+  walkthrough proof in `RUNTIME-012B2B2B`.
 - **OSC desktop notifications need a PTY event queue.** Experiment 141 found
   that Roastty already parsed OSC 9 and OSC 777 desktop notification commands,
   but the live terminal path dropped them. PTY-backed parity now queues terminal
   desktop notification events through `TermioPump`, applies the
   `desktop-notifications` gate at the surface, and dispatches the app action
   with Ghostty's fixed 63-byte title and 255-byte body C-string truncation.
+- **macOS user-notification plumbing is copied source parity.** Experiment 155
+  proved the copied macOS host preserves pinned Ghostty's notification category
+  registration, foreground presentation gate, authorization/settings gate,
+  surface notification content/request lifecycle, identifier cleanup, delayed
+  focused cleanup, and click-to-focus routing after expected Roastty renames.
+  Ghostty core desktop-notification rate limiting, command-finish notifications,
+  app-notifications, live OS banner/sound delivery, actual bell side effects,
+  and link UI flows remain in `RUNTIME-012B2B2B`.
 - **The terminal residual gap was an audit problem, not a hidden runtime
   toggle.** Experiment 142 exhaustively mapped pinned Ghostty `DerivedConfig`,
   direct termio config uses, and stream-handler config updates to existing
@@ -1502,4 +1510,4 @@ remains open.
 - [Experiment 154: Non-glass opacity runtime](154-non-glass-opacity-runtime.md)
   — **Pass**
 - [Experiment 155: macOS user notification runtime](155-macos-user-notification-runtime.md)
-  — **Designed**
+  — **Pass**

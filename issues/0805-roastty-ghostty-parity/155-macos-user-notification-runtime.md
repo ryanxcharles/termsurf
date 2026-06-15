@@ -124,3 +124,70 @@ lifecycle blocks, rather than marker-only checks. Residual risk: this experiment
 is intentionally static source parity and does not prove live macOS notification
 authorization, banner/sound delivery, Notification Center persistence, or async
 scheduling behavior in a running app.
+
+## Result
+
+**Result:** Pass
+
+The copied macOS user-notification presentation and lifecycle slice is now split
+out as `RUNTIME-012B2B2A` with a dedicated static guard. The guard proves:
+
+- `AppDelegate.swift`, `Roastty.App.swift`, and `RoasttyPackage.swift` match
+  pinned Ghostty after expected Ghostty-to-Roastty renames;
+- the notification-relevant `SurfaceView_AppKit.swift` lifecycle blocks match
+  pinned Ghostty after expected renames, including identifier tracking,
+  surface-removal cleanup, focus cleanup, notification content/request fields,
+  `requireFocus` userInfo, delivery callback tracking, delayed focused cleanup,
+  and click-to-focus routing;
+- pinned Ghostty's core desktop-notification rate limiter is present in
+  `Surface.zig` and remains outside this Swift source-level slice.
+
+The remaining notification/link/bell GUI gap moved to `RUNTIME-012B2B2B` and
+continues to track command-finish notifications, app-notifications, native
+desktop notification rate limiting, live OS banner/sound delivery, actual bell
+side effects, link hover/cursor UI, link previews, and context/menu link flows.
+
+Verification passed:
+
+```text
+macos_user_notification_runtime_parity=pass
+desktop_notification_runtime_parity=pass
+bell_presentation_runtime_parity=pass
+terminal_runtime_residual_audit=pass
+```
+
+The runtime inventory generator reported:
+
+```text
+runtime_rows=63
+oracle_complete=57
+closed=59
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+All `*_runtime_parity.py` guards passed.
+
+## Conclusion
+
+The source-level macOS user-notification lifecycle copied from pinned Ghostty is
+closed for parity. This does not close live notification behavior: the next
+notification experiment should target one of the remaining runtime/GUI slices in
+`RUNTIME-012B2B2B`, especially Ghostty core rate limiting or actual macOS
+banner/sound delivery.
+
+## Completion Review
+
+**Reviewer:** Parfit the 2nd
+
+**Verdict:** Approve
+
+The reviewer found no blocking issues. They confirmed the experiment result and
+README status are consistent, the new guard normalized-compares the
+notification-relevant `SurfaceView_AppKit.swift` lifecycle blocks, the
+`RUNTIME-012B2B2A` / `RUNTIME-012B2B2B` split is honest, CFG-223 counts are
+consistent, and the verification commands pass. Residual risk remains limited to
+the explicitly tracked live-notification, command/app notification, bell
+side-effect, and link UI gaps in `RUNTIME-012B2B2B`.
