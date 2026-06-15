@@ -793,7 +793,7 @@ ROWS = [
     ),
     RuntimeRow(
         id="RUNTIME-008B2B2B2B2B",
-        behavior="remaining renderer-visible effects: broader GUI/pixel parity",
+        behavior="remaining renderer-visible background image, colorspace, alpha blending, scroll-to-bottom, and custom shader animation effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` renderer/window visual fields; `vendor/ghostty/src/renderer/generic.zig` derived renderer config and draw paths; `vendor/ghostty/src/Surface.zig` renderer config messages; screenshot/pixel walkthrough paths",
         roastty_reference="`roastty/src/lib.rs` live renderer and render state; `roastty/src/renderer`; copied macOS renderer/window host",
         family="renderer",
@@ -819,12 +819,16 @@ ROWS = [
             "shader cursor pixel readback. Experiment 177 split out focused "
             "live window-padding pixel proof in the macOS app. Experiment "
             "178 split out focused live app/GUI block cursor pixel proof. "
-            "CFG-223 still needs representative runtime or GUI proof for "
-            "broader GUI/pixel parity."
+            "Experiment 179 adds `renderer_visual_residual_audit.py`, which "
+            "audits pinned Ghostty's renderer, shader, surface, config, and "
+            "macOS render-host sources. The audit proves the old broad "
+            "renderer residual is narrowed to concrete remaining "
+            "renderer-visible effects rather than hidden broad GUI/pixel "
+            "parity."
         ),
-        missing_evidence="Add renderer/runtime or GUI smoke rows for broader GUI/pixel parity.",
+        missing_evidence="Add runtime or renderer proof for `custom-shader-animation` focus/always/false draw-timer policy; background image rendering and `background-image-opacity`, `background-image-position`, `background-image-fit`, `background-image-repeat`; `window-colorspace`; `alpha-blending`; and `scroll-to-bottom.output` renderer behavior.",
         guard_tier="Tier 3",
-        guard_command="TBD by future CFG-223 renderer visual experiment.",
+        guard_command="TBD by future CFG-223 renderer visual experiments.",
     ),
     RuntimeRow(
         id="RUNTIME-008B2B2B2B2C",

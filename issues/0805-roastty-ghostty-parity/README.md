@@ -782,6 +782,13 @@ experiment files until they are proven.
   completed rows. The remaining CFG-223 gaps are now explicitly non-terminal:
   font renderer output, renderer-visible GUI/pixel effects, macOS app UI, and
   native notification/link/bell presentation flows.
+- **The renderer visual residual gap is now concrete.** Experiment 179 mapped
+  pinned Ghostty's renderer, shader, surface, config, and macOS render-host
+  sources to the already-completed renderer rows, and found the residual was not
+  empty. The remaining renderer work is now explicitly
+  `custom-shader-animation`, background image rendering/options,
+  `window-colorspace`, `alpha-blending`, and `scroll-to-bottom.output`, rather
+  than a vague broader GUI/pixel bucket.
 - **Facet inventories can outpace their aggregate matrix rows.** Experiment 169
   found CFG-217 through CFG-222 were complete in their generated facet
   inventories while the top-level matrix still reported stale `Gap` rows. The
@@ -1720,4 +1727,4 @@ remains open.
 - [Experiment 178: GUI cursor pixel runtime](178-gui-cursor-pixel-runtime.md) —
   **Pass**
 - [Experiment 179: Renderer visual residual audit](179-renderer-visual-residual-audit.md)
-  — **Designed**
+  — **Pass**

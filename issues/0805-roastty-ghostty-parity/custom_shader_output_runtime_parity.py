@@ -168,12 +168,12 @@ def main() -> int:
     require_all(
         row_gap,
         [
-            ("Gap", "remaining row status"),
-                        ("broader GUI/pixel parity", "remaining GUI parity gap"),
+            ("Gap", "renderer residual row status"),
+            ("custom-shader-animation", "concrete renderer gap evidence"),
         ],
     )
-    if "Add renderer/runtime or GUI smoke rows for broader GUI/pixel parity." not in row_gap:
-        raise AssertionError("remaining renderer gap still has unexpected missing-evidence wording")
+    if "custom-shader-animation` focus/always/false draw-timer policy" not in row_gap:
+        raise AssertionError("renderer residual row still has unexpected missing-evidence wording")
 
     cfg223 = require_row(config_matrix, "CFG-223")
     require_all(

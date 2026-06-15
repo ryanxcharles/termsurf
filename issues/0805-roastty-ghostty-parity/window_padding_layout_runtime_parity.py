@@ -229,7 +229,7 @@ def main() -> int:
         row_gap,
         [
             ("Gap", "RUNTIME-008B2B2B2B2B status"),
-            ("broader GUI/pixel parity", "RUNTIME-008B2B2B2B2B GUI parity gap"),
+            ("custom-shader-animation", "RUNTIME-008B2B2B2B2B concrete gap"),
         ],
     )
     if 'id="RUNTIME-008B2B2",' in read(

@@ -96,8 +96,8 @@ def main() -> int:
     require_all(
         row_gap,
         [
-            ("Gap", "remaining row status"),
-                        ("broader GUI/pixel parity", "remaining GUI parity gap"),
+            ("Gap", "renderer residual row status"),
+            ("custom-shader-animation", "concrete renderer gap evidence"),
         ],
     )
     if "RUNTIME-008B2B2B2B2 |" in runtime_inventory:
