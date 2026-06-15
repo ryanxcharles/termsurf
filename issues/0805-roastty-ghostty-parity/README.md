@@ -1766,3 +1766,5 @@ remains open.
   — **Pass**
 - [Experiment 184: Font renderer residual proof](184-font-renderer-residual-proof.md)
   — **Pass**
+- [Experiment 185: macOS walkthrough residual proof](185-macos-walkthrough-residual-proof.md)
+  — **Designed**
