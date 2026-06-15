@@ -1454,3 +1454,5 @@ remains open.
   — **Pass**
 - [Experiment 149: Font variation runtime](149-font-variation-runtime.md) —
   **Pass**
+- [Experiment 150: Font metric modifier runtime](150-font-metric-modifier-runtime.md)
+  — **Designed**
