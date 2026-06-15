@@ -1364,3 +1364,5 @@ remains open.
   — **Pass**
 - [Experiment 138: Cursor default runtime](138-cursor-default-runtime.md) —
   **Pass**
+- [Experiment 139: Image storage limit runtime](139-image-storage-limit-runtime.md)
+  — **Designed**
