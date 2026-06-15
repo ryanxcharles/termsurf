@@ -301,7 +301,7 @@ def main() -> int:
             ("audible bell output", "RUNTIME-012B2B2B2B2B3C actual GUI effect gap"),
             ("real link hover/cursor pixels", "RUNTIME-012B2B2B2B2B3C hover cursor gap"),
             ("native link preview display", "RUNTIME-012B2B2B2B2B3C link preview gap"),
-            ("native context-menu display", "RUNTIME-012B2B2B2B2B3C context menu gap"),
+            ("external Launch Services handler delivery", "RUNTIME-012B2B2B2B2B3C external URL-handler gap"),
         ],
     )
     if "RUNTIME-012B2B |" in runtime_inventory:
@@ -311,8 +311,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("85 rows Oracle complete", "CFG-223 oracle count"),
-            ("88 rows closed", "CFG-223 closed count"),
+            ("87 rows Oracle complete", "CFG-223 oracle count"),
+            ("90 rows closed", "CFG-223 closed count"),
             ("1 rows are incomplete", "CFG-223 incomplete count"),
             ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],

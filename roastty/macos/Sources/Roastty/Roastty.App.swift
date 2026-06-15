@@ -723,6 +723,15 @@ extension Roastty {
                 url = URL(filePath: expandedPath)
             }
 
+            appendUITestTrace("openURL url=\(url.absoluteString) kind=\(action.kind)")
+            if let expected = ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_RECORD_OPEN_URL_PATH"] {
+                try? Data((url.absoluteString + "\n").utf8).write(to: URL(fileURLWithPath: expected))
+            }
+            if ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_SUPPRESS_OPEN_URL"] == "1" {
+                appendUITestTrace("openURL suppressed=true")
+                return true
+            }
+
             switch action.kind {
             case .text:
                 // Open with the default editor for `*.roastty` file or just system text editor
@@ -743,6 +752,17 @@ extension Roastty {
             // Open with the default application for the URL
             NSWorkspace.shared.open(url)
             return true
+        }
+
+        static func openURLForUITest(_ url: String) -> Bool {
+            guard ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_ENABLE_OPEN_URL_ACTION"] == "1" else { return false }
+            return url.withCString { cString in
+                var action = roastty_action_open_url_s()
+                action.kind = ROASTTY_ACTION_OPEN_URL_KIND_UNKNOWN
+                action.url = cString
+                action.len = UInt(url.utf8.count)
+                return openURL(action)
+            }
         }
 
         private static func undo(_ app: roastty_app_t, target: roastty_target_s) -> Bool {

@@ -128,3 +128,108 @@ count, incomplete count, gap count, CFG-223 status, and remaining gap IDs.
 
 Fresh-context Codex reviewer `Sartre the 3rd` re-reviewed only those fixes and
 returned `VERDICT: APPROVED` with no remaining required findings.
+
+## Result
+
+**Result:** Partial
+
+Experiment 187 closed two slices of the remaining CFG-223 native/OS GUI gap:
+
+- `RUNTIME-012B2B2B2B2B3C1` is now `Oracle complete` for live native
+  context-menu construction. The guard launches the debug app, creates a real
+  terminal surface, invokes the env-gated UI test action, and proves the native
+  `SurfaceView.menu(for:)` path constructs menu items including `Paste`, split
+  actions, and `Change Terminal Title...`.
+- `RUNTIME-012B2B2B2B2B3C2` is now `Oracle complete` for live native app
+  URL-opening request construction. The guard calls the same
+  `Roastty.App.openURL` path with
+  `https://example.com/issue805-exp187-controlled`, records the exact resolved
+  URL to a controlled file, and suppresses the final `NSWorkspace.open` call so
+  the proof is deterministic in this VM.
+
+The URL proof is narrower than the design's preferred external handler. It
+proves Roastty requests opening the exact URL through the native app path; it
+does not prove external Launch Services handler delivery. That remaining
+external handler slice stays in `RUNTIME-012B2B2B2B2B3C`.
+
+The regenerated CFG-223 state is:
+
+- runtime rows: `91`
+- Oracle-complete rows: `87`
+- closed rows: `90`
+- incomplete rows: `1`
+- runtime gaps: `1`
+- CFG-223 status: `Gap`
+- remaining gap ID: `RUNTIME-012B2B2B2B2B3C`
+
+Focused verification passed:
+
+```text
+(cd roastty && macos/build.nu --action build)
+# ** BUILD SUCCEEDED **
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_native_context_menu_trace_runtime.py
+# macos_native_context_menu_trace_runtime=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_controlled_url_open_runtime.py
+# macos_controlled_url_open_runtime=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/notification_link_bell_gui_residual_parity.py
+# notification_link_bell_gui_residual_parity=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+# runtime_rows=91
+# oracle_complete=87
+# closed=90
+# audit_covered=0
+# incomplete=1
+# gap=1
+# cfg223=Gap
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_user_notification_runtime_parity.py
+# macos_user_notification_runtime_parity=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_link_hover_banner_runtime_parity.py
+# macos_link_hover_banner_runtime_parity=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_app_workflow_plumbing_parity.py
+# macos_app_workflow_plumbing_parity=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_presentation_runtime_parity.py
+# bell_presentation_runtime_parity=pass
+
+for guard in issues/0805-roastty-ghostty-parity/*_parity.py issues/0805-roastty-ghostty-parity/*_residual_audit.py issues/0805-roastty-ghostty-parity/macos_*_runtime.py; do
+  PYTHONDONTWRITEBYTECODE=1 python3 "$guard" || exit 1
+done
+# Issue 805 Exp187 fail-fast broad guard sweep completed Mon Jun 15 14:39:10 CDT 2026
+
+python3 -m py_compile issues/0805-roastty-ghostty-parity/*.py
+# pass; removed generated __pycache__
+
+prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/187-native-menu-url-opening-proof.md issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md
+# All matched files use Prettier code style!
+
+git diff --check
+# pass
+```
+
+## Conclusion
+
+Native context-menu construction and native URL-opening request construction are
+now deterministic guarded slices instead of broad residual GUI unknowns. The
+next experiment should target one of the still-open OS-controlled effects in
+`RUNTIME-012B2B2B2B2B3C`: notification banner/sound delivery after
+authorization, audible bell output, dock attention, bell border/title visible
+effects, real link hover/cursor pixels, native link preview display, or external
+Launch Services handler delivery.
+
+## Completion Review
+
+Fresh-context Codex adversarial reviewer `Faraday the 3rd` reviewed the
+completed experiment, including the working-tree diff from plan commit
+`a923565ce`, changed Swift hooks, new live guards, inventory split, README
+updates, claimed build/test logs, and commit-gate status.
+
+Verdict: **Approved**.
+
+Findings: none.

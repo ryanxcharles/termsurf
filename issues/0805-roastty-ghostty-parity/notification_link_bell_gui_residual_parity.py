@@ -61,7 +61,7 @@ def main() -> int:
     require("Gap" in cfg223, f"CFG-223 should remain Gap: {cfg223}")
     require_text(
         matrix,
-        "Runtime inventory coverage: 85 rows Oracle complete; 88 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
+        "Runtime inventory coverage: 87 rows Oracle complete; 90 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
         "CFG-223 split counts",
     )
 
@@ -82,6 +82,20 @@ def main() -> int:
     require_text(bell, "configured audio-path request trace", "bell audio trace evidence")
     require_text(bell, "macos_notification_link_bell_trace_runtime.py", "bell live guard command")
 
+    context_menu_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C1")
+    context_menu = row_line(runtime, "RUNTIME-012B2B2B2B2B3C1")
+    require(context_menu_cells[4] == "notifications", f"unexpected context-menu row family: {context_menu_cells}")
+    require(context_menu_cells[5] == "Oracle complete", f"unexpected context-menu row status: {context_menu_cells}")
+    require_text(context_menu, "native context-menu construction", "context-menu live evidence")
+    require_text(context_menu, "macos_native_context_menu_trace_runtime.py", "context-menu live guard command")
+
+    url_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C2")
+    url = row_line(runtime, "RUNTIME-012B2B2B2B2B3C2")
+    require(url_cells[4] == "notifications", f"unexpected URL row family: {url_cells}")
+    require(url_cells[5] == "Oracle complete", f"unexpected URL row status: {url_cells}")
+    require_text(url, "openURL", "URL-opening live evidence")
+    require_text(url, "macos_controlled_url_open_runtime.py", "URL-opening live guard command")
+
     gap_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C")
     gap = row_line(runtime, "RUNTIME-012B2B2B2B2B3C")
     require(gap_cells[4] == "notifications", f"unexpected gap row family: {gap_cells}")
@@ -93,8 +107,7 @@ def main() -> int:
         "bell border/title visible effects",
         "real link hover/cursor pixels",
         "native link preview display",
-        "native context-menu display",
-        "OS URL-opening with a controlled handler",
+        "external Launch Services handler delivery",
     ]:
         require_text(gap, needle, f"remaining exact gap slice {needle}")
 
@@ -112,6 +125,22 @@ def main() -> int:
         f"stderr:\n{result.stderr}",
     )
     require_text(result.stdout, "macos_notification_link_bell_trace_runtime=pass", "live guard pass marker")
+
+    for guard in [
+        ISSUE / "macos_native_context_menu_trace_runtime.py",
+        ISSUE / "macos_controlled_url_open_runtime.py",
+    ]:
+        result = subprocess.run(
+            ["python3", str(guard)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=90,
+        )
+        require(
+            result.returncode == 0,
+            f"{guard.name} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
     print("notification_link_bell_gui_residual_parity=pass")
     return 0

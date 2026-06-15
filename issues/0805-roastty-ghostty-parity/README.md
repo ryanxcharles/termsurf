@@ -1022,6 +1022,13 @@ experiment files until they are proven.
   deterministic proof for OS banner delivery, audible output, dock attention,
   link hover pixels, native previews/menus, or URL-opening handlers. CFG-223 now
   has one exact remaining gap in `RUNTIME-012B2B2B2B2B3C`.
+- **Native menu and URL-opening request proof can be deterministic without
+  external OS side effects.** Experiment 187 closed native context-menu
+  construction with a live `SurfaceView.menu(for:)` trace and closed native
+  URL-opening request construction by calling the real `Roastty.App.openURL`
+  path with an env-gated test action and suppressed final `NSWorkspace.open`.
+  External Launch Services handler delivery remains an honest VM/OS-controlled
+  gap in `RUNTIME-012B2B2B2B2B3C`.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1786,4 +1793,4 @@ remains open.
 - [Experiment 186: Notification/link/bell GUI residual proof](186-notification-link-bell-gui-residual-proof.md)
   — **Partial**
 - [Experiment 187: Native menu and URL-opening proof](187-native-menu-url-opening-proof.md)
-  — **Designed**
+  — **Partial**

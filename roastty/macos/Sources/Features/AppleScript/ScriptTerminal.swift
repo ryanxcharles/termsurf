@@ -72,6 +72,16 @@ final class ScriptTerminal: NSObject {
     /// Used by command handling (`perform action ... on <terminal>`).
     func perform(action: String) -> Bool {
         guard NSApp.isAppleScriptEnabled else { return false }
+        if action == "ui_test_context_menu" {
+            guard ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_ENABLE_CONTEXT_MENU_ACTION"] == "1" else { return false }
+            surfaceView?.performSelector(onMainThread: #selector(Roastty.SurfaceView.showUITestContextMenu(_:)), with: nil, waitUntilDone: true)
+            return true
+        }
+        if action.hasPrefix("ui_test_open_url:") {
+            guard ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_ENABLE_OPEN_URL_ACTION"] == "1" else { return false }
+            let url = String(action.dropFirst("ui_test_open_url:".count))
+            return Roastty.App.openURLForUITest(url)
+        }
         guard let surfaceModel = surfaceView?.surfaceModel else { return false }
         return surfaceModel.perform(action: action)
     }

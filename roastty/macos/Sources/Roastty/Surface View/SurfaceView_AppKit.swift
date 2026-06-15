@@ -1614,6 +1614,26 @@ extension Roastty {
             return menu
         }
 
+        @objc func showUITestContextMenu(_ sender: Any?) {
+            guard ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_ENABLE_CONTEXT_MENU_ACTION"] == "1" else { return }
+            let event = NSEvent.mouseEvent(
+                with: .rightMouseDown,
+                location: CGPoint(x: bounds.midX, y: bounds.midY),
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window?.windowNumber ?? 0,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1
+            )
+            guard let event, let menu = menu(for: event) else {
+                appendUITestKeyTrace("contextMenu uiTestAction=no-menu")
+                return
+            }
+            appendUITestKeyTrace("contextMenu uiTestAction items=\(menu.items.map { $0.title }.joined(separator: "|"))")
+        }
+
         // MARK: Menu Handlers
 
         @IBAction func copy(_ sender: Any?) {

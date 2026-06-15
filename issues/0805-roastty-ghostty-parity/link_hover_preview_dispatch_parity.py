@@ -113,8 +113,7 @@ def main() -> int:
             ("audible bell output", "remaining bell gap"),
             ("real link hover/cursor pixels", "remaining hover UI gap"),
             ("native link preview display", "remaining preview UI gap"),
-            ("native context-menu display", "remaining menu UI gap"),
-            ("OS URL-opening with a controlled handler", "remaining OS URL gap"),
+            ("external Launch Services handler delivery", "remaining external URL-handler gap"),
         ],
     )
     if "runtime `mouse_over_link` preview dispatch" in row_gap:
@@ -124,8 +123,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("85 rows Oracle complete", "CFG-223 oracle count"),
-            ("88 rows closed", "CFG-223 closed count"),
+            ("87 rows Oracle complete", "CFG-223 oracle count"),
+            ("90 rows closed", "CFG-223 closed count"),
             ("1 rows are incomplete", "CFG-223 incomplete count"),
             ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],

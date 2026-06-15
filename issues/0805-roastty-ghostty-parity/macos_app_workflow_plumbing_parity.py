@@ -41,7 +41,14 @@ def strip_ui_trace_hooks(source: str) -> str:
             if helper_depth <= 0:
                 skip_helper = False
             continue
-        if "func appendUITestTrace(" in line or "func appendUITestKeyTrace(" in line:
+        if (
+            "func appendUITestTrace(" in line
+            or "func appendUITestKeyTrace(" in line
+            or "static func openURLForUITest(" in line
+            or 'if let expected = ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_RECORD_OPEN_URL_PATH"]' in line
+            or 'if ProcessInfo.processInfo.environment["ROASTTY_UI_TEST_SUPPRESS_OPEN_URL"] == "1"' in line
+            or "func showUITestContextMenu(" in line
+        ):
             skip_helper = True
             helper_depth = line.count("{") - line.count("}")
             continue
@@ -55,7 +62,10 @@ def strip_ui_trace_hooks(source: str) -> str:
             continue
         stripped.append(line)
     result = "\n".join(stripped) + ("\n" if source.endswith("\n") else "")
-    return result.replace("\n\n}\n\n/// Represents", "\n}\n\n/// Represents").replace(
+    return result.replace("\n\n\n            switch action.kind", "\n\n            switch action.kind").replace(
+        "\n        }\n\n\n        private static func undo",
+        "\n        }\n\n        private static func undo",
+    ).replace("\n\n}\n\n/// Represents", "\n}\n\n/// Represents").replace(
         "\n\n\n        private static func setInitialSize",
         "\n\n        private static func setInitialSize",
     )
@@ -406,16 +416,16 @@ def main() -> int:
         command_palette_guard,
         [
             ('require_row(runtime_inventory, "RUNTIME-011B2B")', "command palette gap id update"),
-            ("85 rows Oracle complete", "command palette CFG-223 oracle count"),
-            ("88 rows closed", "command palette CFG-223 closed count"),
+            ("87 rows Oracle complete", "command palette CFG-223 oracle count"),
+            ("90 rows closed", "command palette CFG-223 closed count"),
         ],
     )
     require_all(
         terminal_residual_guard,
         [
             ('("RUNTIME-011B2B", "macOS residual row remains tracked")', "terminal residual macOS id update"),
-            ("85 rows Oracle complete", "terminal residual CFG-223 oracle count"),
-            ("88 rows closed", "terminal residual CFG-223 closed count"),
+            ("87 rows Oracle complete", "terminal residual CFG-223 oracle count"),
+            ("90 rows closed", "terminal residual CFG-223 closed count"),
         ],
     )
 
@@ -423,8 +433,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("85 rows Oracle complete", "CFG-223 oracle count"),
-            ("88 rows closed", "CFG-223 closed count"),
+            ("87 rows Oracle complete", "CFG-223 oracle count"),
+            ("90 rows closed", "CFG-223 closed count"),
             ("1 rows are incomplete", "CFG-223 incomplete count"),
             ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],
