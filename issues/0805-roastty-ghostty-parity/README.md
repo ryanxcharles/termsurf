@@ -1520,3 +1520,5 @@ remains open.
   — **Pass**
 - [Experiment 156: Desktop notification rate limit](156-desktop-notification-rate-limit.md)
   — **Pass**
+- [Experiment 157: Command-finished runtime](157-command-finished-runtime.md) —
+  **Designed**
