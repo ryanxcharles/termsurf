@@ -1686,3 +1686,5 @@ remains open.
   **Pass**
 - [Experiment 174: Quick Terminal GUI runtime](174-quick-terminal-gui-runtime.md)
   — **Pass**
+- [Experiment 175: macOS split layout runtime](175-macos-split-layout-runtime.md)
+  — **Designed**
