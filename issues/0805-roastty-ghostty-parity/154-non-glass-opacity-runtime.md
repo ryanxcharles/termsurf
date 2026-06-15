@@ -122,3 +122,105 @@ Optional findings:
   relatively. The design was tightened to state the expected post-split counts:
   `runtime_rows=62`, `oracle_complete=56`, `closed=58`, `incomplete=4`, `gap=4`,
   and `cfg223=Gap`.
+
+## Result
+
+**Result:** Pass
+
+Implemented the static copied macOS non-glass opacity parity guard and split the
+renderer-visible runtime inventory:
+
+- `RUNTIME-008B2B2B2A`: **Oracle complete** for copied macOS non-glass
+  compositor opacity host behavior.
+- `RUNTIME-008B2B2B2B`: **Gap** for remaining renderer-visible effects: GUI
+  cursor pixels, custom shader output, broader GUI/pixel parity, and
+  screenshot-level padding pixel proof.
+
+The new guard proves that Roastty preserves pinned Ghostty's copied macOS
+non-glass opacity host behavior after expected product renames. It checks
+regular terminal windows, transparent titlebar windows, and quick terminal
+windows for background opacity thresholding, fullscreen/opaque-toggle
+suppression, the 0.001 white background workaround, non-glass blur ABI calls,
+preferred background alpha clamping, titlebar preferred-color forwarding, and
+quick-terminal opacity handling.
+
+Verification passed:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/non_glass_opacity_runtime_parity.py
+```
+
+Output:
+
+```text
+non_glass_opacity_runtime_parity=pass
+```
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_glass_visual_runtime_parity.py
+```
+
+The adjacent macOS glass guard passed.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+runtime_rows=62
+oracle_complete=56
+closed=58
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+```bash
+for guard in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do
+  PYTHONDONTWRITEBYTECODE=1 python3 "$guard" || exit 1
+done
+```
+
+The full runtime parity loop passed, including
+`non_glass_opacity_runtime_parity=pass`.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py
+```
+
+Output:
+
+```text
+terminal_runtime_residual_audit=pass
+```
+
+## Conclusion
+
+Roastty preserves the copied macOS non-glass opacity host behavior for this
+bounded source-level slice. This closes the deterministic window/quick-terminal
+opacity wiring without claiming screenshot-level opacity pixels, GUI cursor
+pixels, custom shader output, or broader GUI visual parity.
+
+CFG-223 remains open with four unresolved runtime gaps: remaining font renderer
+output effects, remaining renderer-visible GUI/pixel effects, remaining macOS
+app workflow/UI effects, and remaining notification/link/bell GUI effects.
+
+## Completion Review
+
+Adversarial subagent `019eca1d-0998-7123-88b9-2f9ac6d161e5` reviewed the
+completed experiment with fresh context and returned `VERDICT: APPROVED`.
+
+Findings: none.
+
+The reviewer independently verified the new non-glass opacity guard, the
+adjacent macOS glass guard, regenerated runtime inventory to `/tmp`, the full
+runtime parity guard loop, the terminal runtime residual audit, and
+`git diff --check`. The reviewer also confirmed that no product code changed,
+that no result commit existed after plan commit `c39887b69`, that the README
+marks Experiment 154 as `Pass`, and that `RUNTIME-008B2B2B2A` stays limited to
+source-level copied macOS host parity while `RUNTIME-008B2B2B2B` keeps GUI
+cursor pixels, custom shader output, broader GUI/pixel parity, and
+screenshot-level padding pixel proof as gaps.

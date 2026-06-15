@@ -771,6 +771,15 @@ experiment files until they are proven.
   compositor opacity, GUI cursor pixels, custom shader output, broader GUI/
   pixel parity, and screenshot-level padding pixel proof remain in
   `RUNTIME-008B2B2B2`.
+- **Non-glass opacity also lives in the copied macOS host.** Experiment 154
+  proved `TerminalWindow.swift`, `TransparentTitlebarTerminalWindow.swift`, and
+  `QuickTerminalController.swift` are rename-equivalent to pinned Ghostty and
+  preserve background opacity thresholding, fullscreen/opaque-toggle
+  suppression, the 0.001 white background workaround, non-glass blur ABI calls,
+  preferred background alpha clamping, titlebar forwarding, and quick-terminal
+  opacity handling. GUI cursor pixels, custom shader output, broader GUI/pixel
+  parity, and screenshot-level padding pixel proof remain in
+  `RUNTIME-008B2B2B2B`.
 - **Command palette runtime plumbing can be proven without a full GUI
   walkthrough.** Experiment 152 split copied command palette source parity,
   toggle notification delivery, `commandPaletteIsShowing` state, focus return,
@@ -1491,4 +1500,4 @@ remains open.
 - [Experiment 153: Bell presentation runtime](153-bell-presentation-runtime.md)
   — **Pass**
 - [Experiment 154: Non-glass opacity runtime](154-non-glass-opacity-runtime.md)
-  — **Designed**
+  — **Pass**

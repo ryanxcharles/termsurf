@@ -154,16 +154,16 @@ def main() -> int:
         ],
     )
 
-    row_008b = require_row(runtime_inventory, "RUNTIME-008B2B2B2")
+    row_008b = require_row(runtime_inventory, "RUNTIME-008B2B2B2B")
     require_all(
         row_008b,
         [
-            ("Gap", "RUNTIME-008B2B2B2 status"),
-            ("non-glass compositor opacity", "RUNTIME-008B2B2B2 opacity gap"),
-            ("non-glass compositor opacity", "RUNTIME-008B2B2B2 blur gap"),
-            ("screenshot-level padding pixel proof", "RUNTIME-008B2B2B2 screenshot padding gap"),
-            ("GUI cursor pixels", "RUNTIME-008B2B2B2 GUI cursor gap"),
-            ("custom shader output", "RUNTIME-008B2B2B2 custom shader gap"),
+            ("Gap", "RUNTIME-008B2B2B2B status"),
+            ("non-glass compositor opacity", "RUNTIME-008B2B2B2B opacity gap"),
+            ("non-glass compositor opacity", "RUNTIME-008B2B2B2B blur gap"),
+            ("screenshot-level padding pixel proof", "RUNTIME-008B2B2B2B screenshot padding gap"),
+            ("GUI cursor pixels", "RUNTIME-008B2B2B2B GUI cursor gap"),
+            ("custom shader output", "RUNTIME-008B2B2B2B custom shader gap"),
         ],
     )
 
@@ -173,8 +173,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains gap"),
-            ("55 rows Oracle complete", "CFG-223 oracle count"),
-            ("57 rows closed", "CFG-223 closed count"),
+            ("56 rows Oracle complete", "CFG-223 oracle count"),
+            ("58 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],
