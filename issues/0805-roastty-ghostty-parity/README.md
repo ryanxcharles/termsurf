@@ -1490,3 +1490,5 @@ remains open.
   **Pass**
 - [Experiment 153: Bell presentation runtime](153-bell-presentation-runtime.md)
   — **Pass**
+- [Experiment 154: Non-glass opacity runtime](154-non-glass-opacity-runtime.md)
+  — **Designed**
