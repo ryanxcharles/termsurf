@@ -366,18 +366,21 @@ def main() -> int:
             "use_linear_correction",
         ],
     )
-
-    residual = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B")
-    require_all(
-        residual,
+    require_row_complete(
+        runtime_inventory,
+        "RUNTIME-008B2B2B2B2B4",
         [
-            ("Gap", "residual renderer row status"),
-            ("scroll-to-bottom.output", "scroll-to-bottom output gap"),
-            ("TBD by future CFG-223 renderer visual experiments", "future renderer guard"),
+            "scroll-to-bottom output",
+            "synchronized output",
+            "node pointer and `y`",
+            "scroll_to_bottom_output_runtime_parity.py",
         ],
     )
-    if "custom-shader-animation" in residual:
-        raise AssertionError("custom-shader-animation still appears in residual renderer gap")
+    for line in runtime_inventory.splitlines():
+        if line.startswith("| RUNTIME-008B2B2B2B2B "):
+            raise AssertionError("old renderer residual row still exists")
+
+    scroll_row = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B4")
     for forbidden in [
         "background-image-opacity",
         "background-image-position",
@@ -386,8 +389,8 @@ def main() -> int:
         "window-colorspace",
         "alpha-blending",
     ]:
-        if forbidden in residual:
-            raise AssertionError(f"{forbidden} still appears in residual renderer gap")
+        if forbidden in scroll_row:
+            raise AssertionError(f"{forbidden} still appears in scroll-to-bottom row")
 
     require_row(runtime_inventory, "RUNTIME-007B2B2B2B2")
     require_row(runtime_inventory, "RUNTIME-011B2B")
@@ -403,18 +406,23 @@ def main() -> int:
     require_all(
         inventory_source,
         [
-            ('id="RUNTIME-008B2B2B2B2B"', "source residual row"),
             ('id="RUNTIME-008B2B2B2B2B1"', "source custom shader animation row"),
             ('id="RUNTIME-008B2B2B2B2B2"', "source background image row"),
             ('id="RUNTIME-008B2B2B2B2B3"', "source color uniform row"),
+            ('id="RUNTIME-008B2B2B2B2B4"', "source scroll-to-bottom row"),
             ("background_image_runtime_parity.py", "source background image guard"),
             ("color_uniform_runtime_parity.py", "source color uniform guard"),
-            ("renderer_visual_residual_audit.py", "source residual guard"),
+            (
+                "scroll_to_bottom_output_runtime_parity.py",
+                "source scroll-to-bottom guard",
+            ),
             ('id="RUNTIME-007B2B2B2B2"', "font gap remains tracked"),
             ('id="RUNTIME-011B2B"', "macOS walkthrough gap remains tracked"),
             ('id="RUNTIME-012B2B2B2B2B3"', "notification gap remains tracked"),
         ],
     )
+    if 'id="RUNTIME-008B2B2B2B2B"' in inventory_source:
+        raise AssertionError("old renderer residual row still exists in source")
 
     cfg223 = require_row(config_matrix, "CFG-223")
     require_all(
@@ -422,10 +430,10 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains open"),
-            ("80 rows Oracle complete", "CFG-223 oracle count"),
-            ("83 rows closed", "CFG-223 closed count"),
-            ("4 rows are incomplete", "CFG-223 incomplete count"),
-            ("4 rows are runtime gaps", "CFG-223 gap count"),
+            ("81 rows Oracle complete", "CFG-223 oracle count"),
+            ("84 rows closed", "CFG-223 closed count"),
+            ("3 rows are incomplete", "CFG-223 incomplete count"),
+            ("3 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 

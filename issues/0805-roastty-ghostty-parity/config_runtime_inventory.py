@@ -792,46 +792,34 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml cell_text_cursor -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml cell_text_wide_cursor_overrides_second_cell -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml cell_text_non_wide_cursor_does_not_override_second_cell -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/metal_cursor_pixel_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-008B2B2B2B2B",
-        behavior="remaining renderer-visible scroll-to-bottom output effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` renderer/window visual fields; `vendor/ghostty/src/renderer/generic.zig` derived renderer config and draw paths; `vendor/ghostty/src/Surface.zig` renderer config messages; screenshot/pixel walkthrough paths",
-        roastty_reference="`roastty/src/lib.rs` live renderer and render state; `roastty/src/renderer`; copied macOS renderer/window host",
+        id="RUNTIME-008B2B2B2B2B4",
+        behavior="scroll-to-bottom output renderer-time viewport behavior",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `scroll-to-bottom`; `vendor/ghostty/src/renderer/generic.zig` synchronized-output skip, bottom-right marker tracking, and `scrollViewport(.bottom)` render-time behavior",
+        roastty_reference="`roastty/src/lib.rs` `scroll_to_bottom_on_output_before_present` and `scroll_to_bottom_output_*` tests; `roastty/src/terminal/terminal.rs` synchronized-output and active screen bottom-right accessors",
         family="renderer",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
-            "Experiment 125 split out the proven scheduler/cursor/focus/"
-            "occlusion/rebuild control slice. Experiment 133 split out "
-            "deterministic renderer knob sourcing, background-opacity-cells "
-            "behavior, opacity conversion/clamping, window-padding-color "
-            "padding-extension decisions, and thicken knob sourcing. "
-            "Experiment 134 split out deterministic selected cursor render "
-            "data, color/text-color resolution, wide cursor render data, lock "
-            "fallback rendering, and cursor list routing. Experiment 144 "
-            "split out password/preedit cursor-style priority through the "
-            "active frame renderer path. Experiment 148 split out "
-            "deterministic window-padding scaling, balance layout math, "
-            "active live renderer padded Size/grid wiring, and padded PTY "
-            "row/column state. Experiment 151 split out copied macOS "
-            "`macos-glass*` blur/opacity host behavior. Experiment 154 split "
-            "out copied macOS non-glass compositor opacity host behavior. "
-            "Experiment 163 split out deterministic Metal custom shader output "
-            "readback. Experiment 164 split out deterministic Metal text "
-            "shader cursor pixel readback. Experiment 177 split out focused "
-            "live window-padding pixel proof in the macOS app. Experiment "
-            "178 split out focused live app/GUI block cursor pixel proof. "
-            "Experiment 179 adds `renderer_visual_residual_audit.py`, which "
-            "audits pinned Ghostty's renderer, shader, surface, config, and "
-            "macOS render-host sources. The audit proves the old broad "
-            "renderer residual is narrowed to concrete remaining "
-            "renderer-visible effects rather than hidden broad GUI/pixel "
-            "parity. Experiment 180 split out the custom shader animation "
-            "draw-timer policy. Experiment 181 split out deterministic "
-            "background image renderer runtime behavior. Experiment 182 split "
-            "out deterministic color uniform behavior."
+            "Experiment 183 ports pinned Ghostty's `scroll-to-bottom.output` "
+            "render-time behavior. `Surface::present_live` calls "
+            "`scroll_to_bottom_on_output_before_present` before frame rendering, "
+            "matching Ghostty's pre-render state update ordering. The helper "
+            "does nothing when synchronized output mode is active, when the "
+            "config output flag is false, when the bottom marker is unavailable, "
+            "or when the active/screen bottom marker's node pointer and `y` "
+            "match the stored marker. When the marker changes, it stores the "
+            "new marker and scrolls the terminal viewport to bottom. Focused "
+            "`scroll_to_bottom_output_*` tests prove the disabled config path "
+            "preserves a history viewport, the enabled path scrolls once per "
+            "bottom marker, repeated renders without output do not scroll, and "
+            "synchronized output skips both scrolling and marker advancement "
+            "until the mode is disabled. "
+            "`scroll_to_bottom_output_runtime_parity.py` statically checks the "
+            "pinned Ghostty anchors, Roastty implementation, focused tests, and "
+            "this inventory split."
         ),
-        missing_evidence="Add runtime or renderer proof for `scroll-to-bottom.output` renderer behavior.",
-        guard_tier="Tier 3",
-        guard_command="TBD by future CFG-223 renderer visual experiments.",
+        missing_evidence="None for deterministic `scroll-to-bottom.output` renderer-time viewport behavior.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml scroll_to_bottom_output -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/scroll_to_bottom_output_runtime_parity.py`",
     ),
     RuntimeRow(
         id="RUNTIME-008B2B2B2B2B1",
@@ -854,7 +842,7 @@ ROWS = [
             "checks pinned Ghostty `syncDrawTimer`, Roastty implementation "
             "markers, tests, and this inventory split."
         ),
-        missing_evidence="None for custom-shader-animation focus/always/false draw-timer policy. `scroll-to-bottom.output` remains tracked by RUNTIME-008B2B2B2B2B; background image renderer behavior is tracked by RUNTIME-008B2B2B2B2B2 and color uniform behavior is tracked by RUNTIME-008B2B2B2B2B3.",
+        missing_evidence="None for custom-shader-animation focus/always/false draw-timer policy. `scroll-to-bottom.output` remains tracked by RUNTIME-008B2B2B2B2B4; background image renderer behavior is tracked by RUNTIME-008B2B2B2B2B2 and color uniform behavior is tracked by RUNTIME-008B2B2B2B2B3.",
         guard_tier="Tier 2",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml custom_shader_animation -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/custom_shader_animation_runtime_parity.py`",
     ),
@@ -884,7 +872,7 @@ ROWS = [
             "config-change, buffer, and draw anchors against Roastty's "
             "implementation, tests, and this inventory split."
         ),
-        missing_evidence="None for deterministic background image renderer runtime behavior. `scroll-to-bottom.output` remains tracked by RUNTIME-008B2B2B2B2B; color uniform behavior is tracked by RUNTIME-008B2B2B2B2B3.",
+        missing_evidence="None for deterministic background image renderer runtime behavior. `scroll-to-bottom.output` remains tracked by RUNTIME-008B2B2B2B2B4; color uniform behavior is tracked by RUNTIME-008B2B2B2B2B3.",
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml background_image -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml bg_image -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/background_image_runtime_parity.py`",
     ),
@@ -911,7 +899,7 @@ ROWS = [
             "statically checks the pinned Ghostty config, renderer, shader, "
             "Roastty implementation, tests, and this inventory split."
         ),
-        missing_evidence="None for deterministic colorspace and alpha-blending Metal uniform behavior. `scroll-to-bottom.output` remains tracked by RUNTIME-008B2B2B2B2B.",
+        missing_evidence="None for deterministic colorspace and alpha-blending Metal uniform behavior. `scroll-to-bottom.output` remains tracked by RUNTIME-008B2B2B2B2B4.",
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml update_color_config -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml uniforms_new -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml uniforms_from_config_sources_config_values -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml metal_uniform_layout_matches_standard_shader_struct -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/color_uniform_runtime_parity.py`",
     ),
@@ -2339,7 +2327,7 @@ EXPECTED_IDS = [
     "RUNTIME-008B2B2B2A",
     "RUNTIME-008B2B2B2B1",
     "RUNTIME-008B2B2B2B2A",
-    "RUNTIME-008B2B2B2B2B",
+    "RUNTIME-008B2B2B2B2B4",
     "RUNTIME-008B2B2B2B2B1",
     "RUNTIME-008B2B2B2B2B2",
     "RUNTIME-008B2B2B2B2B3",

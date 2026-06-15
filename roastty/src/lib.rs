@@ -2819,6 +2819,7 @@ struct Surface {
     cursor_blink_next: std::time::Instant,
     last_cursor_reset: Option<std::time::Instant>,
     last_bell_time: Option<std::time::Instant>,
+    last_output_bottom_marker: Option<OutputBottomMarker>,
     last_termio_error: Option<String>,
     /// The app-provided `NSView` (macOS) captured from `surface_config.platform.macos.nsview`
     /// (Issue 802 / Exp 15) — the live-render target. Null off-macOS or when not supplied.
@@ -2831,6 +2832,21 @@ struct Surface {
     present_driver: Option<PresentDriver>,
     #[cfg(test)]
     test_termio_events: VecDeque<termio::TermioWorkerEvent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OutputBottomMarker {
+    node: *const (),
+    y: u16,
+}
+
+impl From<TerminalGridRef> for OutputBottomMarker {
+    fn from(value: TerminalGridRef) -> Self {
+        Self {
+            node: value.node,
+            y: value.y,
+        }
+    }
 }
 
 const CURSOR_BLINK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(600);
@@ -4449,6 +4465,7 @@ impl Surface {
             cell_width: self.size.cell_width_px,
             cell_height: self.size.cell_height_px,
         };
+        self.scroll_to_bottom_on_output_before_present(&config);
         let Some(live) = self.renderer.as_mut() else {
             return;
         };
@@ -4555,6 +4572,31 @@ impl Surface {
                 eprintln!("[roastty] live present error: {e:?}");
             }
         });
+    }
+
+    fn scroll_to_bottom_on_output_before_present(&mut self, config: &config::Config) {
+        if !config.scroll_to_bottom.output {
+            return;
+        }
+        let Some(worker) = self.termio_worker.as_ref() else {
+            return;
+        };
+        let last_marker = self.last_output_bottom_marker;
+        let next_marker = worker.with_termio_mut(|termio| {
+            let terminal = termio.terminal_mut();
+            if terminal.synchronized_output_enabled() {
+                return None;
+            }
+            let marker = OutputBottomMarker::from(terminal.active_screen_bottom_right()?);
+            if Some(marker) == last_marker {
+                return None;
+            }
+            terminal.scroll_viewport_to_bottom();
+            Some(marker)
+        });
+        if let Some(marker) = next_marker {
+            self.last_output_bottom_marker = Some(marker);
+        }
     }
 
     fn wakeup_app(&self) {
@@ -18723,6 +18765,7 @@ pub extern "C" fn roastty_surface_new(
         cursor_blink_next: std::time::Instant::now() + CURSOR_BLINK_INTERVAL,
         last_cursor_reset: None,
         last_bell_time: None,
+        last_output_bottom_marker: None,
         last_termio_error: None,
         // Capture the app's NSView (macOS) for the live-render target (Exp 15). Null off-macOS.
         nsview: if config.platform_tag == 1 {
@@ -21536,6 +21579,225 @@ mod tests {
     fn test_worker_with_size(script: &str, size: PtySize) -> termio::TermioWorker {
         let termio = termio::Termio::spawn("/bin/sh", ["-c", script], size).expect("spawn termio");
         termio::TermioWorker::spawn(termio, 10, 4096).expect("spawn termio worker")
+    }
+
+    fn scroll_to_bottom_output_test_size() -> PtySize {
+        PtySize {
+            rows: 6,
+            cols: 20,
+            width_px: 200,
+            height_px: 120,
+        }
+    }
+
+    fn attach_scroll_to_bottom_output_worker(surface: RoasttySurface) {
+        surface_from_handle(surface).unwrap().termio_worker = Some(test_worker_with_size(
+            "sleep 1",
+            scroll_to_bottom_output_test_size(),
+        ));
+    }
+
+    fn with_surface_terminal<R>(
+        surface: RoasttySurface,
+        f: impl FnOnce(&terminal::terminal::Terminal) -> R,
+    ) -> R {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| f(termio.terminal()))
+    }
+
+    fn with_surface_terminal_mut<R>(
+        surface: RoasttySurface,
+        f: impl FnOnce(&mut terminal::terminal::Terminal) -> R,
+    ) -> R {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio_mut(|termio| f(termio.terminal_mut()))
+    }
+
+    fn scroll_to_bottom_output_seed_terminal(surface: RoasttySurface) {
+        with_surface_terminal_mut(surface, |terminal| {
+            let mut content = String::new();
+            for i in 0..24 {
+                content.push_str(&format!("seed-{i:02}\r\n"));
+            }
+            terminal.next_slice(content.as_bytes()).unwrap();
+        });
+    }
+
+    fn scroll_to_bottom_output_write(surface: RoasttySurface, label: &str) {
+        with_surface_terminal_mut(surface, |terminal| {
+            terminal
+                .next_slice(format!("{label}\r\n").as_bytes())
+                .unwrap();
+        });
+    }
+
+    fn scroll_to_bottom_output_scroll_history(surface: RoasttySurface) {
+        with_surface_terminal_mut(surface, |terminal| {
+            terminal.scroll_viewport_delta_row(-100);
+        });
+    }
+
+    fn scroll_to_bottom_output_at_bottom(surface: RoasttySurface) -> bool {
+        with_surface_terminal(surface, |terminal| {
+            let Some((_, viewport_bottom)) = terminal.viewport_bounds() else {
+                return false;
+            };
+            let Some(active_bottom) = terminal.active_screen_bottom_right() else {
+                return false;
+            };
+            viewport_bottom.node == active_bottom.node && viewport_bottom.y == active_bottom.y
+        })
+    }
+
+    fn run_scroll_to_bottom_output_helper(surface: RoasttySurface) {
+        let surface_ref = surface_from_handle(surface).unwrap();
+        let config = surface_ref.active_config();
+        surface_ref.scroll_to_bottom_on_output_before_present(&config);
+    }
+
+    #[test]
+    fn scroll_to_bottom_output_disabled_preserves_history_viewport() {
+        let _guard = pty_command_lock();
+        let app = new_test_app();
+        let surface = new_test_surface(app);
+        attach_scroll_to_bottom_output_worker(surface);
+
+        scroll_to_bottom_output_seed_terminal(surface);
+        scroll_to_bottom_output_scroll_history(surface);
+        assert!(!scroll_to_bottom_output_at_bottom(surface));
+
+        scroll_to_bottom_output_write(surface, "disabled-output");
+        run_scroll_to_bottom_output_helper(surface);
+
+        assert!(
+            !scroll_to_bottom_output_at_bottom(surface),
+            "disabled scroll-to-bottom.output must not scroll on output"
+        );
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .last_output_bottom_marker,
+            None
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn scroll_to_bottom_output_enabled_scrolls_once_per_bottom_marker() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str("scroll-to-bottom = output\n");
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        attach_scroll_to_bottom_output_worker(surface);
+
+        scroll_to_bottom_output_seed_terminal(surface);
+        scroll_to_bottom_output_scroll_history(surface);
+        assert!(!scroll_to_bottom_output_at_bottom(surface));
+
+        scroll_to_bottom_output_write(surface, "enabled-output");
+        run_scroll_to_bottom_output_helper(surface);
+        assert!(
+            scroll_to_bottom_output_at_bottom(surface),
+            "changed bottom marker should scroll to bottom"
+        );
+        let first_marker = surface_from_handle(surface)
+            .unwrap()
+            .last_output_bottom_marker
+            .expect("marker after output scroll");
+
+        scroll_to_bottom_output_scroll_history(surface);
+        assert!(!scroll_to_bottom_output_at_bottom(surface));
+        run_scroll_to_bottom_output_helper(surface);
+        assert!(
+            !scroll_to_bottom_output_at_bottom(surface),
+            "unchanged bottom marker must not scroll on a later render"
+        );
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .last_output_bottom_marker,
+            Some(first_marker)
+        );
+
+        scroll_to_bottom_output_write(surface, "enabled-output-2");
+        run_scroll_to_bottom_output_helper(surface);
+        assert!(
+            scroll_to_bottom_output_at_bottom(surface),
+            "new bottom marker should scroll after manual history scroll"
+        );
+        let second_marker = surface_from_handle(surface)
+            .unwrap()
+            .last_output_bottom_marker
+            .expect("marker after second output scroll");
+        assert_ne!(first_marker, second_marker);
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
+    }
+
+    #[test]
+    fn scroll_to_bottom_output_synchronized_output_skips_scroll_and_marker() {
+        let _guard = pty_command_lock();
+        let config = new_test_config_from_str("scroll-to-bottom = output\n");
+        let app = roastty_app_new(ptr::null(), config);
+        let surface = new_test_surface(app);
+        attach_scroll_to_bottom_output_worker(surface);
+
+        scroll_to_bottom_output_seed_terminal(surface);
+        run_scroll_to_bottom_output_helper(surface);
+        let initial_marker = surface_from_handle(surface)
+            .unwrap()
+            .last_output_bottom_marker
+            .expect("initial marker");
+
+        scroll_to_bottom_output_scroll_history(surface);
+        assert!(!scroll_to_bottom_output_at_bottom(surface));
+        with_surface_terminal_mut(surface, |terminal| {
+            assert!(terminal.mode_set(2026, false, true));
+        });
+        scroll_to_bottom_output_write(surface, "sync-held-output");
+        run_scroll_to_bottom_output_helper(surface);
+        assert!(
+            !scroll_to_bottom_output_at_bottom(surface),
+            "synchronized output should skip scroll"
+        );
+        assert_eq!(
+            surface_from_handle(surface)
+                .unwrap()
+                .last_output_bottom_marker,
+            Some(initial_marker),
+            "synchronized output should not advance the marker"
+        );
+
+        with_surface_terminal_mut(surface, |terminal| {
+            assert!(terminal.mode_set(2026, false, false));
+        });
+        run_scroll_to_bottom_output_helper(surface);
+        assert!(
+            scroll_to_bottom_output_at_bottom(surface),
+            "disabling synchronized output should allow the pending bottom marker to scroll"
+        );
+        assert_ne!(
+            surface_from_handle(surface)
+                .unwrap()
+                .last_output_bottom_marker,
+            Some(initial_marker)
+        );
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+        roastty_config_free(config);
     }
 
     fn wait_until(mut done: impl FnMut() -> bool) {

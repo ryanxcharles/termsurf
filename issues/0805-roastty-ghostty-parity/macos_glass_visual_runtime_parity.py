@@ -116,11 +116,11 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B4")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-008B2B2B2B2B status"),
+            ("Oracle complete", "RUNTIME-008B2B2B2B2B4 status"),
                         ("scroll-to-bottom.output", "RUNTIME-008B2B2B2B2B concrete gap"),
         ],
     )
@@ -131,10 +131,10 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("80 rows Oracle complete", "CFG-223 oracle count"),
-            ("83 rows closed", "CFG-223 closed count"),
-            ("4 rows are incomplete", "CFG-223 incomplete count"),
-            ("4 rows are runtime gaps", "CFG-223 gap count"),
+            ("81 rows Oracle complete", "CFG-223 oracle count"),
+            ("84 rows closed", "CFG-223 closed count"),
+            ("3 rows are incomplete", "CFG-223 incomplete count"),
+            ("3 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 

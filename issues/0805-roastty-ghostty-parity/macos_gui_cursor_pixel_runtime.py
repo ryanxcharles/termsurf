@@ -406,7 +406,7 @@ def assert_inventory_split() -> None:
         (
             line
             for line in runtime_inventory.splitlines()
-            if line.startswith("| RUNTIME-008B2B2B2B2B ")
+            if line.startswith("| RUNTIME-008B2B2B2B2B4 ")
         ),
         "",
     )
@@ -424,12 +424,12 @@ def assert_inventory_split() -> None:
     require("magenta-dominant" in runtime_inventory, "missing magenta cursor evidence")
     require("geometry-derived sample rectangles" in runtime_inventory, "missing geometry-derived sample evidence")
     require(remaining_row, "missing renderer residual row")
-    require("scroll-to-bottom.output" in remaining_row, "concrete renderer gap missing evidence")
+    require("scroll-to-bottom.output" in remaining_row, "scroll-to-bottom row missing evidence")
     require("GUI cursor pixels" not in remaining_row, "remaining renderer gap still claims GUI cursor pixels")
-    require("80 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("83 rows closed" in config_matrix, "CFG-223 closed count not updated")
-    require("4 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
-    require("4 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
+    require("81 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("84 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require("3 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
+    require("3 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require(cfg223 is not None and len(cfg223) > 4 and cfg223[4] == "Gap", "CFG-223 should remain Gap")
 
 

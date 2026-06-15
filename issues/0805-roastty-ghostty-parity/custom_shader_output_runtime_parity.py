@@ -164,12 +164,12 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B4")
     require_all(
         row_gap,
         [
-            ("Gap", "renderer residual row status"),
-            ("scroll-to-bottom.output", "concrete renderer gap evidence"),
+            ("Oracle complete", "scroll-to-bottom row status"),
+            ("scroll-to-bottom.output", "scroll-to-bottom row evidence"),
         ],
     )
     if "scroll-to-bottom.output" not in row_gap:
@@ -181,10 +181,10 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("80 rows Oracle complete", "CFG-223 oracle count"),
-            ("83 rows closed", "CFG-223 closed count"),
-            ("4 rows are incomplete", "CFG-223 incomplete count"),
-            ("4 rows are runtime gaps", "CFG-223 gap count"),
+            ("81 rows Oracle complete", "CFG-223 oracle count"),
+            ("84 rows closed", "CFG-223 closed count"),
+            ("3 rows are incomplete", "CFG-223 incomplete count"),
+            ("3 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 

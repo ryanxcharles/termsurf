@@ -111,3 +111,78 @@ Fresh-context Codex adversarial review:
   pinned Ghostty's ordering: synchronized output returns early before the
   scroll-to-bottom output check, and Roastty has the corresponding
   `SynchronizedOutput` mode anchor.
+
+## Result
+
+**Result:** Pass
+
+Experiment 183 implemented and proved `scroll-to-bottom.output` renderer-time
+viewport behavior in Roastty.
+
+Implementation notes:
+
+- Added `OutputBottomMarker` state to `Surface`, storing the active/screen
+  bottom marker's node pointer and `y` value, matching pinned Ghostty's
+  `last_bottom_node`/`last_bottom_y` comparison.
+- Added `Surface::scroll_to_bottom_on_output_before_present` and call it from
+  `present_live` before live frame rendering. The helper skips when
+  `scroll-to-bottom.output` is false, when synchronized output mode is active,
+  when no bottom marker exists, or when the marker did not change; otherwise it
+  stores the marker and scrolls the viewport to bottom.
+- Added minimal terminal accessors for synchronized output mode and active
+  screen bottom-right grid refs.
+- Added focused `scroll_to_bottom_output_*` Rust tests for disabled config,
+  enabled marker-based scrolling, repeated render no-op behavior, and
+  synchronized-output no-scroll/no-marker-advance behavior.
+- Added `scroll_to_bottom_output_runtime_parity.py`.
+- Replaced the old `RUNTIME-008B2B2B2B2B` renderer residual row with
+  Oracle-complete `RUNTIME-008B2B2B2B2B4`. CFG-223 now reports 87 runtime rows,
+  81 Oracle-complete rows, 84 closed rows, 3 incomplete rows, and 3 runtime
+  gaps.
+
+Verification:
+
+- `cargo test --manifest-path roastty/Cargo.toml scroll_to_bottom_output -- --test-threads=1`
+  — 3 passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/scroll_to_bottom_output_runtime_parity.py`
+  — passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/renderer_visual_residual_audit.py`
+  — passed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  — passed with `runtime_rows=87`, `oracle_complete=81`, `closed=84`,
+  `incomplete=3`, `gap=3`, `cfg223=Gap`.
+- Additional changed non-GUI parity guards passed as a batch after updating
+  CFG-223 count assertions.
+- `python3 -m py_compile` passed for all changed Python guards plus
+  `scroll_to_bottom_output_runtime_parity.py`.
+- `cargo fmt --manifest-path roastty/Cargo.toml --check` — passed.
+- `prettier --check issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md issues/0805-roastty-ghostty-parity/183-scroll-to-bottom-output-runtime.md`
+  — passed after formatting generated markdown.
+- `git diff --check` — passed.
+
+Live macOS GUI guard scripts that only received CFG-223 count-string updates
+were syntax-checked with `py_compile`; they were not launched in this
+experiment.
+
+## Conclusion
+
+The renderer-visible `scroll-to-bottom.output` gap is closed. The remaining
+CFG-223 gaps are now the font renderer output row, the live macOS app
+walkthrough row, and the notification/link/bell GUI effects row.
+
+## Completion Review
+
+Fresh-context Codex adversarial result review:
+
+- Verdict: **Approved**.
+- Required findings: none.
+- Optional finding: a `/tmp` dry-run of `config_runtime_inventory.py` produces a
+  matrix whose CFG-223 evidence path points at the `/tmp` output argument rather
+  than the repo inventory path. No repo fix was required because the checked-in
+  generator command uses the repo output path.
+- Nit: one guard label still called the Oracle-complete scroll row a concrete
+  gap. Fixed the stale label wording in affected guards.
+- Reviewer verification passed: targeted `scroll_to_bottom_output` Rust tests,
+  `cargo fmt --check`, `scroll_to_bottom_output_runtime_parity.py`,
+  `renderer_visual_residual_audit.py`, `/tmp` generator dry run,
+  `prettier --check`, and `git diff --check`.

@@ -1976,6 +1976,10 @@ impl Screen {
         self.pages.viewport_bounds()
     }
 
+    pub(super) fn bottom_right(&self, tag: point::Tag) -> Option<GridRef> {
+        self.pages.get_bottom_right(tag).map(GridRef::from)
+    }
+
     pub(super) fn pin(&self, point: point::Point) -> Option<Pin> {
         self.pages.pin(point)
     }

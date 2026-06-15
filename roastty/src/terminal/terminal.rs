@@ -2242,6 +2242,13 @@ impl Terminal {
             .map(|(top_left, bottom_right)| (top_left.into(), bottom_right.into()))
     }
 
+    pub(crate) fn active_screen_bottom_right(&self) -> Option<TerminalGridRef> {
+        self.screens
+            .active()
+            .bottom_right(super::point::Tag::Screen)
+            .map(Into::into)
+    }
+
     pub(crate) fn grid_ref_before(
         &self,
         a: TerminalGridRef,
@@ -2587,6 +2594,10 @@ impl Terminal {
         };
         self.modes.set(mode, enabled);
         true
+    }
+
+    pub(crate) fn synchronized_output_enabled(&self) -> bool {
+        self.modes.get(modes::Mode::SynchronizedOutput)
     }
 
     pub(crate) fn bracketed_paste_enabled(&self) -> bool {

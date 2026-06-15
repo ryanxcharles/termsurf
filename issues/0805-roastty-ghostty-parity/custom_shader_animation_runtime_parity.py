@@ -107,12 +107,12 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B4")
     require_all(
         row_gap,
         [
-            ("Gap", "remaining renderer gap status"),
-            ("scroll-to-bottom.output", "scroll-to-bottom gap remains"),
+            ("Oracle complete", "scroll-to-bottom row status"),
+            ("scroll-to-bottom.output", "scroll-to-bottom row remains"),
         ],
     )
     if "custom-shader-animation" in row_gap:
@@ -126,8 +126,8 @@ def main() -> int:
         [
             ('id="RUNTIME-008B2B2B2B2B1"', "source complete row"),
             ("custom_shader_animation_runtime_parity.py", "source guard"),
-            ('id="RUNTIME-008B2B2B2B2B"', "source remaining row"),
-            ("scroll-to-bottom.output", "source remaining scroll gap"),
+            ('id="RUNTIME-008B2B2B2B2B4"', "source remaining row"),
+            ("scroll-to-bottom.output", "source scroll row"),
         ],
     )
 
@@ -137,10 +137,10 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains open"),
-            ("80 rows Oracle complete", "CFG-223 oracle count"),
-            ("83 rows closed", "CFG-223 closed count"),
-            ("4 rows are incomplete", "CFG-223 incomplete count"),
-            ("4 rows are runtime gaps", "CFG-223 gap count"),
+            ("81 rows Oracle complete", "CFG-223 oracle count"),
+            ("84 rows closed", "CFG-223 closed count"),
+            ("3 rows are incomplete", "CFG-223 incomplete count"),
+            ("3 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 
