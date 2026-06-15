@@ -1694,3 +1694,5 @@ remains open.
   — **Pass**
 - [Experiment 175: macOS split layout runtime](175-macos-split-layout-runtime.md)
   — **Pass**
+- [Experiment 176: macOS hidden titlebar runtime](176-macos-hidden-titlebar-runtime.md)
+  — **Designed**
