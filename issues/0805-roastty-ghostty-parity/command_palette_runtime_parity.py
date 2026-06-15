@@ -241,7 +241,11 @@ def main() -> int:
             ),
             ("screenshot/pixel evidence", "RUNTIME-011B2B screenshot/pixel gap"),
             (
-                "focused fullscreen, command-palette, and Quick Terminal proof",
+                "broader split variants and interactions",
+                "RUNTIME-011B2B broader split gap",
+            ),
+            (
+                "focused fullscreen, command-palette, Quick Terminal, and right-split layout proof",
                 "RUNTIME-011B2B narrowed GUI evidence",
             ),
         ],
@@ -253,8 +257,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("73 rows Oracle complete", "CFG-223 oracle count"),
-            ("76 rows closed", "CFG-223 closed count"),
+            ("74 rows Oracle complete", "CFG-223 oracle count"),
+            ("77 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

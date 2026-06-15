@@ -302,6 +302,12 @@ experiment files until they are proven.
   layer, and capture that exact CGWindowID with `screencapture`. PID-only
   screenshot helpers prefer layer-0 terminal windows and can capture the wrong
   window while the Quick Terminal panel is visible.
+- **Split layout proof should sample stable colored regions.** Experiment 175
+  showed that a live right split can be proven by running controlled child
+  processes that paint distinct truecolor ANSI backgrounds, capturing the exact
+  PID-owned layer-0 CGWindowID, and sampling stable visible regions inside each
+  pane. Broad right-third sampling can hit renderer wrap gaps, so the durable
+  oracle avoids the titlebar, divider, window edges, and known wrap bands.
 - **Passing behavior needs a durable but cheap guard.** Future experiments
   should record the cheapest sufficient regression guard for each passing parity
   row. Prefer static checks and unit tests when they prove the behavior; reserve
@@ -1687,4 +1693,4 @@ remains open.
 - [Experiment 174: Quick Terminal GUI runtime](174-quick-terminal-gui-runtime.md)
   — **Pass**
 - [Experiment 175: macOS split layout runtime](175-macos-split-layout-runtime.md)
-  — **Designed**
+  — **Pass**

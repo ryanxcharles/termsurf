@@ -38,8 +38,9 @@ or the full GUI walkthrough.
   - Resolve the launched app's front PID-owned CoreGraphics layer-0 window id
     and capture that exact window id with `screencapture -x -o -l{window_id}`.
   - Add screenshot pixel sampling, implemented with a small local helper or
-    inline Swift/AppKit reader, that samples grids in the left third and right
-    third of the screenshot while avoiding titlebar and window edge regions.
+    inline Swift/AppKit reader, that samples grids inside stable visible
+    left-pane and right-pane regions while avoiding the titlebar, divider,
+    window edges, and renderer wrap gaps.
   - Treat split visual layout as proven only if:
     - the screenshot dimensions are nonzero and tied to the same exact
       CGWindowID observed after split creation;
@@ -175,3 +176,103 @@ Evidence checked by the reviewer:
   macOS guard reruns, prettier formatting, and `git diff --check`.
 
 Final design verdict: **Approved**.
+
+## Result
+
+**Result:** Pass
+
+Experiment 175 implemented and verified a focused live right-split visual layout
+guard.
+
+Changes:
+
+- `issues/0805-roastty-ghostty-parity/macos_split_layout_runtime.py`
+  - Added a live debug-app guard using the absolute `Roastty.app` bundle,
+    isolated config, exact launched Unix PID targeting, scoped cleanup, and
+    new-crash-report detection.
+  - Creates a primary terminal whose controlled child process repeatedly paints
+    a red truecolor ANSI background, then creates a `direction right` split
+    whose controlled child process repeatedly paints a blue truecolor ANSI
+    background.
+  - Waits for marker files proving both child painter processes started.
+  - Requires the selected tab to contain exactly two non-empty terminal IDs.
+  - Captures the exact PID-owned layer-0 CoreGraphics window with
+    `screencapture -x -o -l{window_id}`.
+  - Samples the captured PNG with a temporary Swift/AppKit helper and requires
+    red-dominant samples in the left pane, blue-dominant samples in the right
+    pane, and cross-color rejection so both sides cannot pass as the same color.
+  - Saves the latest debug screenshot and metrics to
+    `/tmp/termsurf-issue805-exp175-split-layout.png` and
+    `/tmp/termsurf-issue805-exp175-split-layout.json` for failure diagnosis.
+- `issues/0805-roastty-ghostty-parity/config_runtime_inventory.py`
+  - Added `RUNTIME-011B2I` for focused live right-split visual layout proof.
+  - Narrowed `RUNTIME-011B2B` so the remaining split gap is broader split
+    variants and interactions, not the focused right-split visual proof.
+- Generated docs
+  - Regenerated `config-runtime-inventory.md`, `config-matrix.md`, and
+    `platform-runtime-classification.md`.
+- Existing CFG-223 guard scripts
+  - Updated CFG-223 expected counts from 73/76 to 74/77 and replaced stale broad
+    split-gap assertions with the remaining broader split gap.
+
+Verification run:
+
+```bash
+(cd roastty && macos/build.nu --action build)
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_split_layout_runtime.py
+```
+
+The live guard passed:
+
+```text
+macos_split_layout_runtime=pass left_terminal=7BDBB864-F693-4560-91BC-361BFA3E48AF right_terminal=C9EA3360-DAF2-4F51-835A-454C4FDA148F
+```
+
+The regenerated CFG-223 counts are:
+
+```text
+runtime_rows=81
+oracle_complete=74
+closed=77
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+## Conclusion
+
+Focused right-split visual layout is now proven in the live macOS app: two
+AppleScript terminal objects are created in one tab, the same PID-owned window
+is captured by exact CoreGraphics window id, and the captured image contains
+distinct red and blue regions in the expected split panes. `RUNTIME-011B2B`
+remains open for titlebar visuals, broader split variants/interactions,
+cursor/pointer pixels, broader screenshot/pixel parity, and broader input
+walkthrough effects.
+
+## Result Review
+
+Fresh-context adversarial reviewer `Lovelace the 3rd` reviewed the completed
+experiment and returned `APPROVED` with no findings.
+
+Evidence checked by the reviewer:
+
+- The working tree contains the result edits and the result commit had not been
+  made before review.
+- The issue README marks Experiment 175 as `Pass`.
+- The experiment file has `## Result` and `## Conclusion`.
+- CFG-223 remains `Gap` with `81` runtime rows, `74` Oracle-complete rows, `77`
+  closed rows, `4` incomplete rows, and `4` gap rows.
+- `RUNTIME-011B2B` remains open for broader GUI/titlebar/split/input/pixel work,
+  while `RUNTIME-011B2I` is scoped to focused right-split visual layout.
+- The guard requires two AppleScript terminal IDs, exact PID-owned CGWindowID
+  capture, and red/blue screenshot sampling, so it cannot pass on object counts
+  alone.
+
+Read-only checks run by the reviewer:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/*.py
+git diff --check -- issues/0805-roastty-ghostty-parity
+```
+
+Final result verdict: **Approved**.
