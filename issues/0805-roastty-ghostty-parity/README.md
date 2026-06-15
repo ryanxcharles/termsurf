@@ -1303,3 +1303,4 @@ remains open.
   — **Pass**
 - [Experiment 130: Shell startup rewrite runtime](130-shell-startup-rewrite-runtime.md)
   — **Pass**
+- [Experiment 131: OSC 7 edge runtime](131-osc7-edge-runtime.md) — **Designed**
