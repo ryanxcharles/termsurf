@@ -1754,3 +1754,5 @@ remains open.
   — **Pass**
 - [Experiment 183: Scroll-to-bottom output runtime](183-scroll-to-bottom-output-runtime.md)
   — **Pass**
+- [Experiment 184: Font renderer residual proof](184-font-renderer-residual-proof.md)
+  — **Designed**
