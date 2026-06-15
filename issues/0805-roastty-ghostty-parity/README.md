@@ -1813,3 +1813,5 @@ remains open.
   — **Partial**
 - [Experiment 189: Live link hover banner pixels](189-live-link-hover-banner-pixels.md)
   — **Partial**
+- [Experiment 190: Live bell title and border pixels](190-live-bell-title-border-pixels.md)
+  — **Designed**
