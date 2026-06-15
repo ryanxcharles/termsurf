@@ -1846,3 +1846,5 @@ remains open.
   — **Partial**
 - [Experiment 192: Live dock attention state](192-live-dock-attention-state.md)
   — **Partial**
+- [Experiment 193: Live Quick Look definition dispatch](193-live-quicklook-definition.md)
+  — **Designed**
