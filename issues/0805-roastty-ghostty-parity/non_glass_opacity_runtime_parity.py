@@ -230,7 +230,6 @@ def main() -> int:
             ("Gap", "RUNTIME-008B2B2B2B2B status"),
             ("GUI cursor pixels", "RUNTIME-008B2B2B2B2B cursor gap"),
             ("broader GUI/pixel parity", "RUNTIME-008B2B2B2B2B GUI parity gap"),
-            ("screenshot-level padding pixel proof", "RUNTIME-008B2B2B2B2B screenshot padding gap"),
         ],
     )
     if "RUNTIME-008B2B2B2 |" in runtime_inventory:
@@ -240,8 +239,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("75 rows Oracle complete", "CFG-223 oracle count"),
-            ("78 rows closed", "CFG-223 closed count"),
+            ("76 rows Oracle complete", "CFG-223 oracle count"),
+            ("79 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

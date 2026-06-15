@@ -171,10 +171,9 @@ def main() -> int:
             ("Gap", "remaining row status"),
             ("GUI cursor pixels", "remaining cursor gap"),
             ("broader GUI/pixel parity", "remaining GUI parity gap"),
-            ("screenshot-level padding pixel proof", "remaining padding pixel gap"),
         ],
     )
-    if "Add renderer/runtime or GUI smoke rows for GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof." not in row_gap:
+    if "Add renderer/runtime or GUI smoke rows for GUI cursor pixels and broader GUI/pixel parity." not in row_gap:
         raise AssertionError("remaining renderer gap still has unexpected missing-evidence wording")
 
     cfg223 = require_row(config_matrix, "CFG-223")
@@ -183,8 +182,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("75 rows Oracle complete", "CFG-223 oracle count"),
-            ("78 rows closed", "CFG-223 closed count"),
+            ("76 rows Oracle complete", "CFG-223 oracle count"),
+            ("79 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

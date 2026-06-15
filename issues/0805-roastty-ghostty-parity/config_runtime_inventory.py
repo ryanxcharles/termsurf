@@ -791,7 +791,7 @@ ROWS = [
     ),
     RuntimeRow(
         id="RUNTIME-008B2B2B2B2B",
-        behavior="remaining renderer-visible effects: actual app/GUI cursor pixels/screenshots, broader GUI/pixel parity, and screenshot-level padding pixel proof",
+        behavior="remaining renderer-visible effects: actual app/GUI cursor pixels/screenshots and broader GUI/pixel parity",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` renderer/window visual fields; `vendor/ghostty/src/renderer/generic.zig` derived renderer config and draw paths; `vendor/ghostty/src/Surface.zig` renderer config messages; screenshot/pixel walkthrough paths",
         roastty_reference="`roastty/src/lib.rs` live renderer and render state; `roastty/src/renderer`; copied macOS renderer/window host",
         family="renderer",
@@ -814,15 +814,44 @@ ROWS = [
             "out copied macOS non-glass compositor opacity host behavior. "
             "Experiment 163 split out deterministic Metal custom shader output "
             "readback. Experiment 164 split out deterministic Metal text "
-            "shader cursor pixel readback. "
+            "shader cursor pixel readback. Experiment 177 split out focused "
+            "live window-padding pixel proof in the macOS app. "
             "CFG-223 still needs representative runtime or GUI proof for GUI "
             "cursor pixels, including actual app/GUI cursor screenshots, "
-            "broader GUI/pixel parity, and "
-            "screenshot-level padding pixel proof."
+            "and broader GUI/pixel parity."
         ),
-        missing_evidence="Add renderer/runtime or GUI smoke rows for GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof.",
+        missing_evidence="Add renderer/runtime or GUI smoke rows for GUI cursor pixels and broader GUI/pixel parity.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 renderer visual experiment.",
+    ),
+    RuntimeRow(
+        id="RUNTIME-008B2B2B2B2C",
+        behavior="focused live window-padding pixel proof",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `window-padding-x`, `window-padding-y`, `window-padding-color`; `vendor/ghostty/src/renderer/shaders/shaders.metal` padding/background draw paths",
+        roastty_reference="live debug `Roastty.app`; `roastty/src/renderer/metal/shaders.metal`; `macos_window_padding_pixel_runtime.py`",
+        family="renderer",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 177 adds `macos_window_padding_pixel_runtime.py`, a live "
+            "debug-app guard that launches Roastty with isolated config, large "
+            "asymmetric `window-padding-x` and `window-padding-y`, "
+            "`window-padding-color = background`, hidden titlebar, and a "
+            "deterministic child process that writes a marker file before "
+            "painting the terminal grid bright yellow. The guard proves the "
+            "frontmost process Unix PID is the exact debug-app PID, maps the "
+            "focused accessibility window bounds to the captured PID-owned "
+            "layer-0 CGWindowID, captures that exact window with "
+            "`screencapture -l`, detects the bright terminal-content bounds, "
+            "and requires geometry-derived sample rectangles to show "
+            "top/bottom/left/right padding regions are background-dominant "
+            "while content regions just inside each edge are bright-dominant. "
+            "The debug JSON records the terminal id, painter command path, "
+            "marker path, focused accessibility bounds, CGWindowID, configured "
+            "padding, sample rectangles, and observed color counts."
+        ),
+        missing_evidence="None for focused live screenshot-level window-padding pixel proof. GUI cursor pixels, broader GUI/pixel parity, broad font output parity, and full app screenshot parity remain outside this slice.",
+        guard_tier="Tier 3",
+        guard_command="`(cd roastty && macos/build.nu --action build) && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_window_padding_pixel_runtime.py`",
     ),
     RuntimeRow(
         id="RUNTIME-009A",
@@ -2190,6 +2219,7 @@ EXPECTED_IDS = [
     "RUNTIME-008B2B2B2B1",
     "RUNTIME-008B2B2B2B2A",
     "RUNTIME-008B2B2B2B2B",
+    "RUNTIME-008B2B2B2B2C",
     "RUNTIME-009A",
     "RUNTIME-009B1",
     "RUNTIME-009B2A",

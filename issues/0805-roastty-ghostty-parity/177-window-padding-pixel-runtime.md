@@ -192,3 +192,141 @@ padding requirement, command-marker evidence, geometry-derived sample rectangle
 requirements, README link, and `Designed` status.
 
 Final design verdict: **Approved**.
+
+## Result
+
+**Result:** Pass
+
+Experiment 177 added
+`issues/0805-roastty-ghostty-parity/macos_window_padding_pixel_runtime.py`, a
+live macOS GUI guard for screenshot-level `window-padding-*` pixel proof.
+
+The guard launches the debug Roastty app with isolated config/defaults and large
+asymmetric padding:
+
+- `window-padding-x = 96,64`
+- `window-padding-y = 72,136`
+- `window-padding-balance = false`
+- `window-padding-color = background`
+- `macos-titlebar-style = hidden`
+
+It creates a terminal running a deterministic Python painter. The painter writes
+a marker file, hides the cursor, disables autowrap, paints the visible terminal
+grid with a bright truecolor background, and sleeps. The guard waits for the
+marker file before screenshot capture.
+
+The screenshot proof follows the Experiment 176 exact-window pattern: it proves
+the frontmost process is the launched debug-app PID, reads the focused
+accessibility window bounds, maps those bounds to one PID-owned layer-0
+CoreGraphics window, and captures that exact CGWindowID with `screencapture -l`.
+
+The Swift sampler detects the broad bright terminal-content region using row and
+column thresholds so small bright chrome artifacts, such as the debug-build
+warning icon, cannot define the terminal content bounds. It then validates the
+observed content edges against configured padding converted to screenshot pixels
+with a narrow tolerance and derives sample rectangles from those expected edges.
+The passing run proved:
+
+- top, bottom, left, and right padding strips are background-dominant;
+- content strips just inside all four padded-grid edges are bright-dominant;
+- the screenshot is nonblank and tied to the focused Roastty window;
+- the debug JSON records terminal id, command path, marker path, focused bounds,
+  CGWindowID, configured padding, sample rectangles, and observed counts.
+
+Debug artifacts from the passing run:
+
+- `/tmp/termsurf-issue805-exp177-window-padding.png`
+- `/tmp/termsurf-issue805-exp177-window-padding.json`
+
+Latest focused guard output:
+
+```text
+macos_window_padding_pixel_runtime=pass terminal=7EE06896-1CA6-4FE5-85FE-370570BB1C78
+```
+
+Representative metric summary from the passing debug JSON:
+
+```text
+brightBounds = {x: 192, y: 208, width: 1279, height: 719}
+gaps = {left: 192, right: 129, top: 208, bottom: 273}
+expectedPaddingPixels = {left: 192, right: 128, top: 144, bottom: 272}
+expectedEdges = {left: 192, top: 208, right: 1471, bottom: 927}
+top/bottom/left/right padding samples: background-dominant
+top/bottom/left/right content samples: bright-dominant
+```
+
+Inventory impact:
+
+- Added `RUNTIME-008B2B2B2B2C` for focused live window-padding pixel proof.
+- CFG-223 now has 83 runtime rows.
+- CFG-223 now has 76 `Oracle complete` rows.
+- CFG-223 now has 79 closed rows.
+- CFG-223 still has 4 incomplete rows, all `Gap`.
+- CFG-223 remains `Gap`.
+- `RUNTIME-008B2B2B2B2B` remains open for actual app/GUI cursor pixels and
+  broader GUI/pixel parity.
+
+Verification run:
+
+```bash
+(cd roastty && macos/build.nu --action build)
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_window_padding_pixel_runtime.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py \
+  --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md \
+  --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/platform_runtime_classification.py \
+  --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md \
+  --output issues/0805-roastty-ghostty-parity/platform-runtime-classification.md
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile issues/0805-roastty-ghostty-parity/*.py
+```
+
+Regenerated inventory output:
+
+```text
+runtime_rows=83
+oracle_complete=76
+closed=79
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+## Conclusion
+
+Focused live screenshot-level window-padding pixel proof is now covered. The
+remaining renderer-visible gap no longer includes padding screenshot proof; it
+still needs actual app/GUI cursor screenshots and broader GUI/pixel parity.
+
+## Result Review
+
+Fresh-context adversarial reviewer `Bernoulli the 3rd` reviewed the completed
+experiment result and initially returned `CHANGES REQUIRED`.
+
+Required finding:
+
+- The first completed guard only required observed gaps to be at least a
+  fraction of configured padding, then anchored padding/content sample
+  rectangles to the measured bright bounds. That proved some padding existed,
+  but did not prove the content was at the configured padding edges.
+
+First fix:
+
+- The sampler added explicit expected-edge checks and recorded expected edges in
+  debug JSON. The reviewer correctly found that the right/bottom slack terms
+  were still derived from observed `maxX`/`maxY`, making those edges circular.
+
+Final fix:
+
+- The sampler no longer computes observed-derived slack. It computes expected
+  right and bottom edges directly from screenshot dimensions and configured
+  padding, compares observed right/bottom gaps directly to configured
+  screenshot-pixel padding with a narrow tolerance, and anchors the right/bottom
+  sample rectangles to those independently computed edges.
+- The live config now uses asymmetric but fixed-window-compatible padding:
+  `window-padding-x = 96,64` and `window-padding-y = 72,136`.
+
+Re-review verdict: **Approved**. The reviewer confirmed the prior required
+finding was resolved and that no new required findings were introduced.
+
+Final result verdict: **Approved**.

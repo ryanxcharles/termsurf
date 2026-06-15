@@ -99,7 +99,6 @@ def main() -> int:
             ("Gap", "remaining row status"),
             ("actual app/GUI cursor screenshots", "remaining cursor screenshot gap"),
             ("broader GUI/pixel parity", "remaining GUI parity gap"),
-            ("screenshot-level padding pixel proof", "remaining padding pixel gap"),
         ],
     )
     if "RUNTIME-008B2B2B2B2 |" in runtime_inventory:
@@ -111,8 +110,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("75 rows Oracle complete", "CFG-223 oracle count"),
-            ("78 rows closed", "CFG-223 closed count"),
+            ("76 rows Oracle complete", "CFG-223 oracle count"),
+            ("79 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

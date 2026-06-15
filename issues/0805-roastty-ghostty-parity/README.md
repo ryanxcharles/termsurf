@@ -314,6 +314,12 @@ experiment files until they are proven.
   config. On this VM, `AXFocused` on the window remains false even when the app
   is active; the stable focus proof is exact frontmost Unix PID plus `AXMain` on
   the target window and on the process `AXFocusedWindow`.
+- **Padding pixel proof must ignore small bright chrome artifacts.** Experiment
+  177 showed that the debug-build warning icon can match a bright-content color
+  classifier near the titlebar. Durable screenshot guards should identify
+  terminal content from broad bright rows/columns or equivalent connected
+  regions, then derive padding/content sample rectangles from that measured
+  content box instead of treating isolated bright pixels as content bounds.
 - **Passing behavior needs a durable but cheap guard.** Future experiments
   should record the cheapest sufficient regression guard for each passing parity
   row. Prefer static checks and unit tests when they prove the behavior; reserve
@@ -1703,4 +1709,4 @@ remains open.
 - [Experiment 176: macOS hidden titlebar runtime](176-macos-hidden-titlebar-runtime.md)
   — **Pass**
 - [Experiment 177: Window padding pixel runtime](177-window-padding-pixel-runtime.md)
-  — **Designed**
+  — **Pass**
