@@ -196,22 +196,21 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B2")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-007B2B2B status"),
-            ("font-variation", "RUNTIME-007B2B2B variation gap"),
-            ("metric adjustment", "RUNTIME-007B2B2B metric gap"),
-            ("bitmap/color font thickening edge cases", "RUNTIME-007B2B2B bitmap gap"),
-            ("broader font pixel parity", "RUNTIME-007B2B2B pixel gap"),
+            ("Gap", "RUNTIME-007B2B2B2 status"),
+            ("metric adjustment", "RUNTIME-007B2B2B2 metric gap"),
+            ("bitmap/color font thickening edge cases", "RUNTIME-007B2B2B2 bitmap gap"),
+            ("broader font pixel parity", "RUNTIME-007B2B2B2 pixel gap"),
         ],
     )
     if 'id="RUNTIME-007B2B",' in read(
         "issues/0805-roastty-ghostty-parity/config_runtime_inventory.py"
     ):
         raise AssertionError("old broad RUNTIME-007B2B row is still present")
-    require(issue_readme, "`RUNTIME-007B2B2B`.", "current learnings point at reduced font gap")
+    require(issue_readme, "`RUNTIME-007B2B2B2`.", "current learnings point at reduced font gap")
     if "Remaining font work stays in\n  `RUNTIME-007B2B2`." in issue_readme:
         raise AssertionError("current learnings still point at old broad RUNTIME-007B2B2 row")
 
@@ -221,8 +220,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("50 rows Oracle complete", "CFG-223 oracle count"),
-            ("52 rows closed", "CFG-223 closed count"),
+            ("51 rows Oracle complete", "CFG-223 oracle count"),
+            ("53 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

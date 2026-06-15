@@ -145,3 +145,83 @@ style-specific variation mapping matches pinned Ghostty `SharedGridSet.zig`, the
 verification includes focused tests/static guard/inventory regeneration/hygiene
 checks, and the plan keeps CFG-223 plus broader visual/pixel font parity as
 gaps.
+
+## Result
+
+**Result:** Pass
+
+Roastty now threads all four parsed `font-variation*` lists into style-specific
+config-derived font discovery descriptors:
+
+- regular descriptors receive `font-variation`;
+- bold descriptors receive `font-variation-bold`;
+- italic descriptors receive `font-variation-italic`;
+- bold-italic descriptors receive `font-variation-bold-italic`.
+
+The config-derived font-grid key now changes when variation values change, style
+offsets remain stable with variations present, no-variation configs keep
+descriptor variation lists empty, and a configured-variation grid still resolves
+ASCII on macOS. The implementation also carries pinned Ghostty's styled
+variation retry: if a non-regular descriptor with variations cannot discover a
+styled face, Roastty retries discovery with bold/italic search bits cleared.
+
+`RUNTIME-007B2B2B` was split into:
+
+- `RUNTIME-007B2B2B1`: **Oracle complete** for deterministic `font-variation*`
+  config propagation into style-specific descriptors, font-grid key separation,
+  deferred face loading, and CoreText variation application mechanics.
+- `RUNTIME-007B2B2B2`: **Gap** for metric adjustment, fallback/shaping visual
+  output, bitmap/color font thickening edge cases, glyph metrics as seen by the
+  renderer, and broader renderer-visible font pixel parity.
+
+Verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml font_variation_runtime
+cargo test --manifest-path roastty/Cargo.toml font_variation_config_parser_family_oracle
+cargo test --manifest-path roastty/Cargo.toml font_variation_config_formatter_family_oracle
+cargo test --manifest-path roastty/Cargo.toml deferred_face_load_applies_variations
+cargo test --manifest-path roastty/Cargo.toml set_variations_runs_on_face
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_variation_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+for guard in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$guard" || exit 1; done
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+The regenerated CFG-223 inventory reports:
+
+- `runtime_rows=57`
+- `oracle_complete=51`
+- `closed=53`
+- `incomplete=4`
+- `gap=4`
+- `cfg223=Gap`
+
+## Conclusion
+
+Font variation config is no longer only parsed and stored. It now reaches the
+font-grid descriptor/runtime path in the same style-specific shape as pinned
+Ghostty, participates in font-grid key separation, and remains wired through
+deferred CoreText face loading. Future font experiments should focus on the
+remaining `RUNTIME-007B2B2B2` visual/metric gaps rather than descriptor
+propagation.
+
+## Completion Review
+
+Adversarial review by fresh-context Codex subagent approved the completed
+experiment with no required, optional, or nit findings. The reviewer
+independently verified:
+
+- `cargo test --manifest-path roastty/Cargo.toml font_variation_runtime`;
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_variation_runtime_parity.py`;
+- `cargo fmt --manifest-path roastty/Cargo.toml --check`;
+- `git diff --check`;
+- regenerated runtime inventory counts: `runtime_rows=57`, `oracle_complete=51`,
+  `closed=53`, `incomplete=4`, `gap=4`, `cfg223=Gap`.
+
+The reviewer noted one non-blocking command caveat: the requested `/tmp` matrix
+regeneration path needed a seeded matrix file because
+`config_runtime_inventory.py` updates an existing matrix instead of creating one
+from scratch. After seeding from the current matrix, regeneration succeeded and
+the only expected matrix difference was the embedded `/tmp` evidence path.

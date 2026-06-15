@@ -410,7 +410,40 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml font_feature_runtime && cargo test --manifest-path roastty/Cargo.toml merged_features_defaults_then_user && cargo test --manifest-path roastty/Cargo.toml shape_row_options_default_matches_default_shape && cargo test --manifest-path roastty/Cargo.toml shaper_cache_feature && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_feature_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-007B2B2B",
+        id="RUNTIME-007B2B2B1",
+        behavior="font-variation renderer descriptor propagation, key separation, and CoreText deferred-face application",
+        ghostty_reference="`vendor/ghostty/src/font/SharedGridSet.zig` style-specific descriptor variation assignment and styled variation retry; `vendor/ghostty/src/font/discovery.zig` descriptor variation hashing/clone; `vendor/ghostty/src/font/DeferredFace.zig` deferred variation retention; `vendor/ghostty/src/font/face/coretext.zig` `setVariations`",
+        roastty_reference="`roastty/src/font/shared_grid_set.rs` style-specific config variation descriptor wiring and retry; `roastty/src/font/discovery.rs` descriptor variation hashing; `roastty/src/font/deferred_face.rs` deferred variation retention; `roastty/src/font/face/coretext.rs` `set_variations`",
+        family="font",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 149 wires the four parsed `font-variation*` lists "
+            "into style-specific config-derived font descriptors without "
+            "claiming variable-font pixel parity. "
+            "`font_variation_runtime_key_maps_each_style_variations` proves "
+            "regular, bold, italic, and bold-italic descriptors receive only "
+            "their matching config variation list. "
+            "`font_variation_runtime_key_hash_changes_with_variation_value` "
+            "proves variation differences split config-derived font-grid "
+            "keys. `font_variation_runtime_key_preserves_style_offsets` and "
+            "`font_variation_runtime_default_key_has_no_variations` prove "
+            "style slicing and default no-variation behavior remain stable. "
+            "`font_variation_runtime_build_grid_with_configured_variations`, "
+            "`deferred_face_load_applies_variations`, and "
+            "`set_variations_runs_on_face` prove configured variations keep "
+            "the grid/deferred CoreText face path usable through "
+            "`set_variations`. `font_variation_runtime_parity.py` statically "
+            "checks pinned Ghostty's style-specific descriptor variation "
+            "assignment, styled variation retry, descriptor hashing/clone, "
+            "deferred face retention, and CoreText `setVariations` markers "
+            "against Roastty's wiring, tests, and inventory split."
+        ),
+        missing_evidence="None for deterministic `font-variation*` config propagation into style-specific descriptors, font-grid key separation, deferred face loading, and CoreText variation application mechanics.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml font_variation_runtime && cargo test --manifest-path roastty/Cargo.toml font_variation_config_parser_family_oracle && cargo test --manifest-path roastty/Cargo.toml font_variation_config_formatter_family_oracle && cargo test --manifest-path roastty/Cargo.toml deferred_face_load_applies_variations && cargo test --manifest-path roastty/Cargo.toml set_variations_runs_on_face && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_variation_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-007B2B2B2",
         behavior="remaining font renderer output effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` font feature, variation, thicken, metric, and shaping fields; `vendor/ghostty/src/font` shaping/rendering paths",
         roastty_reference="`roastty/src/font`; `roastty/src/renderer` font shaping, metrics, glyph output, and visual renderer behavior",
@@ -430,14 +463,16 @@ ROWS = [
             "mechanics. Experiment 147 split out deterministic `font-feature` "
             "renderer option propagation, default-plus-user feature merging, "
             "CoreText shaping option application, and feature-aware shaped-run "
-            "cache separation. "
+            "cache separation. Experiment 149 split out deterministic "
+            "`font-variation*` style-specific descriptor propagation, "
+            "font-grid key separation, deferred face loading, and CoreText "
+            "variation application mechanics. "
             "Remaining font parity still needs focused runtime/renderer or GUI "
-            "proof for `font-variation*` config effects, metric adjustment, "
-            "fallback/shaping visual output, bitmap/color font "
-            "thickening edge cases, glyph metrics as seen by the renderer, "
-            "and broader renderer-visible font pixel parity."
+            "proof for metric adjustment, fallback/shaping visual output, "
+            "bitmap/color font thickening edge cases, glyph metrics as seen "
+            "by the renderer, and broader renderer-visible font pixel parity."
         ),
-        missing_evidence="Add focused font renderer/runtime or GUI proof for font variations, metric adjustment, fallback/shaping visual output, bitmap/color font thickening edge cases, glyph metrics, and broader font pixel parity.",
+        missing_evidence="Add focused font renderer/runtime or GUI proof for metric adjustment, fallback/shaping visual output, bitmap/color font thickening edge cases, glyph metrics, and broader font pixel parity.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 font renderer experiment.",
     ),
@@ -1389,7 +1424,8 @@ EXPECTED_IDS = [
     "RUNTIME-007B2A",
     "RUNTIME-007B2B1",
     "RUNTIME-007B2B2A",
-    "RUNTIME-007B2B2B",
+    "RUNTIME-007B2B2B1",
+    "RUNTIME-007B2B2B2",
     "RUNTIME-008A",
     "RUNTIME-008B1",
     "RUNTIME-008B2A",

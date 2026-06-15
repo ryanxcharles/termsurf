@@ -103,13 +103,12 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B2")
     require_all(
         row_gap,
         [
             ("Gap", "remaining row status"),
             ("remaining font renderer output effects", "remaining behavior"),
-            ("font-variation", "remaining font variation gap"),
             ("bitmap/color font thickening edge cases", "remaining thicken edge gap"),
             ("metric adjustment", "remaining metric gap"),
             ("renderer-visible font pixel parity", "remaining pixel gap"),
@@ -124,8 +123,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("50 rows Oracle complete", "CFG-223 oracle count"),
-            ("52 rows closed", "CFG-223 closed count"),
+            ("51 rows Oracle complete", "CFG-223 oracle count"),
+            ("53 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

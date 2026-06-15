@@ -735,21 +735,21 @@ experiment files until they are proven.
   renderer gap. Roastty now applies `FontShapingBreak` to row-local `RunOptions`
   in active frame row formatting, matching pinned Ghostty's renderer-side
   application after viewport cursor derivation. Remaining font work stays in
-  `RUNTIME-007B2B2B`.
+  `RUNTIME-007B2B2B2`.
 - **Font thickening has a deterministic non-`sbix` render slice.** Experiment
   146 split `font-thicken` and `font-thicken-strength` option propagation,
   shared glyph-cache key separation, and CoreText non-`sbix` canvas
   padding/strength behavior out of the remaining font renderer gap. Bitmap/color
-  font thickening edge cases, feature/variation effects, metric adjustment,
-  fallback visual output, glyph metrics, and broad font pixel parity remain in
-  `RUNTIME-007B2B2B`.
+  font thickening edge cases, feature effects, metric adjustment, fallback
+  visual output, glyph metrics, and broad font pixel parity remain in
+  `RUNTIME-007B2B2B2`.
 - **Font features are active renderer shaping options.** Experiment 147 split
   deterministic `font-feature` propagation out of the remaining font renderer
   gap by threading config-derived shape options into active row shaping,
   preserving default feature merging, and namespacing shaped-run cache entries
-  by feature set. Font variations, metric adjustment, fallback visual output,
-  bitmap/color thickening edge cases, glyph metrics, broader font pixel parity,
-  and GUI-visible A/B font rendering remain in `RUNTIME-007B2B2B`.
+  by feature set. Metric adjustment, fallback visual output, bitmap/color
+  thickening edge cases, glyph metrics, broader font pixel parity, and
+  GUI-visible A/B font rendering remain in `RUNTIME-007B2B2B2`.
 - **Window padding layout is renderer size state.** Experiment 148 split
   deterministic `window-padding-x`/`window-padding-y` scaling,
   `window-padding-balance` math, active live renderer padded `Size`/grid wiring,
@@ -757,6 +757,13 @@ experiment files until they are proven.
   real compositor opacity, GUI cursor pixels, custom shader output, broader
   GUI/pixel parity, and screenshot-level padding pixel proof remain in
   `RUNTIME-008B2B2B`.
+- **Font variations are style-specific font descriptors.** Experiment 149 split
+  deterministic `font-variation*` config propagation out of the remaining font
+  renderer gap by threading the four parsed variation lists into regular, bold,
+  italic, and bold-italic discovery descriptors, splitting font-grid keys by
+  variation values, preserving deferred CoreText face application, and carrying
+  pinned Ghostty's styled variation retry. Remaining font renderer work stays in
+  `RUNTIME-007B2B2B2`.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1446,4 +1453,4 @@ remains open.
 - [Experiment 148: Window padding layout runtime](148-window-padding-layout-runtime.md)
   — **Pass**
 - [Experiment 149: Font variation runtime](149-font-variation-runtime.md) —
-  **Designed**
+  **Pass**

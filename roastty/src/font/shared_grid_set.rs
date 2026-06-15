@@ -13,7 +13,7 @@ use crate::config;
 use crate::font::codepoint_map::CodepointMap;
 use crate::font::codepoint_resolver::CodepointResolver;
 use crate::font::collection::{Collection, CompleteError, SetPointSizeError, SyntheticStyle};
-use crate::font::discovery::Descriptor;
+use crate::font::discovery::{Descriptor, Variation};
 use crate::font::face::coretext::Face;
 use crate::font::shared_grid::SharedGrid;
 use crate::font::Style;
@@ -147,6 +147,10 @@ pub(crate) struct DerivedConfig {
     pub font_style_bold: config::FontStyle,
     pub font_style_italic: config::FontStyle,
     pub font_style_bold_italic: config::FontStyle,
+    pub font_variation: config::RepeatableFontVariation,
+    pub font_variation_bold: config::RepeatableFontVariation,
+    pub font_variation_italic: config::RepeatableFontVariation,
+    pub font_variation_bold_italic: config::RepeatableFontVariation,
     pub font_codepoint_map: config::RepeatableCodepointMap,
     pub font_synthetic_style: config::FontSyntheticStyle,
 }
@@ -162,6 +166,10 @@ impl DerivedConfig {
             font_style_bold: config.font_style_bold.clone(),
             font_style_italic: config.font_style_italic.clone(),
             font_style_bold_italic: config.font_style_bold_italic.clone(),
+            font_variation: config.font_variation.clone(),
+            font_variation_bold: config.font_variation_bold.clone(),
+            font_variation_italic: config.font_variation_italic.clone(),
+            font_variation_bold_italic: config.font_variation_bold_italic.clone(),
             font_codepoint_map: config.font_codepoint_map.clone(),
             font_synthetic_style: config.font_synthetic_style,
         }
@@ -187,6 +195,7 @@ impl Key {
             &config.font_style,
             Style::Regular,
             font_size_points,
+            &config.font_variation,
         );
         let regular_offset = descriptors.len();
         append_descriptors(
@@ -195,6 +204,7 @@ impl Key {
             &config.font_style_bold,
             Style::Bold,
             font_size_points,
+            &config.font_variation_bold,
         );
         let bold_offset = descriptors.len();
         append_descriptors(
@@ -203,6 +213,7 @@ impl Key {
             &config.font_style_italic,
             Style::Italic,
             font_size_points,
+            &config.font_variation_italic,
         );
         let italic_offset = descriptors.len();
         append_descriptors(
@@ -211,6 +222,7 @@ impl Key {
             &config.font_style_bold_italic,
             Style::BoldItalic,
             font_size_points,
+            &config.font_variation_bold_italic,
         );
         let bold_italic_offset = descriptors.len();
 
@@ -278,14 +290,17 @@ fn append_descriptors(
     style_config: &config::FontStyle,
     style: Style,
     font_size_points: f32,
+    variations: &config::RepeatableFontVariation,
 ) {
     let exact_style = style_config.name_value();
+    let variations = discovery_variations(variations);
     for family in &families.list {
         let mut descriptor = Descriptor {
             family: Some(family.clone()),
             style: exact_style.map(ToOwned::to_owned),
             size: font_size_points,
             monospace: true,
+            variations: variations.clone(),
             ..Default::default()
         };
         if exact_style.is_none() {
@@ -301,6 +316,17 @@ fn append_descriptors(
         }
         descriptors.push(descriptor);
     }
+}
+
+fn discovery_variations(variations: &config::RepeatableFontVariation) -> Vec<Variation> {
+    variations
+        .list
+        .iter()
+        .map(|v| Variation {
+            id: Variation::id_from_tag(&v.id),
+            value: v.value,
+        })
+        .collect()
 }
 
 /// Errors building a shared grid from config.
@@ -367,7 +393,15 @@ fn collection_for_key(key: &Key, config: &DerivedConfig) -> Result<Collection, B
         Style::BoldItalic,
     ] {
         for descriptor in key.descriptors_for_style(style) {
-            if let Some(face) = descriptor.discover_deferred_faces().next() {
+            let mut face = descriptor.discover_deferred_faces().next();
+            if face.is_none() && style != Style::Regular && !descriptor.variations.is_empty() {
+                let mut retry = descriptor.clone();
+                retry.bold = false;
+                retry.italic = false;
+                face = retry.discover_deferred_faces().next();
+            }
+
+            if let Some(face) = face {
                 collection
                     .add_deferred_with_adjustment(
                         face,
@@ -436,6 +470,13 @@ mod tests {
         collection.update_metrics().unwrap();
         let metrics = *collection.metrics().unwrap();
         SharedGrid::new(CodepointResolver::new(collection), metrics)
+    }
+
+    fn variation(tag: &[u8; 4], value: f64) -> Variation {
+        Variation {
+            id: Variation::id_from_tag(tag),
+            value,
+        }
     }
 
     #[test]
@@ -548,6 +589,126 @@ mod tests {
         assert_eq!(bold_italic[0].family.as_deref(), Some("Bold Italic"));
         assert!(bold_italic[0].bold);
         assert!(bold_italic[0].italic);
+    }
+
+    #[test]
+    fn font_variation_runtime_key_maps_each_style_variations() {
+        let mut cfg = Config::default();
+        cfg.font_family.parse_cli(Some("Regular")).unwrap();
+        cfg.font_family_bold.parse_cli(Some("Bold")).unwrap();
+        cfg.font_family_italic.parse_cli(Some("Italic")).unwrap();
+        cfg.font_family_bold_italic
+            .parse_cli(Some("Bold Italic"))
+            .unwrap();
+        cfg.set("font-variation", Some("wght=200")).unwrap();
+        cfg.set("font-variation-bold", Some("wght=700")).unwrap();
+        cfg.set("font-variation-italic", Some("slnt=-10")).unwrap();
+        cfg.set("font-variation-bold-italic", Some("wdth=95"))
+            .unwrap();
+        cfg.finalize();
+
+        let derived = DerivedConfig::from_config(&cfg);
+        let key = Key::new(&derived, 13.0);
+
+        assert_eq!(
+            key.descriptors_for_style(Style::Regular)[0].variations,
+            vec![variation(b"wght", 200.0)]
+        );
+        assert_eq!(
+            key.descriptors_for_style(Style::Bold)[0].variations,
+            vec![variation(b"wght", 700.0)]
+        );
+        assert_eq!(
+            key.descriptors_for_style(Style::Italic)[0].variations,
+            vec![variation(b"slnt", -10.0)]
+        );
+        assert_eq!(
+            key.descriptors_for_style(Style::BoldItalic)[0].variations,
+            vec![variation(b"wdth", 95.0)]
+        );
+    }
+
+    #[test]
+    fn font_variation_runtime_key_hash_changes_with_variation_value() {
+        let mut base = Config::default();
+        base.font_family.parse_cli(Some("Menlo")).unwrap();
+        base.set("font-variation", Some("wght=200")).unwrap();
+
+        let mut changed = base.clone();
+        changed.set("font-variation", Some("")).unwrap();
+        changed.set("font-variation", Some("wght=700")).unwrap();
+
+        let base_key = Key::new(&DerivedConfig::from_config(&base), 13.0);
+        let changed_key = Key::new(&DerivedConfig::from_config(&changed), 13.0);
+
+        assert_ne!(base_key, changed_key);
+        assert_ne!(base_key.hashcode(), changed_key.hashcode());
+    }
+
+    #[test]
+    fn font_variation_runtime_key_preserves_style_offsets() {
+        let mut cfg = Config::default();
+        cfg.font_family.parse_cli(Some("Regular One")).unwrap();
+        cfg.font_family.parse_cli(Some("Regular Two")).unwrap();
+        cfg.font_family_bold.parse_cli(Some("Bold One")).unwrap();
+        cfg.font_family_italic
+            .parse_cli(Some("Italic One"))
+            .unwrap();
+        cfg.font_family_bold_italic
+            .parse_cli(Some("Bold Italic One"))
+            .unwrap();
+        cfg.set("font-variation", Some("wght=200")).unwrap();
+        cfg.set("font-variation-bold", Some("wght=700")).unwrap();
+        cfg.set("font-variation-italic", Some("slnt=-10")).unwrap();
+        cfg.set("font-variation-bold-italic", Some("wdth=95"))
+            .unwrap();
+
+        let key = Key::new(&DerivedConfig::from_config(&cfg), 13.0);
+
+        assert_eq!(key.descriptors_for_style(Style::Regular).len(), 2);
+        assert_eq!(key.descriptors_for_style(Style::Bold).len(), 1);
+        assert_eq!(key.descriptors_for_style(Style::Italic).len(), 1);
+        assert_eq!(key.descriptors_for_style(Style::BoldItalic).len(), 1);
+        assert_eq!(
+            key.descriptors_for_style(Style::Regular)[1].variations,
+            vec![variation(b"wght", 200.0)]
+        );
+        assert_eq!(
+            key.descriptors_for_style(Style::BoldItalic)[0]
+                .family
+                .as_deref(),
+            Some("Bold Italic One")
+        );
+    }
+
+    #[test]
+    fn font_variation_runtime_default_key_has_no_variations() {
+        let mut cfg = Config::default();
+        cfg.font_family.parse_cli(Some("Menlo")).unwrap();
+
+        let key = Key::new(&DerivedConfig::from_config(&cfg), 13.0);
+
+        assert!(
+            key.descriptors_for_style(Style::Regular)[0]
+                .variations
+                .is_empty(),
+            "no-variation config keeps descriptor variations empty"
+        );
+    }
+
+    #[test]
+    fn font_variation_runtime_build_grid_with_configured_variations() {
+        let mut cfg = Config::default();
+        cfg.font_family.parse_cli(Some("Menlo")).unwrap();
+        cfg.set("font-variation", Some("wght=700")).unwrap();
+
+        let mut grid = build_grid_from_config(&cfg, 13.0).expect("grid builds");
+        let index = grid
+            .get_index('A' as u32, Style::Regular, None)
+            .unwrap()
+            .expect("configured variation grid resolves ASCII");
+
+        assert!(grid.has_codepoint(index, 'A' as u32, None));
     }
 
     #[test]
