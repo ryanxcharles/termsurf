@@ -228,6 +228,11 @@ impl ModeState {
         self.values[mode.index()] = value;
     }
 
+    pub(super) fn set_default(&mut self, mode: Mode, value: bool) {
+        self.default[mode.index()] = value;
+        self.values[mode.index()] = value;
+    }
+
     pub(super) fn get(&self, mode: Mode) -> bool {
         self.values[mode.index()]
     }

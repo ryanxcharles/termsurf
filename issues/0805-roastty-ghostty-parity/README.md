@@ -671,6 +671,11 @@ experiment files until they are proven.
   parser: OSC 4/10/11/12 query replies must use the configured `none`, `8-bit`,
   or `16-bit` response format at startup and after app config updates, while
   set/reset color operations still run when query replies are disabled.
+- **Grapheme width method is a terminal default mode.** Experiment 140 found
+  that pinned Ghostty maps `grapheme-width-method` into DEC 2027
+  `grapheme_cluster` during `Termio.init`, storing it as both current and reset
+  default mode state. Roastty parity therefore requires startup wiring plus
+  direct reset/RIS proof, not just setting the current mode bit.
 - **Shell integration parity has a proven Termio env slice.** Experiment 124
   split terminal identity, resource-backed `TERMINFO`, explicit env override
   ordering, shell feature env, and zsh bootstrap behavior out of the broader
@@ -1372,4 +1377,4 @@ remains open.
 - [Experiment 139: Image storage limit runtime](139-image-storage-limit-runtime.md)
   — **Pass**
 - [Experiment 140: Grapheme width method runtime](140-grapheme-width-method-runtime.md)
-  — **Designed**
+  — **Pass**

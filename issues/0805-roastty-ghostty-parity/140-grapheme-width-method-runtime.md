@@ -82,3 +82,44 @@ mode initialization plus RIS/full-reset verification.
 Re-review returned **Approved**. The reviewer confirmed the prior finding is
 resolved because the design now requires current-and-default DEC 2027
 initialization and reset verification for both `unicode` and `legacy`.
+
+## Result
+
+**Result:** Pass
+
+Roastty now passes the parsed `grapheme-width-method` value through surface
+startup, `TermioSpawnOptions`, and `TerminalInitOptions`. The terminal mode
+initialization uses a default-mode path that updates both current and
+reset/default DEC 2027 state, matching pinned Ghostty's `default_modes` behavior
+instead of only flipping the live mode bit.
+
+Verification completed:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml -- --check` — pass.
+- `cargo test --manifest-path roastty/Cargo.toml grapheme_width_method_runtime`
+  — pass: 3 tests passed, 0 failed.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/grapheme_width_method_runtime_parity.py`
+  — pass.
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md`
+  — pass: `runtime_rows=49`, `oracle_complete=42`, `closed=44`, `incomplete=5`,
+  `gap=5`, `cfg223=Gap`.
+- `git diff --check` — pass.
+
+CFG-223 remains a gap overall, but the completed runtime inventory count moved
+from 41 to 42 oracle-complete rows. The remaining broad terminal behavior row
+was renamed to `RUNTIME-009B2B2B3B2B2B2B3`.
+
+## Conclusion
+
+`grapheme-width-method` is now covered for startup terminal runtime parity.
+Pinned Ghostty treats it as a terminal default mode rather than a live reload
+setting, so Roastty's durable guard focuses on startup plus direct reset/RIS
+restoration for both `unicode` and `legacy`. Other terminal behavior effects
+remain in the reduced `RUNTIME-009B2B2B3B2B2B2B3` gap.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **Approved** with no
+findings. The reviewer independently ran the focused Rust test, formatter check,
+static parity guard, inventory generation against `/tmp` outputs, and
+`git diff --check`, and confirmed the result commit had not yet been made.

@@ -41,6 +41,7 @@ pub(crate) struct TermioSpawnOptions {
     pub(crate) max_scrollback_bytes: Option<usize>,
     pub(crate) palette: color::Palette,
     pub(crate) image_storage_limit: usize,
+    pub(crate) grapheme_cluster: bool,
     pub(crate) title_report: bool,
     pub(crate) enquiry_response: Vec<u8>,
     pub(crate) osc_color_report_format: crate::config::OscColorReportFormat,
@@ -61,6 +62,7 @@ impl Default for TermioSpawnOptions {
             max_scrollback_bytes: None,
             palette: color::DEFAULT_PALETTE,
             image_storage_limit: crate::terminal::kitty::graphics_storage::DEFAULT_TOTAL_LIMIT,
+            grapheme_cluster: crate::config::GraphemeWidthMethod::Unicode.grapheme_cluster(),
             title_report: false,
             enquiry_response: Vec::new(),
             osc_color_report_format: crate::config::OscColorReportFormat::Bits16,
@@ -197,6 +199,7 @@ impl Termio {
             TerminalInitOptions {
                 cursor_visual_style: options.cursor_visual_style,
                 cursor_blink: options.cursor_blink,
+                grapheme_cluster: options.grapheme_cluster,
                 title_report: options.title_report,
                 enquiry_response: options.enquiry_response,
                 osc_color_report_format: options.osc_color_report_format,
@@ -1547,6 +1550,46 @@ mod tests {
         assert!(termio
             .terminal()
             .kitty_image_medium_enabled(crate::terminal::terminal::KittyImageMedium::SharedMemory));
+    }
+
+    #[test]
+    fn grapheme_width_method_runtime_spawn_options_reach_terminal() {
+        let _guard = pty_command_lock();
+
+        for grapheme_cluster in [true, false] {
+            let mut termio = Termio::spawn_with_options(
+                "/bin/sleep",
+                ["1"],
+                TermioSpawnOptions {
+                    grapheme_cluster,
+                    ..TermioSpawnOptions::default()
+                },
+                test_size(),
+            )
+            .expect("spawn termio with grapheme width method");
+
+            assert_eq!(
+                termio.terminal().grapheme_cluster_enabled(),
+                grapheme_cluster
+            );
+
+            let toggle = if grapheme_cluster {
+                b"\x1b[?2027l".as_slice()
+            } else {
+                b"\x1b[?2027h"
+            };
+            termio.terminal_mut().next_slice(toggle).unwrap();
+            assert_ne!(
+                termio.terminal().grapheme_cluster_enabled(),
+                grapheme_cluster
+            );
+
+            termio.terminal_mut().next_slice(b"\x1bc").unwrap();
+            assert_eq!(
+                termio.terminal().grapheme_cluster_enabled(),
+                grapheme_cluster
+            );
+        }
     }
 
     #[test]

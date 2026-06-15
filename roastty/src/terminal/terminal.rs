@@ -794,6 +794,7 @@ pub(crate) enum TerminalInitError {
 pub(crate) struct TerminalInitOptions {
     pub(crate) cursor_visual_style: cursor::VisualStyle,
     pub(crate) cursor_blink: Option<bool>,
+    pub(crate) grapheme_cluster: bool,
     pub(crate) title_report: bool,
     pub(crate) enquiry_response: Vec<u8>,
     pub(crate) osc_color_report_format: OscColorReportFormat,
@@ -805,6 +806,7 @@ impl Default for TerminalInitOptions {
         Self {
             cursor_visual_style: cursor::VisualStyle::Block,
             cursor_blink: None,
+            grapheme_cluster: false,
             title_report: false,
             enquiry_response: Vec::new(),
             osc_color_report_format: OscColorReportFormat::Bits16,
@@ -1071,6 +1073,7 @@ impl Terminal {
             modes::Mode::CursorBlinking,
             options.cursor_blink.unwrap_or(true),
         );
+        modes.set_default(modes::Mode::GraphemeCluster, options.grapheme_cluster);
         Ok(Self {
             size,
             screens,
@@ -2581,6 +2584,10 @@ impl Terminal {
     #[cfg(test)]
     pub(super) fn get_mode_for_tests(&self, mode: modes::Mode) -> bool {
         self.modes.get(mode)
+    }
+
+    pub(crate) fn grapheme_cluster_enabled(&self) -> bool {
+        self.modes.get(modes::Mode::GraphemeCluster)
     }
 
     #[cfg(test)]
@@ -8118,6 +8125,49 @@ mod tests {
             cursor::VisualStyle::Bar
         );
         assert!(!terminal.get_mode_for_tests(Mode::CursorBlinking));
+    }
+
+    #[test]
+    fn grapheme_width_method_runtime_initializes_mode_and_reset_default() {
+        for (grapheme_cluster, expected_report) in [
+            (true, b"\x1b[?2027;1$y".as_slice()),
+            (false, b"\x1b[?2027;2$y"),
+        ] {
+            let mut terminal = Terminal::init_with_options(
+                10,
+                2,
+                None,
+                TerminalInitOptions {
+                    grapheme_cluster,
+                    ..TerminalInitOptions::default()
+                },
+            )
+            .unwrap();
+
+            assert_eq!(terminal.grapheme_cluster_enabled(), grapheme_cluster);
+            terminal.next_slice(b"\x1b[?2027$p").unwrap();
+            assert_eq!(terminal.take_pty_response_for_tests(), expected_report);
+
+            let toggle = if grapheme_cluster {
+                b"\x1b[?2027l".as_slice()
+            } else {
+                b"\x1b[?2027h"
+            };
+            terminal.next_slice(toggle).unwrap();
+            assert_ne!(terminal.grapheme_cluster_enabled(), grapheme_cluster);
+
+            terminal.reset();
+            assert_eq!(terminal.grapheme_cluster_enabled(), grapheme_cluster);
+            terminal.next_slice(b"\x1b[?2027$p").unwrap();
+            assert_eq!(terminal.take_pty_response_for_tests(), expected_report);
+
+            terminal.next_slice(toggle).unwrap();
+            assert_ne!(terminal.grapheme_cluster_enabled(), grapheme_cluster);
+            terminal.next_slice(b"\x1bc").unwrap();
+            assert_eq!(terminal.grapheme_cluster_enabled(), grapheme_cluster);
+            terminal.next_slice(b"\x1b[?2027$p").unwrap();
+            assert_eq!(terminal.take_pty_response_for_tests(), expected_report);
+        }
     }
 
     #[test]

@@ -4009,6 +4009,7 @@ impl Surface {
             max_scrollback_bytes: scrollback_limit_to_bytes(config.scrollback_limit),
             palette: derived_config_palette(&config),
             image_storage_limit: config.image_storage_limit as usize,
+            grapheme_cluster: config.grapheme_width_method.grapheme_cluster(),
             title_report: config.title_report,
             enquiry_response: config.enquiry_response.as_bytes().to_vec(),
             osc_color_report_format: config.osc_color_report_format,
@@ -22406,6 +22407,54 @@ mod tests {
                     terminal.kitty_image_medium_enabled(KittyImageMedium::SharedMemory),
                 )
             })
+    }
+
+    fn surface_grapheme_cluster_enabled(surface: RoasttySurface) -> bool {
+        surface_from_handle(surface)
+            .unwrap()
+            .termio_worker
+            .as_ref()
+            .unwrap()
+            .with_termio(|termio| termio.terminal().grapheme_cluster_enabled())
+    }
+
+    #[test]
+    fn surface_grapheme_width_method_runtime_startup_config() {
+        let _guard = pty_command_lock();
+
+        for (body, expected) in [
+            ("command = sleep 5\n", true),
+            ("grapheme-width-method = unicode\ncommand = sleep 5\n", true),
+            ("grapheme-width-method = legacy\ncommand = sleep 5\n", false),
+        ] {
+            let config = new_test_config_from_str(body);
+            let app = roastty_app_new(ptr::null(), config);
+            let surface = new_test_surface(app);
+
+            assert_eq!(roastty_surface_start(surface), ROASTTY_SUCCESS);
+            assert_eq!(surface_grapheme_cluster_enabled(surface), expected);
+
+            surface_from_handle(surface)
+                .unwrap()
+                .termio_worker
+                .as_ref()
+                .unwrap()
+                .with_termio_mut(|termio| {
+                    let toggle = if expected {
+                        b"\x1b[?2027l".as_slice()
+                    } else {
+                        b"\x1b[?2027h"
+                    };
+                    termio.terminal_mut().next_slice(toggle).unwrap();
+                    assert_ne!(termio.terminal().grapheme_cluster_enabled(), expected);
+                    termio.terminal_mut().next_slice(b"\x1bc").unwrap();
+                    assert_eq!(termio.terminal().grapheme_cluster_enabled(), expected);
+                });
+
+            roastty_surface_free(surface);
+            roastty_app_free(app);
+            roastty_config_free(config);
+        }
     }
 
     #[test]

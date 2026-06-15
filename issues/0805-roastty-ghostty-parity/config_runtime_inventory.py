@@ -838,6 +838,31 @@ ROWS = [
     ),
     RuntimeRow(
         id="RUNTIME-009B2B2B3B2B2B2B2",
+        behavior="`grapheme-width-method` terminal default mode startup and reset effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `grapheme-width-method`; `vendor/ghostty/src/termio/Termio.zig` default mode construction; `vendor/ghostty/src/terminal/Terminal.zig` default mode reset behavior",
+        roastty_reference="`roastty/src/config/mod.rs` `grapheme-width-method`; `roastty/src/termio.rs` spawn options; `roastty/src/lib.rs` surface config startup wiring; `roastty/src/terminal/terminal.rs` default mode initialization",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 140 proves `grapheme-width-method` startup runtime "
+            "parity. `grapheme_width_method_runtime_initializes_mode_and_reset_default` "
+            "proves terminal init options set both current and reset/default "
+            "DEC 2027 state and that direct reset and RIS restore the "
+            "configured default for `unicode` and `legacy`. "
+            "`grapheme_width_method_runtime_spawn_options_reach_terminal` "
+            "proves termio spawn options reach the PTY-backed terminal. "
+            "`surface_grapheme_width_method_runtime_startup_config` proves "
+            "parsed default, explicit `unicode`, and explicit `legacy` config "
+            "reach initial surfaces. `grapheme_width_method_runtime_parity.py` "
+            "statically checks pinned Ghostty termio/default-mode markers plus "
+            "Roastty parser/runtime/startup guards."
+        ),
+        missing_evidence="None for `grapheme-width-method` terminal default mode startup and reset effects.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml grapheme_width_method_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/grapheme_width_method_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3B2B2B2B3",
         behavior="other remaining terminal behavior effects",
         ghostty_reference="remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
@@ -845,7 +870,7 @@ ROWS = [
         status="Gap",
         evidence=(
             "Experiments 117, 122, 124, 126, 127, 128, 129, 130, 131, 135, "
-            "136, and 137 "
+            "136, 137, 138, 139, and 140 "
             "split out zero/no-history scrollback, nonzero scrollback byte "
             "quota, alternate-screen no-scrollback, CSI `21t` title-report "
             "gating, shell-integration feature env and terminal identity, "
@@ -859,7 +884,9 @@ ROWS = [
             "`clipboard-write` primary device-attributes clipboard capability "
             "advertisement, and live `cursor-style`/`cursor-style-blink` "
             "default cursor runtime effects, and `image-storage-limit` kitty "
-            "graphics storage quota startup/live update effects. "
+            "graphics storage quota startup/live update effects, and "
+            "`grapheme-width-method` terminal default mode startup/reset "
+            "effects. "
             "Other remaining terminal behavior toggles still need focused "
             "CFG-223 runtime proof or fixes."
         ),
@@ -1166,6 +1193,7 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2B3B2B2B2A",
     "RUNTIME-009B2B2B3B2B2B2B1",
     "RUNTIME-009B2B2B3B2B2B2B2",
+    "RUNTIME-009B2B2B3B2B2B2B3",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",
