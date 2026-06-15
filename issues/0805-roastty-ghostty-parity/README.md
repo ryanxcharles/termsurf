@@ -1702,3 +1702,5 @@ remains open.
   — **Pass**
 - [Experiment 176: macOS hidden titlebar runtime](176-macos-hidden-titlebar-runtime.md)
   — **Pass**
+- [Experiment 177: Window padding pixel runtime](177-window-padding-pixel-runtime.md)
+  — **Designed**
