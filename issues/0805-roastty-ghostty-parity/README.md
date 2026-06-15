@@ -1835,3 +1835,5 @@ remains open.
   — **Partial**
 - [Experiment 191: Real OS link cursor pixels](191-real-os-link-cursor-pixels.md)
   — **Partial**
+- [Experiment 192: Live dock attention state](192-live-dock-attention-state.md)
+  — **Designed**
