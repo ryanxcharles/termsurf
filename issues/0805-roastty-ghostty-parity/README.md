@@ -1628,3 +1628,5 @@ remains open.
   — **Pass**
 - [Experiment 168: Split divider color crash](168-split-divider-color-crash.md)
   — **Pass**
+- [Experiment 169: Config facet matrix reconciliation](169-config-facet-matrix-reconciliation.md)
+  — **Designed**
