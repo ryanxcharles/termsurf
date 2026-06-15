@@ -61,7 +61,7 @@ def main() -> int:
     require("Gap" in cfg223, f"CFG-223 should remain Gap: {cfg223}")
     require_text(
         matrix,
-        "Runtime inventory coverage: 91 rows Oracle complete; 94 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
+        "Runtime inventory coverage: 92 rows Oracle complete; 95 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
         "CFG-223 split counts",
     )
 
@@ -131,6 +131,16 @@ def main() -> int:
     require_text(cursor, "721-pixel symmetric difference", "cursor symmetric-difference evidence")
     require_text(cursor, "macos_real_link_cursor_pixels.py", "real OS cursor live guard command")
 
+    attention_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C7")
+    attention = row_line(runtime, "RUNTIME-012B2B2B2B2B3C7")
+    require(attention_cells[4] == "notifications", f"unexpected attention row family: {attention_cells}")
+    require(attention_cells[5] == "Oracle complete", f"unexpected attention row status: {attention_cells}")
+    require_text(attention, "background Dock attention request dispatch", "attention request behavior")
+    require_text(attention, "appBell active=false", "inactive attention request evidence")
+    require_text(attention, "appBell attentionRequest=0", "attention request return evidence")
+    require_text(attention, "authorizationStatus=1 badgeSetting=2", "badge authorization evidence")
+    require_text(attention, "macos_live_bell_attention_dock_state.py", "attention live guard command")
+
     gap_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C")
     gap = row_line(runtime, "RUNTIME-012B2B2B2B2B3C")
     require(gap_cells[4] == "notifications", f"unexpected gap row family: {gap_cells}")
@@ -138,7 +148,7 @@ def main() -> int:
     for needle in [
         "actual OS notification delivery/banner/sound",
         "audible bell output",
-        "measurable dock-attention state",
+        "OS-visible dock-attention bounce/state beyond AppKit request dispatch",
         "Quick Look/native link preview display beyond the copied SwiftUI URLHoverBanner",
         "external Launch Services handler delivery",
     ]:
@@ -166,6 +176,7 @@ def main() -> int:
         ISSUE / "macos_live_link_hover_banner_pixels.py",
         ISSUE / "macos_live_bell_title_border_pixels.py",
         ISSUE / "macos_real_link_cursor_pixels.py",
+        ISSUE / "macos_live_bell_attention_dock_state.py",
     ]:
         result = subprocess.run(
             ["python3", str(guard)],

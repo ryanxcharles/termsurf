@@ -2274,7 +2274,7 @@ ROWS = [
             "disabled, and separately drives the audio branch with the configured "
             "`/System/Library/Sounds/Ping.aiff` path and volume."
         ),
-        missing_evidence="None for live bell feature bridge, app branch dispatch, surface bell state dispatch, and configured audio-path request trace. Live bell title/border UI effects are tracked by RUNTIME-012B2B2B2B2B3C5, while audible sound output and measurable dock-attention state remain tracked by RUNTIME-012B2B2B2B2B3C.",
+        missing_evidence="None for live bell feature bridge, app branch dispatch, surface bell state dispatch, and configured audio-path request trace. Live bell title/border UI effects are tracked by RUNTIME-012B2B2B2B2B3C5, background attention request dispatch is tracked by RUNTIME-012B2B2B2B2B3C7, and audible sound output plus OS-visible dock-attention bounce/state remain tracked by RUNTIME-012B2B2B2B2B3C.",
         guard_tier="Tier 3",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_notification_link_bell_trace_runtime.py`",
     ),
@@ -2393,7 +2393,7 @@ ROWS = [
             "changed pixels in the center control region, and zero changed "
             "pixels in the titlebar/control mask."
         ),
-        missing_evidence="None for live copied macOS bell title prefix state and `BellBorderOverlay` pixels. Audible sound output and measurable dock-attention state remain tracked by RUNTIME-012B2B2B2B2B3C.",
+        missing_evidence="None for live copied macOS bell title prefix state and `BellBorderOverlay` pixels. Background attention request dispatch is tracked by RUNTIME-012B2B2B2B2B3C7, while audible sound output and OS-visible dock-attention bounce/state remain tracked by RUNTIME-012B2B2B2B2B3C.",
         guard_tier="Tier 3",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_live_bell_title_border_pixels.py`",
     ),
@@ -2424,6 +2424,33 @@ ROWS = [
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_real_link_cursor_pixels.py`",
     ),
     RuntimeRow(
+        id="RUNTIME-012B2B2B2B2B3C7",
+        behavior="live macOS background Dock attention request dispatch",
+        ghostty_reference="Pinned Ghostty macOS `bell-features = attention` handling through `NSApp.requestUserAttention(.informationalRequest)` and Dock badge authorization-gated update path",
+        roastty_reference="`roastty/macos/Sources/App/macOS/AppDelegate.swift` `roasttyBellDidRing`, `syncDockBadge`, and `setDockBadge`",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 192 adds `macos_live_bell_attention_dock_state.py`, "
+            "which launches the built debug app with isolated configs for an "
+            "attention-enabled run and an otherwise identical attention-disabled "
+            "control. The guard backgrounds Roastty before the child emits BEL, "
+            "then proves the live BEL path with `ringBell target=surface`, "
+            "`surfaceBell state=true`, and `appBell system=false audio=false "
+            "attention=true`. The enabled run records `appBell active=false` "
+            "and `appBell attentionRequest=0`, proving the AppKit request path "
+            "was invoked while the app was inactive on this VM/macOS build. "
+            "The disabled control records `appBell system=false audio=false "
+            "attention=false` with no `attentionRequest` or active-state trace. "
+            "Both runs record Dock badge authorization state "
+            "`authorizationStatus=1 badgeSetting=2`, explaining why no badge "
+            "label can be deterministically asserted in this VM."
+        ),
+        missing_evidence="None for live inactive-app `NSApp.requestUserAttention(.informationalRequest)` dispatch and authorization-gated Dock badge branch capture. OS-visible Dock bounce/state beyond AppKit request dispatch remains tracked by RUNTIME-012B2B2B2B2B3C.",
+        guard_tier="Tier 3",
+        guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_live_bell_attention_dock_state.py`",
+    ),
+    RuntimeRow(
         id="RUNTIME-012B2B2B2B2B3C",
         behavior="remaining OS-controlled notification, audible bell, dock-attention, Quick Look/native preview, and external URL-handler GUI effects",
         ghostty_reference="Pinned Ghostty macOS native notification, audible bell, dock-attention, Quick Look/native preview, and external URL-handler behavior",
@@ -2445,11 +2472,13 @@ ROWS = [
             "bell title prefix state and border overlay pixels into "
             "`RUNTIME-012B2B2B2B2B3C5`. Experiment 191 splits real "
             "OS-rendered link cursor pixels into "
-            "`RUNTIME-012B2B2B2B2B3C6`. The remaining unproven behavior is "
+            "`RUNTIME-012B2B2B2B2B3C6`. Experiment 192 splits live inactive-app "
+            "Dock attention request dispatch and badge authorization capture "
+            "into `RUNTIME-012B2B2B2B2B3C7`. The remaining unproven behavior is "
             "limited to OS-controlled GUI effects that the current VM run did "
             "not expose deterministically."
         ),
-        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, measurable dock-attention state, Quick Look/native link preview display beyond the copied SwiftUI URLHoverBanner, and external Launch Services handler delivery.",
+        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, OS-visible dock-attention bounce/state beyond AppKit request dispatch, Quick Look/native link preview display beyond the copied SwiftUI URLHoverBanner, and external Launch Services handler delivery.",
         guard_tier="Tier 3",
         guard_command="TBD by future focused OS/native GUI experiment.",
     ),
@@ -2584,6 +2613,7 @@ EXPECTED_IDS = [
     "RUNTIME-012B2B2B2B2B3C4",
     "RUNTIME-012B2B2B2B2B3C5",
     "RUNTIME-012B2B2B2B2B3C6",
+    "RUNTIME-012B2B2B2B2B3C7",
     "RUNTIME-012B2B2B2B2B3C",
     "RUNTIME-013",
     "RUNTIME-014",

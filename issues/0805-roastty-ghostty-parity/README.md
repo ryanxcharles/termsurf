@@ -1062,6 +1062,15 @@ experiment files until they are proven.
   701 link-cursor changed pixels, a 721-pixel symmetric difference, and a
   15-pixel bounding-box delta. CFG-223 now has 91 Oracle-complete runtime rows,
   94 closed rows, and the one remaining gap excludes real OS cursor pixels.
+- **Inactive AppKit attention dispatch is observable, but Dock bounce is still
+  OS-controlled.** Experiment 192 proved Roastty can be backgrounded before BEL
+  and still run the attention branch with `appBell active=false`. On this
+  VM/macOS build, `NSApp.requestUserAttention(.informationalRequest)` returned
+  `0` while inactive, so a nonzero request ID is not a valid oracle here. The
+  guard also records `dockBadge authorizationStatus=1 badgeSetting=2`, which
+  explains why the app does not set a badge label in this VM. CFG-223 now has 92
+  Oracle-complete runtime rows and 95 closed rows, while OS-visible Dock
+  bounce/state remains in the residual gap.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1836,4 +1845,4 @@ remains open.
 - [Experiment 191: Real OS link cursor pixels](191-real-os-link-cursor-pixels.md)
   — **Partial**
 - [Experiment 192: Live dock attention state](192-live-dock-attention-state.md)
-  — **Designed**
+  — **Partial**

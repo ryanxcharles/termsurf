@@ -119,3 +119,99 @@ states. The design was narrowed so a nonzero
 oracle, while Dock badge label evidence is opportunistic when macOS allows it.
 
 Final verdict: **Approved**.
+
+## Result
+
+**Result:** Partial
+
+The initial approved oracle was too strong for this VM/macOS build. The first
+implementation attempted to require a nonzero return value from
+`NSApp.requestUserAttention(.informationalRequest)`. The live trace instead
+showed the app was inactive when the attention branch ran, but AppKit returned
+`0`:
+
+```text
+appBell system=false audio=false attention=true
+appBell attention=true
+appBell active=false
+appBell attentionRequest=0
+```
+
+The guard was adjusted to record that behavior honestly instead of treating it
+as proof of an OS-visible Dock bounce. The passing run proves:
+
+- the debug app launched with isolated config/defaults;
+- Roastty was backgrounded before BEL (`front_pid_before_bel = 444`, not the
+  Roastty PID);
+- the attention-enabled run emitted `ringBell target=surface`,
+  `appBell system=false audio=false attention=true`, `appBell active=false`,
+  `appBell attentionRequest=0`, and `surfaceBell state=true`;
+- the attention-disabled control emitted
+  `appBell system=false audio=false attention=false` with no attention request
+  or active-state trace;
+- both runs recorded `dockBadge authorizationStatus=1 badgeSetting=2`, so badge
+  labels are intentionally unavailable in this VM authorization state;
+- no new Roastty crash report was observed.
+
+The inventory now splits `RUNTIME-012B2B2B2B2B3C7` as Oracle complete for live
+inactive-app Dock attention request dispatch and badge authorization capture.
+`RUNTIME-012B2B2B2B2B3C` remains a `Gap` for actual OS notification
+delivery/banner/sound after authorization is available, audible bell output,
+OS-visible Dock attention bounce/state beyond AppKit request dispatch, Quick
+Look/native link preview display beyond the copied SwiftUI URLHoverBanner, and
+external Launch Services handler delivery.
+
+The regenerated CFG-223 counts are:
+
+- runtime rows: 96
+- Oracle complete: 92
+- closed: 95
+- audit covered: 0
+- incomplete: 1
+- runtime gaps: 1
+- CFG-223 status: `Gap`
+
+Verification logs:
+
+- `logs/issue805-exp192-build-1.log` for the build before the first guard run
+- `logs/issue805-exp192-dock-attention-1.log` for the failed standalone
+  notification-settings probe
+- `logs/issue805-exp192-build-2.log` for the rebuild with app-owned badge
+  authorization trace
+- `logs/issue805-exp192-dock-attention-2.log` for the failed nonzero request-ID
+  oracle
+- `logs/issue805-exp192-build-3.log` for the rebuild with active-state trace
+- `logs/issue805-exp192-dock-attention-3.log` for the second failed nonzero
+  request-ID oracle, proving `active=false` and `attentionRequest=0`
+- `logs/issue805-exp192-dock-attention-4.log` for the passing adjusted guard
+- `logs/issue805-exp192-config-runtime-inventory-1.log`
+- `logs/issue805-exp192-residual-guard-1.log`
+- `logs/issue805-exp192-py-compile-1.log`
+- `logs/issue805-exp192-prettier-check-5.log`
+- `logs/issue805-exp192-diff-check-3.log`
+
+## Conclusion
+
+Experiment 192 did not prove OS-visible Dock bounce/state. It did prove the live
+background AppKit attention request dispatch path and the VM's badge
+authorization branch, and it showed that a nonzero `requestUserAttention` return
+value is not a reliable oracle here. The next dock-related attempt needs a
+different OS-visible measurement, such as a reliable Dock UI/screenshot oracle,
+or should move to another remaining residual slice.
+
+## Completion Review
+
+Fresh-context Codex adversarial reviewer `Russell the 3rd` reviewed the
+completed experiment, implementation diff, inventory split, residual guard, and
+verification logs.
+
+Final verdict: **Approved**.
+
+Optional finding accepted for future improvement: the passing live guard log
+contains only `macos_live_bell_attention_dock_state=pass`, while the detailed
+JSON evidence is written to
+`/tmp/termsurf-issue805-exp192-dock-attention-latest.json`. The reviewer agreed
+the script assertions prove the behavior, so this is not blocking.
+
+Nit fixed: the result log list now points at the latest post-update
+`prettier-check-5` and `diff-check-3` logs.

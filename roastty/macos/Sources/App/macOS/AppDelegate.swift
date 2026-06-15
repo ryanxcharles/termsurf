@@ -656,7 +656,9 @@ class AppDelegate: NSObject,
         if roastty.config.bellFeatures.contains(.attention) {
             // Bounce the dock icon if we're not focused.
             appendUITestTrace("appBell attention=true")
-            NSApp.requestUserAttention(.informationalRequest)
+            appendUITestTrace("appBell active=\(NSApp.isActive)")
+            let requestID = NSApp.requestUserAttention(.informationalRequest)
+            appendUITestTrace("appBell attentionRequest=\(requestID)")
         }
     }
 
@@ -684,6 +686,9 @@ class AppDelegate: NSObject,
     private func syncDockBadge() {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
+            self.appendUITestTrace(
+                "dockBadge authorizationStatus=\(settings.authorizationStatus.rawValue) badgeSetting=\(settings.badgeSetting.rawValue)"
+            )
             switch settings.authorizationStatus {
             case .authorized:
                 // If we're authorized and allow badges, then set the badge.
