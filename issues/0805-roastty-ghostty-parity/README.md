@@ -1535,3 +1535,5 @@ remains open.
   **Pass**
 - [Experiment 158: App notifications platform classification](158-app-notifications-platform-classification.md)
   — **Pass**
+- [Experiment 159: macOS link hover banner plumbing](159-macos-link-hover-banner-plumbing.md)
+  — **Designed**
