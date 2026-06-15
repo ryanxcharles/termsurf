@@ -61,7 +61,7 @@ def main() -> int:
     require("Gap" in cfg223, f"CFG-223 should remain Gap: {cfg223}")
     require_text(
         matrix,
-        "Runtime inventory coverage: 93 rows Oracle complete; 96 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
+        "Runtime inventory coverage: 94 rows Oracle complete; 97 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
         "CFG-223 split counts",
     )
 
@@ -151,6 +151,16 @@ def main() -> int:
     require_text(quicklook, "at least 50000 nonblack pixels", "Quick Look native popover threshold evidence")
     require_text(quicklook, "macos_live_quicklook_definition.py", "Quick Look live guard command")
 
+    launch_services_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C9")
+    launch_services = row_line(runtime, "RUNTIME-012B2B2B2B2B3C9")
+    require(launch_services_cells[4] == "notifications", f"unexpected Launch Services row family: {launch_services_cells}")
+    require(launch_services_cells[5] == "Oracle complete", f"unexpected Launch Services row status: {launch_services_cells}")
+    require_text(launch_services, "external Launch Services URL handler delivery", "Launch Services behavior")
+    require_text(launch_services, "registerStatus=0", "Launch Services registration evidence")
+    require_text(launch_services, "openURL url=<private-url> kind=unknown", "unsuppressed Roastty URL trace evidence")
+    require_text(launch_services, "NSWorkspace.shared.open(url)", "production open path evidence")
+    require_text(launch_services, "macos_launch_services_url_handler_delivery.py", "Launch Services live guard command")
+
     gap_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C")
     gap = row_line(runtime, "RUNTIME-012B2B2B2B2B3C")
     require(gap_cells[4] == "notifications", f"unexpected gap row family: {gap_cells}")
@@ -159,11 +169,11 @@ def main() -> int:
         "actual OS notification delivery/banner/sound",
         "audible bell output",
         "OS-visible dock-attention bounce/state beyond AppKit request dispatch",
-        "external Launch Services handler delivery",
     ]:
         require_text(gap, needle, f"remaining exact gap slice {needle}")
     require_absent(gap, "real OS cursor pixels", "closed real OS cursor gap")
     require_absent(gap, "Quick Look/native link preview display", "stale remaining Quick Look gap")
+    require_absent(gap, "Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, OS-visible dock-attention bounce/state beyond AppKit request dispatch, and external Launch Services handler delivery.", "stale external Launch Services missing-evidence wording")
 
     result = subprocess.run(
         ["python3", str(LIVE_GUARD)],
@@ -188,6 +198,7 @@ def main() -> int:
         ISSUE / "macos_real_link_cursor_pixels.py",
         ISSUE / "macos_live_bell_attention_dock_state.py",
         ISSUE / "macos_live_quicklook_definition.py",
+        ISSUE / "macos_launch_services_url_handler_delivery.py",
     ]:
         result = subprocess.run(
             ["python3", str(guard)],

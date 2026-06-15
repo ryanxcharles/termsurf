@@ -1083,6 +1083,15 @@ experiment files until they are proven.
   `logs/issue805-exp193-quicklook-latest.json` because AppKit popover geometry
   can drift by a few pixels between runs. CFG-223 now has 93 Oracle-complete
   runtime rows and 96 closed rows.
+- **Launch Services handler delivery needs a stable handler app location.**
+  Experiment 194 found that per-run URL handler apps under the per-user temp
+  directory could return successful CoreServices registration calls while direct
+  `open <private-url>` still failed with `kLSApplicationNotFoundErr`. Building
+  the per-run native Cocoa handler under `logs/` made Launch Services report the
+  expected current handler and deliver both direct `open <private-url>` and
+  Roastty's unsuppressed `NSWorkspace.shared.open(url)` request to the
+  controlled handler. CFG-223 now has 94 Oracle-complete runtime rows and 97
+  closed rows.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1861,4 +1870,4 @@ remains open.
 - [Experiment 193: Live Quick Look definition dispatch](193-live-quicklook-definition.md)
   — **Pass**
 - [Experiment 194: Launch Services URL handler delivery](194-launch-services-url-handler-delivery.md)
-  — **Designed**
+  — **Pass**

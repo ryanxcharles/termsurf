@@ -2316,7 +2316,7 @@ ROWS = [
             "native app path; it intentionally does not claim external Launch "
             "Services handler delivery."
         ),
-        missing_evidence="None for live native app URL-opening request construction and exact URL routing. External Launch Services handler delivery remains outside the deterministic VM oracle and is tracked by RUNTIME-012B2B2B2B2B3C.",
+        missing_evidence="None for live native app URL-opening request construction and exact URL routing. External Launch Services handler delivery is tracked by RUNTIME-012B2B2B2B2B3C9.",
         guard_tier="Tier 3",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_controlled_url_open_runtime.py`",
     ),
@@ -2476,15 +2476,43 @@ ROWS = [
             "displayed a native definition popover attached to the live "
             "Roastty window."
         ),
-        missing_evidence="None for live Quick Look/native definition word lookup, CoreText font attribute, `showDefinition(for:at:)` dispatch, and visible native definition UI pixels. This does not prove external Launch Services handler delivery or unrelated OS notification/audio/dock effects.",
+        missing_evidence="None for live Quick Look/native definition word lookup, CoreText font attribute, `showDefinition(for:at:)` dispatch, and visible native definition UI pixels. This does not prove unrelated OS notification/audio/dock effects.",
         guard_tier="Tier 3",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_live_quicklook_definition.py`",
     ),
     RuntimeRow(
+        id="RUNTIME-012B2B2B2B2B3C9",
+        behavior="external Launch Services URL handler delivery",
+        ghostty_reference="Pinned Ghostty macOS `Ghostty.App.openURL` `NSWorkspace.shared.open(url)` behavior",
+        roastty_reference="`roastty/macos/Sources/Roastty/Roastty.App.swift` `Roastty.App.openURL` unsuppressed `NSWorkspace.shared.open(url)` path and AppleScript UI test hook",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 194 adds `macos_launch_services_url_handler_delivery.py`, "
+            "which builds a per-run native Cocoa handler app under `logs/` for a "
+            "unique private URL scheme, registers it with Launch Services, and "
+            "sets it as the default handler. The guard first proves direct "
+            "`open <private-url>` delivery by requiring the controlled handler "
+            "to write the exact URL. It then launches the built debug Roastty "
+            "app with isolated config/defaults and AppleScript enabled, invokes "
+            "the existing `ui_test_open_url:<url>` action without "
+            "`ROASTTY_UI_TEST_SUPPRESS_OPEN_URL`, requires the Roastty trace "
+            "`openURL url=<private-url> kind=unknown` with no suppressed trace, "
+            "and requires the same controlled handler to record the exact URL "
+            "after Roastty calls the production `NSWorkspace.shared.open(url)` "
+            "path. The passing run recorded `registerStatus=0`, `status=0`, "
+            "the expected current handler bundle ID, matching direct and "
+            "Roastty-delivered private URLs, and no new Roastty crash reports."
+        ),
+        missing_evidence="None for external Launch Services handler delivery of an unsuppressed app URL-open request. This does not prove OS notification banner/sound delivery, audible bell output, or OS-visible Dock attention bounce/state.",
+        guard_tier="Tier 3",
+        guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_launch_services_url_handler_delivery.py`",
+    ),
+    RuntimeRow(
         id="RUNTIME-012B2B2B2B2B3C",
-        behavior="remaining OS-controlled notification, audible bell, dock-attention, and external URL-handler GUI effects",
-        ghostty_reference="Pinned Ghostty macOS native notification, audible bell, dock-attention, and external URL-handler behavior",
-        roastty_reference="`roastty/macos/Sources` native notification, audible bell, dock-attention, and `NSWorkspace.open` handling",
+        behavior="remaining OS-controlled notification, audible bell, and dock-attention GUI effects",
+        ghostty_reference="Pinned Ghostty macOS native notification, audible bell, and dock-attention behavior",
+        roastty_reference="`roastty/macos/Sources` native notification, audible bell, and dock-attention handling",
         family="notifications",
         status="Gap",
         evidence=(
@@ -2507,11 +2535,14 @@ ROWS = [
             "into `RUNTIME-012B2B2B2B2B3C7`. Experiment 193 splits live "
             "Quick Look/native definition word lookup, CoreText font attribute, "
             "`showDefinition(for:at:)` dispatch, and visible native definition "
-            "UI pixels into `RUNTIME-012B2B2B2B2B3C8`. The remaining unproven behavior is "
-            "limited to OS-controlled GUI effects that the current VM run did "
-            "not expose deterministically."
+            "UI pixels into `RUNTIME-012B2B2B2B2B3C8`. Experiment 194 splits "
+            "external Launch Services handler delivery through an unsuppressed "
+            "`NSWorkspace.shared.open(url)` call into "
+            "`RUNTIME-012B2B2B2B2B3C9`. The remaining unproven behavior is "
+            "limited to OS-controlled notification, audio, and Dock effects "
+            "that the current VM run did not expose deterministically."
         ),
-        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, OS-visible dock-attention bounce/state beyond AppKit request dispatch, and external Launch Services handler delivery.",
+        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, and OS-visible dock-attention bounce/state beyond AppKit request dispatch.",
         guard_tier="Tier 3",
         guard_command="TBD by future focused OS/native GUI experiment.",
     ),
@@ -2648,6 +2679,7 @@ EXPECTED_IDS = [
     "RUNTIME-012B2B2B2B2B3C6",
     "RUNTIME-012B2B2B2B2B3C7",
     "RUNTIME-012B2B2B2B2B3C8",
+    "RUNTIME-012B2B2B2B2B3C9",
     "RUNTIME-012B2B2B2B2B3C",
     "RUNTIME-013",
     "RUNTIME-014",
