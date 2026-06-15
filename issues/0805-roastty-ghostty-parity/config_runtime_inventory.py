@@ -738,8 +738,31 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml custom_shader_output_requires_metal_device -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml compositor_custom_shader -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml compositor_image_aware_frame_can_be_custom_shader_source -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/custom_shader_output_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-008B2B2B2B2",
-        behavior="remaining renderer-visible effects: GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof",
+        id="RUNTIME-008B2B2B2B2A",
+        behavior="Metal text shader cursor pixel readback",
+        ghostty_reference="`vendor/ghostty/src/renderer/shaders/shaders.metal` cursor text shader branch and cursor uniforms",
+        roastty_reference="`roastty/src/renderer/metal/shaders.metal` cursor text shader branch; `roastty/src/renderer/metal/render_pass.rs` cursor readback tests",
+        family="renderer",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 164 splits out deterministic Metal text shader cursor "
+            "pixel readback. Pinned Ghostty and Roastty both use the "
+            "`cursor_pos`/`cursor_wide` shader branch to replace non-cursor "
+            "glyph color with `uniforms.cursor_color` while preserving "
+            "`IS_CURSOR_GLYPH` vertex color. Roastty's Metal target-byte "
+            "readback tests prove cursor-position recolor, cursor-glyph color "
+            "preservation, wide-cursor second-cell recolor, and non-wide "
+            "second-cell non-recolor. `metal_cursor_pixel_runtime_parity.py` "
+            "statically checks the pinned Ghostty shader anchors, Roastty "
+            "shader anchors, required readback tests, and this inventory split."
+        ),
+        missing_evidence="None for deterministic Metal text shader cursor pixel readback. Actual app/GUI cursor screenshots and broader GUI/pixel proof remain outside this slice.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml cell_text_cursor -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml cell_text_wide_cursor_overrides_second_cell -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml cell_text_non_wide_cursor_does_not_override_second_cell -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/metal_cursor_pixel_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-008B2B2B2B2B",
+        behavior="remaining renderer-visible effects: actual app/GUI cursor pixels/screenshots, broader GUI/pixel parity, and screenshot-level padding pixel proof",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` renderer/window visual fields; `vendor/ghostty/src/renderer/generic.zig` derived renderer config and draw paths; `vendor/ghostty/src/Surface.zig` renderer config messages; screenshot/pixel walkthrough paths",
         roastty_reference="`roastty/src/lib.rs` live renderer and render state; `roastty/src/renderer`; copied macOS renderer/window host",
         family="renderer",
@@ -761,10 +784,12 @@ ROWS = [
             "`macos-glass*` blur/opacity host behavior. Experiment 154 split "
             "out copied macOS non-glass compositor opacity host behavior. "
             "Experiment 163 split out deterministic Metal custom shader output "
-            "readback. "
+            "readback. Experiment 164 split out deterministic Metal text "
+            "shader cursor pixel readback. "
             "CFG-223 still needs representative runtime or GUI proof for GUI "
-            "cursor pixels, broader GUI/pixel parity, and screenshot-level "
-            "padding pixel proof."
+            "cursor pixels, including actual app/GUI cursor screenshots, "
+            "broader GUI/pixel parity, and "
+            "screenshot-level padding pixel proof."
         ),
         missing_evidence="Add renderer/runtime or GUI smoke rows for GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof.",
         guard_tier="Tier 3",
@@ -1837,7 +1862,8 @@ EXPECTED_IDS = [
     "RUNTIME-008B2B2B1",
     "RUNTIME-008B2B2B2A",
     "RUNTIME-008B2B2B2B1",
-    "RUNTIME-008B2B2B2B2",
+    "RUNTIME-008B2B2B2B2A",
+    "RUNTIME-008B2B2B2B2B",
     "RUNTIME-009A",
     "RUNTIME-009B1",
     "RUNTIME-009B2A",

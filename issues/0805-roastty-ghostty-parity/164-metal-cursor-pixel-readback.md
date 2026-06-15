@@ -121,3 +121,72 @@ explicitly, in addition to the existing cursor-position and cursor-glyph tests.
 
 The reviewer confirmed the required verification-command issue was fixed and
 approved the design for implementation.
+
+## Result
+
+**Result:** Pass
+
+Implemented the narrow renderer-visible split for deterministic Metal cursor
+pixel readback:
+
+- Added `metal_cursor_pixel_runtime_parity.py` to guard pinned Ghostty and
+  Roastty Metal shader cursor markers, the four Roastty target-byte readback
+  tests, the new inventory rows, and CFG-223 counts.
+- Split `RUNTIME-008B2B2B2B2` into:
+  - `RUNTIME-008B2B2B2B2A`: **Oracle complete** for Metal text shader cursor
+    pixel readback.
+  - `RUNTIME-008B2B2B2B2B`: **Gap** for actual app/GUI cursor
+    pixels/screenshots, broader GUI/pixel parity, and screenshot-level padding
+    pixel proof.
+
+Verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml cell_text_cursor -- --test-threads=1
+cargo test --manifest-path roastty/Cargo.toml cell_text_wide_cursor_overrides_second_cell -- --test-threads=1
+cargo test --manifest-path roastty/Cargo.toml cell_text_non_wide_cursor_does_not_override_second_cell -- --test-threads=1
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/metal_cursor_pixel_runtime_parity.py
+for f in issues/0805-roastty-ghostty-parity/*_runtime_parity.py issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py issues/0805-roastty-ghostty-parity/link_hover_modifier_refresh_parity.py issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$f" >/tmp/$(basename "$f").out || { echo FAIL:$f; cat /tmp/$(basename "$f").out; exit 1; }; done; echo parity_guards=pass
+python3 -m py_compile issues/0805-roastty-ghostty-parity/metal_cursor_pixel_runtime_parity.py issues/0805-roastty-ghostty-parity/config_runtime_inventory.py
+cargo fmt --manifest-path roastty/Cargo.toml --check
+prettier --write --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/164-metal-cursor-pixel-readback.md issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md
+git diff --check
+```
+
+The regenerated inventory reported:
+
+```text
+runtime_rows=71
+oracle_complete=64
+closed=67
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+## Conclusion
+
+The cursor shader's deterministic Metal pixel output is now guarded without
+claiming full GUI cursor parity. CFG-223 remains `Gap`; the reduced renderer
+visual row now owns actual app/GUI cursor pixels/screenshots, broader GUI/pixel
+parity, and screenshot-level padding pixel proof.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Initial verdict:** Changes required.
+
+The reviewer found one documentation issue: the Result verification block
+omitted the already-run `cargo fmt --check`, Prettier, and `git diff --check`
+hygiene commands even though those commands were part of the designed
+verification.
+
+**Fix:** Added the missing hygiene commands to the Result verification block.
+
+**Re-review verdict:** Approved.
+
+The reviewer confirmed the missing verification commands were recorded and
+approved the completed experiment for the result commit.

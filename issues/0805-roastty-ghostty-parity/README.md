@@ -837,6 +837,13 @@ experiment files until they are proven.
   non-skipping Metal device assertion so the proof is not vacuous. GUI cursor
   pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof
   remain in `RUNTIME-008B2B2B2B2`.
+- **Cursor shader pixels can be proven without a full app screenshot.**
+  Experiment 164 uses Metal render-target readback tests to prove the copied
+  text shader cursor branch: non-cursor glyphs under the cursor recolor to
+  `cursor_color`, cursor glyphs preserve their vertex color, wide cursors
+  recolor the second cell, and non-wide cursors do not. Actual app/GUI cursor
+  screenshots, broader GUI/pixel parity, and screenshot-level padding pixel
+  proof remain in `RUNTIME-008B2B2B2B2B`.
 - **Command palette runtime plumbing can be proven without a full GUI
   walkthrough.** Experiment 152 split copied command palette source parity,
   toggle notification delivery, `commandPaletteIsShowing` state, focus return,
@@ -1577,4 +1584,4 @@ remains open.
 - [Experiment 163: Custom shader output runtime](163-custom-shader-output-runtime.md)
   — **Pass**
 - [Experiment 164: Metal cursor pixel readback](164-metal-cursor-pixel-readback.md)
-  — **Designed**
+  — **Pass**
