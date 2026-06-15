@@ -1411,3 +1411,5 @@ remains open.
   — **Pass**
 - [Experiment 144: Cursor priority active renderer](144-cursor-priority-active-renderer.md)
   — **Pass**
+- [Experiment 145: Font shaping break runtime](145-font-shaping-break-runtime.md)
+  — **Designed**
