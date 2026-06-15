@@ -110,3 +110,74 @@ findings. The reviewer confirmed the design now requires Ghostty's refresh
 semantics, mouse-reporting/shift-override gate, left-click drag suppression, and
 keeps the scope limited to deterministic runtime dispatch without overclaiming
 native GUI/OS proof.
+
+## Result
+
+**Result:** Pass
+
+Roastty now performs deterministic surface-side link-hover dispatch matching the
+pinned Ghostty runtime path. The implementation adds typed ABI payloads for
+`ROASTTY_ACTION_MOUSE_SHAPE` and `ROASTTY_ACTION_MOUSE_OVER_LINK`, surface hover
+state for the previous link cell and left-press cell, and a `refresh_link_hover`
+path driven by mouse-position updates.
+
+The runtime dispatch now:
+
+- dispatches pointer shape while over a detected link;
+- dispatches `mouse_over_link = url` only when the link kind is enabled by
+  `link-previews`;
+- clears with the current terminal mouse shape plus `mouse_over_link = ""` when
+  leaving a link or moving out of the viewport;
+- refreshes again while already over a link, matching Ghostty's stale-text
+  protection;
+- suppresses hover during normal mouse reporting;
+- allows hover refresh when shift overrides mouse reporting;
+- suppresses hover while the left button is held and the cursor has moved away
+  from the original click cell.
+
+The implementation deliberately does not claim native preview window display,
+native context/menu display, real pointer pixels, or OS URL-opening flows.
+
+Verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml link_hover_preview_dispatch -- --test-threads=1
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+The generated CFG-223 counts are now:
+
+- `runtime_rows=69`
+- `oracle_complete=62`
+- `closed=65`
+- `incomplete=4`
+- `gap=4`
+
+## Conclusion
+
+Experiment 161 closes the deterministic `mouse_over_link` hover-preview dispatch
+gap. The remaining notification/link/bell gap is now narrowed to actual GUI/OS
+effects: live OS notification delivery, actual bell side effects, real app
+hover/cursor pixels, native link preview display, native context/menu display,
+and OS URL-opening flows.
+
+## Completion Review
+
+**Reviewer:** Euler the 2nd (`019eca87-3987-7af1-9d17-67bdc7f3cb4a`)
+
+**Result:** Blocked, then approved with notes after fixes.
+
+The first completion review found a real parity bug: Roastty cleared link hover
+by dispatching `ROASTTY_MOUSE_SHAPE_DEFAULT`, while pinned Ghostty restores the
+terminal's current mouse shape. The implementation was fixed by exposing
+`Terminal::mouse_shape()`, converting terminal mouse shapes to ABI values in the
+surface runtime, and changing `clear_link_hover` to restore the current terminal
+shape. The clear regression test now sets OSC 22 `crosshair` before hover and
+proves both off-link and out-of-viewport clears restore crosshair.
+
+The reviewer approved the fixed result. The remaining note is that pinned
+Ghostty can also refresh hover on modifier changes; this experiment remains
+scoped to mouse-position-driven refresh and does not claim modifier-change-only
+refresh parity.

@@ -110,7 +110,17 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B2")
+    row_dispatch = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B2")
+    require_all(
+        row_dispatch,
+        [
+            ("Oracle complete", "dispatch row status"),
+            ("link hover preview surface action dispatch", "dispatch row behavior"),
+            ("Experiment 161", "dispatch row experiment"),
+        ],
+    )
+
+    row_gap = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B3")
     require_all(
         row_gap,
         [
@@ -118,7 +128,6 @@ def main() -> int:
             ("Actual OS banner/sound delivery", "remaining OS notification gap"),
             ("actual audio/dock/border/title GUI effects", "remaining bell GUI gap"),
             ("real app link hover/cursor UI", "remaining hover/cursor gap"),
-            ("runtime `mouse_over_link` preview dispatch", "remaining preview dispatch gap"),
             ("native link preview display", "remaining native preview gap"),
             ("native context/menu display", "remaining native context menu gap"),
             ("OS URL-opening flows", "remaining OS URL opening gap"),
@@ -133,8 +142,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("61 rows Oracle complete", "CFG-223 oracle count"),
-            ("64 rows closed", "CFG-223 closed count"),
+            ("62 rows Oracle complete", "CFG-223 oracle count"),
+            ("65 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

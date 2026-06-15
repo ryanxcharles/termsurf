@@ -280,6 +280,10 @@ experiment files until they are proven.
   `zig build -Demit-macos-app=false` and
   `nu macos/build.nu --configuration Debug`; the old build-only
   `macos-only-xcframework.patch` is no longer needed for the baseline.
+- **Runtime dispatch should read surface-owned config when config can reload.**
+  Experiment 161 showed that link-hover preview dispatch must use the
+  surface-cached `link_previews` value, not only app-level parsed config, so
+  `roastty_surface_update_config` changes are reflected by existing surfaces.
 - **Device attributes can be config-derived terminal state.** Pinned Ghostty's
   primary device-attributes reply advertises feature `52` only when
   `clipboard-write != deny`. Roastty now treats that as terminal runtime state:
@@ -1555,4 +1559,4 @@ remains open.
 - [Experiment 160: Link preview context runtime](160-link-preview-context-runtime.md)
   — **Pass**
 - [Experiment 161: Link hover preview dispatch](161-link-hover-preview-dispatch.md)
-  — **Designed**
+  — **Pass**

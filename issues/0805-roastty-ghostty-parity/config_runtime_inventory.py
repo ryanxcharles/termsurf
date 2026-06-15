@@ -1609,7 +1609,7 @@ ROWS = [
             "`hoverUrl`, published hover state, `URLHoverBanner(url:)` rendering, "
             "middle truncation, and left/right banner hover switch."
         ),
-        missing_evidence="None for copied macOS link-hover banner source plumbing; live mouse hover delivery, pointer cursor changes, live app link preview display, and native context/menu link interactions remain tracked by RUNTIME-012B2B2B2B2B2.",
+        missing_evidence="None for copied macOS link-hover banner source plumbing; live pointer cursor pixels, live app link preview display, and native context/menu link interactions remain tracked by RUNTIME-012B2B2B2B2B3.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_link_hover_banner_runtime_parity.py`",
     ),
@@ -1643,15 +1643,51 @@ ROWS = [
             "the pinned Ghostty conditions, Roastty implementation markers, "
             "tests, and this inventory split."
         ),
-        missing_evidence="None for deterministic link preview config predicates and link-specific context-menu selection runtime semantics. Actual `mouse_over_link` preview dispatch, GUI hover/cursor, native preview display, native menu display, and OS URL opening remain tracked by RUNTIME-012B2B2B2B2B2.",
+        missing_evidence="None for deterministic link preview config predicates and link-specific context-menu selection runtime semantics. Actual `mouse_over_link` preview dispatch remains tracked by RUNTIME-012B2B2B2B2B2; GUI hover/cursor, native preview display, native menu display, and OS URL opening remain tracked by RUNTIME-012B2B2B2B2B3.",
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml link_preview_context_runtime -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py`",
     ),
     RuntimeRow(
         id="RUNTIME-012B2B2B2B2B2",
+        behavior="link hover preview surface action dispatch",
+        ghostty_reference="`vendor/ghostty/src/Surface.zig` `mouseRefreshLinks`, `linkAtPos`, mouse reporting gate, left-click drag suppression, `mouse_shape`, and `mouse_over_link` dispatch",
+        roastty_reference="`roastty/src/lib.rs` `refresh_link_hover`, link hover URL lookup, mouse reporting/shift override gate, left-click drag suppression, action ABI payloads, and `link_hover_preview_dispatch_*` tests",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 161 splits out deterministic surface-side link hover "
+            "preview dispatch. Roastty now refreshes link hover on mouse-position "
+            "updates using Ghostty's refresh semantics, configured-link/OSC8 "
+            "priority, ctrl/super OSC8 gate, `link-previews` preview gating, "
+            "mouse-reporting/shift-override gate, and left-click drag suppression. "
+            "`link_hover_preview_dispatch_regular_link_gates_preview_and_shape` "
+            "proves regular detected links dispatch pointer shape and preview URL "
+            "only when regular previews are enabled. "
+            "`link_hover_preview_dispatch_osc8_link_gates_preview_with_ctrl_or_super` "
+            "proves OSC8 hover dispatch requires ctrl/super and obeys the OSC8 "
+            "preview gate. "
+            "`link_hover_preview_dispatch_repeats_while_over_link_and_clears_on_leave` "
+            "proves Ghostty-compatible repeat refresh while already over a link "
+            "and empty-url/current-terminal-shape clearing when leaving or "
+            "moving out of the viewport. "
+            "`link_hover_preview_dispatch_respects_mouse_reporting_and_shift_override` "
+            "proves normal mouse reporting suppresses hover dispatch while "
+            "shift override allows refresh, and "
+            "`link_hover_preview_dispatch_suppresses_left_drag_hover` proves "
+            "left-drag hover suppression. "
+            "`link_hover_preview_dispatch_parity.py` statically checks pinned "
+            "Ghostty anchors, Roastty implementation markers, tests, and this "
+            "inventory split."
+        ),
+        missing_evidence="None for deterministic surface-side link hover preview dispatch. Native preview display, native context/menu display, real pointer pixels, and OS URL-opening flows remain tracked by RUNTIME-012B2B2B2B2B3.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml link_hover_preview_dispatch -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-012B2B2B2B2B3",
         behavior="remaining notification/link/bell GUI effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification and link preview fields; `vendor/ghostty/src/Surface.zig` notification/link hover/menu paths; macOS native notification and link handling",
-        roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling beyond copied bell and user-notification plumbing",
+        roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling beyond copied bell, user-notification, hover banner, and surface action dispatch plumbing",
         family="notifications",
         status="Gap",
         evidence=(
@@ -1669,13 +1705,13 @@ ROWS = [
             "macOS runtime. Experiment 159 split out copied macOS link-hover "
             "banner source plumbing. Experiment 160 split out deterministic "
             "link preview config predicates and link-specific context-menu "
-            "selection runtime semantics. Actual OS banner/sound delivery, actual "
-            "audio/dock/border/title GUI effects, real app link hover/cursor "
-            "UI, runtime `mouse_over_link` preview dispatch, native link preview "
-            "display, native context/menu display, and OS URL-opening flows "
-            "still need focused GUI, runtime, or OS proof."
+            "selection runtime semantics. Experiment 161 split out deterministic "
+            "surface-side link hover preview dispatch. Actual OS banner/sound "
+            "delivery, actual audio/dock/border/title GUI effects, real app link "
+            "hover/cursor UI, native link preview display, native context/menu "
+            "display, and OS URL-opening flows still need focused GUI or OS proof."
         ),
-        missing_evidence="Add live OS notification delivery, actual bell side-effect, real app hover/cursor, runtime preview dispatch, native preview display, native context/menu display, and OS URL-opening walkthrough guards.",
+        missing_evidence="Add live OS notification delivery, actual bell side-effect, real app hover/cursor, native preview display, native context/menu display, and OS URL-opening walkthrough guards.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 notification/link GUI or runtime experiment.",
     ),
@@ -1783,6 +1819,7 @@ EXPECTED_IDS = [
     "RUNTIME-012B2B2B2B2A",
     "RUNTIME-012B2B2B2B2B1",
     "RUNTIME-012B2B2B2B2B2",
+    "RUNTIME-012B2B2B2B2B3",
     "RUNTIME-013",
     "RUNTIME-014",
 ]

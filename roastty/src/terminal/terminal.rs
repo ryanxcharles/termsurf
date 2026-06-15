@@ -2811,9 +2811,13 @@ impl Terminal {
         self.pwd.logical_str()
     }
 
+    pub(crate) fn mouse_shape(&self) -> mouse::MouseShape {
+        self.mouse_shape
+    }
+
     #[cfg(test)]
     pub(super) fn mouse_shape_for_tests(&self) -> mouse::MouseShape {
-        self.mouse_shape
+        self.mouse_shape()
     }
 
     #[cfg(test)]
