@@ -1402,3 +1402,5 @@ remains open.
   — **Pass**
 - [Experiment 143: Font live grid update runtime](143-font-live-grid-update-runtime.md)
   — **Pass**
+- [Experiment 144: Cursor priority active renderer](144-cursor-priority-active-renderer.md)
+  — **Designed**
