@@ -112,3 +112,108 @@ allowance preserves Ghostty's inline filter/map behavior, the toggle
 notification and controller state plumbing match after renames, the `Roastty`
 scheme and `RoasttyTests` target exist for the planned xcodebuild test command,
 and `git diff --check` passed.
+
+## Result
+
+**Result:** Pass
+
+Implemented the static command palette runtime parity guard and split the macOS
+app runtime inventory:
+
+- `RUNTIME-011A`: **Oracle complete** for command palette runtime plumbing,
+  custom command entries, and hosted action dispatch.
+- `RUNTIME-011B`: **Gap** for remaining macOS app/window/tab/split/menu/titlebar
+  /fullscreen/quick-terminal and broader command palette GUI effects.
+
+The new guard proves that pinned Ghostty's `CommandPalette.swift` and
+`CommandPaletteIntent.swift` are rename-equivalent to Roastty. It also verifies
+that Roastty's `TerminalCommandPaletteView.terminalCommandOptions` helper is a
+testable extraction of Ghostty's inline custom-command filter/map behavior, and
+checks copied app/controller/surface markers for `toggle_command_palette`
+dispatch, command-palette notification delivery, `commandPaletteIsShowing` state
+toggling, focus return, and keyboard-event shielding while the palette is shown.
+
+Verification passed:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/command_palette_runtime_parity.py
+```
+
+```bash
+xcodebuild test \
+  -project roastty/macos/Roastty.xcodeproj \
+  -scheme Roastty \
+  -testPlan Roastty \
+  -only-testing:RoasttyTests/CommandPaletteHostedTests
+```
+
+Output summary:
+
+```text
+** TEST SUCCEEDED **
+Test case 'CommandPaletteHostedTests/commandEntriesBuildSelectableOptions()' passed
+Test case 'CommandPaletteHostedTests/surfacePerformDispatchesBindingAction()' passed
+```
+
+Xcode selected both matching local macOS destinations, so each test case was
+reported once per destination. The test session succeeded.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Output:
+
+```text
+runtime_rows=60
+oracle_complete=54
+closed=56
+audit_covered=0
+incomplete=4
+gap=4
+cfg223=Gap
+```
+
+```bash
+for guard in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do
+  PYTHONDONTWRITEBYTECODE=1 python3 "$guard" || exit 1
+done
+```
+
+The full runtime parity loop passed.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py
+```
+
+Output:
+
+```text
+terminal_runtime_residual_audit=pass
+```
+
+## Conclusion
+
+Roastty preserves pinned Ghostty's command palette runtime plumbing for this
+bounded slice, including config-derived custom commands, unsupported-action
+filtering, shortcut display, action callback dispatch, app toggle notification
+delivery, controller state toggling, focus return, and keyboard-event shielding.
+
+CFG-223 remains open with four unresolved runtime gaps: remaining font renderer
+output effects, remaining renderer-visible visual effects, remaining macOS app
+workflow/UI effects, and notification/link/bell presentation flows.
+
+## Completion Review
+
+Adversarial subagent `019eca04-9b4f-7730-bc93-2dd58b4bd347` reviewed the
+completed experiment with fresh context and returned `VERDICT: APPROVED`.
+
+Findings: none.
+
+The reviewer independently verified the command palette parity guard, the hosted
+xcodebuild command palette tests, the terminal runtime residual audit, the full
+runtime parity guard loop, and `git diff --check`. The reviewer also confirmed
+that the result commit had not been made before review, that no product code
+changed, that `RUNTIME-011A` is scoped to command palette runtime
+plumbing/custom entries/hosted dispatch, and that `RUNTIME-011B` remains the
+broader macOS app GUI gap.

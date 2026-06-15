@@ -764,6 +764,14 @@ experiment files until they are proven.
   compositor opacity, GUI cursor pixels, custom shader output, broader GUI/
   pixel parity, and screenshot-level padding pixel proof remain in
   `RUNTIME-008B2B2B2`.
+- **Command palette runtime plumbing can be proven without a full GUI
+  walkthrough.** Experiment 152 split copied command palette source parity,
+  toggle notification delivery, `commandPaletteIsShowing` state, focus return,
+  keyboard-event shielding, config-derived custom command options, unsupported
+  action filtering, shortcut display, and hosted action dispatch out of the
+  macOS app gap. Windows, tabs, splits, menus, titlebar, fullscreen, quick
+  terminal, broader command palette GUI/pixel/input navigation, and full app
+  walkthrough evidence remain in `RUNTIME-011B`.
 - **Font variations are style-specific font descriptors.** Experiment 149 split
   deterministic `font-variation*` config propagation out of the remaining font
   renderer gap by threading the four parsed variation lists into regular, bold,
@@ -1472,4 +1480,4 @@ remains open.
 - [Experiment 151: macOS glass visual runtime](151-macos-glass-visual-runtime.md)
   — **Pass**
 - [Experiment 152: Command palette runtime](152-command-palette-runtime.md) —
-  **Designed**
+  **Pass**

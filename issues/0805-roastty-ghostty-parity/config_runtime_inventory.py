@@ -237,7 +237,7 @@ ROWS = [
         ),
         missing_evidence=(
             "None for key remap/keybind dispatch runtime behavior; "
-            "command-palette UI dispatch remains tracked by `RUNTIME-011`."
+            "command-palette UI dispatch remains tracked by `RUNTIME-011B`."
         ),
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml surface_key_remap && cargo test --manifest-path roastty/Cargo.toml surface_key_table`",
@@ -1319,19 +1319,54 @@ ROWS = [
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_quit_lifecycle_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-011",
-        behavior="macOS app/window/tab/split/menu and command palette UI effects",
-        ghostty_reference="`vendor/ghostty/macos/Sources`; app/window/tab/split config-driven UI behavior",
+        id="RUNTIME-011A",
+        behavior="macOS command palette runtime plumbing, custom command entries, and hosted action dispatch",
+        ghostty_reference="`vendor/ghostty/macos/Sources/Features/Command Palette`; `vendor/ghostty/macos/Sources/Features/App Intents/CommandPaletteIntent.swift`; `vendor/ghostty/macos/Sources/Ghostty/Ghostty.App.swift`; `vendor/ghostty/macos/Sources/Features/Terminal/BaseTerminalController.swift`; command palette keyboard shielding in `SurfaceView_AppKit.swift`",
+        roastty_reference="`roastty/macos/Sources/Features/Command Palette`; `roastty/macos/Sources/Features/App Intents/CommandPaletteIntent.swift`; `roastty/macos/Sources/Roastty/Roastty.App.swift`; `roastty/macos/Sources/Features/Terminal/BaseTerminalController.swift`; `roastty/macos/Tests/Roastty/CommandPaletteHostedTests.swift`",
+        family="macOS app",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 152 splits out command palette runtime plumbing from "
+            "the broader macOS app GUI gap. `command_palette_runtime_parity.py` "
+            "proves the shared command palette SwiftUI view and app intent are "
+            "rename-equivalent to pinned Ghostty, verifies Roastty's "
+            "`TerminalCommandPaletteView.terminalCommandOptions` helper is a "
+            "testable extraction of Ghostty's custom-command filter/map, and "
+            "checks copied app/controller/surface markers for "
+            "`toggle_command_palette` dispatch, command-palette notification "
+            "delivery, `commandPaletteIsShowing` state toggling, focus return, "
+            "and keyboard-event shielding while the palette is shown. "
+            "`CommandPaletteHostedTests` proves config-derived "
+            "`command-palette-entry` values build selectable options, "
+            "unsupported actions are filtered, shortcuts are displayed, "
+            "callbacks dispatch the configured action, and hosted surface "
+            "`perform(action:)` accepts supported command-palette actions while "
+            "rejecting invalid ones."
+        ),
+        missing_evidence="None for command palette runtime plumbing, custom command entries, hosted action dispatch, toggle notification delivery, focus return, and keyboard shielding. Broader command palette GUI walkthrough and pixel/input navigation remain outside this slice.",
+        guard_tier="Tier 2",
+        guard_command="`xcodebuild test -project roastty/macos/Roastty.xcodeproj -scheme Roastty -testPlan Roastty -only-testing:RoasttyTests/CommandPaletteHostedTests && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/command_palette_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-011B",
+        behavior="remaining macOS app/window/tab/split/menu/titlebar/fullscreen/quick-terminal and broader command palette GUI effects",
+        ghostty_reference="`vendor/ghostty/macos/Sources`; app/window/tab/split/menu/titlebar/fullscreen/quick-terminal and GUI walkthrough behavior",
         roastty_reference="`roastty/macos/Sources`; Roastty app wrapper and Swift UI",
         family="macOS app",
         status="Gap",
         evidence=(
-            "Feature and walkthrough matrices only prove launch/cleanup and "
-            "keyboard delivery. CFG-223 still needs real app walkthrough or "
-            "focused macOS tests for config-driven windows, tabs, splits, "
-            "menus, titlebar, fullscreen, quick terminal, and command palette UI."
+            "Feature and walkthrough matrices prove launch/cleanup and "
+            "keyboard delivery. Experiment 121 split out copied macOS "
+            "quit-after-last-window-closed config behavior, and Experiment 152 "
+            "split out command palette runtime plumbing, custom command "
+            "entries, hosted action dispatch, toggle notification delivery, "
+            "focus return, and keyboard-event shielding. CFG-223 still needs "
+            "real app walkthrough or focused macOS tests for config-driven "
+            "windows, tabs, splits, menus, titlebar, fullscreen, quick "
+            "terminal, and broader command palette GUI/pixel/input navigation "
+            "behavior."
         ),
-        missing_evidence="Add focused macOS app walkthrough rows and GUI guards.",
+        missing_evidence="Add focused macOS app walkthrough rows and GUI guards for windows, tabs, splits, menus, titlebar, fullscreen, quick terminal, and broader command palette GUI behavior.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 macOS app walkthrough experiment.",
     ),
@@ -1441,9 +1476,9 @@ ROWS = [
             "config inventory. GTK and Linux runtime effects are marked not "
             "applicable to Roastty's macOS runtime; `macos-option-as-alt` points "
             "to existing key translation guards; remaining macOS app effects "
-            "stay owned by `RUNTIME-011`."
+            "stay owned by `RUNTIME-011B`."
         ),
-        missing_evidence="None for platform-specific runtime classification; macOS app behavior gaps remain tracked by RUNTIME-011.",
+        missing_evidence="None for platform-specific runtime classification; macOS app behavior gaps remain tracked by RUNTIME-011B.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/platform_runtime_classification.py --config-inventory issues/0805-roastty-ghostty-parity/config-inventory.md --output issues/0805-roastty-ghostty-parity/platform-runtime-classification.md`",
     ),
@@ -1518,7 +1553,8 @@ EXPECTED_IDS = [
     "RUNTIME-010B2B2A",
     "RUNTIME-010B2B2B1",
     "RUNTIME-010B2B2B2",
-    "RUNTIME-011",
+    "RUNTIME-011A",
+    "RUNTIME-011B",
     "RUNTIME-012A",
     "RUNTIME-012B1",
     "RUNTIME-012B2A",
