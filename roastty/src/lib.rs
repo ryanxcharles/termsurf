@@ -1229,6 +1229,11 @@ pub struct RoasttyActionSetTitle {
 }
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct RoasttyActionPwd {
+    pwd: *const c_char,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct RoasttyActionStartSearch {
     needle: *const c_char,
 }
@@ -1304,6 +1309,7 @@ pub union RoasttyActionU {
     reload_config: RoasttyActionReloadConfig,
     set_title: RoasttyActionSetTitle,
     prompt_title: c_int,
+    pwd: RoasttyActionPwd,
     float_window: c_int,
     secure_input: c_int,
     close_tab_mode: c_int,
@@ -1332,6 +1338,11 @@ fn action_u_from_storage(tag: c_int, storage: [usize; 8]) -> RoasttyActionU {
         ROASTTY_ACTION_SET_TITLE | ROASTTY_ACTION_SET_TAB_TITLE => {
             u.set_title = RoasttyActionSetTitle {
                 title: storage[0] as *const c_char,
+            }
+        }
+        ROASTTY_ACTION_PWD => {
+            u.pwd = RoasttyActionPwd {
+                pwd: storage[0] as *const c_char,
             }
         }
         ROASTTY_ACTION_START_SEARCH => {
@@ -1420,6 +1431,7 @@ fn action_u_to_storage(tag: c_int, u: &RoasttyActionU) -> [usize; 8] {
             ROASTTY_ACTION_SET_TITLE | ROASTTY_ACTION_SET_TAB_TITLE => {
                 s[0] = u.set_title.title as usize
             }
+            ROASTTY_ACTION_PWD => s[0] = u.pwd.pwd as usize,
             ROASTTY_ACTION_START_SEARCH => s[0] = u.start_search.needle as usize,
             ROASTTY_ACTION_OPEN_URL => {
                 s[0] = u.open_url.kind as usize;
@@ -4563,6 +4575,15 @@ impl Surface {
         self.perform_action_result(tag, storage)
     }
 
+    fn set_pwd(&self, pwd: &[u8]) -> bool {
+        let Ok(pwd) = CString::new(pwd) else {
+            return false;
+        };
+        let mut storage = [0usize; 8];
+        storage[0] = pwd.as_ptr() as usize;
+        self.perform_action_result(ROASTTY_ACTION_PWD, storage)
+    }
+
     fn inherited_config(&mut self, context: c_int) -> RoasttySurfaceConfig {
         let mut config = roastty_surface_config_new();
         config.context = valid_surface_context(context).unwrap_or(self.context);
@@ -7257,9 +7278,11 @@ impl Surface {
         match event {
             termio::TermioWorkerEvent::Pump(pump) => {
                 append_ui_key_trace(format!(
-                    "rust surface_apply_termio_event pump bytes_read={} bell_count={} bytes_written={} pending_write={} eof={} child_exited={}",
+                    "rust surface_apply_termio_event pump bytes_read={} bell_count={} titles={} pwd={} bytes_written={} pending_write={} eof={} child_exited={}",
                     pump.bytes_read,
                     pump.bell_count,
+                    pump.titles.len(),
+                    pump.pwd.len(),
                     pump.bytes_written,
                     pump.pending_write_bytes,
                     pump.eof,
@@ -7276,9 +7299,13 @@ impl Surface {
                         self.set_title(ROASTTY_ACTION_SET_TITLE, title.as_bytes());
                     }
                 }
+                for pwd in &pump.pwd {
+                    self.set_pwd(pwd.as_bytes());
+                }
                 if pump.bytes_read > 0
                     || pump.bell_count > 0
                     || !pump.titles.is_empty()
+                    || !pump.pwd.is_empty()
                     || pump.bytes_written > 0
                     || pump.pending_write_bytes > 0
                     || pump.eof
@@ -19745,6 +19772,7 @@ mod tests {
         action_tag: c_int,
         storage: [usize; 8],
         title: Option<String>,
+        pwd: Option<String>,
         needle: Option<String>,
         open_url: Option<(c_int, Vec<u8>)>,
         key_table: Option<(c_int, Vec<u8>)>,
@@ -20172,6 +20200,16 @@ mod tests {
             } else {
                 None
             };
+            let pwd = if action.tag == ROASTTY_ACTION_PWD {
+                let ptr = storage[0] as *const c_char;
+                (!ptr.is_null()).then(|| {
+                    unsafe { CStr::from_ptr(ptr) }
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            } else {
+                None
+            };
             let open_url = if action.tag == ROASTTY_ACTION_OPEN_URL {
                 let ptr = storage[1] as *const u8;
                 let len = storage[2];
@@ -20214,6 +20252,7 @@ mod tests {
                 action_tag: action.tag,
                 storage,
                 title,
+                pwd,
                 needle,
                 open_url,
                 key_table,
@@ -20983,6 +21022,7 @@ mod tests {
             bytes_read,
             bell_count,
             titles: Vec::new(),
+            pwd: Vec::new(),
             eof,
             bytes_written,
             pending_write_bytes,
@@ -21001,6 +21041,22 @@ mod tests {
             bytes_read: 1,
             bell_count: 0,
             titles: titles.into_iter().map(ToOwned::to_owned).collect(),
+            pwd: Vec::new(),
+            eof: false,
+            bytes_written: 0,
+            pending_write_bytes: 0,
+            child_exited: false,
+            child_exit: None,
+        }
+    }
+
+    fn test_pump_with_pwd(pwd: &str) -> termio::TermioPump {
+        termio::TermioPump {
+            readiness: PtyReadiness::default(),
+            bytes_read: 1,
+            bell_count: 0,
+            titles: Vec::new(),
+            pwd: vec![pwd.to_string()],
             eof: false,
             bytes_written: 0,
             pending_write_bytes: 0,
@@ -22366,11 +22422,26 @@ mod tests {
         assert_eq!(records[0].title.as_deref(), Some(""));
 
         reset_action_records(true);
-        apply_test_pump(surface, test_pump_with_title("file://host/fallback"));
+        apply_test_pump(surface, test_pump_with_title("/fallback"));
         let records = action_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].action_tag, ROASTTY_ACTION_SET_TITLE);
-        assert_eq!(records[0].title.as_deref(), Some("file://host/fallback"));
+        assert_eq!(records[0].title.as_deref(), Some("/fallback"));
+
+        roastty_surface_free(surface);
+        roastty_app_free(app);
+    }
+
+    #[test]
+    fn surface_osc7_pwd_normalization_dispatches_pwd_path() {
+        let app = new_test_app_with_action(true);
+        let surface = new_test_surface(app);
+
+        apply_test_pump(surface, test_pump_with_pwd("/surface pwd"));
+        let records = action_records();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action_tag, ROASTTY_ACTION_PWD);
+        assert_eq!(records[0].pwd.as_deref(), Some("/surface pwd"));
 
         roastty_surface_free(surface);
         roastty_app_free(app);
@@ -22381,15 +22452,12 @@ mod tests {
         let app = new_test_app_with_action(true);
         let surface = new_test_surface(app);
 
-        apply_test_pump(
-            surface,
-            test_pump_with_titles(["file://host/one", "two", "file://host/one"]),
-        );
+        apply_test_pump(surface, test_pump_with_titles(["/one", "two", "/one"]));
         let records = action_records();
         assert_eq!(records.len(), 3);
-        assert_eq!(records[0].title.as_deref(), Some("file://host/one"));
+        assert_eq!(records[0].title.as_deref(), Some("/one"));
         assert_eq!(records[1].title.as_deref(), Some("two"));
-        assert_eq!(records[2].title.as_deref(), Some("file://host/one"));
+        assert_eq!(records[2].title.as_deref(), Some("/one"));
 
         roastty_surface_free(surface);
         roastty_app_free(app);
@@ -22403,7 +22471,7 @@ mod tests {
         reset_action_records(true);
 
         apply_test_pump(surface, test_pump_with_title(""));
-        apply_test_pump(surface, test_pump_with_title("file://host/fallback"));
+        apply_test_pump(surface, test_pump_with_title("/fallback"));
         assert!(action_records().is_empty());
 
         roastty_surface_free(surface);

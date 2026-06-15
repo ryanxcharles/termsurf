@@ -129,3 +129,99 @@ Fixes:
   dispatch tests.
 
 **Re-review verdict:** Approved. No Required findings remain.
+
+## Result
+
+**Result:** Pass.
+
+Implemented the OSC 7 PWD normalization runtime slice:
+
+- Roastty now validates non-empty OSC 7 PWD reports through a Ghostty-style
+  scheme/local-host/path normalizer instead of storing the raw URL.
+- Accepted local `file` URLs store and dispatch a percent-decoded path.
+- Accepted local `kitty-shell-cwd` URLs store and dispatch the raw path after
+  the host.
+- Unsupported schemes, missing hostnames, non-local hostnames, invalid `file`
+  encodings, and invalid UTF-8 decoded paths leave the previous PWD/title state
+  unchanged.
+- Valid local empty-path reports such as `file://localhost` are accepted and
+  clear the logical PWD, matching Ghostty's normalized empty-path behavior.
+- Terminal PWD changes are queued as explicit pending PWD events, drained into
+  `TermioPump.pwd`, emitted by the worker, and dispatched to live surfaces as
+  `ROASTTY_ACTION_PWD`.
+- Title fallback continues to use pending title events, now with normalized PWD
+  paths instead of raw URLs.
+
+The runtime inventory split is now:
+
+- `RUNTIME-009B2B2B2`: **Oracle complete** for common local OSC 7 PWD URI
+  validation, hostname checks, path normalization, surface PWD dispatch, and
+  title fallback path dispatch.
+- `RUNTIME-009B2B2B3`: **Gap** for exact nonzero scrollback byte quota,
+  remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI
+  edge cases, and other remaining terminal behavior effects.
+
+Verification passed:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc7_pwd_normalization
+cargo test --manifest-path roastty/Cargo.toml termio_osc7_pwd_normalization
+cargo test --manifest-path roastty/Cargo.toml surface_osc7_pwd_normalization
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback
+cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback
+cargo test --manifest-path roastty/Cargo.toml surface_title_pwd_fallback
+cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_pwd_normalization_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+The regenerated runtime inventory reports:
+
+```text
+runtime_rows=37
+oracle_complete=30
+closed=32
+audit_covered=0
+incomplete=5
+gap=5
+cfg223=Gap
+```
+
+## Conclusion
+
+Roastty no longer treats accepted OSC 7 PWD reports as raw URLs. The common
+local `file` and `kitty-shell-cwd` paths now match Ghostty's state, surface PWD
+dispatch, and title fallback behavior with durable Tier 2 guards. CFG-223
+correctly remains `Gap` because exact nonzero scrollback byte quotas, remaining
+shell rewrite coverage, exotic OSC 7 URI edge cases, and other terminal effects
+still need separate experiments.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Initial verdict:** Changes required.
+
+Required finding:
+
+- Broader `terminal_stream_osc` tests still seeded OSC 7 PWD with non-local
+  `file://host/...` fixtures and expected raw URL values. The focused experiment
+  filters passed, but the broader OSC suite failed after local-host validation
+  was added.
+
+Fix:
+
+- Updated the OSC stream tests that seed PWD via OSC 7 to use
+  `file://localhost/...` and assert normalized paths such as `/home` and
+  `/split`.
+- Left direct `set_pwd_for_tests("file://host/...")` formatter tests unchanged,
+  because those tests bypass OSC 7 parsing and exercise stored terminal state
+  serialization.
+- Added `cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc` to
+  the verification evidence for this result.
+
+**Re-review verdict:** Approved. The reviewer verified `terminal_stream_osc`,
+`terminal_stream_osc7_pwd_normalization`, and `git diff --check` passed, and
+reported no remaining Required findings.

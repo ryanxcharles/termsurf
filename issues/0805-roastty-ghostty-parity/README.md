@@ -345,8 +345,14 @@ experiment files until they are proven.
 - **Empty title reset is an event, not just a string diff.** Pinned Ghostty
   sends title messages for empty-title resets even when the effective title is
   blank or unchanged. Roastty now drains explicit pending title events through
-  `TermioPump`; full OSC 7 URI parsing, hostname validation, and path
-  normalization remain separate terminal gaps.
+  `TermioPump`; OSC 7 PWD normalization is proven separately from exact nonzero
+  scrollback quota and other remaining terminal gaps.
+- **OSC 7 PWD reports are paths, not raw URLs.** Pinned Ghostty accepts local
+  `file` and `kitty-shell-cwd` OSC 7 URLs, requires a local hostname, stores the
+  normalized path, dispatches that path as `pwd`, and uses that path for title
+  fallback. Roastty now mirrors this common local path behavior through terminal
+  state, `TermioPump`, and `ROASTTY_ACTION_PWD`; exotic OSC 7 URI edge cases
+  remain part of the reduced terminal gap.
 - **`scrollback-limit` runtime parity has two tiers.** Roastty's terminal core
   currently models scrollback capacity in rows, while pinned Ghostty documents
   `scrollback-limit` as a byte quota. A focused experiment may prove the
@@ -1286,4 +1292,4 @@ remains open.
 - [Experiment 127: Title PWD fallback runtime](127-title-pwd-fallback-runtime.md)
   — **Pass**
 - [Experiment 128: OSC 7 PWD normalization runtime](128-osc7-pwd-normalization-runtime.md)
-  — **Designed**
+  — **Pass**

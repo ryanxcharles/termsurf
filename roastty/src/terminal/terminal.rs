@@ -4,6 +4,7 @@ use std::ffi::{c_char, c_void};
 use std::ptr::NonNull;
 
 use crate::input::key_encode;
+use crate::os::hostname;
 
 use super::charsets;
 use super::color;
@@ -62,6 +63,7 @@ pub(crate) struct Terminal {
     title: TerminalTitle,
     pwd: TerminalPwd,
     pending_title_updates: Vec<String>,
+    pending_pwd_updates: Vec<String>,
     mouse_shape: mouse::MouseShape,
     title_report: bool,
     next_implicit_hyperlink_id: u32,
@@ -812,6 +814,7 @@ struct TerminalStreamHandler<'a> {
     title: &'a mut TerminalTitle,
     pwd: &'a mut TerminalPwd,
     pending_title_updates: &'a mut Vec<String>,
+    pending_pwd_updates: &'a mut Vec<String>,
     mouse_shape: &'a mut mouse::MouseShape,
     title_report: &'a bool,
     next_implicit_hyperlink_id: &'a mut u32,
@@ -1078,6 +1081,7 @@ impl Terminal {
             title: TerminalTitle::default(),
             pwd: TerminalPwd::default(),
             pending_title_updates: Vec::new(),
+            pending_pwd_updates: Vec::new(),
             mouse_shape: mouse::MouseShape::Text,
             title_report: options.title_report,
             next_implicit_hyperlink_id: 0,
@@ -1108,6 +1112,7 @@ impl Terminal {
             title,
             pwd,
             pending_title_updates,
+            pending_pwd_updates,
             mouse_shape,
             title_report,
             next_implicit_hyperlink_id,
@@ -1131,6 +1136,7 @@ impl Terminal {
             title,
             pwd,
             pending_title_updates,
+            pending_pwd_updates,
             mouse_shape,
             title_report,
             next_implicit_hyperlink_id,
@@ -1163,6 +1169,8 @@ impl Terminal {
         self.flags = TerminalFlags::default();
         self.previous_char = None;
         self.pending_clipboard_events.clear();
+        self.pending_title_updates.clear();
+        self.pending_pwd_updates.clear();
     }
 
     pub(crate) fn drain_clipboard_events(&mut self) -> Vec<TerminalClipboardEvent> {
@@ -1175,6 +1183,10 @@ impl Terminal {
 
     pub(crate) fn take_pending_title_updates(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_title_updates)
+    }
+
+    pub(crate) fn take_pending_pwd_updates(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_pwd_updates)
     }
 
     pub(crate) fn title(&self) -> &str {
@@ -3816,6 +3828,7 @@ impl TerminalStreamHandler<'_> {
     fn report_pwd(&mut self, url: &str) {
         if url.is_empty() {
             self.pwd.clear();
+            self.pending_pwd_updates.push(String::new());
             if !self.title.seen_explicit {
                 self.title.set_fallback("");
                 self.queue_title_update("");
@@ -3823,7 +3836,12 @@ impl TerminalStreamHandler<'_> {
             return;
         }
 
-        self.pwd.set(url);
+        let Some(path) = normalize_report_pwd_url(url) else {
+            return;
+        };
+
+        self.pwd.set(&path);
+        self.pending_pwd_updates.push(path.clone());
         if !self.title.seen_explicit {
             let fallback = self.pwd.logical_str().unwrap_or("").to_string();
             self.title.set_fallback(&fallback);
@@ -3964,6 +3982,7 @@ impl TerminalStreamHandler<'_> {
         self.title.clear();
         self.pwd.clear();
         self.pending_title_updates.clear();
+        self.pending_pwd_updates.clear();
         *self.dcs = dcs::Handler::new();
         self.clear_tmux_state();
         self.kitty_graphics.reset();
@@ -4510,6 +4529,68 @@ impl ScrollingRegion {
             && self.right < size.cols
             && (size.rows <= 1 || self.top < self.bottom)
             && (size.cols <= 1 || self.left < self.right)
+    }
+}
+
+fn normalize_report_pwd_url(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if scheme != "file" && scheme != "kitty-shell-cwd" {
+        return None;
+    }
+
+    let host_end = rest
+        .find(|c| matches!(c, '/' | '?' | '#'))
+        .unwrap_or(rest.len());
+    let host = &rest[..host_end];
+    if host.is_empty() {
+        return None;
+    }
+    if !hostname::is_local(host.as_bytes()).ok()? {
+        return None;
+    }
+
+    let path = if rest.as_bytes().get(host_end) == Some(&b'/') {
+        let path_with_suffix = &rest[host_end..];
+        let path_end = path_with_suffix
+            .find(|c| matches!(c, '?' | '#'))
+            .unwrap_or(path_with_suffix.len());
+        &path_with_suffix[..path_end]
+    } else {
+        ""
+    };
+
+    match scheme {
+        "file" => percent_decode_path(path),
+        "kitty-shell-cwd" => Some(path.to_string()),
+        _ => None,
+    }
+}
+
+fn percent_decode_path(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hi = *bytes.get(i + 1)?;
+            let lo = *bytes.get(i + 2)?;
+            decoded.push((hex_value(hi)? << 4) | hex_value(lo)?);
+            i += 3;
+        } else {
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -9590,12 +9671,12 @@ mod tests {
 
         terminal
             .next_slice(
-                b"\x1b]0;window title\x07\x1b]7;file://host/home\x1b\\\x1b]8;id=tab;https://e\x07",
+                b"\x1b]0;window title\x07\x1b]7;file://localhost/home\x1b\\\x1b]8;id=tab;https://e\x07",
             )
             .unwrap();
 
         assert_eq!(terminal.title_for_tests(), "window title");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/home"));
         assert_eq!(
             terminal.cursor_hyperlink_for_tests(),
             Some((
@@ -9612,12 +9693,18 @@ mod tests {
     fn terminal_stream_title_pwd_fallback_state_machine() {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
-        terminal.next_slice(b"\x1b]7;file://host/home\x07").unwrap();
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
-        assert_eq!(terminal.title_for_tests(), "file://host/home");
+        terminal
+            .next_slice(b"\x1b]7;file://localhost/home\x07")
+            .unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("/home"));
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/home".to_string()]
+        );
+        assert_eq!(terminal.title_for_tests(), "/home");
         assert_eq!(
             terminal.take_pending_title_updates(),
-            vec!["file://host/home".to_string()]
+            vec!["/home".to_string()]
         );
 
         terminal.next_slice(b"\x1b]0;explicit\x07").unwrap();
@@ -9628,21 +9715,26 @@ mod tests {
         );
 
         terminal
-            .next_slice(b"\x1b]7;file://host/ignored\x07")
+            .next_slice(b"\x1b]7;file://localhost/ignored\x07")
             .unwrap();
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/ignored"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/ignored"));
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/ignored".to_string()]
+        );
         assert_eq!(terminal.title_for_tests(), "explicit");
         assert!(terminal.take_pending_title_updates().is_empty());
 
         terminal.next_slice(b"\x1b]0;\x07").unwrap();
-        assert_eq!(terminal.title_for_tests(), "file://host/ignored");
+        assert_eq!(terminal.title_for_tests(), "/ignored");
         assert_eq!(
             terminal.take_pending_title_updates(),
-            vec!["file://host/ignored".to_string()]
+            vec!["/ignored".to_string()]
         );
 
         terminal.next_slice(b"\x1b]7;\x07").unwrap();
         assert_eq!(terminal.pwd_for_tests(), None);
+        assert_eq!(terminal.take_pending_pwd_updates(), vec!["".to_string()]);
         assert_eq!(terminal.title_for_tests(), "");
         assert_eq!(terminal.take_pending_title_updates(), vec!["".to_string()]);
     }
@@ -9655,18 +9747,20 @@ mod tests {
         assert_eq!(terminal.title_for_tests(), "");
         assert_eq!(terminal.take_pending_title_updates(), vec!["".to_string()]);
 
-        terminal.next_slice(b"\x1b]7;file://host/same\x07").unwrap();
-        assert_eq!(terminal.title_for_tests(), "file://host/same");
+        terminal
+            .next_slice(b"\x1b]7;file://localhost/same\x07")
+            .unwrap();
+        assert_eq!(terminal.title_for_tests(), "/same");
         assert_eq!(
             terminal.take_pending_title_updates(),
-            vec!["file://host/same".to_string()]
+            vec!["/same".to_string()]
         );
 
         terminal.next_slice(b"\x1b]0;\x07").unwrap();
-        assert_eq!(terminal.title_for_tests(), "file://host/same");
+        assert_eq!(terminal.title_for_tests(), "/same");
         assert_eq!(
             terminal.take_pending_title_updates(),
-            vec!["file://host/same".to_string()]
+            vec!["/same".to_string()]
         );
     }
 
@@ -9675,18 +9769,79 @@ mod tests {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
         terminal
-            .next_slice(b"\x1b]7;file://host/one\x07\x1b]0;two\x07\x1b]0;\x07")
+            .next_slice(b"\x1b]7;file://localhost/one\x07\x1b]0;two\x07\x1b]0;\x07")
             .unwrap();
 
-        assert_eq!(terminal.title_for_tests(), "file://host/one");
+        assert_eq!(terminal.title_for_tests(), "/one");
         assert_eq!(
             terminal.take_pending_title_updates(),
-            vec![
-                "file://host/one".to_string(),
-                "two".to_string(),
-                "file://host/one".to_string()
-            ]
+            vec!["/one".to_string(), "two".to_string(), "/one".to_string()]
         );
+    }
+
+    #[test]
+    fn terminal_stream_osc7_pwd_normalization_accepts_local_paths() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]7;file://localhost/tmp/hello%20world\x07")
+            .unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("/tmp/hello world"));
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/tmp/hello world".to_string()]
+        );
+        assert_eq!(terminal.title_for_tests(), "/tmp/hello world");
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["/tmp/hello world".to_string()]
+        );
+
+        terminal
+            .next_slice(b"\x1b]7;kitty-shell-cwd://localhost/tmp/raw%20path\x07")
+            .unwrap();
+        assert_eq!(terminal.pwd_for_tests(), Some("/tmp/raw%20path"));
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/tmp/raw%20path".to_string()]
+        );
+
+        terminal.next_slice(b"\x1b]7;file://localhost\x07").unwrap();
+        assert_eq!(terminal.pwd_for_tests(), None);
+        assert_eq!(terminal.take_pending_pwd_updates(), vec!["".to_string()]);
+    }
+
+    #[test]
+    fn terminal_stream_osc7_pwd_normalization_rejects_invalid_urls() {
+        let mut terminal = Terminal::init(10, 2, None).unwrap();
+
+        terminal
+            .next_slice(b"\x1b]7;file://localhost/original\x07")
+            .unwrap();
+        assert_eq!(
+            terminal.take_pending_pwd_updates(),
+            vec!["/original".to_string()]
+        );
+        assert_eq!(
+            terminal.take_pending_title_updates(),
+            vec!["/original".to_string()]
+        );
+
+        for url in [
+            "http://localhost/bad",
+            "file:///missing-host",
+            "file://remote.example/bad",
+            "file://localhost/bad%ZZ",
+            "kitty-shell-cwd:///missing-host",
+        ] {
+            terminal
+                .next_slice(format!("\x1b]7;{url}\x07").as_bytes())
+                .unwrap();
+            assert_eq!(terminal.pwd_for_tests(), Some("/original"));
+            assert_eq!(terminal.title_for_tests(), "/original");
+            assert!(terminal.take_pending_pwd_updates().is_empty());
+            assert!(terminal.take_pending_title_updates().is_empty());
+        }
     }
 
     #[test]
@@ -9750,7 +9905,7 @@ mod tests {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
         terminal
-            .next_slice(b"\x1b]0;original\x07\x1b]7;file://host/original\x07")
+            .next_slice(b"\x1b]0;original\x07\x1b]7;file://localhost/original\x07")
             .unwrap();
         terminal
             .next_slice(
@@ -9759,7 +9914,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(terminal.title_for_tests(), "original");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/original"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/original"));
         assert_eq!(terminal.cursor_hyperlink_for_tests(), None);
         assert_eq!(plain_with_unwrap(&terminal, false), "");
     }
@@ -9769,10 +9924,10 @@ mod tests {
         let mut terminal = Terminal::init(10, 2, None).unwrap();
 
         terminal
-            .next_slice(b"\x1b]1337;CurrentDir=file://host/osc1337\x07")
+            .next_slice(b"\x1b]1337;CurrentDir=file://localhost/osc1337\x07")
             .unwrap();
 
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/osc1337"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/osc1337"));
     }
 
     #[test]
@@ -9836,7 +9991,9 @@ mod tests {
 
         terminal.next_slice(b"abc").unwrap();
         terminal
-            .next_slice(b"\x1b]0;title\x07\x1b]7;file://host/home\x07\x1b]8;id=x;https://e\x07")
+            .next_slice(
+                b"\x1b]0;title\x07\x1b]7;file://localhost/home\x07\x1b]8;id=x;https://e\x07",
+            )
             .unwrap();
         terminal.next_slice(b"\x1b]10;#112233\x07").unwrap();
         terminal.set_mode_for_tests(Mode::Insert, true);
@@ -9853,7 +10010,7 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "abc");
         assert_eq!(terminal.title_for_tests(), "title");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/home"));
         assert_eq!(
             terminal.cursor_hyperlink_for_tests(),
             Some((
@@ -10088,7 +10245,9 @@ mod tests {
 
         terminal.next_slice(b"abc").unwrap();
         terminal
-            .next_slice(b"\x1b]0;title\x07\x1b]7;file://host/home\x07\x1b]8;id=x;https://e\x07")
+            .next_slice(
+                b"\x1b]0;title\x07\x1b]7;file://localhost/home\x07\x1b]8;id=x;https://e\x07",
+            )
             .unwrap();
         terminal.next_slice(b"\x1b]10;#112233\x07").unwrap();
         terminal.set_mode_for_tests(Mode::Insert, true);
@@ -10105,7 +10264,7 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "abc");
         assert_eq!(terminal.title_for_tests(), "title");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/home"));
         assert_eq!(
             terminal.cursor_hyperlink_for_tests(),
             Some((
@@ -10127,7 +10286,9 @@ mod tests {
 
         terminal.next_slice(b"abc").unwrap();
         terminal
-            .next_slice(b"\x1b]0;title\x07\x1b]7;file://host/home\x07\x1b]8;id=x;https://e\x07")
+            .next_slice(
+                b"\x1b]0;title\x07\x1b]7;file://localhost/home\x07\x1b]8;id=x;https://e\x07",
+            )
             .unwrap();
         terminal.next_slice(b"\x1b]10;#112233\x07").unwrap();
         terminal.set_mode_for_tests(Mode::Insert, true);
@@ -10160,7 +10321,7 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "abc");
         assert_eq!(terminal.title_for_tests(), "title");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/home"));
         assert_eq!(
             terminal.cursor_hyperlink_for_tests(),
             Some((
@@ -10236,7 +10397,9 @@ mod tests {
 
         terminal.next_slice(b"abc").unwrap();
         terminal
-            .next_slice(b"\x1b]0;title\x07\x1b]7;file://host/home\x07\x1b]8;id=x;https://e\x07")
+            .next_slice(
+                b"\x1b]0;title\x07\x1b]7;file://localhost/home\x07\x1b]8;id=x;https://e\x07",
+            )
             .unwrap();
         terminal.next_slice(b"\x1b]10;#112233\x07").unwrap();
         terminal.set_mode_for_tests(Mode::Insert, true);
@@ -10255,7 +10418,7 @@ mod tests {
 
         assert_eq!(plain_with_unwrap(&terminal, false), "abc");
         assert_eq!(terminal.title_for_tests(), "title");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/home"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/home"));
         assert_eq!(
             terminal.cursor_hyperlink_for_tests(),
             Some((
@@ -10284,7 +10447,7 @@ mod tests {
         terminal.clear_dirty_for_tests();
 
         terminal
-            .next_slice(b"\x1b]0;t\x07\x1b]7;file://host/p\x07\x1b]8;;https://e\x1b\\")
+            .next_slice(b"\x1b]0;t\x07\x1b]7;file://localhost/p\x07\x1b]8;;https://e\x1b\\")
             .unwrap();
 
         assert_eq!(plain_with_unwrap(&terminal, false), "abc");
@@ -10860,11 +11023,11 @@ mod tests {
         terminal.next_slice(b"0;split").unwrap();
         terminal.next_slice(b"\x1b").unwrap();
         terminal.next_slice(b"\\").unwrap();
-        terminal.next_slice(b"\x1b]7;file://host/s").unwrap();
+        terminal.next_slice(b"\x1b]7;file://localhost/s").unwrap();
         terminal.next_slice(b"plit\x07").unwrap();
 
         assert_eq!(terminal.title_for_tests(), "split");
-        assert_eq!(terminal.pwd_for_tests(), Some("file://host/split"));
+        assert_eq!(terminal.pwd_for_tests(), Some("/split"));
         assert_eq!(plain_with_unwrap(&terminal, false), "");
     }
 

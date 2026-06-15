@@ -458,30 +458,61 @@ ROWS = [
             "statically checks pinned Ghostty's corresponding `seen_title` "
             "branches and Roastty's runtime/test markers."
         ),
-        missing_evidence="None for stored-PWD title fallback state and empty title app dispatch behavior covered by these guards. Full OSC 7 URI parsing, hostname validation, and path normalization remain in RUNTIME-009B2B2B2.",
+        missing_evidence="None for stored-PWD title fallback state and empty title app dispatch behavior covered by these guards. OSC 7 URI parsing, hostname validation, and path normalization are split into RUNTIME-009B2B2B2.",
         guard_tier="Tier 2",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml surface_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml worker_rejects_terminal_with_callbacks && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/title_pwd_fallback_runtime_parity.py`",
     ),
     RuntimeRow(
         id="RUNTIME-009B2B2B2",
-        behavior="exact nonzero scrollback byte quota, OSC 7 URI parsing/hostname/path normalization, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects",
-        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback; `vendor/ghostty/src/termio/stream_handler.zig` OSC 7 URI parsing, hostname validation, path normalization, and remaining shell/title behavior; shell integration startup paths",
+        behavior="OSC 7 local PWD URI validation, hostname checks, path normalization, surface PWD dispatch, and title fallback path dispatch",
+        ghostty_reference="`vendor/ghostty/src/termio/stream_handler.zig` OSC 7 `reportPwd` scheme gate, hostname validation, path normalization, `.pwd_change`, and title fallback",
+        roastty_reference="`roastty/src/terminal/terminal.rs` OSC 7 PWD normalizer and pending PWD/title events; `roastty/src/termio.rs` PWD pump field; `roastty/src/lib.rs` PWD action dispatch",
+        family="terminal",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 128 split out the OSC 7 PWD normalization slice. "
+            "`terminal_stream_osc7_pwd_normalization_*` tests prove local "
+            "`file` URLs store and dispatch normalized paths, `file` paths "
+            "percent-decode valid `%xx` escapes and reject invalid escapes, "
+            "local `kitty-shell-cwd` paths stay raw, valid local empty paths "
+            "clear PWD like Ghostty, and unsupported schemes, missing hosts, "
+            "remote hosts, and invalid encodings do not mutate PWD or title "
+            "state. Updated `terminal_stream_title_pwd_fallback_*` tests "
+            "prove title fallback uses normalized paths and preserves event "
+            "order. `termio_osc7_pwd_normalization_*` and "
+            "`termio_title_pwd_fallback_*` tests prove normalized PWD and "
+            "title fallback paths travel through `TermioPump` without "
+            "terminal callbacks. `surface_osc7_pwd_normalization_*` proves "
+            "`ROASTTY_ACTION_PWD` dispatches the normalized path to live "
+            "surfaces, and `osc7_pwd_normalization_runtime_parity.py` "
+            "statically checks pinned Ghostty and Roastty markers."
+        ),
+        missing_evidence="None for this local OSC 7 PWD validation, normalization, PWD dispatch, and title fallback path dispatch slice. Remaining terminal gaps stay in RUNTIME-009B2B2B3.",
+        guard_tier="Tier 2",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_stream_osc7_pwd_normalization && cargo test --manifest-path roastty/Cargo.toml terminal_stream_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml termio_osc7_pwd_normalization && cargo test --manifest-path roastty/Cargo.toml termio_title_pwd_fallback && cargo test --manifest-path roastty/Cargo.toml surface_osc7_pwd_normalization && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/osc7_pwd_normalization_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-009B2B2B3",
+        behavior="exact nonzero scrollback byte quota, remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI edge cases, and other remaining terminal behavior effects",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` nonzero `scrollback-limit`; `vendor/ghostty/src/terminal/Screen.zig` byte-quota scrollback; remaining `vendor/ghostty/src/termio/stream_handler.zig` terminal behavior and shell integration startup paths",
         roastty_reference="`roastty/src/lib.rs` terminal/termio config use; `roastty/src/termio.rs`; `roastty/src/terminal`",
         family="terminal",
         status="Gap",
         evidence=(
-            "Experiments 117, 122, 124, 126, and 127 split out "
+            "Experiments 117, 122, 124, 126, 127, and 128 split out "
             "zero/no-history scrollback, alternate-screen no-scrollback, CSI "
             "`21t` title-report gating, shell-integration feature env and "
             "terminal identity, zsh bootstrap, configured/static non-empty "
             "surface title behavior, and stored-PWD title fallback/empty "
-            "title app dispatch. Exact nonzero `scrollback-limit` byte quota "
-            "parity, OSC 7 URI parsing/hostname/path normalization, remaining "
-            "shell-specific startup rewrite coverage, and other remaining "
+            "title app dispatch, plus the common local OSC 7 PWD validation, "
+            "path normalization, surface PWD dispatch, and title fallback "
+            "path behavior. Exact nonzero `scrollback-limit` byte quota "
+            "parity, remaining shell-specific startup rewrite coverage, "
+            "unproven exotic OSC 7 URI edge cases, and other remaining "
             "terminal behavior toggles still need focused CFG-223 runtime "
             "proof or fixes."
         ),
-        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, OSC 7 URI parsing/hostname/path normalization, remaining shell-specific startup rewrite coverage, and other remaining terminal behavior effects.",
+        missing_evidence="Add runtime proof or fixes for exact nonzero scrollback byte quota behavior, remaining shell-specific startup rewrite coverage, unproven exotic OSC 7 URI edge cases, and other remaining terminal behavior effects.",
         guard_tier="Tier 2",
         guard_command="TBD by future CFG-223 terminal runtime experiment.",
     ),
@@ -772,6 +803,7 @@ EXPECTED_IDS = [
     "RUNTIME-009B2B2A",
     "RUNTIME-009B2B2B1",
     "RUNTIME-009B2B2B2",
+    "RUNTIME-009B2B2B3",
     "RUNTIME-010A",
     "RUNTIME-010B1",
     "RUNTIME-010B2A",
