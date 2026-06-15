@@ -638,6 +638,14 @@ mod tests {
         MTLCreateSystemDefaultDevice()
     }
 
+    #[test]
+    fn custom_shader_output_requires_metal_device() {
+        assert!(
+            metal_device().is_some(),
+            "Experiment 163 custom shader output proof requires a usable Metal device"
+        );
+    }
+
     fn compositor(
         device: Retained<ProtocolObject<dyn MTLDevice>>,
         width: usize,

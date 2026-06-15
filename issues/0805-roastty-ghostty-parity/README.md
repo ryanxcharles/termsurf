@@ -830,6 +830,13 @@ experiment files until they are proven.
   opacity handling. GUI cursor pixels, custom shader output, broader GUI/pixel
   parity, and screenshot-level padding pixel proof remain in
   `RUNTIME-008B2B2B2B`.
+- **Custom shader output can be proven with Metal readback.** Experiment 163
+  uses the Metal compositor's target-byte readback tests to prove custom shader
+  offscreen rendering, post-process pipeline order, ping-pong textures, sampler
+  settings, resize behavior, and image-aware source frames. It requires a
+  non-skipping Metal device assertion so the proof is not vacuous. GUI cursor
+  pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof
+  remain in `RUNTIME-008B2B2B2B2`.
 - **Command palette runtime plumbing can be proven without a full GUI
   walkthrough.** Experiment 152 split copied command palette source parity,
   toggle notification delivery, `commandPaletteIsShowing` state, focus return,
@@ -1568,4 +1575,4 @@ remains open.
 - [Experiment 162: Link hover modifier refresh](162-link-hover-modifier-refresh.md)
   — **Pass**
 - [Experiment 163: Custom shader output runtime](163-custom-shader-output-runtime.md)
-  — **Designed**
+  — **Pass**

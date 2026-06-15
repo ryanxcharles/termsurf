@@ -704,8 +704,42 @@ ROWS = [
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/non_glass_opacity_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-008B2B2B2B",
-        behavior="remaining renderer-visible effects: GUI cursor pixels, custom shader output, broader GUI/pixel parity, and screenshot-level padding pixel proof",
+        id="RUNTIME-008B2B2B2B1",
+        behavior="Metal custom shader output readback",
+        ghostty_reference="`vendor/ghostty/src/renderer/generic.zig` custom shader state, offscreen frame target, post-process pipeline loop, uniform sync, ping-pong textures, and final target draw; `vendor/ghostty/src/renderer/metal/shaders.zig` post-pipeline init; `vendor/ghostty/src/renderer/Metal.zig` custom shader target",
+        roastty_reference="`roastty/src/renderer/metal/compositor.rs` custom shader draw path and readback tests; `roastty/src/renderer/metal/render_pass.rs` `draw_custom_shader`; `roastty/src/renderer/metal/shaders.rs` post-process pipeline build; `roastty/src/renderer/metal/texture.rs` post-process texture options",
+        family="renderer",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 163 splits out deterministic Metal custom shader "
+            "output. Roastty renders the normal frame into an offscreen "
+            "texture when custom shader pipelines are active, syncs "
+            "`CustomShaderUniforms`, runs post-process pipelines in order, "
+            "ping-pongs intermediate textures, and writes the final pass to "
+            "the target. `custom_shader_output_requires_metal_device` makes "
+            "this proof non-vacuous on the current macOS VM. "
+            "`compositor_custom_shader_samples_offscreen_frame_into_final_target` "
+            "proves a single custom shader samples the offscreen terminal "
+            "frame and changes the final target bytes. "
+            "`compositor_custom_shader_ping_pongs_multiple_passes` proves "
+            "ordered multi-pass ping-pong output. "
+            "`compositor_custom_shader_resizes_intermediate_textures` proves "
+            "intermediate textures track target size, "
+            "`compositor_custom_shader_uses_shadertoy_sampler_options` proves "
+            "linear clamp-to-edge sampling, and "
+            "`compositor_image_aware_frame_can_be_custom_shader_source` proves "
+            "the image-aware frame path can feed the custom shader source. "
+            "`custom_shader_output_runtime_parity.py` statically checks "
+            "pinned Ghostty anchors, Roastty implementation markers, tests, "
+            "and this inventory split."
+        ),
+        missing_evidence="None for deterministic Metal custom shader output readback. Native app screenshot equivalence and broader GUI/pixel proof remain outside this slice.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml custom_shader_output_requires_metal_device -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml compositor_custom_shader -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml compositor_image_aware_frame_can_be_custom_shader_source -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/custom_shader_output_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-008B2B2B2B2",
+        behavior="remaining renderer-visible effects: GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` renderer/window visual fields; `vendor/ghostty/src/renderer/generic.zig` derived renderer config and draw paths; `vendor/ghostty/src/Surface.zig` renderer config messages; screenshot/pixel walkthrough paths",
         roastty_reference="`roastty/src/lib.rs` live renderer and render state; `roastty/src/renderer`; copied macOS renderer/window host",
         family="renderer",
@@ -726,11 +760,13 @@ ROWS = [
             "row/column state. Experiment 151 split out copied macOS "
             "`macos-glass*` blur/opacity host behavior. Experiment 154 split "
             "out copied macOS non-glass compositor opacity host behavior. "
+            "Experiment 163 split out deterministic Metal custom shader output "
+            "readback. "
             "CFG-223 still needs representative runtime or GUI proof for GUI "
-            "cursor pixels, custom shader output, broader GUI/pixel parity, "
-            "and screenshot-level padding pixel proof."
+            "cursor pixels, broader GUI/pixel parity, and screenshot-level "
+            "padding pixel proof."
         ),
-        missing_evidence="Add renderer/runtime or GUI smoke rows for GUI cursor pixels, custom shader output, broader GUI/pixel parity, and screenshot-level padding pixel proof.",
+        missing_evidence="Add renderer/runtime or GUI smoke rows for GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel proof.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 renderer visual experiment.",
     ),
@@ -1483,7 +1519,7 @@ ROWS = [
             "`bell-features = attention`, `bell-features = title`, and "
             "`bell-features = border` gates."
         ),
-        missing_evidence="None for copied macOS bell presentation plumbing source parity; actual OS/audio/dock/border/title runtime side effects remain tracked by RUNTIME-012B2B2B2B2B.",
+        missing_evidence="None for copied macOS bell presentation plumbing source parity; actual OS/audio/dock/border/title runtime side effects remain tracked by RUNTIME-012B2B2B2B2B3.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_runtime_dispatch_parity.py && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_presentation_runtime_parity.py`",
     ),
@@ -1507,7 +1543,7 @@ ROWS = [
             "construction, `requireFocus` userInfo, delivery, delayed focused "
             "cleanup, and click-to-focus routing."
         ),
-        missing_evidence="None for copied macOS user-notification presentation/lifecycle source parity; live OS banner/sound behavior remains tracked by RUNTIME-012B2B2B2B2B.",
+        missing_evidence="None for copied macOS user-notification presentation/lifecycle source parity; live OS banner/sound behavior remains tracked by RUNTIME-012B2B2B2B2B3.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_user_notification_runtime_parity.py`",
     ),
@@ -1562,7 +1598,7 @@ ROWS = [
             "checks pinned Ghostty source, Roastty parser/pump/surface/ABI "
             "implementation, tests, and this inventory split."
         ),
-        missing_evidence="None for command-finished runtime action dispatch; the app-level notification presentation that may consume the action remains tracked by RUNTIME-012B2B2B2B2B.",
+        missing_evidence="None for command-finished runtime action dispatch; the app-level notification presentation that may consume the action remains tracked by RUNTIME-012B2B2B2B2B3.",
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_command_event_runtime && cargo test --manifest-path roastty/Cargo.toml termio_command_event_runtime && cargo test --manifest-path roastty/Cargo.toml surface_command_finished_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/command_finished_runtime_parity.py`",
     ),
@@ -1800,7 +1836,8 @@ EXPECTED_IDS = [
     "RUNTIME-008B2B2A",
     "RUNTIME-008B2B2B1",
     "RUNTIME-008B2B2B2A",
-    "RUNTIME-008B2B2B2B",
+    "RUNTIME-008B2B2B2B1",
+    "RUNTIME-008B2B2B2B2",
     "RUNTIME-009A",
     "RUNTIME-009B1",
     "RUNTIME-009B2A",

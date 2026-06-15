@@ -140,3 +140,114 @@ of the pass criteria.
 
 The reviewer confirmed both findings were resolved and reported no new required
 findings.
+
+## Result
+
+**Result:** Pass
+
+Split deterministic Metal custom shader output readback out of the remaining
+renderer-visible gap. Roastty now has an explicit non-skipping Metal
+availability test for this proof, so the focused custom shader output tests
+cannot satisfy the experiment on a machine without
+`MTLCreateSystemDefaultDevice()`.
+
+The existing Metal compositor readback tests prove the scoped behavior:
+
+- `compositor_custom_shader_samples_offscreen_frame_into_final_target` proves a
+  single custom shader samples the offscreen terminal frame and changes the
+  final target bytes.
+- `compositor_custom_shader_ping_pongs_multiple_passes` proves ordered
+  multi-pass output through ping-pong textures.
+- `compositor_custom_shader_resizes_intermediate_textures` proves intermediate
+  custom shader textures track target size.
+- `compositor_custom_shader_uses_shadertoy_sampler_options` proves the linear
+  clamp-to-edge sampler settings.
+- `compositor_image_aware_frame_can_be_custom_shader_source` proves the
+  image-aware frame path can feed the custom shader source texture.
+
+Added `custom_shader_output_runtime_parity.py` to statically guard pinned
+Ghostty's custom shader render path, Roastty's Metal implementation markers, the
+readback tests, and the inventory split.
+
+Verification run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml custom_shader_output_requires_metal_device -- --test-threads=1
+```
+
+Result: 1 passed.
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml compositor_custom_shader -- --test-threads=1
+```
+
+Result: 4 passed.
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml compositor_image_aware_frame_can_be_custom_shader_source -- --test-threads=1
+```
+
+Result: 1 passed.
+
+```bash
+cargo fmt --manifest-path roastty/Cargo.toml
+cargo fmt --manifest-path roastty/Cargo.toml --check
+```
+
+Result: both passed.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/custom_shader_output_runtime_parity.py
+```
+
+Result: `custom_shader_output_runtime_parity=pass`.
+
+```bash
+for guard in issues/0805-roastty-ghostty-parity/*_runtime_parity.py issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py issues/0805-roastty-ghostty-parity/link_hover_preview_dispatch_parity.py issues/0805-roastty-ghostty-parity/link_hover_modifier_refresh_parity.py issues/0805-roastty-ghostty-parity/link_preview_context_runtime_parity.py; do
+  [ -f "$guard" ] || continue
+  PYTHONDONTWRITEBYTECODE=1 python3 "$guard" || exit 1
+done
+```
+
+Result: all listed guards passed.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+```
+
+Result: `runtime_rows=70`, `oracle_complete=63`, `closed=66`, `incomplete=4`,
+`gap=4`, `cfg223=Gap`.
+
+## Conclusion
+
+The custom shader output portion of the renderer-visible gap is now proven by a
+non-vacuous Metal readback guard and durable static/source checks. CFG-223
+remains open because the remaining renderer-visible row still needs proof for
+GUI cursor pixels, broader GUI/pixel parity, and screenshot-level padding pixel
+proof. The other three broad gaps also remain open: font renderer output, macOS
+app workflow/UI effects, and notification/link/bell GUI effects.
+
+## Completion Review
+
+**Reviewer:** Dewey the 2nd (`019ecab4-d460-7322-ad2d-c5705563b798`)
+
+**Result:** Approved
+
+The reviewer found no required issues. They confirmed the experiment does not
+overclaim full GUI/pixel parity, keeps CFG-223 open, leaves GUI cursor pixels,
+broader GUI/pixel parity, and screenshot-level padding proof in the remaining
+renderer gap, and proves the custom shader slice with a non-vacuous Metal device
+test on this machine.
+
+The reviewer independently ran:
+
+- `cargo fmt --manifest-path roastty/Cargo.toml --check`
+- `cargo test --manifest-path roastty/Cargo.toml custom_shader_output_requires_metal_device -- --test-threads=1`
+- `cargo test --manifest-path roastty/Cargo.toml compositor_custom_shader -- --test-threads=1`
+- `cargo test --manifest-path roastty/Cargo.toml compositor_image_aware_frame_can_be_custom_shader_source -- --test-threads=1`
+- `PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/custom_shader_output_runtime_parity.py`
+- `git diff --check`
+
+All checks passed. The reviewer also verified the runtime inventory counts
+read-only as `runtime_rows=70`, `oracle_complete=63`, `closed=66`,
+`incomplete=4`, `gap=4`, and `cfg223=Gap`.

@@ -128,16 +128,16 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B")
+    row_gap = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B3")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-012B2B2B2B2B status"),
+            ("Gap", "RUNTIME-012B2B2B2B2B3 status"),
             ("Actual OS banner/sound delivery", "remaining OS notification gap"),
             ("actual audio/dock/border/title GUI effects", "remaining bell GUI gap"),
             ("real app link hover/cursor UI", "remaining real hover UI gap"),
-            ("link previews", "remaining link preview gap"),
-            ("context/menu link flows", "remaining context menu gap"),
+            ("native link preview display", "remaining link preview gap"),
+            ("native context/menu display", "remaining context menu gap"),
         ],
     )
 
@@ -145,7 +145,7 @@ def main() -> int:
         inventory_source,
         [
             ('id="RUNTIME-012B2B2B2B2A"', "source link-hover row"),
-            ('id="RUNTIME-012B2B2B2B2B"', "source reduced gap row"),
+            ('id="RUNTIME-012B2B2B2B2B3"', "source reduced gap row"),
             ("macos_link_hover_banner_runtime_parity.py", "source guard command"),
         ],
     )
@@ -154,8 +154,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("60 rows Oracle complete", "CFG-223 oracle count"),
-            ("63 rows closed", "CFG-223 closed count"),
+            ("63 rows Oracle complete", "CFG-223 oracle count"),
+            ("66 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],
