@@ -9,6 +9,7 @@
 
 use crate::config::{Config, FontShapingBreak, WindowPaddingColor};
 use crate::font::run::Wide;
+use crate::font::shape;
 use crate::font::shared_grid::SharedGrid;
 use crate::renderer::cell::{row_never_extend_bg_flags, Contents, Highlight, SelectionConfig};
 use crate::renderer::cursor::{self, Style as CursorStyle, StyleOptions};
@@ -462,6 +463,7 @@ pub(crate) struct FrameRenderKnobs {
     pub(crate) background_opacity: f64,
     pub(crate) padding_color: WindowPaddingColor,
     pub(crate) font_shaping_break: FontShapingBreak,
+    pub(crate) shape_options: shape::Options,
     pub(crate) overlay_alpha: u8,
     pub(crate) cursor_overlay_alpha: u8,
     pub(crate) selection_config: SelectionConfig,
@@ -486,6 +488,9 @@ impl FrameRenderKnobs {
             background_opacity: config.background_opacity.clamp(0.0, 1.0),
             padding_color: config.window_padding_color,
             font_shaping_break: config.font_shaping_break,
+            shape_options: shape::Options {
+                features: config.font_feature.list.clone(),
+            },
             overlay_alpha: 255,
             cursor_overlay_alpha: (config.cursor_opacity.clamp(0.0, 1.0) * 255.0).ceil() as u8,
             selection_config: SelectionConfig::from_config(config),
@@ -620,6 +625,7 @@ impl FrameRenderState {
                 background_opacity_cells: knobs.background_opacity_cells,
                 background_opacity: knobs.background_opacity,
                 font_shaping_break: knobs.font_shaping_break,
+                shape_options: &knobs.shape_options,
             },
             text_overlay: FrameSnapshotTextOverlayInput {
                 cursor: self
@@ -850,6 +856,10 @@ mod tests {
     /// Build a full rebuild input borrowing the caller-owned scratch data. The
     /// `row_never_extend` length is the only lever the error test needs (`&[]`
     /// makes `refine_padding_extend_rows` reject).
+    fn default_shape_options() -> &'static shape::Options {
+        Box::leak(Box::new(shape::Options::default()))
+    }
+
     fn frame_input<'a>(
         highlights: &'a [Vec<Highlight>],
         link_ranges: &'a [Vec<[u16; 2]>],
@@ -872,6 +882,7 @@ mod tests {
                 background_opacity_cells: true,
                 background_opacity: 0.42,
                 font_shaping_break: FontShapingBreak::default(),
+                shape_options: default_shape_options(),
             },
             text_overlay: FrameSnapshotTextOverlayInput {
                 cursor: Some(FrameSnapshotCursorOverlayInput {
@@ -1232,6 +1243,7 @@ mod tests {
             background_opacity: 0.42,
             padding_color: WindowPaddingColor::Extend,
             font_shaping_break: FontShapingBreak::default(),
+            shape_options: shape::Options::default(),
             overlay_alpha: 219,
             cursor_overlay_alpha: 211,
             selection_config: SelectionConfig::default(),
@@ -1314,6 +1326,40 @@ mod tests {
 
         assert!(input.row_format.thicken);
         assert_eq!(input.row_format.thicken_strength, 128);
+    }
+
+    #[test]
+    fn font_feature_runtime_active_frame_sources_config() {
+        let term = terminal(4, 3);
+        let mut config = Config::default();
+        config.set("font-feature", Some("-liga")).unwrap();
+        config.set("font-feature", Some("kern=2")).unwrap();
+        let knobs = FrameRenderKnobs::from_config(&config);
+        let state = FrameRenderState::from_terminal(&term);
+
+        let input = state.rebuild_input(&knobs);
+
+        assert_eq!(
+            input.row_format.shape_options.features,
+            vec!["-liga".to_string(), "kern=2".to_string()]
+        );
+        assert_eq!(
+            input.row_format.shape_options.merged_features(),
+            vec![
+                shape::Feature {
+                    tag: *b"liga",
+                    value: 1
+                },
+                shape::Feature {
+                    tag: *b"liga",
+                    value: 0
+                },
+                shape::Feature {
+                    tag: *b"kern",
+                    value: 2
+                },
+            ]
+        );
     }
 
     #[test]

@@ -78,7 +78,7 @@ def main() -> int:
             ("font_shaping_break: FontShapingBreak", "row-format break field"),
             ("row_format_options(&input, row)", "row-format option helper call"),
             ("opts.apply_break_config(input.font_shaping_break)", "row-format break application"),
-            ("shape_row_cached(&opts", "shaping consumes adjusted options"),
+            ("shape_row_cached_options(", "shaping consumes adjusted options"),
             (
                 "font_shaping_break_runtime_default_preserves_cursor_break",
                 "default preserves cursor test",
@@ -114,15 +114,15 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2")
+    row_gap = require_row(runtime_inventory, "RUNTIME-007B2B2B")
     require_all(
         row_gap,
         [
-            ("Gap", "RUNTIME-007B2B2 status"),
-            ("feature/variation", "RUNTIME-007B2B2 feature gap"),
-            ("bitmap/color font thickening edge cases", "RUNTIME-007B2B2 thicken edge gap"),
-            ("metric adjustment", "RUNTIME-007B2B2 metric gap"),
-            ("renderer-visible font pixel parity", "RUNTIME-007B2B2 pixel gap"),
+            ("Gap", "RUNTIME-007B2B2B status"),
+            ("font-variation", "RUNTIME-007B2B2B variation gap"),
+            ("bitmap/color font thickening edge cases", "RUNTIME-007B2B2B thicken edge gap"),
+            ("metric adjustment", "RUNTIME-007B2B2B metric gap"),
+            ("renderer-visible font pixel parity", "RUNTIME-007B2B2B pixel gap"),
         ],
     )
     if "RUNTIME-007B2 |" in runtime_inventory:
@@ -134,8 +134,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("48 rows Oracle complete", "CFG-223 oracle count"),
-            ("50 rows closed", "CFG-223 closed count"),
+            ("49 rows Oracle complete", "CFG-223 oracle count"),
+            ("51 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

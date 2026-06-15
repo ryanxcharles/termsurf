@@ -334,6 +334,31 @@ impl Options {
         }
         out
     }
+
+    /// Stable namespace for caches whose values depend on user feature strings.
+    /// The empty/default feature set is namespace zero so existing default cache
+    /// behavior stays byte-for-byte keyed by the run hash. Non-empty features use
+    /// a simple FNV-1a stream over each string and separator bytes.
+    pub(crate) fn cache_namespace(&self) -> u64 {
+        if self.features.is_empty() {
+            return 0;
+        }
+
+        let mut hash = 0xcbf29ce484222325u64;
+        for feature in &self.features {
+            for &byte in feature.as_bytes() {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+            hash ^= 0xff;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        if hash == 0 {
+            1
+        } else {
+            hash
+        }
+    }
 }
 
 #[cfg(test)]
@@ -507,6 +532,25 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn options_cache_namespace_is_stable_and_distinct() {
+        assert_eq!(Options::default().cache_namespace(), 0);
+
+        let off = Options {
+            features: vec!["-liga".into()],
+        };
+        let also_off = Options {
+            features: vec!["-liga".into()],
+        };
+        let on = Options {
+            features: vec!["liga".into()],
+        };
+
+        assert_ne!(off.cache_namespace(), 0);
+        assert_eq!(off.cache_namespace(), also_off.cache_namespace());
+        assert_ne!(off.cache_namespace(), on.cache_namespace());
     }
 
     #[test]

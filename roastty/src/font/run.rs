@@ -220,7 +220,16 @@ pub(crate) struct ShapedRun {
 /// Faithful port of upstream's renderer per-row driver loop
 /// (`while (run_iter.next()) |run| shape(run)`).
 pub(crate) fn shape_row(opts: &RunOptions, resolver: &mut CodepointResolver) -> Vec<ShapedRun> {
-    shape_row_with(opts, resolver, None)
+    shape_row_with(opts, resolver, &shape::Options::default(), None)
+}
+
+/// Shape a terminal row end to end with explicit OpenType feature options.
+pub(crate) fn shape_row_options(
+    opts: &RunOptions,
+    resolver: &mut CodepointResolver,
+    shape_options: &shape::Options,
+) -> Vec<ShapedRun> {
+    shape_row_with(opts, resolver, shape_options, None)
 }
 
 /// Shape a terminal row end to end, using `cache` for shaped runs when possible.
@@ -229,12 +238,24 @@ pub(crate) fn shape_row_cached(
     resolver: &mut CodepointResolver,
     cache: &mut ShaperCache,
 ) -> Vec<ShapedRun> {
-    shape_row_with(opts, resolver, Some(cache))
+    shape_row_with(opts, resolver, &shape::Options::default(), Some(cache))
+}
+
+/// Shape a terminal row end to end with explicit OpenType feature options and
+/// shaped-run caching.
+pub(crate) fn shape_row_cached_options(
+    opts: &RunOptions,
+    resolver: &mut CodepointResolver,
+    cache: &mut ShaperCache,
+    shape_options: &shape::Options,
+) -> Vec<ShapedRun> {
+    shape_row_with(opts, resolver, shape_options, Some(cache))
 }
 
 fn shape_row_with(
     opts: &RunOptions,
     resolver: &mut CodepointResolver,
+    shape_options: &shape::Options,
     mut cache: Option<&mut ShaperCache>,
 ) -> Vec<ShapedRun> {
     // Drain the iterator first so its `&mut resolver` borrow is released before we
@@ -247,6 +268,7 @@ fn shape_row_with(
     drop(iter);
 
     let mut shaped = Vec::with_capacity(runs.len());
+    let cache_namespace = shape_options.cache_namespace();
     for out in runs {
         // Special (sprite/box-drawing) indices have no face — the sprite draw path
         // shapes them separately (a later experiment).
@@ -254,7 +276,7 @@ fn shape_row_with(
             continue;
         }
         if let Some(cache) = cache.as_deref_mut() {
-            if let Some(glyphs) = cache.get(out.run) {
+            if let Some(glyphs) = cache.get_with_namespace(out.run, cache_namespace) {
                 shaped.push(ShapedRun {
                     run: out.run,
                     glyphs: glyphs.to_vec(),
@@ -270,9 +292,9 @@ fn shape_row_with(
             .collection_mut()
             .get_face(out.run.font_index)
             .expect("a text run's font index must be face-backed");
-        let glyphs = face.shape_run(&out.codepoints);
+        let glyphs = face.shape_run_options(&out.codepoints, shape_options);
         if let Some(cache) = cache.as_deref_mut() {
-            cache.put(out.run, &glyphs);
+            cache.put_with_namespace(out.run, cache_namespace, &glyphs);
         }
         shaped.push(ShapedRun {
             run: out.run,
@@ -807,6 +829,48 @@ mod tests {
             cache.slot_count(),
             1,
             "the repeated run reused the cached slot"
+        );
+    }
+
+    #[test]
+    fn shape_row_options_default_matches_default_shape() {
+        let opts = RunOptions {
+            cells: vec![narrow('A' as u32), narrow('B' as u32)],
+            ..Default::default()
+        };
+        let mut default_resolver = menlo_resolver();
+        let mut options_resolver = menlo_resolver();
+
+        assert_eq!(
+            shape_row(&opts, &mut default_resolver),
+            shape_row_options(&opts, &mut options_resolver, &shape::Options::default())
+        );
+    }
+
+    #[test]
+    fn font_feature_runtime_cached_rows_use_feature_namespace() {
+        let opts = RunOptions {
+            cells: vec![narrow('A' as u32), narrow('B' as u32)],
+            ..Default::default()
+        };
+        let mut resolver = menlo_resolver();
+        let mut cache = ShaperCache::new();
+        let off = shape::Options {
+            features: vec!["-liga".into()],
+        };
+        let on = shape::Options {
+            features: vec!["liga".into()],
+        };
+
+        let off_rows = shape_row_cached_options(&opts, &mut resolver, &mut cache, &off);
+        let on_rows = shape_row_cached_options(&opts, &mut resolver, &mut cache, &on);
+
+        assert_eq!(off_rows.len(), 1);
+        assert_eq!(on_rows.len(), 1);
+        assert_eq!(
+            cache.slot_count(),
+            2,
+            "same run hash stores separate shaped output by feature namespace"
         );
     }
 

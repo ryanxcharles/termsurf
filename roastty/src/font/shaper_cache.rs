@@ -1,9 +1,9 @@
 //! Cache shaped cells by text-run hash.
 //!
 //! Faithful port of upstream `font/shaper/Cache.zig`: shaped cells are copied
-//! into cache-owned storage and keyed by [`TextRun::hash`]. The fixed-bucket LRU
-//! table stores slot indexes so the cached cell vectors can stay owned by this
-//! module.
+//! into cache-owned storage and keyed by [`TextRun::hash`] plus a shaping-option
+//! namespace. The fixed-bucket LRU table stores slot indexes so the cached cell
+//! vectors can stay owned by this module.
 
 use crate::font::run::TextRun;
 use crate::font::shape;
@@ -23,7 +23,7 @@ impl CacheContext<u64> for RunHashContext {
 
 type CellCacheTable = CacheTable<u64, usize, RunHashContext, 256, 8>;
 
-/// A shaped-run cache keyed by [`TextRun::hash`].
+/// A shaped-run cache keyed by [`TextRun::hash`] and shaping-option namespace.
 pub(crate) struct ShaperCache {
     map: CellCacheTable,
     slots: Vec<Option<Vec<shape::Cell>>>,
@@ -41,7 +41,16 @@ impl ShaperCache {
 
     /// Get the shaped cells for `run`, bumping the cache entry to most-recent.
     pub(crate) fn get(&mut self, run: TextRun) -> Option<&[shape::Cell]> {
-        let slot = self.map.get(run.hash)?;
+        self.get_with_namespace(run, 0)
+    }
+
+    /// Get shaped cells for `run` under a shaping-option namespace.
+    pub(crate) fn get_with_namespace(
+        &mut self,
+        run: TextRun,
+        namespace: u64,
+    ) -> Option<&[shape::Cell]> {
+        let slot = self.map.get(cache_key(run, namespace))?;
         self.slots.get(slot)?.as_deref()
     }
 
@@ -51,14 +60,26 @@ impl ShaperCache {
     /// instead of appending a duplicate. The renderer's intended use is
     /// miss-then-put, so duplicate keys are not semantically meaningful.
     pub(crate) fn put(&mut self, run: TextRun, cells: &[shape::Cell]) {
-        if let Some(slot) = self.map.get(run.hash) {
+        self.put_with_namespace(run, 0, cells)
+    }
+
+    /// Insert a cache-owned copy of `cells` for `run` under a shaping-option
+    /// namespace.
+    pub(crate) fn put_with_namespace(
+        &mut self,
+        run: TextRun,
+        namespace: u64,
+        cells: &[shape::Cell],
+    ) {
+        let key = cache_key(run, namespace);
+        if let Some(slot) = self.map.get(key) {
             self.slots[slot] = Some(cells.to_vec());
             return;
         }
 
         let slot = self.alloc_slot();
         self.slots[slot] = Some(cells.to_vec());
-        if let Some((_hash, evicted_slot)) = self.map.put(run.hash, slot) {
+        if let Some((_hash, evicted_slot)) = self.map.put(key, slot) {
             if evicted_slot != slot && self.slots[evicted_slot].take().is_some() {
                 self.free.push(evicted_slot);
             }
@@ -85,6 +106,24 @@ impl ShaperCache {
     #[cfg(test)]
     pub(crate) fn slot_count(&self) -> usize {
         self.slots.len()
+    }
+}
+
+fn cache_key(run: TextRun, namespace: u64) -> u64 {
+    if namespace == 0 {
+        return run.hash;
+    }
+    let mut hash = 0xcbf29ce484222325u64;
+    for part in [run.hash, namespace] {
+        for byte in part.to_le_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    if hash == run.hash {
+        hash ^ namespace
+    } else {
+        hash
     }
 }
 
@@ -147,6 +186,20 @@ mod tests {
             1,
             "same-key replacement reuses the slot"
         );
+    }
+
+    #[test]
+    fn shaper_cache_feature_namespace_separates_same_run() {
+        let mut cache = ShaperCache::new();
+        let run = run(5);
+
+        cache.put_with_namespace(run, 1, &[cell(50)]);
+        cache.put_with_namespace(run, 2, &[cell(60)]);
+
+        assert_eq!(cache.get_with_namespace(run, 1), Some(&[cell(50)][..]));
+        assert_eq!(cache.get_with_namespace(run, 2), Some(&[cell(60)][..]));
+        assert!(cache.get(run).is_none(), "default namespace is separate");
+        assert_eq!(cache.slot_count(), 2);
     }
 
     #[test]

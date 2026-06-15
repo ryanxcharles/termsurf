@@ -13,7 +13,8 @@
 use crate::config::{FontShapingBreak, WindowPaddingColor};
 use crate::font::atlas::Atlas;
 use crate::font::codepoint_resolver::ResolverRenderError;
-use crate::font::run::{shape_row_cached, RunOptions, Wide};
+use crate::font::run::{shape_row_cached_options, RunOptions, Wide};
+use crate::font::shape;
 use crate::font::shared_grid::SharedGrid;
 use crate::renderer::cell::{
     add_cursor, add_preedit, rebuild_bg_row, rebuild_row, Contents, Highlight, SelectionConfig,
@@ -140,6 +141,7 @@ impl FrameTerminalSnapshot {
             background_opacity_cells: input.background_opacity_cells,
             background_opacity: input.background_opacity,
             font_shaping_break: input.font_shaping_break,
+            shape_options: input.shape_options,
         }
     }
 
@@ -618,6 +620,7 @@ pub(crate) struct FrameRowFormatInput<'a> {
     pub(crate) background_opacity_cells: bool,
     pub(crate) background_opacity: f64,
     pub(crate) font_shaping_break: FontShapingBreak,
+    pub(crate) shape_options: &'a shape::Options,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -636,6 +639,7 @@ pub(crate) struct FrameSnapshotRowFormatInput<'a> {
     pub(crate) background_opacity_cells: bool,
     pub(crate) background_opacity: f64,
     pub(crate) font_shaping_break: FontShapingBreak,
+    pub(crate) shape_options: &'a shape::Options,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1098,7 +1102,12 @@ impl FrameRebuildPlan {
                 input.background_opacity,
             );
 
-            let runs = shape_row_cached(&opts, &mut grid.resolver, &mut grid.shaper_cache);
+            let runs = shape_row_cached_options(
+                &opts,
+                &mut grid.resolver,
+                &mut grid.shaper_cache,
+                input.shape_options,
+            );
             rebuild_row(
                 contents,
                 grid,
@@ -2011,6 +2020,10 @@ mod tests {
         }
     }
 
+    fn default_shape_options() -> &'static shape::Options {
+        Box::leak(Box::new(shape::Options::default()))
+    }
+
     fn format_input<'a>(rows: &'a [RunOptions]) -> FrameRowFormatInput<'a> {
         FrameRowFormatInput {
             rows,
@@ -2028,6 +2041,7 @@ mod tests {
             background_opacity_cells: false,
             background_opacity: 1.0,
             font_shaping_break: FontShapingBreak::default(),
+            shape_options: default_shape_options(),
         }
     }
 
@@ -2051,6 +2065,7 @@ mod tests {
             background_opacity_cells: true,
             background_opacity: 0.42,
             font_shaping_break: FontShapingBreak::default(),
+            shape_options: default_shape_options(),
         }
     }
 

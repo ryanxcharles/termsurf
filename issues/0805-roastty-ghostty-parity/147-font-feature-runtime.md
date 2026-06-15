@@ -101,7 +101,7 @@ Commands:
 ```bash
 cargo test --manifest-path roastty/Cargo.toml font_feature_runtime
 cargo test --manifest-path roastty/Cargo.toml merged_features_defaults_then_user
-cargo test --manifest-path roastty/Cargo.toml shape_run_options_default_matches_default_shape
+cargo test --manifest-path roastty/Cargo.toml shape_row_options_default_matches_default_shape
 cargo test --manifest-path roastty/Cargo.toml shaper_cache_feature
 PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_feature_runtime_parity.py
 PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
@@ -130,3 +130,77 @@ Fail criteria:
 **Verdict:** Approved.
 
 The reviewer found no findings.
+
+## Result
+
+**Result:** Pass
+
+Roastty now threads `Config.font_feature.list` into active renderer row shaping:
+`FrameRenderKnobs::from_config` builds `shape::Options` from the parsed
+configuration, frame rebuild inputs carry those options, and row shaping calls
+`Face::shape_run_options` for active cached rows. The default row-shaping path
+is preserved for callers that do not pass explicit shaping options.
+
+The shaped-run cache is now feature-aware. Default shaping still uses namespace
+`0`, while non-empty feature sets derive a deterministic namespace from the
+feature strings. Focused tests prove that identical text runs can hold separate
+cached glyph output for different feature options.
+
+`RUNTIME-007B2B2` was split as planned:
+
+- `RUNTIME-007B2B2A` is **Oracle complete** for deterministic `font-feature`
+  renderer option propagation, default-plus-user feature merging, CoreText
+  shaping option application, and feature-aware shaped-run cache separation.
+- `RUNTIME-007B2B2B` remains **Gap** for font variations, metric adjustment,
+  fallback/shaping visual output, bitmap/color font thickening edge cases, glyph
+  metrics, broader font pixel parity, and GUI-visible A/B font rendering.
+
+The regenerated CFG-223 inventory reports:
+
+- `runtime_rows=55`
+- `oracle_complete=49`
+- `closed=51`
+- `incomplete=4`
+- `gap=4`
+- `cfg223=Gap`
+
+Verification run:
+
+```bash
+cargo test --manifest-path roastty/Cargo.toml font_feature_runtime
+cargo test --manifest-path roastty/Cargo.toml merged_features_defaults_then_user
+cargo test --manifest-path roastty/Cargo.toml shape_row_options_default_matches_default_shape
+cargo test --manifest-path roastty/Cargo.toml shaper_cache_feature
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/font_feature_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py
+for guard in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do PYTHONDONTWRITEBYTECODE=1 python3 "$guard" || exit 1; done
+cargo fmt --manifest-path roastty/Cargo.toml --check
+git diff --check
+```
+
+All commands passed.
+
+## Conclusion
+
+The deterministic `font-feature` runtime slice is no longer part of the font
+renderer gap. The remaining CFG-223 gap is smaller but still real:
+`RUNTIME-007B2B2B`, `RUNTIME-008B2B2`, `RUNTIME-011`, and `RUNTIME-012B2B`
+remain open.
+
+## Completion Review
+
+**Reviewer:** Codex adversarial subagent with fresh context.
+
+**Verdict:** Approved.
+
+The reviewer found no findings. It independently verified the focused
+`font-feature` and default row-shaping tests, the static font-feature runtime
+guard, the residual audit, Rust formatting, whitespace hygiene, additional
+feature-merge/cache tests, and CFG-223 counts:
+
+- `runtime_rows=55`
+- `oracle_complete=49`
+- `closed=51`
+- `incomplete=4`
+- `gap=4`
