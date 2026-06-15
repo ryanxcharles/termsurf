@@ -1560,3 +1560,5 @@ remains open.
   — **Pass**
 - [Experiment 161: Link hover preview dispatch](161-link-hover-preview-dispatch.md)
   — **Pass**
+- [Experiment 162: Link hover modifier refresh](162-link-hover-modifier-refresh.md)
+  — **Designed**
