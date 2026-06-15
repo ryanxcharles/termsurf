@@ -200,7 +200,7 @@ ROWS = [
             "semantics; refreshes existing surfaces on config update; and "
             "does not bypass terminal mouse reporting."
         ),
-        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012B2B2B2B2.",
+        missing_evidence="None for non-link right-click-action surface runtime behavior; link-specific context-menu behavior remains tracked by RUNTIME-012B2B2B2B2B.",
         guard_tier="Tier 3",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml right_click_action`",
     ),
@@ -1483,7 +1483,7 @@ ROWS = [
             "`bell-features = attention`, `bell-features = title`, and "
             "`bell-features = border` gates."
         ),
-        missing_evidence="None for copied macOS bell presentation plumbing source parity; actual OS/audio/dock/border/title runtime side effects remain tracked by RUNTIME-012B2B2B2B2.",
+        missing_evidence="None for copied macOS bell presentation plumbing source parity; actual OS/audio/dock/border/title runtime side effects remain tracked by RUNTIME-012B2B2B2B2B.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_runtime_dispatch_parity.py && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_presentation_runtime_parity.py`",
     ),
@@ -1507,7 +1507,7 @@ ROWS = [
             "construction, `requireFocus` userInfo, delivery, delayed focused "
             "cleanup, and click-to-focus routing."
         ),
-        missing_evidence="None for copied macOS user-notification presentation/lifecycle source parity; live OS banner/sound behavior remains tracked by RUNTIME-012B2B2B2B2.",
+        missing_evidence="None for copied macOS user-notification presentation/lifecycle source parity; live OS banner/sound behavior remains tracked by RUNTIME-012B2B2B2B2B.",
         guard_tier="Tier 0",
         guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_user_notification_runtime_parity.py`",
     ),
@@ -1562,7 +1562,7 @@ ROWS = [
             "checks pinned Ghostty source, Roastty parser/pump/surface/ABI "
             "implementation, tests, and this inventory split."
         ),
-        missing_evidence="None for command-finished runtime action dispatch; the app-level notification presentation that may consume the action remains tracked by RUNTIME-012B2B2B2B2.",
+        missing_evidence="None for command-finished runtime action dispatch; the app-level notification presentation that may consume the action remains tracked by RUNTIME-012B2B2B2B2B.",
         guard_tier="Tier 1",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml terminal_command_event_runtime && cargo test --manifest-path roastty/Cargo.toml termio_command_event_runtime && cargo test --manifest-path roastty/Cargo.toml surface_command_finished_runtime && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/command_finished_runtime_parity.py`",
     ),
@@ -1592,7 +1592,29 @@ ROWS = [
         guard_command="`cargo test --manifest-path roastty/Cargo.toml app_notifications && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/app_notifications_platform_runtime_parity.py`",
     ),
     RuntimeRow(
-        id="RUNTIME-012B2B2B2B2",
+        id="RUNTIME-012B2B2B2B2A",
+        behavior="copied macOS link-hover banner plumbing",
+        ghostty_reference="`vendor/ghostty/macos/Sources/Ghostty/Ghostty.App.swift` `setMouseOverLink`; `vendor/ghostty/macos/Sources/Ghostty/Surface View/OSSurfaceView.swift` `hoverUrl`; `vendor/ghostty/macos/Sources/Ghostty/Surface View/SurfaceView.swift` `URLHoverBanner`; `vendor/ghostty/macos/Sources/Helpers/URLHoverBanner.swift`",
+        roastty_reference="`roastty/macos/Sources/Roastty/Roastty.App.swift` `setMouseOverLink`; `roastty/macos/Sources/Roastty/Surface View/OSSurfaceView.swift` `hoverUrl`; `roastty/macos/Sources/Roastty/Surface View/SurfaceView.swift` `URLHoverBanner`; `roastty/macos/Sources/Helpers/URLHoverBanner.swift`",
+        family="notifications",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 159 proves the copied macOS link-hover banner plumbing "
+            "matches pinned Ghostty after expected renames. "
+            "`macos_link_hover_banner_runtime_parity.py` normalized-compares "
+            "`OSSurfaceView.swift`, `SurfaceView.swift`, `URLHoverBanner.swift`, "
+            "and `Ghostty.App.swift`/`Roastty.App.swift`, and checks the concrete "
+            "`mouse_over_link` action dispatch, `setMouseOverLink` surface "
+            "target handling, empty-url clearing, UTF-8 URL decode into "
+            "`hoverUrl`, published hover state, `URLHoverBanner(url:)` rendering, "
+            "middle truncation, and left/right banner hover switch."
+        ),
+        missing_evidence="None for copied macOS link-hover banner source plumbing; live mouse hover delivery, pointer cursor changes, link preview policy, and context/menu link interactions remain tracked by RUNTIME-012B2B2B2B2B.",
+        guard_tier="Tier 0",
+        guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_link_hover_banner_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-012B2B2B2B2B",
         behavior="remaining notification/link/bell GUI effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` notification and link preview fields; `vendor/ghostty/src/Surface.zig` notification/link hover/menu paths; macOS native notification and link handling",
         roastty_reference="`roastty/macos/Sources` notification, pointer, preview, and context/menu handling beyond copied bell and user-notification plumbing",
@@ -1610,12 +1632,13 @@ ROWS = [
             "limiting. Experiment 157 split out command-finished terminal, "
             "termio, surface action, and ABI dispatch. Experiment 158 split "
             "out GTK-only `app-notifications` as not applicable to Roastty's "
-            "macOS runtime. Actual OS banner/sound delivery, actual "
-            "audio/dock/border/title GUI effects, link hover/cursor UI, link "
-            "previews in the real app, and context/menu link flows still need "
-            "focused runtime or GUI proof."
+            "macOS runtime. Experiment 159 split out copied macOS link-hover "
+            "banner source plumbing. Actual OS banner/sound delivery, actual "
+            "audio/dock/border/title GUI effects, real app link hover/cursor "
+            "UI, link previews in the real app, and context/menu link flows "
+            "still need focused runtime or GUI proof."
         ),
-        missing_evidence="Add live OS notification delivery, actual bell side-effect, app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
+        missing_evidence="Add live OS notification delivery, actual bell side-effect, real app hover/cursor, preview, and context/menu link runtime or GUI walkthrough guards.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 notification/link GUI or runtime experiment.",
     ),
@@ -1720,7 +1743,8 @@ EXPECTED_IDS = [
     "RUNTIME-012B2B2B1",
     "RUNTIME-012B2B2B2A",
     "RUNTIME-012B2B2B2B1",
-    "RUNTIME-012B2B2B2B2",
+    "RUNTIME-012B2B2B2B2A",
+    "RUNTIME-012B2B2B2B2B",
     "RUNTIME-013",
     "RUNTIME-014",
 ]

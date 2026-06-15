@@ -444,6 +444,12 @@ experiment files until they are proven.
   config-reload and clipboard-copy toast gates. Roastty should keep
   parser/formatter parity for the option, but there is no macOS runtime toast
   behavior to reproduce.
+- **macOS link-hover banner plumbing is copied source parity.** The copied macOS
+  app preserves pinned Ghostty's `mouse_over_link` action handling into
+  `hoverUrl`, `URLHoverBanner(url:)`, URL text truncation, and side-switching
+  hover banner layout after expected Roastty renames. Live mouse hover delivery,
+  cursor shape changes, link previews, and context/menu link flows remain
+  separate GUI gaps.
 - **OSC 133 `C` is the command-start runtime boundary.** Pinned Ghostty maps
   semantic prompt `end_input_start_output` / OSC 133 `C` to `start_command` and
   OSC 133 `D` to `stop_command`; OSC 133 `B` is an end-prompt/input boundary,
@@ -679,7 +685,7 @@ experiment files until they are proven.
   title bell prefix, and separate `bell-features = system`, `audio`,
   `attention`, `title`, and `border` gates after expected Roastty renames.
   Actual OS/audio/dock/border/title side effects still need GUI or platform
-  walkthrough proof in `RUNTIME-012B2B2B2B2`.
+  walkthrough proof in `RUNTIME-012B2B2B2B2B`.
 - **OSC desktop notifications need a PTY event queue.** Experiment 141 found
   that Roastty already parsed OSC 9 and OSC 777 desktop notification commands,
   but the live terminal path dropped them. PTY-backed parity now queues terminal
@@ -692,7 +698,7 @@ experiment files until they are proven.
   surface notification content/request lifecycle, identifier cleanup, delayed
   focused cleanup, and click-to-focus routing after expected Roastty renames.
   Live OS banner/sound delivery, actual bell side effects, and link UI flows
-  remain in `RUNTIME-012B2B2B2B2`.
+  remain in `RUNTIME-012B2B2B2B2B`.
 - **Desktop notification throttling is app-level runtime state.** Experiment 156
   split Ghostty's one-second desktop-notification throttle and five-second
   identical-notification suppression out of the remaining notification gap.
@@ -1536,4 +1542,4 @@ remains open.
 - [Experiment 158: App notifications platform classification](158-app-notifications-platform-classification.md)
   — **Pass**
 - [Experiment 159: macOS link hover banner plumbing](159-macos-link-hover-banner-plumbing.md)
-  — **Designed**
+  — **Pass**

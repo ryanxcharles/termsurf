@@ -83,3 +83,69 @@ The fresh-context design review found no required issues. It confirmed the
 README links the experiment as `Designed`, the design has the required sections,
 the scope stays limited to copied macOS hover-banner plumbing, and the expected
 CFG-223 count change is coherent.
+
+## Result
+
+**Result:** Pass
+
+The copied macOS link-hover banner plumbing now has a dedicated Oracle-complete
+runtime/source row:
+
+- Pinned Ghostty and Roastty `OSSurfaceView.swift`, `SurfaceView.swift`,
+  `URLHoverBanner.swift`, and app action handling match after expected
+  Ghostty/Roastty and C-symbol renames.
+- The guard proves the `mouse_over_link` action dispatch reaches
+  `setMouseOverLink`, surface targets update `hoverUrl`, empty URLs clear
+  `hoverUrl`, non-empty URL bytes decode as UTF-8, `SurfaceView` renders
+  `URLHoverBanner(url:)`, and `URLHoverBanner` preserves middle truncation plus
+  left/right hover-side switching.
+- `RUNTIME-012B2B2B2B2A` is now `Oracle complete`.
+- The remaining notification/link/bell GUI gap is narrowed to
+  `RUNTIME-012B2B2B2B2B`.
+
+Verification:
+
+```text
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_link_hover_banner_runtime_parity.py
+# macos_link_hover_banner_runtime_parity=pass
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+# runtime_rows=67
+# oracle_complete=60
+# closed=63
+# audit_covered=0
+# incomplete=4
+# gap=4
+# cfg223=Gap
+
+for f in issues/0805-roastty-ghostty-parity/*_runtime_parity.py; do
+  PYTHONDONTWRITEBYTECODE=1 python3 "$f" || exit 1
+done
+# all runtime parity guards passed
+
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/terminal_runtime_residual_audit.py
+# terminal_runtime_residual_audit=pass
+
+prettier --check --prose-wrap always --print-width 80 issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/159-macos-link-hover-banner-plumbing.md
+# All matched files use Prettier code style
+
+git diff --check
+# pass
+```
+
+## Conclusion
+
+Copied macOS link-hover banner source plumbing no longer blocks CFG-223. The
+remaining notification/link/bell GUI gap still needs real app proof for live
+mouse hover delivery, pointer cursor changes, link preview behavior,
+context/menu link flows, live OS notification delivery, and actual bell side
+effects.
+
+## Completion Review
+
+**Reviewer:** Sartre the 2nd
+
+**Verdict:** Approved
+
+The fresh-context completion review found no required, optional, or nit
+findings.
