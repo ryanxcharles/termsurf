@@ -345,16 +345,23 @@ def main() -> int:
         "RUNTIME-008B2B2B2B2B1",
         ["custom-shader-animation", "focus/always/false", "draw-timer"],
     )
+    require_row_complete(
+        runtime_inventory,
+        "RUNTIME-008B2B2B2B2B2",
+        [
+            "background image renderer runtime",
+            "background-image-opacity",
+            "background-image-position",
+            "background-image-fit",
+            "background-image-repeat",
+        ],
+    )
 
     residual = require_row(runtime_inventory, "RUNTIME-008B2B2B2B2B")
     require_all(
         residual,
         [
             ("Gap", "residual renderer row status"),
-            ("background-image-opacity", "background image opacity gap"),
-            ("background-image-position", "background image position gap"),
-            ("background-image-fit", "background image fit gap"),
-            ("background-image-repeat", "background image repeat gap"),
             ("window-colorspace", "window colorspace gap"),
             ("alpha-blending", "alpha blending gap"),
             ("scroll-to-bottom.output", "scroll-to-bottom output gap"),
@@ -363,6 +370,14 @@ def main() -> int:
     )
     if "custom-shader-animation" in residual:
         raise AssertionError("custom-shader-animation still appears in residual renderer gap")
+    for forbidden in [
+        "background-image-opacity",
+        "background-image-position",
+        "background-image-fit",
+        "background-image-repeat",
+    ]:
+        if forbidden in residual:
+            raise AssertionError(f"{forbidden} still appears in residual renderer gap")
 
     require_row(runtime_inventory, "RUNTIME-007B2B2B2B2")
     require_row(runtime_inventory, "RUNTIME-011B2B")
@@ -380,8 +395,9 @@ def main() -> int:
         [
             ('id="RUNTIME-008B2B2B2B2B"', "source residual row"),
             ('id="RUNTIME-008B2B2B2B2B1"', "source custom shader animation row"),
+            ('id="RUNTIME-008B2B2B2B2B2"', "source background image row"),
+            ("background_image_runtime_parity.py", "source background image guard"),
             ("renderer_visual_residual_audit.py", "source residual guard"),
-            ("background image rendering", "source background image gap"),
             ('id="RUNTIME-007B2B2B2B2"', "font gap remains tracked"),
             ('id="RUNTIME-011B2B"', "macOS walkthrough gap remains tracked"),
             ('id="RUNTIME-012B2B2B2B2B3"', "notification gap remains tracked"),
@@ -394,8 +410,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains open"),
-            ("78 rows Oracle complete", "CFG-223 oracle count"),
-            ("81 rows closed", "CFG-223 closed count"),
+            ("79 rows Oracle complete", "CFG-223 oracle count"),
+            ("82 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

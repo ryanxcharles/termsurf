@@ -112,7 +112,7 @@ def main() -> int:
         row_gap,
         [
             ("Gap", "remaining renderer gap status"),
-            ("background-image-opacity", "background image gap remains"),
+            ("window-colorspace", "colorspace gap remains"),
             ("window-colorspace", "colorspace gap remains"),
             ("alpha-blending", "alpha gap remains"),
             ("scroll-to-bottom.output", "scroll-to-bottom gap remains"),
@@ -127,7 +127,7 @@ def main() -> int:
             ('id="RUNTIME-008B2B2B2B2B1"', "source complete row"),
             ("custom_shader_animation_runtime_parity.py", "source guard"),
             ('id="RUNTIME-008B2B2B2B2B"', "source remaining row"),
-            ("background-image-opacity", "source remaining background image gap"),
+            ("window-colorspace", "source remaining colorspace gap"),
         ],
     )
 
@@ -137,8 +137,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 remains open"),
-            ("78 rows Oracle complete", "CFG-223 oracle count"),
-            ("81 rows closed", "CFG-223 closed count"),
+            ("79 rows Oracle complete", "CFG-223 oracle count"),
+            ("82 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

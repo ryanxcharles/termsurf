@@ -793,7 +793,7 @@ ROWS = [
     ),
     RuntimeRow(
         id="RUNTIME-008B2B2B2B2B",
-        behavior="remaining renderer-visible background image, colorspace, alpha blending, and scroll-to-bottom effects",
+        behavior="remaining renderer-visible colorspace, alpha blending, and scroll-to-bottom effects",
         ghostty_reference="`vendor/ghostty/src/config/Config.zig` renderer/window visual fields; `vendor/ghostty/src/renderer/generic.zig` derived renderer config and draw paths; `vendor/ghostty/src/Surface.zig` renderer config messages; screenshot/pixel walkthrough paths",
         roastty_reference="`roastty/src/lib.rs` live renderer and render state; `roastty/src/renderer`; copied macOS renderer/window host",
         family="renderer",
@@ -825,9 +825,10 @@ ROWS = [
             "renderer residual is narrowed to concrete remaining "
             "renderer-visible effects rather than hidden broad GUI/pixel "
             "parity. Experiment 180 split out the custom shader animation "
-            "draw-timer policy."
+            "draw-timer policy. Experiment 181 split out deterministic "
+            "background image renderer runtime behavior."
         ),
-        missing_evidence="Add runtime or renderer proof for background image rendering and `background-image-opacity`, `background-image-position`, `background-image-fit`, `background-image-repeat`; `window-colorspace`; `alpha-blending`; and `scroll-to-bottom.output` renderer behavior.",
+        missing_evidence="Add runtime or renderer proof for `window-colorspace`; `alpha-blending`; and `scroll-to-bottom.output` renderer behavior.",
         guard_tier="Tier 3",
         guard_command="TBD by future CFG-223 renderer visual experiments.",
     ),
@@ -852,9 +853,39 @@ ROWS = [
             "checks pinned Ghostty `syncDrawTimer`, Roastty implementation "
             "markers, tests, and this inventory split."
         ),
-        missing_evidence="None for custom-shader-animation focus/always/false draw-timer policy. Background image, colorspace, alpha blending, and scroll-to-bottom renderer behavior remain in RUNTIME-008B2B2B2B2B.",
+        missing_evidence="None for custom-shader-animation focus/always/false draw-timer policy. Colorspace, alpha blending, and scroll-to-bottom renderer behavior remain in RUNTIME-008B2B2B2B2B; background image renderer behavior is tracked by RUNTIME-008B2B2B2B2B2.",
         guard_tier="Tier 2",
         guard_command="`cargo test --manifest-path roastty/Cargo.toml custom_shader_animation -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/custom_shader_animation_runtime_parity.py`",
+    ),
+    RuntimeRow(
+        id="RUNTIME-008B2B2B2B2B2",
+        behavior="background image renderer runtime behavior",
+        ghostty_reference="`vendor/ghostty/src/config/Config.zig` `background-image*` fields; `vendor/ghostty/src/renderer/generic.zig` background image derived config, preparation, config-change, buffer, and draw paths",
+        roastty_reference="`roastty/src/renderer/image.rs` background image state/config; `roastty/src/renderer/metal/render_pass.rs` background image draw/readback tests; `roastty/src/renderer/frame_renderer.rs` live background image frame test; `roastty/src/lib.rs` live renderer background image state",
+        family="renderer",
+        status="Oracle complete",
+        evidence=(
+            "Experiment 181 splits out deterministic background image renderer "
+            "runtime behavior. `BackgroundImageConfig::from_config` sources "
+            "`background-image`, `background-image-opacity`, "
+            "`background-image-position`, `background-image-fit`, and "
+            "`background-image-repeat` from parsed config and packs Ghostty's "
+            "background image vertex semantics. `BackgroundImageState` loads, "
+            "decodes, uploads, reuses, replaces, resets, and unloads config "
+            "images while preserving an existing ready image on failed "
+            "replacement. Metal render-pass tests prove the background image "
+            "pipeline draws texture pixels over the configured background, "
+            "`none` fit uses texture size for placement, and zero-instance "
+            "draws do not bind or render. The live frame renderer test proves "
+            "a config path reaches a rendered frame and reset config returns "
+            "to the plain background. `background_image_runtime_parity.py` "
+            "statically checks the pinned Ghostty derived-config, preparation, "
+            "config-change, buffer, and draw anchors against Roastty's "
+            "implementation, tests, and this inventory split."
+        ),
+        missing_evidence="None for deterministic background image renderer runtime behavior. `window-colorspace`, `alpha-blending`, and `scroll-to-bottom.output` remain tracked by RUNTIME-008B2B2B2B2B.",
+        guard_tier="Tier 1",
+        guard_command="`cargo test --manifest-path roastty/Cargo.toml background_image -- --test-threads=1 && cargo test --manifest-path roastty/Cargo.toml bg_image -- --test-threads=1 && PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/background_image_runtime_parity.py`",
     ),
     RuntimeRow(
         id="RUNTIME-008B2B2B2B2C",
@@ -2282,6 +2313,7 @@ EXPECTED_IDS = [
     "RUNTIME-008B2B2B2B2A",
     "RUNTIME-008B2B2B2B2B",
     "RUNTIME-008B2B2B2B2B1",
+    "RUNTIME-008B2B2B2B2B2",
     "RUNTIME-008B2B2B2B2C",
     "RUNTIME-008B2B2B2B2D",
     "RUNTIME-009A",

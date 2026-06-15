@@ -795,6 +795,13 @@ experiment files until they are proven.
   shader pipelines are active. Roastty now mirrors Ghostty's `always`, focused
   `true`, and `false` policy without bypassing the dirty-frame or
   live-visibility gates.
+- **Background image parity is a renderer/runtime slice.** Experiment 181 split
+  `background-image` and its opacity, position, fit, and repeat options out of
+  the renderer residual. Roastty now has guarded evidence for config sourcing,
+  image load/upload/replace/reset, vertex packing, Metal shader/render-pass
+  output, compositor routing, and live frame reset behavior. The remaining
+  renderer residual is now `window-colorspace`, `alpha-blending`, and
+  `scroll-to-bottom.output`.
 - **Facet inventories can outpace their aggregate matrix rows.** Experiment 169
   found CFG-217 through CFG-222 were complete in their generated facet
   inventories while the top-level matrix still reported stale `Gap` rows. The
@@ -1737,4 +1744,4 @@ remains open.
 - [Experiment 180: Custom shader animation runtime](180-custom-shader-animation-runtime.md)
   — **Pass**
 - [Experiment 181: Background image renderer runtime](181-background-image-renderer-runtime.md)
-  — **Designed**
+  — **Pass**

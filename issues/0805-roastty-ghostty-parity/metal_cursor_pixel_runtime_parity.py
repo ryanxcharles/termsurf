@@ -97,7 +97,7 @@ def main() -> int:
         row_gap,
         [
             ("Gap", "renderer residual row status"),
-            ("background-image-opacity", "concrete renderer gap evidence"),
+            ("window-colorspace", "concrete renderer gap evidence"),
         ],
     )
     if "RUNTIME-008B2B2B2B2 |" in runtime_inventory:
@@ -109,8 +109,8 @@ def main() -> int:
         [
             ("Runtime and UI effects", "CFG-223 row"),
             ("Gap", "CFG-223 status"),
-            ("78 rows Oracle complete", "CFG-223 oracle count"),
-            ("81 rows closed", "CFG-223 closed count"),
+            ("79 rows Oracle complete", "CFG-223 oracle count"),
+            ("82 rows closed", "CFG-223 closed count"),
             ("4 rows are incomplete", "CFG-223 incomplete count"),
             ("4 rows are runtime gaps", "CFG-223 gap count"),
         ],

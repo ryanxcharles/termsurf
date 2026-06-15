@@ -704,6 +704,14 @@ def sample_padding(
 def assert_inventory_split() -> None:
     runtime_inventory = (ISSUE / "config-runtime-inventory.md").read_text()
     config_matrix = (ISSUE / "config-matrix.md").read_text()
+    residual_row = next(
+        (
+            line
+            for line in runtime_inventory.splitlines()
+            if line.startswith("| RUNTIME-008B2B2B2B2B ")
+        ),
+        None,
+    )
     cfg223 = next(
         (
             [cell.strip() for cell in line.strip().strip("|").split("|")]
@@ -717,10 +725,11 @@ def assert_inventory_split() -> None:
     require("focused live window-padding pixel proof" in runtime_inventory, "missing padding pixel evidence")
     require("top/bottom/left/right" in runtime_inventory, "missing four-edge padding evidence")
     require("geometry-derived sample rectangles" in runtime_inventory, "missing geometry-derived sample evidence")
-    require("| RUNTIME-008B2B2B2B2B" in runtime_inventory, "missing renderer residual row")
-    require("background-image-opacity" in runtime_inventory, "concrete renderer gap missing evidence")
-    require("78 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
-    require("81 rows closed" in config_matrix, "CFG-223 closed count not updated")
+    require(residual_row is not None, "missing renderer residual row")
+    require("window-colorspace" in residual_row, "concrete renderer gap missing evidence")
+    require("background-image-opacity" not in residual_row, "background image still in renderer residual")
+    require("79 rows Oracle complete" in config_matrix, "CFG-223 oracle count not updated")
+    require("82 rows closed" in config_matrix, "CFG-223 closed count not updated")
     require("4 rows are incomplete" in config_matrix, "CFG-223 incomplete count changed")
     require("4 rows are runtime gaps" in config_matrix, "CFG-223 gap count changed")
     require(cfg223 is not None and len(cfg223) > 4 and cfg223[4] == "Gap", "CFG-223 should remain Gap")
