@@ -1108,6 +1108,14 @@ experiment files until they are proven.
   prompt for evidence, but unattended guards must avoid requiring a human to
   press `Allow` or must classify the OS audio-device path as a TCC-gated
   residual.
+- **Close OS presentation at the app-controlled request boundary.** Experiment
+  197 closed CFG-223 by proving copied UserNotifications, `NSSound`, Dock
+  attention, and Dock badge request paths plus live authorization/request-state
+  evidence. Roastty parity is claimed at the copied macOS API request and
+  authorization-state boundary, not at nondeterministic notification banner,
+  physical speaker, microphone TCC, or Dock animation presentation. CFG-223 now
+  has 95 Oracle-complete runtime rows, 98 closed rows, 0 incomplete rows, and 0
+  runtime gaps.
 - **Font-size runtime updates should be idempotent.** Experiment 125 found that
   applying an unchanged font size dirtied ABI-only surfaces because
   `set_font_size_points` always requested a render. The setter now returns
@@ -1892,4 +1900,4 @@ remains open.
 - [Experiment 196: Live bell audio playback](196-live-bell-audio-playback.md) —
   **Partial**
 - [Experiment 197: OS-controlled native boundary closure](197-os-controlled-native-boundary.md)
-  — **Designed**
+  — **Pass**

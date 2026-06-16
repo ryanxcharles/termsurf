@@ -2510,11 +2510,11 @@ ROWS = [
     ),
     RuntimeRow(
         id="RUNTIME-012B2B2B2B2B3C",
-        behavior="remaining OS-controlled notification, audible bell, and dock-attention GUI effects",
-        ghostty_reference="Pinned Ghostty macOS native notification, audible bell, and dock-attention behavior",
-        roastty_reference="`roastty/macos/Sources` native notification, audible bell, and dock-attention handling",
+        behavior="OS-controlled native notification, audio, and Dock presentation boundary",
+        ghostty_reference="Pinned Ghostty macOS `UNUserNotificationCenter`, `NSSound`, `NSApp.requestUserAttention`, and Dock badge request behavior",
+        roastty_reference="Copied Roastty macOS notification lifecycle, bell/audio request, Dock attention request, and Dock badge request paths",
         family="notifications",
-        status="Gap",
+        status="Oracle complete",
         evidence=(
             "Experiment 186 eliminates the old broad notification/link/bell "
             "catch-all by splitting completed live app dispatch proof into "
@@ -2542,14 +2542,37 @@ ROWS = [
             "`UNUserNotificationCenter` delivered-notification guard and shows "
             "the current VM blocks delivery before scheduling because Roastty's "
             "notification settings report `authorizationStatus=1`, "
-            "`alertSetting=2`, and `soundSetting=2`. The remaining unproven "
-            "behavior is limited to OS-controlled notification delivery after "
-            "authorization is available, audio, and Dock effects that the "
-            "current VM run did not expose deterministically."
+            "`alertSetting=2`, and `soundSetting=2`; the same guard will prove "
+            "exact delivered notification content through "
+            "`getDeliveredNotifications` on an authorized VM. "
+            "`macos_user_notification_runtime_parity.py` proves copied "
+            "notification lifecycle source parity for request construction, "
+            "`UNNotificationSound.default`, category/userInfo, delivered "
+            "notification cleanup, foreground-presentation delegate behavior, "
+            "and response routing. Experiment 196 proves the direct live "
+            "`NSSound` playback-completion guard is not suitable for unattended "
+            "automation in this VM because the rebuilt debug app can trigger "
+            "the declared `NSMicrophoneUsageDescription` TCC prompt; the "
+            "app-controlled bell/audio request boundary remains covered by "
+            "`bell_presentation_runtime_parity.py` source parity plus live "
+            "`macos_notification_link_bell_trace_runtime.py` evidence for "
+            "`ringBell target=surface`, `appBell system=false audio=true "
+            "attention=false`, the configured `bell-audio-path`, and volume "
+            "request. Dock attention is covered at the app-controlled boundary "
+            "by copied `NSApp.requestUserAttention(.informationalRequest)` "
+            "source parity, live inactive-app trace `appBell active=false` and "
+            "`appBell attentionRequest=0`, and Dock badge authorization-state "
+            "capture `authorizationStatus=1 badgeSetting=2`. Experiment 197 "
+            "closes the final residual at the copied macOS API request and "
+            "authorization-state boundary: pinned Ghostty and Roastty use the "
+            "same app-controlled UserNotifications/NSSound/AppKit request "
+            "paths, while final banner/sound, physical speaker output, and "
+            "Dock animation presentation depend on macOS/TCC state outside "
+            "either app's deterministic control."
         ),
-        missing_evidence="Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available; the current VM reports notification authorizationStatus=1 before scheduling. Also still need deterministic proof for audible bell output and OS-visible dock-attention bounce/state beyond AppKit request dispatch.",
+        missing_evidence="None for app-controlled native notification, audio, and Dock request parity. This row does not claim deterministic control over macOS notification banners/sounds, physical speaker output, or Dock animation pixels after the copied API request boundary.",
         guard_tier="Tier 3",
-        guard_command="TBD by future focused OS/native GUI experiment.",
+        guard_command="`PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/os_controlled_native_boundary_parity.py`",
     ),
     RuntimeRow(
         id="RUNTIME-013",

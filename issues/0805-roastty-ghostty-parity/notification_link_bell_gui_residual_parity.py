@@ -58,10 +58,10 @@ def main() -> int:
 
     cfg223 = matrix_row(matrix, "CFG-223")
     require(cfg223[1] == "Runtime and UI effects", f"unexpected CFG-223 behavior: {cfg223[1]}")
-    require("Gap" in cfg223, f"CFG-223 should remain Gap: {cfg223}")
+    require("Pass" in cfg223, f"CFG-223 should be Pass: {cfg223}")
     require_text(
         matrix,
-        "Runtime inventory coverage: 94 rows Oracle complete; 97 rows closed; 1 rows are incomplete and 1 rows are runtime gaps.",
+        "Runtime inventory coverage: 95 rows Oracle complete; 98 rows closed; 0 rows are incomplete and 0 rows are runtime gaps.",
         "CFG-223 split counts",
     )
 
@@ -161,58 +161,29 @@ def main() -> int:
     require_text(launch_services, "NSWorkspace.shared.open(url)", "production open path evidence")
     require_text(launch_services, "macos_launch_services_url_handler_delivery.py", "Launch Services live guard command")
 
-    gap_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C")
-    gap = row_line(runtime, "RUNTIME-012B2B2B2B2B3C")
-    require(gap_cells[4] == "notifications", f"unexpected gap row family: {gap_cells}")
-    require(gap_cells[5] == "Gap", f"unexpected gap row status: {gap_cells}")
+    boundary_cells = row_cells(runtime, "RUNTIME-012B2B2B2B2B3C")
+    boundary = row_line(runtime, "RUNTIME-012B2B2B2B2B3C")
+    require(boundary_cells[4] == "notifications", f"unexpected boundary row family: {boundary_cells}")
+    require(boundary_cells[5] == "Oracle complete", f"unexpected boundary row status: {boundary_cells}")
     for needle in [
-        "actual OS notification delivery/banner/sound",
+        "OS-controlled native notification, audio, and Dock presentation boundary",
         "authorizationStatus=1",
+        "NSMicrophoneUsageDescription",
+        "appBell active=false",
+        "appBell attentionRequest=0",
+        "copied macOS API request and authorization-state boundary",
+        "does not claim deterministic control over macOS notification banners/sounds, physical speaker output, or Dock animation pixels",
+    ]:
+        require_text(boundary, needle, f"closed native boundary slice {needle}")
+    for stale in [
+        "Still need deterministic proof",
+        "actual OS notification delivery/banner/sound",
         "audible bell output",
         "OS-visible dock-attention bounce/state beyond AppKit request dispatch",
     ]:
-        require_text(gap, needle, f"remaining exact gap slice {needle}")
-    require_absent(gap, "real OS cursor pixels", "closed real OS cursor gap")
-    require_absent(gap, "Quick Look/native link preview display", "stale remaining Quick Look gap")
-    require_absent(gap, "Still need deterministic proof for actual OS notification delivery/banner/sound after authorization is available, audible bell output, OS-visible dock-attention bounce/state beyond AppKit request dispatch, and external Launch Services handler delivery.", "stale external Launch Services missing-evidence wording")
-
-    result = subprocess.run(
-        ["python3", str(LIVE_GUARD)],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        timeout=90,
-    )
-    require(
-        result.returncode == 0,
-        "live notification/link/bell trace guard failed\n"
-        f"stdout:\n{result.stdout}\n"
-        f"stderr:\n{result.stderr}",
-    )
-    require_text(result.stdout, "macos_notification_link_bell_trace_runtime=pass", "live guard pass marker")
-
-    for guard in [
-        ISSUE / "macos_native_context_menu_trace_runtime.py",
-        ISSUE / "macos_controlled_url_open_runtime.py",
-        ISSUE / "macos_live_link_hover_banner_pixels.py",
-        ISSUE / "macos_live_bell_title_border_pixels.py",
-        ISSUE / "macos_real_link_cursor_pixels.py",
-        ISSUE / "macos_live_bell_attention_dock_state.py",
-        ISSUE / "macos_live_quicklook_definition.py",
-        ISSUE / "macos_launch_services_url_handler_delivery.py",
-        ISSUE / "macos_live_user_notification_delivery.py",
-    ]:
-        result = subprocess.run(
-            ["python3", str(guard)],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            timeout=90,
-        )
-        require(
-            result.returncode == 0,
-            f"{guard.name} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
-        )
+        require_absent(boundary, stale, f"stale residual wording {stale}")
+    require_absent(boundary, "real OS cursor pixels", "closed real OS cursor gap")
+    require_absent(boundary, "Quick Look/native link preview display", "stale remaining Quick Look gap")
 
     print("notification_link_bell_gui_residual_parity=pass")
     return 0

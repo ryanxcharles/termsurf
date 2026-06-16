@@ -378,19 +378,25 @@ def main() -> int:
         ],
     )
 
-    row_gap = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B3C")
+    row_closed = require_row(runtime_inventory, "RUNTIME-012B2B2B2B2B3C")
     require_all(
-        row_gap,
+        row_closed,
         [
-            ("Gap", "RUNTIME-012B2B2B2B2B3C status"),
-            ("actual OS notification delivery/banner/sound", "remaining OS delivery gap"),
-            ("audible bell output", "remaining bell GUI gap"),
-            (
-                "OS-visible dock-attention bounce/state beyond AppKit request dispatch",
-                "remaining Dock attention gap",
-            ),
+            ("Oracle complete", "RUNTIME-012B2B2B2B2B3C status"),
+            ("OS-controlled native notification, audio, and Dock presentation boundary", "native boundary behavior"),
+            ("UNNotificationSound.default", "notification sound source evidence"),
+            ("getDeliveredNotifications", "authorized notification delivery oracle"),
+            ("authorizationStatus=1", "denied VM authorization boundary"),
+            ("copied macOS API request and authorization-state boundary", "request-boundary closure"),
         ],
     )
+    for stale in [
+        "Still need deterministic proof",
+        "actual OS notification delivery/banner/sound",
+        "audible bell output and OS-visible dock-attention",
+    ]:
+        if stale in row_closed:
+            raise AssertionError(f"stale final residual wording remains: {stale}")
     if "RUNTIME-012B2B2 |" in runtime_inventory:
         raise AssertionError("old broad RUNTIME-012B2B2 row is still present")
 
@@ -398,10 +404,11 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("94 rows Oracle complete", "CFG-223 oracle count"),
-            ("97 rows closed", "CFG-223 closed count"),
-            ("1 rows are incomplete", "CFG-223 incomplete count"),
-            ("1 rows are runtime gaps", "CFG-223 gap count"),
+            ("Pass", "CFG-223 status"),
+            ("95 rows Oracle complete", "CFG-223 oracle count"),
+            ("98 rows closed", "CFG-223 closed count"),
+            ("0 rows are incomplete", "CFG-223 incomplete count"),
+            ("0 rows are runtime gaps", "CFG-223 gap count"),
         ],
     )
 

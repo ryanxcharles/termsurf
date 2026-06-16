@@ -187,3 +187,95 @@ Optional finding accepted: the design now explicitly runs
 
 Fresh-context Codex re-reviewer `Locke the 3rd` approved the revised design with
 no required findings.
+
+## Result
+
+**Result:** Pass
+
+Experiment 197 closed the final CFG-223 runtime/UI gap at the app-controlled
+macOS API request and authorization-state boundary. It did not claim
+deterministic control over macOS notification banners, notification sounds,
+physical speaker output, microphone TCC prompts, or Dock animation pixels after
+Roastty has made the copied OS request.
+
+Implementation changes:
+
+- Added `os_controlled_native_boundary_parity.py`, a focused closure guard for
+  the final `RUNTIME-012B2B2B2B2B3C` row.
+- Updated `config_runtime_inventory.py` so `RUNTIME-012B2B2B2B2B3C` is
+  `Oracle complete` with explicit evidence for:
+  - copied UserNotifications source parity and denied-VM authorization-state
+    boundary;
+  - copied `NSSound` request source parity, live configured audio-path/volume
+    request evidence, and Experiment 196's microphone TCC prompt boundary;
+  - copied `NSApp.requestUserAttention(.informationalRequest)` source parity,
+    live inactive-app request dispatch, and Dock badge authorization-state
+    capture.
+- Regenerated `config-runtime-inventory.md` and `config-matrix.md`; CFG-223 is
+  now `Pass`.
+- Updated `macos_user_notification_runtime_parity.py`,
+  `bell_presentation_runtime_parity.py`, and
+  `notification_link_bell_gui_residual_parity.py` so they assert the closed
+  residual row, exact counts, and absence of stale gap wording.
+
+The live user-notification guard ran again in this VM and recorded the expected
+authorization boundary:
+
+- `authorization_status = 1`
+- `alert_setting = 2`
+- `sound_setting = 2`
+- trace `userNotification settings status=1 alert=2 sound=2`
+- trace `userNotification uiTestAction=blocked status=1`
+- no new Roastty crash reports
+
+Final CFG-223 counts:
+
+- runtime rows: 98
+- Oracle-complete runtime rows: 95
+- closed rows: 98
+- incomplete rows: 0
+- gap rows: 0
+- CFG-223 status: `Pass`
+- remaining gap IDs: none
+
+Commands run:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/config_runtime_inventory.py --output issues/0805-roastty-ghostty-parity/config-runtime-inventory.md --matrix issues/0805-roastty-ghostty-parity/config-matrix.md
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_user_notification_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/bell_presentation_runtime_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/notification_link_bell_gui_residual_parity.py
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/macos_live_user_notification_delivery.py > logs/issue805-exp197-user-notification.log 2>&1
+PYTHONDONTWRITEBYTECODE=1 python3 issues/0805-roastty-ghostty-parity/os_controlled_native_boundary_parity.py
+python3 -m py_compile issues/0805-roastty-ghostty-parity/*.py
+rm -rf issues/0805-roastty-ghostty-parity/__pycache__
+prettier --check issues/0805-roastty-ghostty-parity/README.md issues/0805-roastty-ghostty-parity/197-os-controlled-native-boundary.md issues/0805-roastty-ghostty-parity/config-runtime-inventory.md issues/0805-roastty-ghostty-parity/config-matrix.md
+git diff --check
+```
+
+## Completion Review
+
+Fresh-context Codex adversarial reviewer `Helmholtz the 3rd` reviewed the
+completed experiment result and returned **Approved** with no findings.
+
+The reviewer independently verified that
+`os_controlled_native_boundary_parity.py`,
+`notification_link_bell_gui_residual_parity.py`,
+`bell_presentation_runtime_parity.py`, and
+`macos_user_notification_runtime_parity.py` pass; markdown formatting passes;
+and `git diff --check` passes. The reviewer also confirmed the result commit had
+not yet been made, the latest relevant commit was the Exp197 plan commit, the
+runtime inventory counts are 98 runtime rows, 95 Oracle-complete rows, 98 closed
+rows, 0 incomplete rows, and 0 gaps, and the result does not claim deterministic
+OS notification banner/sound, physical speaker output, microphone TCC prompt
+automation, or Dock animation pixels.
+
+## Conclusion
+
+The final runtime/UI residual is closed. CFG-223 now passes with every runtime
+row either Oracle-complete, not applicable, or an accepted intentional
+divergence. The issue no longer has an unresolved runtime/UI gap for
+notification, audio, or Dock presentation: all app-controlled behavior is
+covered by copied source parity and focused request-boundary/live-state guards,
+while final OS presentation remains explicitly outside deterministic app
+control.
