@@ -152,3 +152,141 @@ browser connections that real `webtui` opens after `BrowserReady`.
 The design was updated to require the helper to verify both `--ipc-socket` and
 `--listen-socket`, listen on the browser socket, and accept the normal and
 DevTools webtui direct browser connections.
+
+## Result
+
+**Result:** Pass
+
+The existing Ghostboard implementation passed the real `webtui` DevTools flow
+without source changes.
+
+Verification passed:
+
+- Real `webtui` debug build passed:
+  `logs/ghostboard-exp28-cargo-build-webtui-20260616.log`.
+- No Rust source files were modified, so `cargo fmt` was not required.
+- No Zig source files were modified, so `zig fmt` and the native GhosttyKit
+  framework rebuild were not required.
+- No Swift source files were modified, so `swiftlint` was not required.
+- macOS app build passed:
+  `logs/ghostboard-exp28-macos-build-debug-20260616.log`.
+- Runtime harness passed: `logs/ghostboard-exp28-runtime-harness-20260616.log`.
+- Runtime app log: `logs/ghostboard-exp28-runtime-app-20260616.log`.
+- Fake browser helper log: `logs/ghostboard-exp28-helper-20260616.log`.
+- `web last` / `QueryLastRequest` log:
+  `logs/ghostboard-exp28-querylast-20260616.log`.
+- `git diff --check` passed.
+
+Observed successful runtime checks:
+
+```text
+PASS: helper launched with ipc and listen sockets
+PASS: helper bound --listen-socket
+PASS: normal CreateTab and TabReady tab_id 42
+PASS: normal direct browser connection accepted
+PASS: sent literal :devtools command with System Events
+PASS: DevTools CreateDevtoolsTab and TabReady tab_id 99
+PASS: DevTools direct browser connection accepted
+PASS: QueryLast returned normal pane tab_id 42
+PASS: app log contains QueryDevtoolsRequest tab 42
+PASS: app log contains OpenSplit request
+PASS: app log contains Swift split success
+PASS: app log contains SetDevtoolsOverlay
+PASS: app log contains CreateDevtoolsTab
+PASS: app log contains BrowserReady tab 99
+PASS: app exited and GUI socket cleaned up
+PASS: no stale app, webtui, or helper processes
+runtime verification passed
+```
+
+The runtime harness launched `TermSurf.app` with a temporary
+`GHOSTTY_CONFIG_PATH` whose `command` started the actual
+`/Users/astrohacker/dev/termsurf/target/debug/web` binary:
+
+```text
+/Users/astrohacker/dev/termsurf/target/debug/web --browser /tmp/termsurf-exp28-runtime/devtools-helper.py https://example.com
+```
+
+The fake browser helper was used only in place of Roamium. Ghostboard launched
+that helper with both required browser-server arguments:
+
+```text
+--ipc-socket=/var/folders/.../termsurf-ghostboard-82084.sock
+--listen-socket=/var/folders/.../devtools-helper.py-82084-default.sock
+```
+
+The helper connected back to the GUI socket, sent
+`ServerRegister(profile=default)`, received a normal `CreateTab` for pane
+`476286F8-BB58-4B6A-9565-D092CF301BA9`, sent `TabReady(tab_id=42)`, and accepted
+the normal `webtui` direct browser connection on the listen socket.
+
+The harness then used System Events only to type the literal user command
+`:devtools` into the normal `webtui` pane. It did not send `OpenSplit` directly,
+and it did not use a native split keyboard shortcut. The app log shows that the
+real `webtui` process sent:
+
+```text
+TermSurf QueryDevtoolsRequest pane_id=476286F8-BB58-4B6A-9565-D092CF301BA9 inspected_tab_id=42 profile=default browser=/tmp/termsurf-exp28-runtime/devtools-helper.py
+OpenSplit: pane_id=476286F8-BB58-4B6A-9565-D092CF301BA9 direction=right command=/Users/astrohacker/dev/termsurf/target/debug/web --browser /tmp/termsurf-exp28-runtime/devtools-helper.py --profile default devtools://42
+```
+
+Ghostboard created the native split, and the split launched the real `webtui`
+binary with `devtools://42`, the same browser helper, and `--profile default`.
+The DevTools webtui pane then sent `SetDevtoolsOverlay(inspected_tab_id=42)`,
+causing Ghostboard to send `CreateDevtoolsTab(inspected_tab_id=42)` to the
+helper. The helper replied with `TabReady(tab_id=99)`, and Ghostboard sent
+`BrowserReady(tab_id=99)` to the DevTools pane.
+
+After the DevTools pane was ready, the harness ran the actual `web last`
+subcommand against the normal pane's `TERMSURF_SOCKET` and `TERMSURF_PANE_ID`.
+`QueryLastRequest(profile=default)` still returned the normal pane and tab:
+
+```text
+profile: default
+pane_id: 476286F8-BB58-4B6A-9565-D092CF301BA9
+tab_id:  42
+```
+
+One verification detail matters for future runtime harnesses: the first runtime
+attempt proved the behavior but did not capture Zig `std.log` info-level
+protocol markers because `GHOSTTY_LOG` was not set. The final passing harness
+sets `GHOSTTY_LOG=stderr`, which makes app-side `termsurf` protocol logs visible
+in the captured app log.
+
+## Conclusion
+
+Ghostboard now supports the real `webtui` DevTools workflow through the current
+TermSurf protocol without changes to `webtui`, `roamium`, or
+`proto/termsurf.proto`. The tested chain is:
+
+```text
+webtui normal pane
+  -> QueryDevtoolsRequest(tab_id=42)
+  -> OpenSplit(command=".../target/debug/web --browser <helper> --profile default devtools://42")
+  -> Ghostboard native split
+  -> webtui DevTools pane
+  -> QueryDevtoolsRequest(tab_id=42)
+  -> SetDevtoolsOverlay(inspected_tab_id=42)
+  -> CreateDevtoolsTab(inspected_tab_id=42)
+  -> TabReady(devtools-pane, tab_id=99)
+  -> BrowserReady(devtools-pane, tab_id=99)
+```
+
+The next experiment can move from fake-browser DevTools orchestration to
+Roamium-backed runtime behavior, because the GUI-side split, DevTools overlay,
+browser socket, and `webtui` command path have now been validated together.
+
+## Completion Review
+
+A fresh-context adversarial Codex subagent reviewed the completed Experiment 28
+result and returned **APPROVED** with no findings.
+
+The reviewer confirmed that the working tree contained only the expected issue
+markdown result updates, the result commit had not already been made,
+`git diff --check` was clean, and the logs prove the real
+`/Users/astrohacker/dev/termsurf/target/debug/web` binary drove both the normal
+and DevTools panes. The reviewer also confirmed that the helper verified
+`--ipc-socket`, `--listen-socket`, both direct browser connections, normal tab
+42, DevTools tab 99, `QueryLastRequest(profile=default)` returning the normal
+pane after DevTools became ready, runtime cleanup, the experiment Result and
+Conclusion sections, and the README status update to **Pass**.
