@@ -120,3 +120,112 @@ Fresh-context adversarial re-review returned **APPROVED**. The reviewer
 confirmed that the duplicate-pane update path, duplicate `SetOverlay` runtime
 checks, duplicate-pane fail criterion, and exact build commands resolve the
 prior findings without introducing new required issues.
+
+## Result
+
+**Result:** Pass
+
+Implemented bounded process-local pane/server state in
+`ghostboard/src/apprt/termsurf.zig`.
+
+The socket handler now:
+
+- tracks pane metadata from `SetOverlay`;
+- defaults an empty `SetOverlay.browser` to `roamium`;
+- creates a pending server record for a new `profile/browser` pair;
+- updates an existing `pane_id` without creating a duplicate pane or
+  incrementing server `pane_count`;
+- increments `pane_count` when a new pane reuses an existing pending server;
+- matches `ServerRegister(profile=...)` to the first unattached pending server
+  for that profile;
+- keeps unmatched `ServerRegister` warnings for profiles with no pending server;
+- still does not launch a browser process, send `CreateTab`, send
+  `BrowserReady`, handle `TabReady`, present overlays, or forward input.
+
+Verification passed:
+
+- `zig fmt src/apprt/termsurf.zig src/main_c.zig src/build/SharedDeps.zig`
+  passed.
+- Native GhosttyKit framework build passed:
+  `logs/ghostboard-exp14-zig-native-xcframework-20260616-101940.log`.
+- macOS app build passed:
+  `logs/ghostboard-exp14-macos-build-debug-20260616-102001.log`.
+- Runtime harness passed:
+  `logs/ghostboard-exp14-runtime-harness-20260616-102101.log`.
+- Runtime app log: `logs/ghostboard-exp14-runtime-app-20260616-102101.log`.
+- `git diff --check` passed.
+
+The first native build attempt failed because the `handleServerRegister` helper
+was updated to store the accepted socket fd but its function signature had not
+yet been updated to receive that fd. I fixed the signature and reran the build
+successfully.
+
+Observed successful runtime checks:
+
+```text
+PASS: child wrote TERMSURF_SOCKET
+PASS: socket path is under TMPDIR/termsurf
+PASS: socket exists while app is running
+PASS: app log contains TermSurf socket listening
+PASS: socket fd=11 classified exactly once as Tui
+PASS: SetOverlay pane-a defaulted browser to roamium
+PASS: SetOverlay created pending server
+PASS: duplicate SetOverlay updated pane without pane_count increment
+PASS: new pane reused pending server and incremented pane_count
+PASS: socket fd=11 classified exactly once as Browser
+PASS: ServerRegister matched pending server
+PASS: matched ServerRegister did not log unmatched warning
+PASS: socket fd=11 classified exactly once as Browser
+PASS: unmatched ServerRegister still warns
+PASS: no CreateTab emitted
+PASS: no BrowserReady emitted
+PASS: no TabReady emitted
+PASS: no overlay presentation messages emitted
+PASS: fresh TUI client received HelloReply
+PASS: socket fd=11 classified exactly once as Tui
+PASS: app exited after SIGTERM
+PASS: socket file removed after shutdown
+PASS: no stale TermSurf process remains
+runtime verification passed
+```
+
+The app log shows the core state transitions:
+
+```text
+info(termsurf): SetOverlay: pane_id=pane-a profile=default browser=roamium url=https://example.com
+info(termsurf): SetOverlay: created pending server key=default/roamium pane_count=1
+info(termsurf): SetOverlay: pane_id=pane-a profile=default browser=roamium url=https://example.org
+info(termsurf): SetOverlay: updated pane_id=pane-a profile=default browser=roamium pane_count=1
+info(termsurf): SetOverlay: pane_id=pane-b profile=default browser=roamium url=https://example.net
+info(termsurf): SetOverlay: reused pending server key=default/roamium pane_count=2 has_fd=false
+info(termsurf): ServerRegister: profile=default
+info(termsurf): ServerRegister: matched server key=default/roamium
+info(termsurf): ServerRegister: profile=other
+warning(termsurf): ServerRegister: no matching server for profile=other
+```
+
+## Result Review
+
+Fresh-context adversarial result review returned **APPROVED** with no findings.
+
+The reviewer confirmed:
+
+- the diff is limited to the expected source and issue documentation files;
+- `SetOverlay` and `ServerRegister` behavior matches the approved experiment
+  scope;
+- no browser launch, `CreateTab`, `BrowserReady`, or overlay UI path was
+  introduced;
+- existing classification and `HelloRequest` reply behavior are preserved;
+- the build and runtime logs support the recorded result;
+- the result commit had not been made before review.
+
+## Conclusion
+
+Ghostboard now has the minimal state needed to connect TUI overlay intent with a
+later browser-engine registration. `SetOverlay` creates or updates pane state
+and pending server records, and `ServerRegister` can attach to that pending
+server instead of always warning that no match exists.
+
+The next experiment can build on this state to introduce browser process launch
+or `CreateTab` delivery, while preserving the verified duplicate-pane update
+behavior.

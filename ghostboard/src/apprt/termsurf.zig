@@ -10,6 +10,13 @@ const log = std.log.scoped(.termsurf);
 const env_key: [:0]const u8 = "TERMSURF_SOCKET";
 const max_frame_size: usize = 1024 * 1024;
 const max_clients: usize = 128;
+const max_panes: usize = 256;
+const max_servers: usize = 64;
+const max_pane_id_len: usize = 128;
+const max_profile_len: usize = 128;
+const max_browser_len: usize = 64;
+const max_url_len: usize = 2048;
+const default_browser = "roamium";
 
 const ConnType = enum {
     unknown,
@@ -23,14 +30,64 @@ const ClientSlot = struct {
     done: bool = false,
 };
 
+const PaneState = struct {
+    in_use: bool = false,
+    pane_id: [max_pane_id_len]u8 = undefined,
+    pane_id_len: usize = 0,
+    profile: [max_profile_len]u8 = undefined,
+    profile_len: usize = 0,
+    browser: [max_browser_len]u8 = undefined,
+    browser_len: usize = 0,
+    url: [max_url_len]u8 = undefined,
+    url_len: usize = 0,
+    col: u64 = 0,
+    row: u64 = 0,
+    width: u64 = 0,
+    height: u64 = 0,
+    browsing: bool = false,
+
+    fn paneId(self: *const PaneState) []const u8 {
+        return self.pane_id[0..self.pane_id_len];
+    }
+
+    fn profileName(self: *const PaneState) []const u8 {
+        return self.profile[0..self.profile_len];
+    }
+
+    fn browserName(self: *const PaneState) []const u8 {
+        return self.browser[0..self.browser_len];
+    }
+};
+
+const ServerState = struct {
+    in_use: bool = false,
+    profile: [max_profile_len]u8 = undefined,
+    profile_len: usize = 0,
+    browser: [max_browser_len]u8 = undefined,
+    browser_len: usize = 0,
+    pane_count: usize = 0,
+    attached_fd: std.posix.fd_t = -1,
+
+    fn profileName(self: *const ServerState) []const u8 {
+        return self.profile[0..self.profile_len];
+    }
+
+    fn browserName(self: *const ServerState) []const u8 {
+        return self.browser[0..self.browser_len];
+    }
+};
+
 var mutex: std.Thread.Mutex = .{};
 var clients_mutex: std.Thread.Mutex = .{};
+var state_mutex: std.Thread.Mutex = .{};
 var listener_fd: std.posix.fd_t = -1;
 var accept_thread: ?std.Thread = null;
 var stopping = std.atomic.Value(bool).init(false);
 var socket_path_buf: [std.fs.max_path_bytes]u8 = undefined;
 var socket_path_len: usize = 0;
 var clients: [max_clients]ClientSlot = [_]ClientSlot{.{}} ** max_clients;
+var panes: [max_panes]PaneState = [_]PaneState{.{}} ** max_panes;
+var servers: [max_servers]ServerState = [_]ServerState{.{}} ** max_servers;
 
 pub fn start() !void {
     mutex.lock();
@@ -222,8 +279,11 @@ fn handleClient(fd: std.posix.fd_t, slot_index: usize) void {
                         return;
                     };
                 },
+                c.TERMSURF__TERM_SURF_MESSAGE__MSG_SET_OVERLAY => {
+                    handleSetOverlay(msg.*.unnamed_0.set_overlay);
+                },
                 c.TERMSURF__TERM_SURF_MESSAGE__MSG_SERVER_REGISTER => {
-                    handleServerRegister(msg.*.unnamed_0.server_register);
+                    handleServerRegister(fd, msg.*.unnamed_0.server_register);
                 },
                 else => {
                     log.info("TermSurf message ignored type={s}", .{msgTypeName(msg.*.msg_case)});
@@ -423,9 +483,22 @@ fn sendQueryTabsReply(fd: std.posix.fd_t) !void {
     log.info("TermSurf QueryTabsReply sent", .{});
 }
 
-fn handleServerRegister(req: ?*c.Termsurf__ServerRegister) void {
+fn handleServerRegister(fd: std.posix.fd_t, req: ?*c.Termsurf__ServerRegister) void {
     const profile = serverRegisterProfile(req);
     log.info("ServerRegister: profile={s}", .{profile});
+
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    if (findAttachableServerByProfile(profile)) |index| {
+        servers[index].attached_fd = fd;
+        log.info(
+            "ServerRegister: matched server key={s}/{s}",
+            .{ servers[index].profileName(), servers[index].browserName() },
+        );
+        return;
+    }
+
     log.warn("ServerRegister: no matching server for profile={s}", .{profile});
 }
 
@@ -434,6 +507,173 @@ fn serverRegisterProfile(req: ?*c.Termsurf__ServerRegister) []const u8 {
         if (server.*.profile) |profile| return std.mem.span(profile);
     }
     return "";
+}
+
+fn handleSetOverlay(req: ?*c.Termsurf__SetOverlay) void {
+    const overlay = req orelse {
+        log.warn("SetOverlay: missing payload", .{});
+        return;
+    };
+
+    const pane_id = cString(overlay.*.pane_id);
+    const profile = cString(overlay.*.profile);
+    const requested_browser = cString(overlay.*.browser);
+    const browser = if (requested_browser.len == 0) default_browser else requested_browser;
+    const url = cString(overlay.*.url);
+
+    log.info(
+        "SetOverlay: pane_id={s} profile={s} browser={s} url={s}",
+        .{ pane_id, profile, browser, url },
+    );
+
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    if (findPane(pane_id)) |pane_index| {
+        if (!updatePane(&panes[pane_index], overlay, pane_id, profile, browser, url)) return;
+        const server_index = findServer(profile, browser);
+        const pane_count = if (server_index) |index| servers[index].pane_count else 0;
+        log.info(
+            "SetOverlay: updated pane_id={s} profile={s} browser={s} pane_count={}",
+            .{ pane_id, profile, browser, pane_count },
+        );
+        return;
+    }
+
+    const pane_index = reservePane() orelse {
+        log.warn("SetOverlay: pane limit reached pane_id={s}", .{pane_id});
+        return;
+    };
+    if (!updatePane(&panes[pane_index], overlay, pane_id, profile, browser, url)) return;
+
+    if (findServer(profile, browser)) |server_index| {
+        servers[server_index].pane_count += 1;
+        log.info(
+            "SetOverlay: reused pending server key={s}/{s} pane_count={} has_fd={}",
+            .{ servers[server_index].profileName(), servers[server_index].browserName(), servers[server_index].pane_count, servers[server_index].attached_fd >= 0 },
+        );
+    } else {
+        const server_index = reserveServer() orelse {
+            log.warn("SetOverlay: server limit reached profile={s} browser={s}", .{ profile, browser });
+            panes[pane_index] = .{};
+            return;
+        };
+        if (!setServer(&servers[server_index], profile, browser)) {
+            panes[pane_index] = .{};
+            return;
+        }
+        log.info(
+            "SetOverlay: created pending server key={s}/{s} pane_count={}",
+            .{ servers[server_index].profileName(), servers[server_index].browserName(), servers[server_index].pane_count },
+        );
+    }
+}
+
+fn updatePane(
+    pane: *PaneState,
+    overlay: *c.Termsurf__SetOverlay,
+    pane_id: []const u8,
+    profile: []const u8,
+    browser: []const u8,
+    url: []const u8,
+) bool {
+    if (!copyText(&pane.pane_id, &pane.pane_id_len, pane_id)) {
+        log.warn("SetOverlay: pane_id too long len={} max={}", .{ pane_id.len, max_pane_id_len });
+        return false;
+    }
+    if (!copyText(&pane.profile, &pane.profile_len, profile)) {
+        log.warn("SetOverlay: profile too long len={} max={}", .{ profile.len, max_profile_len });
+        return false;
+    }
+    if (!copyText(&pane.browser, &pane.browser_len, browser)) {
+        log.warn("SetOverlay: browser too long len={} max={}", .{ browser.len, max_browser_len });
+        return false;
+    }
+    if (!copyText(&pane.url, &pane.url_len, url)) {
+        log.warn("SetOverlay: url too long len={} max={}", .{ url.len, max_url_len });
+        return false;
+    }
+
+    pane.in_use = true;
+    pane.col = overlay.*.col;
+    pane.row = overlay.*.row;
+    pane.width = overlay.*.width;
+    pane.height = overlay.*.height;
+    pane.browsing = overlay.*.browsing != 0;
+    return true;
+}
+
+fn setServer(server: *ServerState, profile: []const u8, browser: []const u8) bool {
+    if (!copyText(&server.profile, &server.profile_len, profile)) {
+        log.warn("SetOverlay: server profile too long len={} max={}", .{ profile.len, max_profile_len });
+        return false;
+    }
+    if (!copyText(&server.browser, &server.browser_len, browser)) {
+        log.warn("SetOverlay: server browser too long len={} max={}", .{ browser.len, max_browser_len });
+        return false;
+    }
+
+    server.in_use = true;
+    server.pane_count = 1;
+    server.attached_fd = -1;
+    return true;
+}
+
+fn findPane(pane_id: []const u8) ?usize {
+    for (&panes, 0..) |*pane, i| {
+        if (pane.in_use and std.mem.eql(u8, pane.paneId(), pane_id)) return i;
+    }
+    return null;
+}
+
+fn findServer(profile: []const u8, browser: []const u8) ?usize {
+    for (&servers, 0..) |*server, i| {
+        if (server.in_use and
+            std.mem.eql(u8, server.profileName(), profile) and
+            std.mem.eql(u8, server.browserName(), browser))
+        {
+            return i;
+        }
+    }
+    return null;
+}
+
+fn findAttachableServerByProfile(profile: []const u8) ?usize {
+    for (&servers, 0..) |*server, i| {
+        if (server.in_use and
+            server.attached_fd < 0 and
+            std.mem.eql(u8, server.profileName(), profile))
+        {
+            return i;
+        }
+    }
+    return null;
+}
+
+fn reservePane() ?usize {
+    for (&panes, 0..) |*pane, i| {
+        if (!pane.in_use) return i;
+    }
+    return null;
+}
+
+fn reserveServer() ?usize {
+    for (&servers, 0..) |*server, i| {
+        if (!server.in_use) return i;
+    }
+    return null;
+}
+
+fn cString(ptr: [*c]u8) []const u8 {
+    if (ptr) |value| return std.mem.span(value);
+    return "";
+}
+
+fn copyText(buf: []u8, len: *usize, value: []const u8) bool {
+    if (value.len > buf.len) return false;
+    @memcpy(buf[0..value.len], value);
+    len.* = value.len;
+    return true;
 }
 
 fn sendProtobuf(fd: std.posix.fd_t, wrapper: *c.Termsurf__TermSurfMessage) !void {
