@@ -222,4 +222,4 @@ and against `ghostboard-legacy/` where useful.
   — **Pass**
 - [Experiment 7: Start the TermSurf GUI socket](07-start-termsurf-gui-socket.md)
   — **Pass**
-- [Experiment 8: Decode HelloRequest](08-decode-hello-request.md) — **Designed**
+- [Experiment 8: Decode HelloRequest](08-decode-hello-request.md) — **Pass**

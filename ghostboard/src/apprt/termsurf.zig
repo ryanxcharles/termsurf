@@ -1,16 +1,30 @@
 const std = @import("std");
 const internal_os = @import("../os/main.zig");
 
+const c = @cImport({
+    @cInclude("termsurf.pb-c.h");
+});
+
 const log = std.log.scoped(.termsurf);
 
 const env_key: [:0]const u8 = "TERMSURF_SOCKET";
+const max_frame_size: usize = 1024 * 1024;
+const max_clients: usize = 128;
+
+const ClientSlot = struct {
+    fd: std.posix.fd_t = -1,
+    thread: ?std.Thread = null,
+    done: bool = false,
+};
 
 var mutex: std.Thread.Mutex = .{};
+var clients_mutex: std.Thread.Mutex = .{};
 var listener_fd: std.posix.fd_t = -1;
 var accept_thread: ?std.Thread = null;
 var stopping = std.atomic.Value(bool).init(false);
 var socket_path_buf: [std.fs.max_path_bytes]u8 = undefined;
 var socket_path_len: usize = 0;
+var clients: [max_clients]ClientSlot = [_]ClientSlot{.{}} ** max_clients;
 
 pub fn start() !void {
     mutex.lock();
@@ -31,6 +45,11 @@ pub fn start() !void {
 
     const path_z = try socketPath(tmpdir, sep);
     std.posix.unlink(path_z) catch {};
+    errdefer {
+        std.posix.unlink(path_z) catch {};
+        socket_path_len = 0;
+        _ = internal_os.unsetenv(env_key);
+    }
 
     const fd = try std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0);
     errdefer std.posix.close(fd);
@@ -68,6 +87,11 @@ pub fn stop() void {
         t.join();
     }
 
+    const client_threads = stopClients();
+    for (client_threads) |maybe_thread| {
+        if (maybe_thread) |t| t.join();
+    }
+
     if (socket_path_len > 0) {
         const path = socket_path_buf[0..socket_path_len];
         std.posix.unlink(path) catch {};
@@ -90,8 +114,223 @@ fn acceptLoop(fd: std.posix.fd_t) void {
             return;
         }
         log.info("TermSurf client connected fd={}", .{client_fd});
-        std.posix.close(client_fd);
+
+        joinClientThreads(reapDoneClients());
+        const slot_index = reserveClient(client_fd) orelse {
+            log.warn("TermSurf client limit reached fd={}", .{client_fd});
+            std.posix.close(client_fd);
+            continue;
+        };
+
+        const thread = std.Thread.spawn(.{}, handleClient, .{ client_fd, slot_index }) catch |err| {
+            log.warn("TermSurf client thread failed fd={} err={}", .{ client_fd, err });
+            clearClient(slot_index);
+            std.posix.close(client_fd);
+            continue;
+        };
+
+        if (activateClient(slot_index, thread)) |done_thread| {
+            log.info("TermSurf client exited before thread registration fd={}", .{client_fd});
+            done_thread.join();
+        }
     }
+}
+
+fn handleClient(fd: std.posix.fd_t, slot_index: usize) void {
+    defer {
+        markClientDone(slot_index);
+        std.posix.close(fd);
+    }
+
+    const allocator = std.heap.c_allocator;
+    while (!stopping.load(.acquire)) {
+        const frame = readFrame(fd, allocator) catch |err| {
+            log.warn("TermSurf client read failed fd={} err={}", .{ fd, err });
+            return;
+        } orelse return;
+
+        {
+            defer allocator.free(frame);
+
+            const msg = c.termsurf__term_surf_message__unpack(null, frame.len, frame.ptr) orelse {
+                log.warn("TermSurf protobuf decode failed fd={}", .{fd});
+                return;
+            };
+            defer c.termsurf__term_surf_message__free_unpacked(msg, null);
+
+            log.info("TermSurf message decoded type={s}", .{msgTypeName(msg.*.msg_case)});
+            switch (msg.*.msg_case) {
+                c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REQUEST => {
+                    sendHelloReply(fd) catch |err| {
+                        log.warn("TermSurf HelloReply failed fd={} err={}", .{ fd, err });
+                        return;
+                    };
+                },
+                else => {
+                    log.info("TermSurf message ignored type={s}", .{msgTypeName(msg.*.msg_case)});
+                },
+            }
+        }
+    }
+}
+
+fn reserveClient(fd: std.posix.fd_t) ?usize {
+    clients_mutex.lock();
+    defer clients_mutex.unlock();
+
+    for (&clients, 0..) |*slot, i| {
+        if (slot.thread == null and slot.fd < 0) {
+            slot.* = .{ .fd = fd, .thread = null, .done = false };
+            return i;
+        }
+    }
+
+    return null;
+}
+
+fn activateClient(index: usize, thread: std.Thread) ?std.Thread {
+    clients_mutex.lock();
+    defer clients_mutex.unlock();
+
+    if (clients[index].done) {
+        clients[index] = .{};
+        return thread;
+    }
+
+    clients[index].thread = thread;
+    return null;
+}
+
+fn clearClient(index: usize) void {
+    clients_mutex.lock();
+    defer clients_mutex.unlock();
+    clients[index] = .{};
+}
+
+fn markClientDone(index: usize) void {
+    clients_mutex.lock();
+    defer clients_mutex.unlock();
+
+    clients[index].fd = -1;
+    clients[index].done = true;
+}
+
+fn reapDoneClients() [max_clients]?std.Thread {
+    var threads: [max_clients]?std.Thread = [_]?std.Thread{null} ** max_clients;
+
+    clients_mutex.lock();
+    for (&clients, 0..) |*slot, i| {
+        if (slot.done) {
+            threads[i] = slot.thread;
+            slot.* = .{};
+        }
+    }
+    clients_mutex.unlock();
+
+    return threads;
+}
+
+fn joinClientThreads(threads: [max_clients]?std.Thread) void {
+    for (threads) |maybe_thread| {
+        if (maybe_thread) |thread| {
+            thread.join();
+        }
+    }
+}
+
+fn stopClients() [max_clients]?std.Thread {
+    var threads: [max_clients]?std.Thread = [_]?std.Thread{null} ** max_clients;
+
+    clients_mutex.lock();
+    for (&clients, 0..) |*slot, i| {
+        if (slot.fd >= 0) {
+            std.posix.shutdown(slot.fd, .both) catch {};
+            slot.fd = -1;
+        }
+        threads[i] = slot.thread;
+        slot.* = .{};
+    }
+    clients_mutex.unlock();
+
+    return threads;
+}
+
+fn readFrame(fd: std.posix.fd_t, allocator: std.mem.Allocator) !?[]u8 {
+    var len_buf: [4]u8 = undefined;
+    if (!try readExactOrEof(fd, &len_buf)) return null;
+
+    const frame_len = std.mem.readInt(u32, &len_buf, .little);
+    if (frame_len > max_frame_size) {
+        log.warn("TermSurf frame rejected len={} max={}", .{ frame_len, max_frame_size });
+        return error.FrameTooLarge;
+    }
+
+    const frame = try allocator.alloc(u8, frame_len);
+    errdefer allocator.free(frame);
+    if (!try readExactOrEof(fd, frame)) return error.UnexpectedEof;
+    return frame;
+}
+
+fn readExactOrEof(fd: std.posix.fd_t, buf: []u8) !bool {
+    var offset: usize = 0;
+    while (offset < buf.len) {
+        const n = try std.posix.read(fd, buf[offset..]);
+        if (n == 0) {
+            if (offset == 0) return false;
+            return error.UnexpectedEof;
+        }
+        offset += n;
+    }
+    return true;
+}
+
+fn sendHelloReply(fd: std.posix.fd_t) !void {
+    var reply: c.Termsurf__HelloReply = undefined;
+    c.termsurf__hello_reply__init(&reply);
+
+    var wrapper: c.Termsurf__TermSurfMessage = undefined;
+    c.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REPLY;
+    wrapper.unnamed_0.hello_reply = &reply;
+
+    try sendProtobuf(fd, &wrapper);
+    log.info("TermSurf HelloReply sent", .{});
+}
+
+fn sendProtobuf(fd: std.posix.fd_t, wrapper: *c.Termsurf__TermSurfMessage) !void {
+    const size = c.termsurf__term_surf_message__get_packed_size(wrapper);
+    if (size > max_frame_size) return error.FrameTooLarge;
+
+    const allocator = std.heap.c_allocator;
+    const payload = try allocator.alloc(u8, size);
+    defer allocator.free(payload);
+
+    const packed_size = c.termsurf__term_surf_message__pack(wrapper, payload.ptr);
+    if (packed_size != size) return error.ProtobufPackFailed;
+
+    var len_buf: [4]u8 = undefined;
+    std.mem.writeInt(u32, &len_buf, @intCast(size), .little);
+    try writeAll(fd, &len_buf);
+    try writeAll(fd, payload);
+}
+
+fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
+    var offset: usize = 0;
+    while (offset < bytes.len) {
+        const n = try std.posix.write(fd, bytes[offset..]);
+        if (n == 0) return error.WriteZero;
+        offset += n;
+    }
+}
+
+fn msgTypeName(msg_case: c.Termsurf__TermSurfMessage__MsgCase) []const u8 {
+    return switch (msg_case) {
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REQUEST => "HelloRequest",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REPLY => "HelloReply",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_SERVER_REGISTER => "ServerRegister",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_SET_OVERLAY => "SetOverlay",
+        else => "Other",
+    };
 }
 
 fn wakeAccept() void {

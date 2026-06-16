@@ -197,3 +197,139 @@ Required findings accepted and fixed:
 Re-review returned `APPROVED`. The reviewer confirmed the three required
 findings were resolved, `git diff --check` was clean, the README still links
 Experiment 8 as `Designed`, and the plan commit had not yet been made.
+
+## Result
+
+**Result:** Pass
+
+Implemented length-prefixed protobuf framing for the Ghostboard TermSurf socket
+and the first request/reply pair:
+
+- `ghostboard/src/protobuf/` now contains the protobuf-c runtime/header layout
+  and `termsurf.pb-c.{c,h}` generated from the current `proto/termsurf.proto`.
+- `ghostboard/src/build/SharedDeps.zig` now includes the protobuf-c headers and
+  C sources in Ghostboard's shared build dependencies.
+- `ghostboard/src/apprt/termsurf.zig` now:
+  - keeps accepted clients open in per-client worker threads;
+  - reads 4-byte little-endian length-prefixed frames;
+  - handles partial reads;
+  - rejects frames larger than 1 MiB;
+  - decodes `TermSurfMessage` with protobuf-c;
+  - logs decoded message types;
+  - replies to `HelloRequest` with a length-prefixed `HelloReply`;
+  - leaves all other TermSurf protocol messages logged/ignored for later
+    experiments.
+
+Protobuf generation evidence:
+
+- Installed `protobuf` and `protobuf-c` with Homebrew because `protoc` and
+  `protoc-c` were not present on this VM.
+- Regenerated from the current schema with `./proto/generate.sh`.
+- Generation log: `logs/ghostboard-exp8-protobuf-generate-20260616-final.log`.
+- Tool versions recorded in that log:
+  - `protobuf-c 1.5.2`
+  - `libprotoc 35.0`
+- The generated header includes current protocol messages that Ghostboard Legacy
+  did not have, including `SetGuiActive`, `TargetUrlChanged`, `BrowserReady`,
+  JavaScript dialog, HTTP auth, console, and renderer crash messages.
+
+Verification performed:
+
+- `zig fmt src/apprt/termsurf.zig src/main_c.zig src/build/SharedDeps.zig`
+  passed.
+- Native GhosttyKit framework build passed:
+  `logs/ghostboard-exp8-zig-native-xcframework-final.log`.
+- macOS app build passed: `logs/ghostboard-exp8-macos-build-debug-final.log`.
+- Runtime verification passed:
+  `logs/ghostboard-exp8-runtime-harness-20260616-091445.log`. The app's stderr
+  log for that run is `logs/ghostboard-exp8-runtime-app-20260616-091445.log`.
+- No Swift files were edited in this experiment, so SwiftLint was not required.
+
+Observed successful runtime output:
+
+```text
+PASS: full-frame HelloReply frame 03000000c20100
+PASS: partial-frame HelloReply frame 03000000c20100
+PASS: oversized frame connection rejected or closed without reply
+PASS: post-oversized-fresh-client HelloReply frame 03000000c20100
+PASS: app log contains TermSurf socket listening
+PASS: app log contains TermSurf client connected
+PASS: app log contains TermSurf message decoded type=HelloRequest
+PASS: app log contains TermSurf HelloReply sent
+PASS: app log contains TermSurf frame rejected
+PASS: app exited after SIGTERM
+PASS: socket file removed after shutdown
+runtime verification passed
+```
+
+The app log for the same run contained:
+
+```text
+info(termsurf): TermSurf socket listening on /var/folders/vx/wbmx10nd7tx8259xgg3v4vf80000gn/T/termsurf/termsurf-ghostboard-53388.sock
+info(termsurf): TermSurf client connected fd=13
+info(termsurf): TermSurf message decoded type=HelloRequest
+info(termsurf): TermSurf HelloReply sent
+warning(termsurf): TermSurf frame rejected len=1048577 max=1048576
+```
+
+Follow-up checks found no leftover `TermSurf.app/Contents/MacOS/termsurf`
+processes and no stale `termsurf-ghostboard-*.sock` files.
+
+Scope check:
+
+- No `SetOverlay`, `Navigate`, `SetColorScheme`, query message, browser
+  registration, tab lifecycle, browser launch, overlay, input forwarding, or
+  direct TUI-browser routing behavior was implemented.
+- `webtui` and `roamium` were not modified.
+- The TermSurf protocol schema was not changed.
+- App naming, config paths, icons, `build.zig`, and CLI install/emit behavior
+  were not changed.
+
+## Result Review
+
+Fresh-context adversarial result review initially returned `CHANGES REQUIRED`.
+
+Required finding accepted and fixed:
+
+- Active client fds and threads were not cleaned up by `stop()`. Accepted
+  clients were handled by detached worker threads, so a worker blocked in
+  `readExactOrEof()` could outlive `stop()`. I replaced detached workers with
+  tracked client slots, made `stop()` shut down active client sockets to wake
+  blocked reads, and joined all tracked client threads before unlinking the
+  socket and returning.
+- The first tracking fix still allowed `stopClients()` to race with a just
+  spawned client before the accept thread had published its thread handle. I
+  fixed the stop order so `stop()` now wakes/closes the listener and joins the
+  accept thread before collecting and joining client threads. That prevents the
+  accept loop from racing with client collection.
+
+Optional finding noted:
+
+- The reviewer pointed out that `writeAll()` uses `std.posix.write()` on a
+  socket, so SIGPIPE behavior may need hardening later. I did not expand this
+  experiment for that optional item because the current harness covers normal
+  reply writes and the required shutdown issue was the blocking correctness
+  problem.
+
+After the active-client cleanup fixes, I reran Zig formatting, the native
+GhosttyKit framework build, the macOS app build, and the full runtime harness.
+The latest passing logs are the ones cited above.
+
+Final re-review returned `APPROVED`. The reviewer confirmed that `stop()` now
+wakes/closes the listener and joins the accept thread before collecting client
+threads, removing the spawn/activation race. The reviewer also confirmed client
+slots are reserved before spawn and activated afterward, `git diff --check` was
+clean, the latest logs reported success, and the result commit had not yet been
+made.
+
+## Conclusion
+
+Ghostboard can now speak the TermSurf socket wire format well enough to decode a
+current-schema `HelloRequest` and return a valid length-prefixed `HelloReply`.
+The verification covers full-frame reads, deliberately partial writes,
+oversized-frame rejection, app survival after a rejected frame, and shutdown
+cleanup.
+
+The next experiment can build on this framing by adding another small
+request/reply surface, likely `QueryTabsRequest`, or by introducing explicit TUI
+versus browser-engine connection classification before browser launch work.
