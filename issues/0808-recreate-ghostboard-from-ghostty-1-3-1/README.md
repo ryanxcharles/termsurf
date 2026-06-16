@@ -251,3 +251,5 @@ and against `ghostboard-legacy/` where useful.
   — **Pass**
 - [Experiment 23: Forward ModeChanged focus to browser](23-forward-tui-control-to-browser.md)
   — **Pass**
+- [Experiment 24: Close browser tab on TUI disconnect](24-close-tab-on-tui-disconnect.md)
+  — **Designed**
