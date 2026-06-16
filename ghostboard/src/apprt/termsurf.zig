@@ -185,6 +185,17 @@ const FocusChangedSnapshot = struct {
     }
 };
 
+const BrowserInputSnapshot = struct {
+    browser_fd: std.posix.fd_t = -1,
+    pane_id: [max_pane_id_len]u8 = undefined,
+    pane_id_len: usize = 0,
+    tab_id: i64 = 0,
+
+    fn paneId(self: *const BrowserInputSnapshot) []const u8 {
+        return self.pane_id[0..self.pane_id_len];
+    }
+};
+
 const OverlaySnapshot = struct {
     pane_id: [max_pane_id_len]u8 = undefined,
     pane_id_len: usize = 0,
@@ -1240,6 +1251,168 @@ fn sendFocusChanged(snapshot: *const FocusChangedSnapshot) !void {
         "FocusChanged: pane_id={s} tab_id={} focused={}",
         .{ snapshot.paneId(), snapshot.tab_id, snapshot.focused },
     );
+}
+
+pub fn forwardKeyEvent(
+    pane_id: []const u8,
+    event_type: []const u8,
+    windows_key_code: i64,
+    utf8: []const u8,
+    modifiers: u64,
+) bool {
+    const snapshot = snapshotBrowserInput(pane_id, true) orelse return false;
+
+    var key_event: c.Termsurf__KeyEvent = undefined;
+    c.termsurf__key_event__init(&key_event);
+    key_event.tab_id = snapshot.tab_id;
+    key_event.type = @constCast(event_type.ptr);
+    key_event.windows_key_code = windows_key_code;
+    key_event.utf8 = @constCast(utf8.ptr);
+    key_event.modifiers = modifiers;
+
+    var wrapper: c.Termsurf__TermSurfMessage = undefined;
+    c.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = c.TERMSURF__TERM_SURF_MESSAGE__MSG_KEY_EVENT;
+    wrapper.unnamed_0.key_event = &key_event;
+
+    sendProtobuf(snapshot.browser_fd, &wrapper) catch |err| {
+        log.warn("KeyEvent send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
+        return false;
+    };
+    log.info(
+        "KeyEvent: pane_id={s} tab_id={} type={s} windows_key_code={} utf8_len={} modifiers={}",
+        .{ snapshot.paneId(), snapshot.tab_id, event_type, windows_key_code, utf8.len, modifiers },
+    );
+    return true;
+}
+
+pub fn forwardMouseEvent(
+    pane_id: []const u8,
+    event_type: []const u8,
+    button: []const u8,
+    x: f64,
+    y: f64,
+    click_count: i64,
+    modifiers: u64,
+) bool {
+    const snapshot = snapshotBrowserInput(pane_id, false) orelse return false;
+
+    var mouse_event: c.Termsurf__MouseEvent = undefined;
+    c.termsurf__mouse_event__init(&mouse_event);
+    mouse_event.tab_id = snapshot.tab_id;
+    mouse_event.type = @constCast(event_type.ptr);
+    mouse_event.button = @constCast(button.ptr);
+    mouse_event.x = x;
+    mouse_event.y = y;
+    mouse_event.click_count = click_count;
+    mouse_event.modifiers = modifiers;
+
+    var wrapper: c.Termsurf__TermSurfMessage = undefined;
+    c.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = c.TERMSURF__TERM_SURF_MESSAGE__MSG_MOUSE_EVENT;
+    wrapper.unnamed_0.mouse_event = &mouse_event;
+
+    sendProtobuf(snapshot.browser_fd, &wrapper) catch |err| {
+        log.warn("MouseEvent send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
+        return false;
+    };
+    log.info(
+        "MouseEvent: pane_id={s} tab_id={} type={s} button={s} x={d:.2} y={d:.2} click_count={} modifiers={}",
+        .{ snapshot.paneId(), snapshot.tab_id, event_type, button, x, y, click_count, modifiers },
+    );
+    return true;
+}
+
+pub fn forwardMouseMove(
+    pane_id: []const u8,
+    x: f64,
+    y: f64,
+    modifiers: u64,
+) bool {
+    const snapshot = snapshotBrowserInput(pane_id, false) orelse return false;
+
+    var mouse_move: c.Termsurf__MouseMove = undefined;
+    c.termsurf__mouse_move__init(&mouse_move);
+    mouse_move.tab_id = snapshot.tab_id;
+    mouse_move.x = x;
+    mouse_move.y = y;
+    mouse_move.modifiers = modifiers;
+
+    var wrapper: c.Termsurf__TermSurfMessage = undefined;
+    c.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = c.TERMSURF__TERM_SURF_MESSAGE__MSG_MOUSE_MOVE;
+    wrapper.unnamed_0.mouse_move = &mouse_move;
+
+    sendProtobuf(snapshot.browser_fd, &wrapper) catch |err| {
+        log.warn("MouseMove send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
+        return false;
+    };
+    log.info(
+        "MouseMove: pane_id={s} tab_id={} x={d:.2} y={d:.2} modifiers={}",
+        .{ snapshot.paneId(), snapshot.tab_id, x, y, modifiers },
+    );
+    return true;
+}
+
+pub fn forwardScrollEvent(
+    pane_id: []const u8,
+    x: f64,
+    y: f64,
+    delta_x: f64,
+    delta_y: f64,
+    phase: u64,
+    momentum_phase: u64,
+    precise: bool,
+    modifiers: u64,
+) bool {
+    const snapshot = snapshotBrowserInput(pane_id, false) orelse return false;
+
+    var scroll_event: c.Termsurf__ScrollEvent = undefined;
+    c.termsurf__scroll_event__init(&scroll_event);
+    scroll_event.tab_id = snapshot.tab_id;
+    scroll_event.x = x;
+    scroll_event.y = y;
+    scroll_event.delta_x = delta_x;
+    scroll_event.delta_y = delta_y;
+    scroll_event.phase = phase;
+    scroll_event.momentum_phase = momentum_phase;
+    scroll_event.precise = if (precise) 1 else 0;
+    scroll_event.modifiers = modifiers;
+
+    var wrapper: c.Termsurf__TermSurfMessage = undefined;
+    c.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = c.TERMSURF__TERM_SURF_MESSAGE__MSG_SCROLL_EVENT;
+    wrapper.unnamed_0.scroll_event = &scroll_event;
+
+    sendProtobuf(snapshot.browser_fd, &wrapper) catch |err| {
+        log.warn("ScrollEvent send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
+        return false;
+    };
+    log.info(
+        "ScrollEvent: pane_id={s} tab_id={} x={d:.2} y={d:.2} delta_x={d:.2} delta_y={d:.2} phase={} momentum_phase={} precise={} modifiers={}",
+        .{ snapshot.paneId(), snapshot.tab_id, x, y, delta_x, delta_y, phase, momentum_phase, precise, modifiers },
+    );
+    return true;
+}
+
+fn snapshotBrowserInput(pane_id: []const u8, require_browsing: bool) ?BrowserInputSnapshot {
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    const pane_index = findPane(pane_id) orelse return null;
+    const pane = &panes[pane_index];
+    if (pane.inspected_tab_id != 0) return null;
+    if (require_browsing and !pane.browsing) return null;
+    if (pane.tab_id == 0) return null;
+    const server_index = findServer(pane.profileName(), pane.browserName()) orelse return null;
+    if (servers[server_index].attached_fd < 0) return null;
+
+    var snapshot: BrowserInputSnapshot = .{
+        .browser_fd = servers[server_index].attached_fd,
+        .tab_id = pane.tab_id,
+    };
+    if (!copyText(&snapshot.pane_id, &snapshot.pane_id_len, pane.paneId())) return null;
+    return snapshot;
 }
 
 fn sendCloseTab(snapshot: *const CloseTabSnapshot) !void {

@@ -242,6 +242,8 @@ extension Ghostty {
         private var termsurfOverlayPositioningLayer: CALayer?
         private var termsurfOverlayHostLayer: CALayer?
         private var termsurfOverlayContextID: UInt64 = 0
+        private var termsurfOverlayFrame: CGRect?
+        private var termsurfPressedBrowserKeys: Set<UInt16> = []
 
         // This is the title from the terminal. This is nil if we're currently using
         // the terminal title as the main title property. If the title is set manually
@@ -506,6 +508,7 @@ extension Ghostty {
                 return layer
             }()
             positioning.frame = frame
+            termsurfOverlayFrame = frame
 
             if termsurfOverlayHostLayer == nil || termsurfOverlayContextID != contextID {
                 termsurfOverlayHostLayer?.removeFromSuperlayer()
@@ -540,6 +543,8 @@ extension Ghostty {
             termsurfOverlayPositioningLayer = nil
             termsurfOverlayRootLayer = nil
             termsurfOverlayContextID = 0
+            termsurfOverlayFrame = nil
+            termsurfPressedBrowserKeys.removeAll()
             AppDelegate.logger.info("TermSurf overlay cleared pane_id=\(self.id.uuidString)")
             fputs("TermSurf overlay cleared pane_id=\(self.id.uuidString)\n", stderr)
         }
@@ -983,6 +988,11 @@ extension Ghostty {
         }
 
         override func mouseDown(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "down", button: "left") {
+                window?.makeFirstResponder(self)
+                return
+            }
+
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
@@ -999,6 +1009,10 @@ extension Ghostty {
             // Always reset our pressure when the mouse goes up
             prevPressureStage = 0
 
+            if forwardTermSurfMouseEvent(event, type: "up", button: "left") {
+                return
+            }
+
             // If we have an active surface, report the event
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
@@ -1009,6 +1023,10 @@ extension Ghostty {
         }
 
         override func otherMouseDown(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "down", button: termSurfMouseButton(event)) {
+                return
+            }
+
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             let button = Ghostty.Input.MouseButton(fromNSEventButtonNumber: event.buttonNumber)
@@ -1016,6 +1034,10 @@ extension Ghostty {
         }
 
         override func otherMouseUp(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "up", button: termSurfMouseButton(event)) {
+                return
+            }
+
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             let button = Ghostty.Input.MouseButton(fromNSEventButtonNumber: event.buttonNumber)
@@ -1023,6 +1045,10 @@ extension Ghostty {
         }
 
         override func rightMouseDown(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "down", button: "right") {
+                return
+            }
+
             guard let surface = self.surface else { return super.rightMouseDown(with: event) }
 
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
@@ -1041,6 +1067,10 @@ extension Ghostty {
         }
 
         override func rightMouseUp(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "up", button: "right") {
+                return
+            }
+
             guard let surface = self.surface else { return super.rightMouseUp(with: event) }
 
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
@@ -1104,6 +1134,10 @@ extension Ghostty {
             let pos = self.convert(event.locationInWindow, from: nil)
             mouseLocationInSurface = pos
 
+            if forwardTermSurfMouseMove(event) {
+                return
+            }
+
             guard let surfaceModel else { return }
 
             // Convert window position to view position. Note (0, 0) is bottom left.
@@ -1138,6 +1172,10 @@ extension Ghostty {
         }
 
         override func scrollWheel(with event: NSEvent) {
+            if forwardTermSurfScrollEvent(event) {
+                return
+            }
+
             guard let surfaceModel else { return }
 
             var x = event.scrollingDeltaX
@@ -1181,6 +1219,10 @@ extension Ghostty {
         }
 
         override func keyDown(with event: NSEvent) {
+            if forwardTermSurfKeyDown(event) {
+                return
+            }
+
             guard let surface = self.surface else {
                 self.interpretKeyEvents([event])
                 return
@@ -1303,6 +1345,10 @@ extension Ghostty {
         }
 
         override func keyUp(with event: NSEvent) {
+            if forwardTermSurfKeyUp(event) {
+                return
+            }
+
             _ = keyAction(GHOSTTY_ACTION_RELEASE, event: event)
         }
 
@@ -1503,6 +1549,257 @@ extension Ghostty {
             }
 
             _ = keyAction(action, event: event)
+        }
+
+        private struct TermSurfOverlayPoint {
+            let x: Double
+            let y: Double
+        }
+
+        private func termSurfOverlayPoint(for event: NSEvent) -> TermSurfOverlayPoint? {
+            guard let overlayFrame = termsurfOverlayFrame else { return nil }
+
+            let viewPoint = convert(event.locationInWindow, from: nil)
+            let topOriginPoint = CGPoint(x: viewPoint.x, y: bounds.height - viewPoint.y)
+            let hit = overlayFrame.contains(topOriginPoint)
+            if ProcessInfo.processInfo.environment["TERMSURF_INPUT_TRACE"] == "1" {
+                fputs(
+                    "TermSurf input hit_test pane_id=\(id.uuidString) event=\(event.type.rawValue) view=\(NSStringFromPoint(viewPoint)) top=\(NSStringFromPoint(topOriginPoint)) overlay=\(NSStringFromRect(overlayFrame)) hit=\(hit)\n",
+                    stderr)
+            }
+            guard hit else { return nil }
+
+            return TermSurfOverlayPoint(
+                x: Double(topOriginPoint.x - overlayFrame.minX),
+                y: Double(topOriginPoint.y - overlayFrame.minY))
+        }
+
+        private func forwardTermSurfKeyDown(_ event: NSEvent) -> Bool {
+            let type: String
+            if event.isARepeat || termsurfPressedBrowserKeys.contains(event.keyCode) {
+                type = "repeat"
+            } else {
+                type = "down"
+            }
+            let forwarded = forwardTermSurfKeyEvent(event, type: type)
+            if forwarded {
+                termsurfPressedBrowserKeys.insert(event.keyCode)
+            }
+            return forwarded
+        }
+
+        private func forwardTermSurfKeyUp(_ event: NSEvent) -> Bool {
+            let forwarded = forwardTermSurfKeyEvent(event, type: "up")
+            if forwarded {
+                termsurfPressedBrowserKeys.remove(event.keyCode)
+            }
+            return forwarded
+        }
+
+        private func forwardTermSurfKeyEvent(_ event: NSEvent, type: String) -> Bool {
+            let windowsKeyCode = termSurfWindowsKeyCode(for: event)
+            guard windowsKeyCode != 0 else { return false }
+
+            let text = type == "up" ? "" : event.characters ?? ""
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags)
+
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                type.withCString { typePointer in
+                    text.withCString { textPointer in
+                        termsurf_forward_key_event(
+                            paneIDPointer,
+                            typePointer,
+                            Int64(windowsKeyCode),
+                            textPointer,
+                            modifiers)
+                    }
+                }
+            }
+
+            return forwarded != 0
+        }
+
+        private func forwardTermSurfMouseEvent(
+            _ event: NSEvent,
+            type: String,
+            button: String
+        ) -> Bool {
+            guard let point = termSurfOverlayPoint(for: event) else { return false }
+
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags, pressedButtons: true)
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                type.withCString { typePointer in
+                    button.withCString { buttonPointer in
+                        termsurf_forward_mouse_event(
+                            paneIDPointer,
+                            typePointer,
+                            buttonPointer,
+                            point.x,
+                            point.y,
+                            Int64(max(event.clickCount, 1)),
+                            modifiers)
+                    }
+                }
+            }
+
+            return forwarded != 0
+        }
+
+        private func forwardTermSurfMouseMove(_ event: NSEvent) -> Bool {
+            guard let point = termSurfOverlayPoint(for: event) else { return false }
+
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags, pressedButtons: true)
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                termsurf_forward_mouse_move(
+                    paneIDPointer,
+                    point.x,
+                    point.y,
+                    modifiers)
+            }
+
+            return forwarded != 0
+        }
+
+        private func forwardTermSurfScrollEvent(_ event: NSEvent) -> Bool {
+            guard let point = termSurfOverlayPoint(for: event) else { return false }
+
+            var deltaX = event.scrollingDeltaX
+            var deltaY = event.scrollingDeltaY
+            let precise = event.hasPreciseScrollingDeltas
+            if precise {
+                deltaX *= 2
+                deltaY *= 2
+            }
+
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags)
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                termsurf_forward_scroll_event(
+                    paneIDPointer,
+                    point.x,
+                    point.y,
+                    deltaX,
+                    deltaY,
+                    UInt64(event.phase.rawValue),
+                    UInt64(event.momentumPhase.rawValue),
+                    precise,
+                    modifiers)
+            }
+
+            return forwarded != 0
+        }
+
+        private func termSurfMouseButton(_ event: NSEvent) -> String {
+            switch event.buttonNumber {
+            case 1:
+                return "right"
+            case 2:
+                return "middle"
+            default:
+                return "left"
+            }
+        }
+
+        private func termSurfModifiers(
+            _ flags: NSEvent.ModifierFlags,
+            pressedButtons: Bool = false
+        ) -> UInt64 {
+            var modifiers: UInt64 = 0
+            if flags.contains(.shift) { modifiers |= 1 }
+            if flags.contains(.control) { modifiers |= 2 }
+            if flags.contains(.option) { modifiers |= 4 }
+            if flags.contains(.command) { modifiers |= 8 }
+
+            guard pressedButtons else { return modifiers }
+
+            let buttons = NSEvent.pressedMouseButtons
+            if buttons & (1 << 0) != 0 { modifiers |= 64 }
+            if buttons & (1 << 1) != 0 { modifiers |= 256 }
+            if buttons & (1 << 2) != 0 { modifiers |= 128 }
+            return modifiers
+        }
+
+        private func termSurfWindowsKeyCode(for event: NSEvent) -> UInt32 {
+            switch event.keyCode {
+            case 0x00: return 0x41
+            case 0x0B: return 0x42
+            case 0x08: return 0x43
+            case 0x02: return 0x44
+            case 0x0E: return 0x45
+            case 0x03: return 0x46
+            case 0x05: return 0x47
+            case 0x04: return 0x48
+            case 0x22: return 0x49
+            case 0x26: return 0x4A
+            case 0x28: return 0x4B
+            case 0x25: return 0x4C
+            case 0x2E: return 0x4D
+            case 0x2D: return 0x4E
+            case 0x1F: return 0x4F
+            case 0x23: return 0x50
+            case 0x0C: return 0x51
+            case 0x0F: return 0x52
+            case 0x01: return 0x53
+            case 0x11: return 0x54
+            case 0x20: return 0x55
+            case 0x09: return 0x56
+            case 0x0D: return 0x57
+            case 0x07: return 0x58
+            case 0x10: return 0x59
+            case 0x06: return 0x5A
+            case 0x1D: return 0x30
+            case 0x12: return 0x31
+            case 0x13: return 0x32
+            case 0x14: return 0x33
+            case 0x15: return 0x34
+            case 0x17: return 0x35
+            case 0x16: return 0x36
+            case 0x1A: return 0x37
+            case 0x1C: return 0x38
+            case 0x19: return 0x39
+            case 0x24, 0x4C: return 0x0D
+            case 0x30: return 0x09
+            case 0x33: return 0x08
+            case 0x35: return 0x1B
+            case 0x31: return 0x20
+            case 0x75: return 0x2E
+            case 0x7E: return 0x26
+            case 0x7D: return 0x28
+            case 0x7B: return 0x25
+            case 0x7C: return 0x27
+            case 0x73: return 0x24
+            case 0x77: return 0x23
+            case 0x74: return 0x21
+            case 0x79: return 0x22
+            case 0x72: return 0x2D
+            case 0x7A: return 0x70
+            case 0x78: return 0x71
+            case 0x63: return 0x72
+            case 0x76: return 0x73
+            case 0x60: return 0x74
+            case 0x61: return 0x75
+            case 0x62: return 0x76
+            case 0x64: return 0x77
+            case 0x65: return 0x78
+            case 0x6D: return 0x79
+            case 0x67: return 0x7A
+            case 0x6F: return 0x7B
+            case 0x29: return 0xBA
+            case 0x18: return 0xBB
+            case 0x2B: return 0xBC
+            case 0x1B: return 0xBD
+            case 0x2F: return 0xBE
+            case 0x2C: return 0xBF
+            case 0x32: return 0xC0
+            case 0x21: return 0xDB
+            case 0x2A: return 0xDC
+            case 0x1E: return 0xDD
+            case 0x27: return 0xDE
+            default: return 0
+            }
         }
 
         private func keyAction(

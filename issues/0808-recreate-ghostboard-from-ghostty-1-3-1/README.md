@@ -268,4 +268,4 @@ and against `ghostboard-legacy/` where useful.
 - [Experiment 31: Present the normal Roamium overlay](31-present-normal-roamium-overlay.md)
   — **Pass**
 - [Experiment 32: Forward normal browser input](32-forward-normal-browser-input.md)
-  — **Designed**
+  — **Pass**

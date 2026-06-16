@@ -169,6 +169,80 @@ pub export fn termsurf_ipc_stop() void {
     termsurf.stop();
 }
 
+pub export fn termsurf_forward_key_event(
+    pane_id: [*:0]const u8,
+    event_type: [*:0]const u8,
+    windows_key_code: i64,
+    utf8: [*:0]const u8,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardKeyEvent(
+        std.mem.span(pane_id),
+        std.mem.span(event_type),
+        windows_key_code,
+        std.mem.span(utf8),
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_forward_mouse_event(
+    pane_id: [*:0]const u8,
+    event_type: [*:0]const u8,
+    button: [*:0]const u8,
+    x: f64,
+    y: f64,
+    click_count: i64,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardMouseEvent(
+        std.mem.span(pane_id),
+        std.mem.span(event_type),
+        std.mem.span(button),
+        x,
+        y,
+        click_count,
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_forward_mouse_move(
+    pane_id: [*:0]const u8,
+    x: f64,
+    y: f64,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardMouseMove(
+        std.mem.span(pane_id),
+        x,
+        y,
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_forward_scroll_event(
+    pane_id: [*:0]const u8,
+    x: f64,
+    y: f64,
+    delta_x: f64,
+    delta_y: f64,
+    phase: u64,
+    momentum_phase: u64,
+    precise: bool,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardScrollEvent(
+        std.mem.span(pane_id),
+        x,
+        y,
+        delta_x,
+        delta_y,
+        phase,
+        momentum_phase,
+        precise,
+        modifiers,
+    )) 1 else 0;
+}
+
 test "ghostty_string_s empty string" {
     const testing = std.testing;
     const empty_string = String.empty;
