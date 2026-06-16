@@ -195,3 +195,5 @@ and against `ghostboard-legacy/` where useful.
   — **Partial**
 - [Experiment 3: Fix pristine macOS app link](03-fix-pristine-macos-app-link.md)
   — **Fail**
+- [Experiment 4: Reproduce the upstream macOS baseline](04-reproduce-upstream-macos-baseline.md)
+  — **Designed**
