@@ -277,3 +277,5 @@ and against `ghostboard-legacy/` where useful.
   **Fail**
 - [Experiment 36: Fix and install helper CLI](36-fix-and-install-helper-cli.md)
   — **Pass**
+- [Experiment 37: Closeout acceptance audit](37-closeout-acceptance-audit.md) —
+  **Designed**
