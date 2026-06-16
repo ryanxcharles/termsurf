@@ -126,3 +126,91 @@ real `/Users/astrohacker/dev/termsurf/target/debug/roamium` binary rather than a
 fake helper or installed browser, the lifecycle proof covers spawn arguments,
 `ServerRegister`, `CreateTab`, `TabReady`, `BrowserReady`, direct browser socket
 connection, query visibility, process cleanup, and the required hygiene checks.
+
+## Result
+
+**Result:** Fail
+
+The experiment failed because the designed browser path
+`/Users/astrohacker/dev/termsurf/target/debug/roamium` is not a runnable
+Chromium resource layout on macOS.
+
+Verification completed:
+
+- Real `webtui` debug build passed:
+  `logs/ghostboard-exp29-cargo-build-webtui-20260616.log`.
+- Real `roamium` Cargo build passed:
+  `logs/ghostboard-exp29-cargo-build-roamium-20260616.log`.
+- No Rust source files were modified, so `cargo fmt` was not required.
+- No Zig source files were modified, so `zig fmt` and the native GhosttyKit
+  framework rebuild were not required.
+- No Swift source files were modified, so `swiftlint` was not required.
+- macOS app build passed:
+  `logs/ghostboard-exp29-macos-build-debug-20260616.log`.
+- Runtime harness failed: `logs/ghostboard-exp29-runtime-harness-20260616.log`.
+- Runtime app log: `logs/ghostboard-exp29-runtime-app-20260616.log`.
+- `git diff --check` passed.
+
+Observed runtime failure:
+
+```text
+saw_spawn: True
+saw_server_register: False
+saw_tab_ready: False
+saw_browser_ready: False
+saw_resource_error: True
+runtime verification failed: target/debug/roamium did not complete lifecycle
+exit_status: 1
+```
+
+The app log proves Ghostboard did launch exactly the browser path required by
+this experiment:
+
+```text
+spawned browser path=/Users/astrohacker/dev/termsurf/target/debug/roamium pid=82937 profile=default listen_socket=/var/folders/.../termsurf/roamium-82933-default.sock
+```
+
+Roamium then failed before connecting back to the Ghostboard GUI socket:
+
+```text
+icudtl.dat not found in bundle
+Invalid file descriptor to ICU data received.
+```
+
+This is not evidence that Ghostboard cannot launch Roamium. It is evidence that
+the experiment picked the wrong runnable path. The established TermSurf build
+script does not run Roamium from `target/debug/roamium` directly; it copies the
+Cargo-built binary into Chromium's output directory:
+
+```text
+cp "$REPO_DIR/target/debug/roamium" "$CHROMIUM_OUT/roamium"
+```
+
+That `chromium/src/out/Default/` directory contains the Chromium runtime
+resources Roamium needs, including `icudtl.dat`, `.pak` files, and
+`libtermsurf_chromium.dylib`.
+
+## Conclusion
+
+Experiment 29 eliminated `target/debug/roamium` as the correct runtime browser
+path for this issue. The next experiment should use the established repo-built
+Roamium layout by running `./scripts/build.sh roamium` and launching
+`/Users/astrohacker/dev/termsurf/chromium/src/out/Default/roamium`.
+
+This preserves the important requirement that Ghostboard use a repo-built
+Roamium binary without modifying `webtui`, `roamium`, Chromium, or the protocol.
+
+## Completion Review
+
+A fresh-context adversarial Codex subagent reviewed the completed Experiment 29
+result and returned **APPROVED** with no findings.
+
+The reviewer confirmed that the working tree contained only the expected issue
+markdown updates, the README marks Experiment 29 as **Fail**, the experiment has
+Result and Conclusion sections, the runtime logs prove Ghostboard launched
+`/Users/astrohacker/dev/termsurf/target/debug/roamium`, the runtime logs prove
+Roamium failed before lifecycle completion with missing Chromium resources, the
+build logs show `cargo build -p webtui`, `cargo build -p roamium`, and the macOS
+app build all exited 0, `git diff --check` is clean, and the next-experiment
+conclusion is technically supported by `scripts/build.sh` copying
+`target/debug/roamium` into `chromium/src/out/Default/roamium`.
