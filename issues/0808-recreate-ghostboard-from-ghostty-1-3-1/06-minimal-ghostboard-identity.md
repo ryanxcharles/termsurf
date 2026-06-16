@@ -182,3 +182,9 @@ Required findings accepted and fixed:
   deterministic built-bundle icon comparison.
 
 Focused re-review returned `APPROVED` with no remaining required findings.
+
+After the user clarified that this experiment must not install or emit a
+standalone CLI, the design was corrected to scope `termsurf` to the app bundle
+executable only. A second focused re-review returned `APPROVED` with no required
+findings and confirmed this does not conflict with Issue 808's eventual
+standalone CLI requirement.
