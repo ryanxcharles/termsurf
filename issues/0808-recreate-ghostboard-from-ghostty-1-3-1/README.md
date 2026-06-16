@@ -253,3 +253,5 @@ and against `ghostboard-legacy/` where useful.
   — **Pass**
 - [Experiment 24: Close browser tab on TUI disconnect](24-close-tab-on-tui-disconnect.md)
   — **Pass**
+- [Experiment 25: Create DevTools browser tabs](25-create-devtools-browser-tabs.md)
+  — **Designed**
