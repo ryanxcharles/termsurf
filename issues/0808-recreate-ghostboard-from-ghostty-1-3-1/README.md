@@ -71,8 +71,19 @@ the subtree merge strategy is unreliable for this repo's Ghostty history.
 ## Scope
 
 Before any Ghostboard porting modifications begin, the imported Ghostty `v1.3.1`
-tree must build and run on macOS without errors as plain upstream Ghostty. Until
-that baseline is proven:
+tree must build and run on macOS without errors. Experiments 2 through 4 proved
+that a pristine build does not work on this VM's current Zig/Xcode/macOS SDK
+combination, even though the environment has the documented Ghostty
+dependencies.
+
+Experiment 5 established the local baseline with two build-only deviations:
+
+- build only the native macOS `GhosttyKit` slice instead of constructing iOS and
+  iOS-simulator slices for the local app build;
+- backport Ghostty's later Darwin `libtool` archive-normalization fix so newer
+  Xcode does not drop static archive members while building `libghostty-fat.a`.
+
+Until that build-only baseline is proven:
 
 - make zero source changes under `ghostboard/`;
 - do not change branding, config paths, CLI names, icons, protocol code, build
@@ -81,8 +92,12 @@ that baseline is proven:
   cache, permission, or invocation issues;
 - fix failures by fixing the environment or the build invocation, not by
   modifying imported Ghostty code;
-- only begin Ghostboard-specific modifications after the pristine macOS build
-  and launch are verified and recorded in an experiment.
+- only begin Ghostboard-specific modifications after the macOS build and launch
+  baseline is verified and recorded in an experiment.
+
+After Experiment 5, Ghostboard-specific modifications may begin, but the
+build-only deviations must remain clearly separated from app/runtime, branding,
+config, CLI, icon, protocol, `webtui`, and `roamium` changes.
 
 In scope:
 
@@ -161,8 +176,9 @@ The issue is solved when:
 
 - `ghostboard/` exists as a subtree import of Ghostty `v1.3.1`.
 - The import preserves upstream Ghostty history.
-- Before any Ghostboard-specific code changes, pristine imported Ghostty
-  `v1.3.1` builds and runs on macOS without errors.
+- Before any Ghostboard-specific code changes, imported Ghostty `v1.3.1` builds
+  and runs on macOS without errors, with any required build-only deviations
+  explicitly documented.
 - The app builds in the local development environment.
 - The app can be launched as `TermSurf Ghostboard`.
 - The CLI command is `ghostboard`.
@@ -198,4 +214,4 @@ and against `ghostboard-legacy/` where useful.
 - [Experiment 4: Reproduce the upstream macOS baseline](04-reproduce-upstream-macos-baseline.md)
   — **Fail**
 - [Experiment 5: Apply the macOS-only GhosttyKit build patch](05-apply-macos-only-ghosttykit-build-patch.md)
-  — **Designed**
+  — **Pass**
