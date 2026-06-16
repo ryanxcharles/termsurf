@@ -90,4 +90,4 @@ committed.
 ## Experiments
 
 - [Experiment 1: Restore the archived directory](01-restore-archived-directory.md)
-  — **Designed**
+  — **Pass**
