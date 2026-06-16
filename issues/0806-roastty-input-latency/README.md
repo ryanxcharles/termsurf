@@ -78,3 +78,8 @@ instance, inject minimal keyboard input or write through the same path used by
 the GUI, observe terminal output, and fail if the round trip exceeds a generous
 CI/VM-safe timeout. Broader Ghostty parity testing belongs in separate parity
 work.
+
+## Experiments
+
+- [Experiment 1: Measure live input latency](01-measure-live-input-latency.md) —
+  **Designed**
