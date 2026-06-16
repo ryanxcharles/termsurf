@@ -261,3 +261,5 @@ and against `ghostboard-legacy/` where useful.
   — **Pass**
 - [Experiment 28: Validate webtui DevTools flow](28-validate-webtui-devtools-flow.md)
   — **Pass**
+- [Experiment 29: Validate Roamium normal tab lifecycle](29-validate-roamium-normal-tab-lifecycle.md)
+  — **Designed**
