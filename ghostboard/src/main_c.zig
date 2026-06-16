@@ -15,6 +15,7 @@ const build_config = @import("build_config.zig");
 const main = @import("main_ghostty.zig");
 const state = &@import("global.zig").state;
 const apprt = @import("apprt.zig");
+const termsurf = @import("apprt/termsurf.zig");
 const internal_os = @import("os/main.zig");
 
 // Some comptime assertions that our C API depends on.
@@ -154,6 +155,18 @@ pub export fn ghostty_translate(msgid: [*:0]const u8) [*:0]const u8 {
 /// Free a string allocated by Ghostty.
 pub export fn ghostty_string_free(str: String) void {
     str.deinit();
+}
+
+pub export fn termsurf_ipc_start() c_int {
+    termsurf.start() catch |err| {
+        std.log.err("failed to start TermSurf socket error={}", .{err});
+        return 1;
+    };
+    return 0;
+}
+
+pub export fn termsurf_ipc_stop() void {
+    termsurf.stop();
 }
 
 test "ghostty_string_s empty string" {

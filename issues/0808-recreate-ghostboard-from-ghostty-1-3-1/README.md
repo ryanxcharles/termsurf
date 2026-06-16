@@ -221,4 +221,4 @@ and against `ghostboard-legacy/` where useful.
 - [Experiment 6: Establish minimal TermSurf identity](06-minimal-ghostboard-identity.md)
   — **Pass**
 - [Experiment 7: Start the TermSurf GUI socket](07-start-termsurf-gui-socket.md)
-  — **Designed**
+  — **Pass**

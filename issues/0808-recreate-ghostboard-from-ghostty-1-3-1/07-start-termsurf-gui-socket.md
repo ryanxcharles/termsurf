@@ -169,3 +169,122 @@ Optional finding accepted and fixed:
   created and names the initial automatically opened window in verification.
 
 Re-review returned `APPROVED` with no remaining required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented a minimal TermSurf GUI socket for the macOS app:
+
+- `ghostboard/src/apprt/termsurf.zig` starts a PID-scoped Unix socket under
+  `$TMPDIR/termsurf/`, sets `TERMSURF_SOCKET` only after `listen()` succeeds,
+  accepts local clients, and removes the socket during shutdown.
+- `ghostboard/src/main_c.zig` exports `termsurf_ipc_start()` and
+  `termsurf_ipc_stop()` through the existing C ABI boundary.
+- `ghostboard/include/ghostty.h` declares the two new C-callable hooks.
+- `ghostboard/macos/Sources/App/macOS/AppDelegate.swift` starts the listener in
+  `applicationWillFinishLaunching`, before the first terminal window can be
+  created, and stops it on application termination. It also registers a
+  deterministic SIGTERM shutdown path for automation.
+
+Two runtime failures shaped the final placement:
+
+- Starting the listener in `applicationDidFinishLaunching` was too late. The
+  first terminal command could start from `applicationDidBecomeActive` before
+  the socket existed, so the child inherited an empty `TERMSURF_SOCKET`.
+- A main-queue SIGTERM `DispatchSource` did not fire reliably in this VM launch
+  path. Moving SIGTERM handling to a global queue and exiting after
+  `termsurf_ipc_stop()` made automated cleanup deterministic.
+
+Verification performed:
+
+- `zig fmt src/apprt/termsurf.zig src/main_c.zig` passed.
+- `swiftlint lint --strict --fix` and `swiftlint lint --strict` passed with zero
+  violations.
+- Native GhosttyKit framework build passed:
+  `logs/ghostboard-exp7-zig-native-xcframework-20260616-final-command.log`.
+- macOS app build passed:
+  `logs/ghostboard-exp7-macos-build-debug-20260616-after-global-sigterm.log`.
+- Runtime verification passed:
+  `logs/ghostboard-exp7-runtime-harness-20260616-084855.log`. The app's stderr
+  log for that run is `logs/ghostboard-exp7-runtime-app-20260616-084855.log`.
+
+The successful runtime check launched:
+
+```bash
+GHOSTTY_CONFIG_PATH="$config" GHOSTTY_LOG=stderr \
+  ghostboard/macos/build/Debug/TermSurf.app/Contents/MacOS/termsurf
+```
+
+with a temporary `initial-command` shell script inside the first terminal
+session. That child wrote its inherited `TERMSURF_SOCKET`, connected to that
+same socket, then slept while the test terminated the app with SIGTERM.
+
+Observed successful runtime output:
+
+```text
+runtime verification passed
+app pid: 47390
+child env: /var/folders/vx/wbmx10nd7tx8259xgg3v4vf80000gn/T/termsurf/termsurf-ghostboard-47390.sock
+child connect: /var/folders/vx/wbmx10nd7tx8259xgg3v4vf80000gn/T/termsurf/termsurf-ghostboard-47390.sock
+PASS: child env/connect paths match
+PASS: socket path is under TMPDIR/termsurf and has expected name
+PASS: socket path includes app pid
+PASS: socket exists while app is running
+PASS: app log contains listener line
+PASS: app log contains accepted client line
+PASS: app exited after SIGTERM
+PASS: socket file removed after shutdown
+info(termsurf): TermSurf socket listening on /var/folders/vx/wbmx10nd7tx8259xgg3v4vf80000gn/T/termsurf/termsurf-ghostboard-47390.sock
+info(termsurf): TermSurf client connected fd=13
+```
+
+After SIGTERM, the app process was gone and the socket file no longer existed.
+Follow-up checks found no leftover `TermSurf.app/Contents/MacOS/termsurf`
+processes and no stale `termsurf-ghostboard-*.sock` files.
+
+Scope check:
+
+- No protobuf dispatch was added.
+- No browser engine launch or supervision was added.
+- No overlay rendering was added.
+- No keyboard or mouse forwarding was changed.
+- `webtui` and `roamium` were not modified.
+- No standalone CLI install or emit behavior was changed.
+
+## Result Review
+
+Fresh-context adversarial result review initially returned `CHANGES REQUIRED`.
+
+Required finding accepted and fixed:
+
+- The experiment cited the app stderr log as runtime proof, but that log only
+  contained the listener and accepted-client lines. It did not preserve the
+  harness assertions proving child environment inheritance, matching child
+  connection path, process exit, and socket cleanup. I reran runtime
+  verification with the harness output captured in
+  `logs/ghostboard-exp7-runtime-harness-20260616-084855.log` and updated this
+  result to cite that evidence.
+
+Optional finding accepted and fixed:
+
+- The original native framework build log was empty because the command
+  succeeded silently. I reran it with the command and exit status captured in
+  `logs/ghostboard-exp7-zig-native-xcframework-20260616-final-command.log`.
+
+Re-review returned `APPROVED`. The reviewer confirmed the required evidence gap
+was resolved by `logs/ghostboard-exp7-runtime-harness-20260616-084855.log`, the
+native framework build evidence was resolved by
+`logs/ghostboard-exp7-zig-native-xcframework-20260616-final-command.log`, no new
+required findings were introduced, `git diff --check` was clean, and the result
+commit had not yet been made.
+
+## Conclusion
+
+Ghostboard now exposes the first required TermSurf GUI discovery surface:
+terminal sessions launched by `TermSurf.app` inherit a live `TERMSURF_SOCKET`
+that accepts local client connections and is cleaned up on controlled shutdown.
+
+The next experiment can build on this by adding protobuf framing and a minimal
+diagnostic/handshake read path, still without launching Roamium or rendering
+browser overlays.
