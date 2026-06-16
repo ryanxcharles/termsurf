@@ -304,7 +304,7 @@ fn handleClient(fd: std.posix.fd_t, slot_index: usize) void {
                             .{ query.*.pane_id, query.*.profile },
                         );
                     }
-                    sendQueryTabsReply(fd) catch |err| {
+                    sendQueryTabsReply(fd, req) catch |err| {
                         log.warn("TermSurf QueryTabsReply failed fd={} err={}", .{ fd, err });
                         return;
                     };
@@ -558,9 +558,10 @@ fn sendQueryDevtoolsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryDevtoolsRe
     log.info("TermSurf QueryDevtoolsReply sent", .{});
 }
 
-fn sendQueryTabsReply(fd: std.posix.fd_t) !void {
+fn sendQueryTabsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryTabsRequest) !void {
     var reply: c.Termsurf__QueryTabsReply = undefined;
     c.termsurf__query_tabs_reply__init(&reply);
+    reply.gui_panes = countQueryTabsGuiPanes(req);
 
     var wrapper: c.Termsurf__TermSurfMessage = undefined;
     c.termsurf__term_surf_message__init(&wrapper);
@@ -569,6 +570,25 @@ fn sendQueryTabsReply(fd: std.posix.fd_t) !void {
 
     try sendProtobuf(fd, &wrapper);
     log.info("TermSurf QueryTabsReply sent", .{});
+}
+
+fn countQueryTabsGuiPanes(req: ?*c.Termsurf__QueryTabsRequest) i64 {
+    const requested_profile = if (req) |query| cString(query.*.profile) else "";
+
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    var count: i64 = 0;
+    for (&panes) |*pane| {
+        if (!pane.in_use) continue;
+        if (requested_profile.len > 0 and
+            !std.mem.eql(u8, pane.profileName(), requested_profile))
+        {
+            continue;
+        }
+        count += 1;
+    }
+    return count;
 }
 
 fn handleServerRegister(fd: std.posix.fd_t, req: ?*c.Termsurf__ServerRegister) void {

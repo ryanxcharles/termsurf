@@ -93,3 +93,82 @@ The reviewer confirmed the README links Experiment 18 as `Designed`, the design
 has the required sections, the scope is narrow, the `QueryTabsRequest` plan
 matches Wezboard's GUI-pane counting behavior, and the verification criteria are
 concrete enough to prove the intended behavior and guard regressions.
+
+## Result
+
+**Result:** Pass
+
+Implemented state-backed GUI pane counting for `QueryTabsRequest` in
+`ghostboard/src/apprt/termsurf.zig`.
+
+The socket handler now passes the decoded `QueryTabsRequest` into
+`sendQueryTabsReply`. The reply helper counts `PaneState` records under the
+state mutex, applies Wezboard's profile filter semantics, and fills only
+`QueryTabsReply.gui_panes`. Chromium-side counts, tab entries, and `error`
+remain at their initialized empty values.
+
+Verification passed:
+
+- `zig fmt src/apprt/termsurf.zig src/main_c.zig src/build/SharedDeps.zig`
+  passed.
+- Native GhosttyKit framework build passed:
+  `logs/ghostboard-exp18-zig-native-xcframework-20260616-110013.log`.
+- macOS app build passed:
+  `logs/ghostboard-exp18-macos-build-debug-20260616-110034.log`.
+- Runtime harness passed:
+  `logs/ghostboard-exp18-runtime-harness-20260616-110128.log`.
+- Runtime app log: `logs/ghostboard-exp18-runtime-app-20260616-110128.log`.
+- `git diff --check` passed.
+
+Observed successful runtime checks:
+
+```text
+PASS: QueryTabs before SetOverlay returns zero default panes
+PASS: QueryTabs default counts two default panes
+PASS: QueryTabs empty profile counts all panes
+PASS: QueryTabs other profile counts one pane
+PASS: QueryTabs duplicate SetOverlay does not inflate count
+PASS: fresh TUI client received HelloReply
+PASS: app exited after SIGTERM
+PASS: socket file removed after shutdown
+PASS: no stale TermSurf process remains
+PASS: app log contains TermSurf socket listening
+PASS: app log contains QueryTabsReply sends
+PASS: app log contains duplicate pane update
+PASS: no BrowserReady emitted
+PASS: no CaContext emitted
+PASS: no overlay presentation message emitted
+PASS: no browser launch message emitted
+runtime verification passed
+```
+
+The passing harness verified that every `QueryTabsReply` kept
+`chromium_tabs = 0`, `chromium_browser = 0`, `chromium_devtools = 0`,
+`tabs = []`, and `error = ""`.
+
+## Conclusion
+
+Ghostboard now reports the GUI pane count that `webtui` expects from
+`QueryTabsRequest` after overlay state exists. This closes another synchronous
+state query gap while leaving browser-side tab inventory, browser launch,
+`BrowserReady`, CALayerHost overlay presentation, and input forwarding for later
+experiments.
+
+## Result Review
+
+Fresh-context adversarial result review returned **APPROVED** with no required
+findings.
+
+The reviewer confirmed:
+
+- the diff is limited to `ghostboard/src/apprt/termsurf.zig`, this experiment
+  file, and the issue README;
+- `QueryTabsRequest` now passes the decoded request into `sendQueryTabsReply`;
+- `gui_panes` is counted under `state_mutex` with the same empty-profile
+  all-panes semantics as Wezboard;
+- Chromium-side fields, `tabs`, and `error` remain protobuf-c initialized
+  defaults;
+- the native framework build, macOS app build, and runtime harness logs prove
+  the expected profile-count cases and negative checks;
+- `zig fmt --check` and `git diff --check` passed;
+- the result commit had not been made before review.

@@ -240,4 +240,4 @@ and against `ghostboard-legacy/` where useful.
 - [Experiment 17: Reply to QueryLast from state](17-query-last-from-state.md) —
   **Pass**
 - [Experiment 18: Count QueryTabs GUI panes from state](18-query-tabs-gui-pane-count.md)
-  — **Designed**
+  — **Pass**
