@@ -179,6 +179,24 @@ fn handleClient(fd: std.posix.fd_t, slot_index: usize) void {
                         return;
                     };
                 },
+                c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_DEVTOOLS_REQUEST => {
+                    const req = msg.*.unnamed_0.query_devtools_request;
+                    if (req) |query| {
+                        log.info(
+                            "TermSurf QueryDevtoolsRequest pane_id={s} inspected_tab_id={} profile={s} browser={s}",
+                            .{ query.*.pane_id, query.*.inspected_tab_id, query.*.profile, query.*.browser },
+                        );
+                        sendQueryDevtoolsReply(fd, query) catch |err| {
+                            log.warn("TermSurf QueryDevtoolsReply failed fd={} err={}", .{ fd, err });
+                            return;
+                        };
+                    } else {
+                        sendQueryDevtoolsReply(fd, null) catch |err| {
+                            log.warn("TermSurf QueryDevtoolsReply failed fd={} err={}", .{ fd, err });
+                            return;
+                        };
+                    }
+                },
                 c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_TABS_REQUEST => {
                     const req = msg.*.unnamed_0.query_tabs_request;
                     if (req) |query| {
@@ -337,6 +355,46 @@ fn sendQueryLastReply(fd: std.posix.fd_t) !void {
     log.info("TermSurf QueryLastReply sent", .{});
 }
 
+fn sendQueryDevtoolsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryDevtoolsRequest) !void {
+    var reply: c.Termsurf__QueryDevtoolsReply = undefined;
+    c.termsurf__query_devtools_reply__init(&reply);
+
+    const allocator = std.heap.c_allocator;
+    var allocated_error: ?[]u8 = null;
+    defer if (allocated_error) |err| allocator.free(err);
+
+    const error_msg: [:0]const u8 = if (req) |query| blk: {
+        if (std.mem.len(query.*.browser) == 0) {
+            break :blk "DevTools target browser is required";
+        }
+        if (std.mem.len(query.*.profile) == 0) {
+            break :blk "DevTools target profile is required";
+        }
+        if (query.*.inspected_tab_id == 0) {
+            break :blk "DevTools target tab id is required";
+        }
+        const error_len = std.fmt.count(
+            "Inspected tab {} not found in {s}/{s}",
+            .{ query.*.inspected_tab_id, query.*.browser, query.*.profile },
+        );
+        allocated_error = try allocator.alloc(u8, error_len + 1);
+        break :blk std.fmt.bufPrintZ(
+            allocated_error.?,
+            "Inspected tab {} not found in {s}/{s}",
+            .{ query.*.inspected_tab_id, query.*.browser, query.*.profile },
+        ) catch unreachable;
+    } else "DevTools target browser is required";
+    reply.@"error" = @constCast(error_msg.ptr);
+
+    var wrapper: c.Termsurf__TermSurfMessage = undefined;
+    c.termsurf__term_surf_message__init(&wrapper);
+    wrapper.msg_case = c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_DEVTOOLS_REPLY;
+    wrapper.unnamed_0.query_devtools_reply = &reply;
+
+    try sendProtobuf(fd, &wrapper);
+    log.info("TermSurf QueryDevtoolsReply sent", .{});
+}
+
 fn sendQueryTabsReply(fd: std.posix.fd_t) !void {
     var reply: c.Termsurf__QueryTabsReply = undefined;
     c.termsurf__query_tabs_reply__init(&reply);
@@ -382,6 +440,8 @@ fn msgTypeName(msg_case: c.Termsurf__TermSurfMessage__MsgCase) []const u8 {
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REPLY => "HelloReply",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_LAST_REQUEST => "QueryLastRequest",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_LAST_REPLY => "QueryLastReply",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_DEVTOOLS_REQUEST => "QueryDevtoolsRequest",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_DEVTOOLS_REPLY => "QueryDevtoolsReply",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_TABS_REQUEST => "QueryTabsRequest",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_TABS_REPLY => "QueryTabsReply",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_SERVER_REGISTER => "ServerRegister",
