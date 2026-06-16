@@ -76,7 +76,11 @@ def strip_ui_trace_hooks(source: str) -> str:
             continue
         stripped.append(line)
     result = "\n".join(stripped) + ("\n" if source.endswith("\n") else "")
-    return result.replace("\n\n}\n\n/// Represents", "\n}\n\n/// Represents").replace("\n\n\n        private static func setInitialSize", "\n\n        private static func setInitialSize")
+    return (
+        result.replace("let requestID = NSApp.requestUserAttention(.informationalRequest)", "NSApp.requestUserAttention(.informationalRequest)")
+        .replace("\n\n}\n\n/// Represents", "\n}\n\n/// Represents")
+        .replace("\n\n\n        private static func setInitialSize", "\n\n        private static func setInitialSize")
+    )
 
 
 def assert_sources_match_after_rename(
@@ -299,8 +303,7 @@ def main() -> int:
             ("Gap", "RUNTIME-012B2B2B2B2B3C status"),
             ("actual OS notification delivery/banner/sound", "RUNTIME-012B2B2B2B2B3C OS notification delivery gap"),
             ("audible bell output", "RUNTIME-012B2B2B2B2B3C actual GUI effect gap"),
-            ("native link preview display", "RUNTIME-012B2B2B2B2B3C link preview gap"),
-            ("external Launch Services handler delivery", "RUNTIME-012B2B2B2B2B3C external URL-handler gap"),
+            ("OS-visible dock-attention bounce/state beyond AppKit request dispatch", "RUNTIME-012B2B2B2B2B3C Dock attention gap"),
         ],
     )
     if "RUNTIME-012B2B |" in runtime_inventory:
@@ -310,8 +313,8 @@ def main() -> int:
     require_all(
         cfg223,
         [
-            ("92 rows Oracle complete", "CFG-223 oracle count"),
-            ("95 rows closed", "CFG-223 closed count"),
+            ("94 rows Oracle complete", "CFG-223 oracle count"),
+            ("97 rows closed", "CFG-223 closed count"),
             ("1 rows are incomplete", "CFG-223 incomplete count"),
             ("1 rows are runtime gaps", "CFG-223 gap count"),
         ],

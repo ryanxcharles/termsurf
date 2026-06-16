@@ -1890,4 +1890,4 @@ remains open.
 - [Experiment 195: Live user notification delivery](195-live-user-notification-delivery.md)
   — **Partial**
 - [Experiment 196: Live bell audio playback](196-live-bell-audio-playback.md) —
-  **Designed**
+  **Partial**
