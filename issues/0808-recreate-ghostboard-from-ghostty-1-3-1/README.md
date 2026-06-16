@@ -242,4 +242,4 @@ and against `ghostboard-legacy/` where useful.
 - [Experiment 18: Count QueryTabs GUI panes from state](18-query-tabs-gui-pane-count.md)
   — **Pass**
 - [Experiment 19: Reply to QueryDevtools from tab state](19-query-devtools-from-tab-state.md)
-  — **Designed**
+  — **Pass**

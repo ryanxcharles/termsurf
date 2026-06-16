@@ -112,3 +112,87 @@ sending the protobuf frame.
 Fresh-context adversarial re-review returned **APPROVED**. The reviewer
 confirmed the required finding was resolved and that the fix introduced no new
 required issues.
+
+## Result
+
+**Result:** Pass
+
+Implemented state-backed success replies for `QueryDevtoolsRequest` in
+`ghostboard/src/apprt/termsurf.zig`.
+
+The socket handler now keeps the existing validation path, then looks up the
+requested `profile/browser/inspected_tab_id` in `tab_lookups` under
+`state_mutex`. On success it copies `profile` and `browser` into local
+null-terminated buffers, fills `QueryDevtoolsReply.tab_id`, `browser`, and
+`profile`, and sends an empty `error`. Missing lookup keys keep the existing
+`Inspected tab {id} not found in {browser}/{profile}` error.
+
+Verification passed:
+
+- `zig fmt src/apprt/termsurf.zig src/main_c.zig src/build/SharedDeps.zig`
+  passed.
+- Native GhosttyKit framework build passed:
+  `logs/ghostboard-exp19-zig-native-xcframework-20260616-110820.log`.
+- macOS app build passed:
+  `logs/ghostboard-exp19-macos-build-debug-20260616-110840.log`.
+- Runtime harness passed:
+  `logs/ghostboard-exp19-runtime-harness-20260616-110943.log`.
+- Runtime app log: `logs/ghostboard-exp19-runtime-app-20260616-110943.log`.
+- `git diff --check` passed.
+
+Observed successful runtime checks:
+
+```text
+PASS: QueryDevtools missing browser validation
+PASS: QueryDevtools missing profile validation
+PASS: QueryDevtools missing tab id validation
+PASS: QueryDevtools before TabReady returns not found
+PASS: browser socket received pane-a CreateTab
+PASS: QueryDevtools finds TabReady tab
+PASS: QueryDevtools mismatched profile returns not found
+PASS: QueryDevtools mismatched browser returns not found
+PASS: fresh TUI client received HelloReply
+PASS: app exited after SIGTERM
+PASS: socket file removed after shutdown
+PASS: no stale TermSurf process remains
+PASS: app log contains TermSurf socket listening
+PASS: app log contains QueryDevtoolsReply sends
+PASS: app log contains TabReady lookup
+PASS: no BrowserReady emitted
+PASS: no CaContext emitted
+PASS: no CreateDevtoolsTab emitted
+PASS: no overlay presentation message emitted
+PASS: no browser launch message emitted
+runtime verification passed
+```
+
+The passing harness verified that
+`QueryDevtoolsRequest(browser=roamium, profile=default, inspected_tab_id=42)`
+returns `tab_id = 42`, `browser = "roamium"`, `profile = "default"`, and empty
+`error` after `SetOverlay -> ServerRegister -> CreateTab -> TabReady`.
+
+## Conclusion
+
+Ghostboard now answers the normal-tab `QueryDevtoolsRequest` success path from
+the `TabReady` lookup state. DevTools pane creation, duplicate DevTools
+detection, `CreateDevtoolsTab`, `BrowserReady`, browser launch, CALayerHost
+overlay presentation, and input forwarding remain for later experiments.
+
+## Result Review
+
+Fresh-context adversarial result review returned **APPROVED** with no required,
+optional, or nit findings.
+
+The reviewer confirmed:
+
+- the implementation matches the approved scope;
+- the diff is limited to `ghostboard/src/apprt/termsurf.zig`, this experiment
+  file, and the issue README;
+- `QueryDevtoolsRequest` behavior matches the currently implementable Wezboard
+  success branch;
+- shared `tab_lookups` state is read under `state_mutex`;
+- success reply fields are copied into local buffers before send;
+- verification logs prove the validation, not-found, success, mismatch, and
+  negative-scope checks;
+- the README status matches the result;
+- the result commit had not been made before review.

@@ -525,29 +525,42 @@ fn sendQueryDevtoolsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryDevtoolsRe
     const allocator = std.heap.c_allocator;
     var allocated_error: ?[]u8 = null;
     defer if (allocated_error) |err| allocator.free(err);
+    var browser_buf: [max_browser_len]u8 = undefined;
+    var browser_len: usize = 0;
+    var profile_buf: [max_profile_len]u8 = undefined;
+    var profile_len: usize = 0;
 
     const error_msg: [:0]const u8 = if (req) |query| blk: {
-        if (std.mem.len(query.*.browser) == 0) {
+        const browser = cString(query.*.browser);
+        const profile = cString(query.*.profile);
+        if (browser.len == 0) {
             break :blk "DevTools target browser is required";
         }
-        if (std.mem.len(query.*.profile) == 0) {
+        if (profile.len == 0) {
             break :blk "DevTools target profile is required";
         }
         if (query.*.inspected_tab_id == 0) {
             break :blk "DevTools target tab id is required";
         }
+        if (fillQueryDevtoolsSuccess(&reply, profile, browser, query.*.inspected_tab_id, &profile_buf, &profile_len, &browser_buf, &browser_len)) {
+            break :blk "";
+        }
         const error_len = std.fmt.count(
             "Inspected tab {} not found in {s}/{s}",
-            .{ query.*.inspected_tab_id, query.*.browser, query.*.profile },
+            .{ query.*.inspected_tab_id, browser, profile },
         );
         allocated_error = try allocator.alloc(u8, error_len + 1);
         break :blk std.fmt.bufPrintZ(
             allocated_error.?,
             "Inspected tab {} not found in {s}/{s}",
-            .{ query.*.inspected_tab_id, query.*.browser, query.*.profile },
+            .{ query.*.inspected_tab_id, browser, profile },
         ) catch unreachable;
     } else "DevTools target browser is required";
     reply.@"error" = @constCast(error_msg.ptr);
+    if (error_msg.len == 0) {
+        reply.profile = @constCast(profile_buf[0..profile_len :0].ptr);
+        reply.browser = @constCast(browser_buf[0..browser_len :0].ptr);
+    }
 
     var wrapper: c.Termsurf__TermSurfMessage = undefined;
     c.termsurf__term_surf_message__init(&wrapper);
@@ -556,6 +569,27 @@ fn sendQueryDevtoolsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryDevtoolsRe
 
     try sendProtobuf(fd, &wrapper);
     log.info("TermSurf QueryDevtoolsReply sent", .{});
+}
+
+fn fillQueryDevtoolsSuccess(
+    reply: *c.Termsurf__QueryDevtoolsReply,
+    profile: []const u8,
+    browser: []const u8,
+    inspected_tab_id: i64,
+    profile_buf: []u8,
+    profile_len: *usize,
+    browser_buf: []u8,
+    browser_len: *usize,
+) bool {
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    if (findTabLookup(profile, browser, inspected_tab_id) == null) return false;
+    if (!copyText(profile_buf, profile_len, profile)) return false;
+    if (!copyText(browser_buf, browser_len, browser)) return false;
+
+    reply.tab_id = inspected_tab_id;
+    return true;
 }
 
 fn sendQueryTabsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryTabsRequest) !void {
