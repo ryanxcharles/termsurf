@@ -249,3 +249,5 @@ and against `ghostboard-legacy/` where useful.
   **Pass**
 - [Experiment 22: Forward Resize on overlay updates](22-forward-resize-on-overlay-updates.md)
   — **Pass**
+- [Experiment 23: Forward ModeChanged focus to browser](23-forward-tui-control-to-browser.md)
+  — **Designed**
