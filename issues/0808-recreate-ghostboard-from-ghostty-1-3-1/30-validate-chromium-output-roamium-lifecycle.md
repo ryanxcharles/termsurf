@@ -145,3 +145,158 @@ and `otool -L` output for the copied Roamium artifact and
 `libtermsurf_chromium.dylib`, and to state that this experiment assumes the
 existing Chromium output is current unless runtime evidence proves it stale or
 incompatible.
+
+## Result
+
+**Result:** Pass
+
+Experiment 30 validated the real repo-built Roamium artifact at
+`/Users/astrohacker/dev/termsurf/chromium/src/out/Default/roamium` with the
+actual `target/debug/web` binary and without modifying `webtui`, `roamium`,
+Chromium, or `proto/termsurf.proto`.
+
+Build and artifact verification passed:
+
+- `cargo build -p webtui` passed.
+  - Log: `logs/ghostboard-exp30-cargo-build-webtui-20260616.log`
+- `./scripts/build.sh roamium` passed and placed Roamium at
+  `chromium/src/out/Default/roamium`.
+  - Log: `logs/ghostboard-exp30-build-roamium-script-20260616.log`
+- The artifact/resource check verified:
+  - `chromium/src/out/Default/roamium` exists and is executable;
+  - `chromium/src/out/Default/roamium` is newer than `target/debug/roamium`;
+  - `icudtl.dat`, `content_shell.pak`, `shell_resources.pak`, and
+    `libtermsurf_chromium.dylib` exist beside the Chromium-output Roamium
+    binary;
+  - `otool -L` output was recorded for `roamium` and
+    `libtermsurf_chromium.dylib`.
+  - Log: `logs/ghostboard-exp30-roamium-artifacts-20260616.log`
+- The native GhosttyKit framework build passed after the Ghostboard logging
+  change.
+  - Log: `logs/ghostboard-exp30-zig-native-xcframework-20260616.log`
+- The macOS app build passed after the Ghostboard logging change.
+  - Log: `logs/ghostboard-exp30-macos-build-debug-after-logging-20260616.log`
+
+The only source changes were Ghostboard-side diagnostic logging improvements in
+`ghostboard/src/apprt/termsurf.zig`:
+
+- `msgTypeName` now names every current TermSurf protobuf message case instead
+  of logging browser-originated messages as `Other`. This was needed because the
+  first runtime attempt reached Roamium page state, but the harness could not
+  prove which page-state messages were received while they were logged as
+  `Other`.
+- The browser spawn log now includes the full browser argv so runtime logs prove
+  `--ipc-socket`, `--user-data-dir`, and `--listen-socket`.
+
+Formatting and hygiene:
+
+- `zig fmt src/apprt/termsurf.zig src/main_c.zig src/build/SharedDeps.zig`
+  passed.
+  - Log: `logs/ghostboard-exp30-zig-fmt-20260616.log`
+- No Rust code was modified, so no Rust formatting was required.
+- No Swift code was modified, so no Swift linting was required.
+- `git diff --check` passed.
+
+The runtime harness launched
+`ghostboard/macos/build/Debug/TermSurf.app/Contents/MacOS/termsurf` with
+`GHOSTTY_LOG=stderr` and a temporary config whose command was:
+
+```text
+/Users/astrohacker/dev/termsurf/target/debug/web --browser /Users/astrohacker/dev/termsurf/chromium/src/out/Default/roamium https://example.com
+```
+
+The harness proved the normal Roamium lifecycle:
+
+- Ghostboard spawned
+  `/Users/astrohacker/dev/termsurf/chromium/src/out/Default/roamium` with the
+  expected browser-server argv:
+
+  ```text
+  --ipc-socket=/var/folders/vx/wbmx10nd7tx8259xgg3v4vf80000gn/T/termsurf/termsurf-ghostboard-84821.sock
+  --user-data-dir=/Users/astrohacker/.local/share/termsurf/chromium-profiles/default
+  --listen-socket=/var/folders/vx/wbmx10nd7tx8259xgg3v4vf80000gn/T/termsurf/roamium-84821-default.sock
+  ```
+
+- Roamium bound the listen socket.
+- Roamium connected back to Ghostboard and sent
+  `ServerRegister(profile=default)`.
+- Ghostboard matched the server key and sent `CreateTab` for
+  `https://example.com`.
+- Roamium sent `TabReady(tab_id=1)`.
+- Ghostboard sent `BrowserReady` to the real `webtui` process with the Roamium
+  listen socket and browser path.
+- The real `webtui` process connected to Roamium's direct browser socket, proven
+  by `[Roamium] client connected`.
+- Roamium sent browser-originated page-state messages after `CreateTab`,
+  including `CaContext`, `UrlChanged`, `TargetUrlChanged`, `LoadingState`, and
+  `TitleChanged`.
+- `web last` against the captured normal pane returned the normal Roamium tab:
+
+  ```text
+  profile: default
+  pane_id: 4109BD34-38F5-44C6-A14E-745CA689E782
+  tab_id:  1
+  ```
+
+- Runtime cleanup left no stale matching `TermSurf.app/Contents/MacOS/termsurf`,
+  `target/debug/web`, or `chromium/src/out/Default/roamium` processes, and the
+  GUI socket was removed.
+  - Runtime harness log: `logs/ghostboard-exp30-runtime-harness-20260616.log`
+  - App/Roamium log: `logs/ghostboard-exp30-runtime-app-20260616.log`
+  - `web last` log: `logs/ghostboard-exp30-querylast-20260616.log`
+
+One residual issue remains: Roamium still crashes during shutdown after the
+harness terminates Ghostboard and the browser socket reaches EOF. The crash is
+inside Chromium compositor shutdown: `cc::TileTaskManagerImpl::Shutdown()`. No
+stale process remains, and the normal-tab launch/control lifecycle passed, so
+this experiment passes. Shutdown crash cleanup is a separate lifecycle hardening
+issue and should be addressed by a later experiment.
+
+## Conclusion
+
+Experiment 30 fixes the Experiment 29 mistake: Ghostboard must launch Roamium
+from `chromium/src/out/Default/roamium`, not from `target/debug/roamium`,
+because the Chromium-output directory contains the runtime resources and dylibs
+Roamium needs.
+
+With the correct browser path, Ghostboard can launch and coordinate the real
+repo-built Roamium process for a normal `webtui` tab. The remaining major parity
+work is no longer the basic Roamium lifecycle; it is native browser overlay
+presentation, browser input forwarding, richer browser state handling, and
+graceful browser shutdown.
+
+## Completion Review
+
+A fresh-context adversarial Codex subagent reviewed the completed Experiment 30
+result and returned **CHANGES REQUIRED** with two required findings:
+
+- The recorded runtime logs did not prove the browser argv contained
+  `--ipc-socket`, `--user-data-dir`, and `--listen-socket`.
+- The `zig fmt` and native GhosttyKit framework build logs did not record the
+  command and cwd required by the experiment's pass criteria.
+
+Both findings were accepted as real verification gaps.
+
+Fixes:
+
+- `ghostboard/src/apprt/termsurf.zig` now logs the full browser argv after
+  successful spawn.
+- `logs/ghostboard-exp30-zig-fmt-20260616.log` and
+  `logs/ghostboard-exp30-zig-native-xcframework-20260616.log` were regenerated
+  with `cwd:`, `cmd:`, and `exit_status=` entries.
+- The native GhosttyKit framework build, macOS app build, and runtime harness
+  were rerun after the argv logging fix.
+- The final runtime logs now contain the required browser-server args and the
+  harness asserts their presence before passing.
+
+The same reviewer re-reviewed only the fixes and returned **APPROVED**. The
+reviewer confirmed that:
+
+- `ghostboard/src/apprt/termsurf.zig` now logs full browser argv after spawn;
+- `logs/ghostboard-exp30-runtime-harness-20260616.log` and
+  `logs/ghostboard-exp30-runtime-app-20260616.log` include `--ipc-socket`,
+  `--user-data-dir`, and `--listen-socket`;
+- the `zig fmt` and native GhosttyKit build logs now include `cwd:`, `cmd:`, and
+  `exit_status=0`;
+- `git diff --check` is clean;
+- no new required findings were introduced.

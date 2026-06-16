@@ -1486,8 +1486,8 @@ fn spawnBrowserProcess(profile_z: [:0]const u8, browser_z: [:0]const u8, listen_
     };
 
     log.info(
-        "spawned browser path={s} pid={} profile={s} listen_socket={s}",
-        .{ browser_z, child.id, profile_z, listen_socket_z },
+        "spawned browser path={s} pid={} profile={s} argv={s} {s} {s} {s} --hidden --no-sandbox --enable-logging {s}",
+        .{ browser_z, child.id, profile_z, browser_z, ipc_arg, data_arg, listen_arg, log_arg },
     );
     return child.id;
 }
@@ -1626,14 +1626,28 @@ fn writeAll(fd: std.posix.fd_t, bytes: []const u8) !void {
 
 fn msgTypeName(msg_case: c.Termsurf__TermSurfMessage__MsgCase) []const u8 {
     return switch (msg_case) {
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG__NOT_SET => "NotSet",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REQUEST => "HelloRequest",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_HELLO_REPLY => "HelloReply",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_CREATE_TAB => "CreateTab",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_CREATE_DEVTOOLS_TAB => "CreateDevtoolsTab",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_RESIZE => "Resize",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_CLOSE_TAB => "CloseTab",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_NAVIGATE => "Navigate",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_MOUSE_EVENT => "MouseEvent",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_MOUSE_MOVE => "MouseMove",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_SCROLL_EVENT => "ScrollEvent",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_KEY_EVENT => "KeyEvent",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_FOCUS_CHANGED => "FocusChanged",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_SET_COLOR_SCHEME => "SetColorScheme",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_SET_GUI_ACTIVE => "SetGuiActive",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_TAB_READY => "TabReady",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_CA_CONTEXT => "CaContext",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_URL_CHANGED => "UrlChanged",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_LOADING_STATE => "LoadingState",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_TITLE_CHANGED => "TitleChanged",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_CURSOR_CHANGED => "CursorChanged",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_TARGET_URL_CHANGED => "TargetUrlChanged",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_MODE_CHANGED => "ModeChanged",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_LAST_REQUEST => "QueryLastRequest",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_QUERY_LAST_REPLY => "QueryLastReply",
@@ -1645,6 +1659,13 @@ fn msgTypeName(msg_case: c.Termsurf__TermSurfMessage__MsgCase) []const u8 {
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_SET_OVERLAY => "SetOverlay",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_SET_DEVTOOLS_OVERLAY => "SetDevtoolsOverlay",
         c.TERMSURF__TERM_SURF_MESSAGE__MSG_OPEN_SPLIT => "OpenSplit",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_BROWSER_READY => "BrowserReady",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_JAVASCRIPT_DIALOG_REQUEST => "JavascriptDialogRequest",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_JAVASCRIPT_DIALOG_REPLY => "JavascriptDialogReply",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_CONSOLE_MESSAGE => "ConsoleMessage",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_HTTP_AUTH_REQUEST => "HttpAuthRequest",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_HTTP_AUTH_REPLY => "HttpAuthReply",
+        c.TERMSURF__TERM_SURF_MESSAGE__MSG_RENDERER_CRASHED => "RendererCrashed",
         else => "Other",
     };
 }
