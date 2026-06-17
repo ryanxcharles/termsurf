@@ -199,3 +199,4 @@ work together, not just individually.
   — **Pass**
 - [Experiment 13: Open browser in new tab](13-open-browser-in-new-tab.md) —
   **Pass**
+- [Experiment 14: Close browser tab](14-close-browser-tab.md) — **Designed**
