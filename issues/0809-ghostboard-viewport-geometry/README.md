@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-17"
+closed = "2026-06-17"
 +++
 
 # Issue 809: Ghostboard Viewport Geometry
@@ -226,3 +227,21 @@ work together, not just individually.
   — **Pass**
 - [Experiment 27: Full matrix regression sweep](27-full-matrix-regression-sweep.md)
   — **Pass**
+
+## Conclusion
+
+Issue 809 is closed. Ghostboard browser overlays now fill and follow their
+owning terminal pane across the tested viewport geometry matrix: initial open,
+window resize, horizontal and vertical splits, split resize/equalize/zoom,
+pane/tab/window close and restore, focus changes, tab/window isolation,
+fullscreen/unfullscreen, minimize/hide/restore, font-size and TUI overlay resize
+changes, scrollback, navigation, DevTools, mouse input, and keyboard input after
+tab/window switching.
+
+The final strict matrix sweep passed with no `FAIL:` markers:
+`logs/ghostboard-geometry-full-matrix-summary-20260617-160236.log`.
+
+The only remaining caveat is environmental: this macOS VM exposes a single
+display, so the display-move/backing-scale row verified the single-display
+backing-scale, geometry, hit-test, focus, and keyboard path, but could not
+perform an actual cross-display move.
