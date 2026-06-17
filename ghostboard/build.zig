@@ -129,6 +129,10 @@ pub fn build(b: *std.Build) !void {
             if (i18n) |v| v.install();
         }
     } else {
+        if (config.emit_exe) {
+            exe.install();
+        }
+
         // Libghostty
         //
         // Note: libghostty is not stable for general purpose use. It is used

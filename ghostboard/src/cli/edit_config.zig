@@ -20,22 +20,17 @@ pub const Options = struct {
     }
 };
 
-/// The `edit-config` command opens the Ghostty configuration file in the
+/// The `edit-config` command opens the TermSurf configuration file in the
 /// editor specified by the `$VISUAL` or `$EDITOR` environment variables.
 ///
 /// IMPORTANT: This command will not reload the configuration after
 /// editing. You will need to manually reload the configuration using the
-/// application menu, configured keybind, or by restarting Ghostty. We
-/// plan to auto-reload in the future, but Ghostty isn't capable of
-/// this yet.
+/// application menu, configured keybind, or by restarting TermSurf. We
+/// plan to auto-reload in the future, but the app isn't capable of this yet.
 ///
 /// The filepath opened is the default user-specific configuration
-/// file, which is typically located at `$XDG_CONFIG_HOME/ghostty/config.ghostty`.
-/// On macOS, this may also be located at
-/// `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty`.
-/// On macOS, whichever path exists and is non-empty will be prioritized,
-/// prioritizing the Application Support directory if neither are
-/// non-empty.
+/// file, which is located at `$XDG_CONFIG_HOME/termsurf/config`
+/// (`~/.config/termsurf/config` by default).
 ///
 /// This command prefers the `$VISUAL` environment variable over `$EDITOR`,
 /// if both are set. If neither are set, it will print an error
@@ -79,7 +74,7 @@ fn runInner(alloc: Allocator, stderr: *std.Io.Writer) !u8 {
     // We don't currently support Windows because we use the exec syscall.
     if (comptime builtin.os.tag == .windows) {
         try stderr.print(
-            \\The `ghostty +edit-config` command is not supported on Windows.
+            \\The `termsurf +edit-config` command is not supported on Windows.
             \\Please edit the configuration file manually at the following path:
             \\
             \\{s}
@@ -113,7 +108,7 @@ fn runInner(alloc: Allocator, stderr: *std.Io.Writer) !u8 {
     if (editor.len == 0) {
         try stderr.print(
             \\The $EDITOR or $VISUAL environment variable is not set or is empty.
-            \\This environment variable is required to edit the Ghostty configuration
+            \\This environment variable is required to edit the TermSurf configuration
             \\via this CLI command.
             \\
             \\Please set the environment variable to your preferred terminal

@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = @import("../quirks.zig").inlineAssert;
 const Allocator = std.mem.Allocator;
 const internal_os = @import("../os/main.zig");
@@ -11,7 +10,7 @@ const log = std.log.scoped(.config);
 pub fn defaultXdgPath(alloc: Allocator) ![]const u8 {
     return try internal_os.xdg.config(
         alloc,
-        .{ .subdir = "ghostty/config.ghostty" },
+        .{ .subdir = "termsurf/config" },
     );
 }
 
@@ -20,7 +19,7 @@ pub fn defaultXdgPath(alloc: Allocator) ![]const u8 {
 pub fn legacyDefaultXdgPath(alloc: Allocator) ![]const u8 {
     return try internal_os.xdg.config(
         alloc,
-        .{ .subdir = "ghostty/config" },
+        .{ .subdir = "termsurf/config" },
     );
 }
 
@@ -94,30 +93,7 @@ pub fn preferredAppSupportPath(alloc: Allocator) ![]const u8 {
 ///
 /// The returned value must be freed by the caller.
 pub fn preferredDefaultFilePath(alloc: Allocator) ![]const u8 {
-    switch (builtin.os.tag) {
-        .macos => {
-            // macOS prefers the Application Support directory
-            // if it exists.
-            const app_support_path = try preferredAppSupportPath(alloc);
-            const app_support_file = open(app_support_path) catch {
-                // Try the XDG path if it exists
-                const xdg_path = try preferredXdgPath(alloc);
-                const xdg_file = open(xdg_path) catch {
-                    // If neither file exists, use app support
-                    alloc.free(xdg_path);
-                    return app_support_path;
-                };
-                xdg_file.close();
-                alloc.free(app_support_path);
-                return xdg_path;
-            };
-            app_support_file.close();
-            return app_support_path;
-        },
-
-        // All other platforms use XDG only
-        else => return try preferredXdgPath(alloc),
-    }
+    return try preferredXdgPath(alloc);
 }
 
 const OpenFileError = error{

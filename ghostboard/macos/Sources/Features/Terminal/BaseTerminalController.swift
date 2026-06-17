@@ -447,7 +447,15 @@ class BaseTerminalController: NSWindowController,
     /// This also updates the undo manager to support restoring this node.
     ///
     /// This does no confirmation and assumes confirmation is already done.
-    private func removeSurfaceNode(_ node: SplitTree<Ghostty.SurfaceView>.Node) {
+    private func removeSurfaceNode(_ node: SplitTree<Ghostty.SurfaceView>.Node, closeTermSurfPanes: Bool = true) {
+        if closeTermSurfPanes {
+            for view in node {
+                view.id.uuidString.withCString { paneID in
+                    termsurf_pane_closed(paneID)
+                }
+            }
+        }
+
         // Move focus if the closed surface was focused and we have a next target
         let nextFocus: Ghostty.SurfaceView? = if node.contains(
             where: { $0 == focusedSurface }
@@ -961,7 +969,7 @@ class BaseTerminalController: NSWindowController,
         }
 
         // Remove the node from the source.
-        sourceController.removeSurfaceNode(sourceNode)
+        sourceController.removeSurfaceNode(sourceNode, closeTermSurfPanes: false)
 
         // Add in the surface to our tree
         replaceSurfaceTree(

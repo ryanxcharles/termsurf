@@ -4,6 +4,7 @@ import UserNotifications
 import OSLog
 import Sparkle
 import GhosttyKit
+import Darwin
 
 class AppDelegate: NSObject,
                     ObservableObject,
@@ -198,6 +199,12 @@ class AppDelegate: NSObject,
             // Manual autofill via the `Edit => AutoFill` menu item still work as expected.
             "NSAutoFillHeuristicControllerEnabled": false,
         ])
+
+        setupSignals()
+
+        if termsurf_ipc_start() != GHOSTTY_SUCCESS {
+            Self.logger.error("failed to start TermSurf socket")
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -312,9 +319,6 @@ class AppDelegate: NSObject,
         // Setup our menu
         setupMenuImages()
 
-        // Setup signal handlers
-        setupSignals()
-
         switch Ghostty.launchSource {
         case .app:
             // Don't have to do anything.
@@ -427,6 +431,8 @@ class AppDelegate: NSObject,
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        termsurf_ipc_stop()
+
         // We have no notifications we want to persist after death,
         // so remove them all now. In the future we may want to be
         // more selective and only remove surface-targeted notifications.
@@ -541,6 +547,7 @@ class AppDelegate: NSObject,
         // We need to ignore signals we register with makeSignalSource or they
         // don't seem to handle.
         signal(SIGUSR2, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
 
         // Make the signal source and register our event handle. We keep a weak
         // ref to ourself so we don't create a retain cycle.
@@ -557,6 +564,15 @@ class AppDelegate: NSObject,
 
         // We need to keep a strong reference to it so it isn't disabled.
         signals.append(sigusr2)
+
+        let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global(qos: .userInitiated))
+        sigterm.setEventHandler {
+            Self.logger.info("terminating in response to SIGTERM")
+            termsurf_ipc_stop()
+            Darwin.exit(0)
+        }
+        sigterm.resume()
+        signals.append(sigterm)
     }
 
     // MARK: Notifications and Events

@@ -238,6 +238,52 @@ extension Ghostty {
         // Timer to remove progress report after 15 seconds
         private var progressReportTimer: Timer?
 
+        private var termsurfOverlayRootLayer: CALayer?
+        private var termsurfOverlayPositioningLayer: CALayer?
+        private var termsurfOverlayHostLayer: CALayer?
+        private var termsurfOverlayContextID: UInt64 = 0
+        private var termsurfOverlayFrame: CGRect?
+        private var termsurfPressedBrowserKeys: Set<UInt16> = []
+
+        func termSurfGeometryIdentity(browserTabID: String = "unknown:appkit") -> String {
+            let windowID = window.map { String($0.windowNumber) } ?? "unknown:no-window"
+            let surfaceID = id.uuidString
+            let selectedTabID = window?.tabGroup?.selectedWindow.map { String($0.windowNumber) } ?? windowID
+            return termsurfGeometryIdentity(
+                paneID: id.uuidString,
+                browserTabID: browserTabID,
+                surfaceID: surfaceID,
+                windowID: windowID,
+                selectedTabID: selectedTabID)
+        }
+
+        private func termSurfLogGeometry(
+            event: String,
+            browserTabID: String = "unknown:appkit",
+            grid: String = "unknown:not-provided",
+            browserPixel: String = "unknown:not-provided",
+            contextID: UInt64? = nil,
+            hit: Bool? = nil,
+            rawPoint: CGPoint? = nil,
+            topPoint: CGPoint? = nil,
+            webPoint: CGPoint? = nil,
+            note: String
+        ) {
+            let context = contextID.map { String($0) } ?? String(termsurfOverlayContextID)
+            let rootFrame = termsurfOverlayRootLayer.map { NSStringFromRect($0.frame) } ?? "none"
+            let positioningFrame = termsurfOverlayPositioningLayer.map { NSStringFromRect($0.frame) } ?? "none"
+            let hostFrame = termsurfOverlayHostLayer.map { NSStringFromRect($0.frame) } ?? "none"
+            let overlayFrame = termsurfOverlayFrame.map { NSStringFromRect($0) } ?? "none"
+            let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+            let hitValue = hit.map { String($0) } ?? "unknown:not-hit-test"
+            let raw = rawPoint.map { NSStringFromPoint($0) } ?? "none"
+            let top = topPoint.map { NSStringFromPoint($0) } ?? "none"
+            let web = webPoint.map { NSStringFromPoint($0) } ?? "none"
+
+            termsurfLogGeometry(
+                "layer=appkit event=\(event) scenario=\(termsurfGeometryScenario()) identity=\(termSurfGeometryIdentity(browserTabID: browserTabID)) bounds=\(NSStringFromRect(bounds)) cell=\(cellSize.width)x\(cellSize.height) grid=\(grid) overlay_frame=\(overlayFrame) root_frame=\(rootFrame) positioning_frame=\(positioningFrame) host_frame=\(hostFrame) browser_pixel=\(browserPixel) backing_scale=\(scale) context_id=\(context) visible=\(termsurfOverlayHostLayer != nil) hit=\(hitValue) raw_point=\(raw) top_point=\(top) web_point=\(web) note=\(note)")
+        }
+
         // This is the title from the terminal. This is nil if we're currently using
         // the terminal title as the main title property. If the title is set manually
         // by the user, this is set to the prior value (which may be empty, but non-nil).
@@ -390,7 +436,8 @@ extension Ghostty {
             ) { [weak self] event in self?.localEventHandler(event) }
 
             // Setup our surface. This will also initialize all the terminal IO.
-            let surface_cfg = baseConfig ?? SurfaceConfiguration()
+            var surface_cfg = baseConfig ?? SurfaceConfiguration()
+            surface_cfg.environmentVariables["TERMSURF_PANE_ID"] = self.id.uuidString
             let surface = surface_cfg.withCValue(view: self) { surface_cfg_c in
                 ghostty_surface_new(app, &surface_cfg_c)
             }
@@ -436,12 +483,163 @@ extension Ghostty {
 
             // Cancel progress report timer
             progressReportTimer?.invalidate()
+
+            clearTermSurfOverlay()
+        }
+
+        // swiftlint:disable:next function_parameter_count
+        func presentTermSurfOverlay(
+            contextID: UInt64,
+            col: UInt64,
+            row: UInt64,
+            width: UInt64,
+            height: UInt64,
+            pixelWidth: UInt64,
+            pixelHeight: UInt64
+        ) {
+            dispatchPrecondition(condition: .onQueue(.main))
+            let grid = "\(width)x\(height)+\(col)+\(row)"
+            let browserPixel = "\(pixelWidth)x\(pixelHeight)"
+
+            guard contextID != 0 else {
+                AppDelegate.logger.warning("TermSurf overlay rejected: context id is zero")
+                termSurfLogGeometry(
+                    event: "present_rejected",
+                    grid: grid,
+                    browserPixel: browserPixel,
+                    contextID: contextID,
+                    note: "context-id-zero")
+                return
+            }
+
+            wantsLayer = true
+            guard let surfaceLayer = layer else {
+                AppDelegate.logger.warning("TermSurf overlay rejected: surface has no backing layer")
+                termSurfLogGeometry(
+                    event: "present_rejected",
+                    grid: grid,
+                    browserPixel: browserPixel,
+                    contextID: contextID,
+                    note: "missing-surface-layer")
+                return
+            }
+
+            let cellWidth = cellSize.width > 0 ? cellSize.width : 10
+            let cellHeight = cellSize.height > 0 ? cellSize.height : 20
+            let frame = CGRect(
+                x: CGFloat(col) * cellWidth,
+                y: CGFloat(row) * cellHeight,
+                width: CGFloat(width) * cellWidth,
+                height: CGFloat(height) * cellHeight)
+            guard frame.width > 0, frame.height > 0 else {
+                AppDelegate.logger.warning("TermSurf overlay rejected: empty frame")
+                termSurfLogGeometry(
+                    event: "present_rejected",
+                    grid: grid,
+                    browserPixel: browserPixel,
+                    contextID: contextID,
+                    note: "empty-frame")
+                return
+            }
+
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            defer { CATransaction.commit() }
+
+            let root = termsurfOverlayRootLayer ?? {
+                let layer = CALayer()
+                layer.name = "TermSurfOverlayRoot"
+                layer.isGeometryFlipped = true
+                layer.anchorPoint = .zero
+                layer.frame = bounds
+                surfaceLayer.addSublayer(layer)
+                termsurfOverlayRootLayer = layer
+                return layer
+            }()
+            root.frame = bounds
+
+            let positioning = termsurfOverlayPositioningLayer ?? {
+                let layer = CALayer()
+                layer.name = "TermSurfOverlayPositioning"
+                layer.anchorPoint = .zero
+                root.addSublayer(layer)
+                termsurfOverlayPositioningLayer = layer
+                return layer
+            }()
+            positioning.frame = frame
+            termsurfOverlayFrame = frame
+
+            if termsurfOverlayHostLayer == nil || termsurfOverlayContextID != contextID {
+                termsurfOverlayHostLayer?.removeFromSuperlayer()
+                guard let hostClass = NSClassFromString("CALayerHost") as? CALayer.Type else {
+                    AppDelegate.logger.warning("TermSurf overlay rejected: CALayerHost unavailable")
+                    termSurfLogGeometry(
+                        event: "present_rejected",
+                        grid: grid,
+                        browserPixel: browserPixel,
+                        contextID: contextID,
+                        note: "calayerhost-unavailable")
+                    return
+                }
+                let host = hostClass.init()
+                host.name = "TermSurfOverlayHost"
+                host.anchorPoint = .zero
+                host.setValue(NSNumber(value: contextID), forKey: "contextId")
+                positioning.addSublayer(host)
+                termsurfOverlayHostLayer = host
+                termsurfOverlayContextID = contextID
+            }
+
+            termsurfOverlayHostLayer?.frame = CGRect(origin: .zero, size: frame.size)
+            let backingScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+            termsurfOverlayHostLayer?.contentsScale = backingScale
+            let appkitPixelWidth = UInt64((frame.width * backingScale).rounded())
+            let appkitPixelHeight = UInt64((frame.height * backingScale).rounded())
+            termSurfLogGeometry(
+                event: "presented",
+                grid: grid,
+                browserPixel: browserPixel,
+                contextID: contextID,
+                note: "overlay-presented")
+            termsurfLogGeometry(
+                "layer=appkit event=presented_pixels scenario=\(termsurfGeometryScenario()) identity=\(termSurfGeometryIdentity()) grid=\(grid) browser_pixel=\(browserPixel) appkit_pixel=\(appkitPixelWidth)x\(appkitPixelHeight) backing_scale=\(backingScale) context_id=\(contextID) visible=true note=reported-presented-pixels")
+            id.uuidString.withCString { paneIDPointer in
+                termsurf_overlay_presented_pixels(
+                    paneIDPointer,
+                    appkitPixelWidth,
+                    appkitPixelHeight)
+                termsurf_pane_focus_changed(paneIDPointer, focused ? 1 : 0)
+            }
+
+            AppDelegate.logger.info(
+                "TermSurf overlay presented pane_id=\(self.id.uuidString) context_id=\(contextID) frame=\(NSStringFromRect(frame)) pixel=\(pixelWidth)x\(pixelHeight)")
+            fputs(
+                "TermSurf overlay presented pane_id=\(self.id.uuidString) context_id=\(contextID) frame=\(NSStringFromRect(frame)) pixel=\(pixelWidth)x\(pixelHeight)\n",
+                stderr)
+        }
+
+        func clearTermSurfOverlay() {
+            termSurfLogGeometry(event: "clear", note: "clearing-overlay")
+            termsurfOverlayHostLayer?.removeFromSuperlayer()
+            termsurfOverlayPositioningLayer?.removeFromSuperlayer()
+            termsurfOverlayRootLayer?.removeFromSuperlayer()
+            termsurfOverlayHostLayer = nil
+            termsurfOverlayPositioningLayer = nil
+            termsurfOverlayRootLayer = nil
+            termsurfOverlayContextID = 0
+            termsurfOverlayFrame = nil
+            termsurfPressedBrowserKeys.removeAll()
+            AppDelegate.logger.info("TermSurf overlay cleared pane_id=\(self.id.uuidString)")
+            fputs("TermSurf overlay cleared pane_id=\(self.id.uuidString)\n", stderr)
         }
 
         func focusDidChange(_ focused: Bool) {
             guard let surface = self.surface else { return }
             guard self.focused != focused else { return }
             self.focused = focused
+            id.uuidString.withCString { paneID in
+                termsurf_pane_focus_changed(paneID, focused ? 1 : 0)
+            }
 
             // If we lost our focus then remove the mouse event suppression so
             // our mouse release event leaving the surface can properly be
@@ -480,6 +678,7 @@ extension Ghostty {
             // here that we use "size" and NOT the view frame. If we're in the middle of
             // an animation (i.e. a fullscreen animation), the frame will not yet be updated.
             // The size represents our final size we're going for.
+            termSurfLogGeometry(event: "size_did_change", note: "surface-size-did-change")
             let scaledSize = self.convertToBacking(size)
             setSurfaceSize(width: UInt32(scaledSize.width), height: UInt32(scaledSize.height))
             // Store this size so we can reuse it when backing properties change
@@ -675,13 +874,13 @@ extension Ghostty {
             // being used to transfer split focus. Consume it so it does not
             // get forwarded to the terminal as a mouse click.
             if NSApp.isActive && window.isKeyWindow {
-                window.makeFirstResponder(self)
+                Ghostty.moveFocus(to: self)
                 suppressNextLeftMouseUp = true
                 return nil
             }
 
             // Make ourselves the first responder
-            window.makeFirstResponder(self)
+            Ghostty.moveFocus(to: self)
 
             // We have to keep processing the event so that AppKit can properly
             // focus the window and dispatch events. If you return nil here then
@@ -801,6 +1000,26 @@ extension Ghostty {
 
         // MARK: - NSView
 
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            termSurfLogGeometry(event: "frame_size_changed", note: "view-frame-size-changed")
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            termSurfLogGeometry(event: "view_moved_to_window", note: "window-membership-changed")
+        }
+
+        override func viewDidHide() {
+            super.viewDidHide()
+            termSurfLogGeometry(event: "view_did_hide", note: "view-hidden")
+        }
+
+        override func viewDidUnhide() {
+            super.viewDidUnhide()
+            termSurfLogGeometry(event: "view_did_unhide", note: "view-unhidden")
+        }
+
         override func becomeFirstResponder() -> Bool {
             let result = super.becomeFirstResponder()
             if result { focusDidChange(true) }
@@ -862,6 +1081,7 @@ extension Ghostty {
                 layer?.contentsScale = window.backingScaleFactor
                 CATransaction.commit()
             }
+            termSurfLogGeometry(event: "backing_properties_changed", note: "updated-backing-scale")
 
             guard let surface = self.surface else { return }
 
@@ -877,6 +1097,11 @@ extension Ghostty {
         }
 
         override func mouseDown(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "down", button: "left") {
+                Ghostty.moveFocus(to: self)
+                return
+            }
+
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
@@ -893,6 +1118,10 @@ extension Ghostty {
             // Always reset our pressure when the mouse goes up
             prevPressureStage = 0
 
+            if forwardTermSurfMouseEvent(event, type: "up", button: "left") {
+                return
+            }
+
             // If we have an active surface, report the event
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
@@ -903,6 +1132,10 @@ extension Ghostty {
         }
 
         override func otherMouseDown(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "down", button: termSurfMouseButton(event)) {
+                return
+            }
+
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             let button = Ghostty.Input.MouseButton(fromNSEventButtonNumber: event.buttonNumber)
@@ -910,6 +1143,10 @@ extension Ghostty {
         }
 
         override func otherMouseUp(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "up", button: termSurfMouseButton(event)) {
+                return
+            }
+
             guard let surface = self.surface else { return }
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
             let button = Ghostty.Input.MouseButton(fromNSEventButtonNumber: event.buttonNumber)
@@ -917,6 +1154,10 @@ extension Ghostty {
         }
 
         override func rightMouseDown(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "down", button: "right") {
+                return
+            }
+
             guard let surface = self.surface else { return super.rightMouseDown(with: event) }
 
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
@@ -935,6 +1176,10 @@ extension Ghostty {
         }
 
         override func rightMouseUp(with event: NSEvent) {
+            if forwardTermSurfMouseEvent(event, type: "up", button: "right") {
+                return
+            }
+
             guard let surface = self.surface else { return super.rightMouseUp(with: event) }
 
             let mods = Ghostty.ghosttyMods(event.modifierFlags)
@@ -998,6 +1243,10 @@ extension Ghostty {
             let pos = self.convert(event.locationInWindow, from: nil)
             mouseLocationInSurface = pos
 
+            if forwardTermSurfMouseMove(event) {
+                return
+            }
+
             guard let surfaceModel else { return }
 
             // Convert window position to view position. Note (0, 0) is bottom left.
@@ -1032,6 +1281,10 @@ extension Ghostty {
         }
 
         override func scrollWheel(with event: NSEvent) {
+            if forwardTermSurfScrollEvent(event) {
+                return
+            }
+
             guard let surfaceModel else { return }
 
             var x = event.scrollingDeltaX
@@ -1075,6 +1328,16 @@ extension Ghostty {
         }
 
         override func keyDown(with event: NSEvent) {
+            termSurfLogGeometry(
+                event: "key_down",
+                note: "key_code=\(event.keyCode) modifiers=\(termSurfModifiers(event.modifierFlags)) focused=\(focused)")
+            if forwardTermSurfKeyDown(event) {
+                termSurfLogGeometry(
+                    event: "key_down_forwarded",
+                    note: "key_code=\(event.keyCode) modifiers=\(termSurfModifiers(event.modifierFlags)) focused=\(focused)")
+                return
+            }
+
             guard let surface = self.surface else {
                 self.interpretKeyEvents([event])
                 return
@@ -1197,6 +1460,10 @@ extension Ghostty {
         }
 
         override func keyUp(with event: NSEvent) {
+            if forwardTermSurfKeyUp(event) {
+                return
+            }
+
             _ = keyAction(GHOSTTY_ACTION_RELEASE, event: event)
         }
 
@@ -1230,6 +1497,9 @@ extension Ghostty {
 
         /// Special case handling for some control keys
         override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            termSurfLogGeometry(
+                event: "perform_key_equivalent",
+                note: "key_code=\(event.keyCode) modifiers=\(termSurfModifiers(event.modifierFlags)) focused=\(focused)")
             // We only care about key down events. It might not even be possible
             // to receive any other event type here.
             guard event.type == .keyDown else { return false }
@@ -1255,6 +1525,9 @@ extension Ghostty {
 
             // If this is a binding then we want to perform it.
             if let bindingFlags {
+                termSurfLogGeometry(
+                    event: "perform_key_equivalent_binding",
+                    note: "key_code=\(event.keyCode) modifiers=\(termSurfModifiers(event.modifierFlags)) focused=\(focused) flags=\(bindingFlags.rawValue)")
                 // Attempt to trigger a menu item for this key binding. We only do this if:
                 //   - We're not in a key sequence or table (those are separate bindings)
                 //   - The binding is NOT `all` (menu uses FirstResponder chain)
@@ -1397,6 +1670,269 @@ extension Ghostty {
             }
 
             _ = keyAction(action, event: event)
+        }
+
+        private struct TermSurfOverlayPoint {
+            let x: Double
+            let y: Double
+        }
+
+        private func termSurfOverlayPoint(for event: NSEvent) -> TermSurfOverlayPoint? {
+            guard let overlayFrame = termsurfOverlayFrame else { return nil }
+
+            let viewPoint = convert(event.locationInWindow, from: nil)
+            let topOriginPoint = CGPoint(x: viewPoint.x, y: bounds.height - viewPoint.y)
+            let hit = overlayFrame.contains(topOriginPoint)
+            let webPoint = CGPoint(x: topOriginPoint.x - overlayFrame.minX, y: topOriginPoint.y - overlayFrame.minY)
+            termSurfLogGeometry(
+                event: "hit_test",
+                hit: hit,
+                rawPoint: viewPoint,
+                topPoint: topOriginPoint,
+                webPoint: webPoint,
+                note: "browser-input-hit-test")
+            if ProcessInfo.processInfo.environment["TERMSURF_INPUT_TRACE"] == "1" {
+                fputs(
+                    "TermSurf input hit_test pane_id=\(id.uuidString) event=\(event.type.rawValue) view=\(NSStringFromPoint(viewPoint)) top=\(NSStringFromPoint(topOriginPoint)) overlay=\(NSStringFromRect(overlayFrame)) hit=\(hit)\n",
+                    stderr)
+            }
+            guard hit else { return nil }
+
+            return TermSurfOverlayPoint(
+                x: Double(webPoint.x),
+                y: Double(webPoint.y))
+        }
+
+        private func forwardTermSurfKeyDown(_ event: NSEvent) -> Bool {
+            let type: String
+            if event.isARepeat || termsurfPressedBrowserKeys.contains(event.keyCode) {
+                type = "repeat"
+            } else {
+                type = "down"
+            }
+            let forwarded = forwardTermSurfKeyEvent(event, type: type)
+            if forwarded {
+                termsurfPressedBrowserKeys.insert(event.keyCode)
+            }
+            return forwarded
+        }
+
+        private func forwardTermSurfKeyUp(_ event: NSEvent) -> Bool {
+            let forwarded = forwardTermSurfKeyEvent(event, type: "up")
+            if forwarded {
+                termsurfPressedBrowserKeys.remove(event.keyCode)
+            }
+            return forwarded
+        }
+
+        private func forwardTermSurfKeyEvent(_ event: NSEvent, type: String) -> Bool {
+            if event.keyCode == 0x35 {
+                return false
+            }
+
+            let windowsKeyCode = termSurfWindowsKeyCode(for: event)
+            guard windowsKeyCode != 0 else { return false }
+
+            let text = type == "up" ? "" : event.characters ?? ""
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags)
+
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                type.withCString { typePointer in
+                    text.withCString { textPointer in
+                        termsurf_forward_key_event(
+                            paneIDPointer,
+                            typePointer,
+                            Int64(windowsKeyCode),
+                            textPointer,
+                            modifiers)
+                    }
+                }
+            }
+
+            return forwarded != 0
+        }
+
+        private func forwardTermSurfMouseEvent(
+            _ event: NSEvent,
+            type: String,
+            button: String
+        ) -> Bool {
+            guard let point = termSurfOverlayPoint(for: event) else { return false }
+
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags, pressedButtons: true)
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                type.withCString { typePointer in
+                    button.withCString { buttonPointer in
+                        termsurf_forward_mouse_event(
+                            paneIDPointer,
+                            typePointer,
+                            buttonPointer,
+                            point.x,
+                            point.y,
+                            Int64(max(event.clickCount, 1)),
+                            modifiers)
+                    }
+                }
+            }
+
+            return forwarded != 0
+        }
+
+        private func forwardTermSurfMouseMove(_ event: NSEvent) -> Bool {
+            guard let point = termSurfOverlayPoint(for: event) else { return false }
+
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags, pressedButtons: true)
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                termsurf_forward_mouse_move(
+                    paneIDPointer,
+                    point.x,
+                    point.y,
+                    modifiers)
+            }
+
+            return forwarded != 0
+        }
+
+        private func forwardTermSurfScrollEvent(_ event: NSEvent) -> Bool {
+            guard let point = termSurfOverlayPoint(for: event) else { return false }
+
+            var deltaX = event.scrollingDeltaX
+            var deltaY = event.scrollingDeltaY
+            let precise = event.hasPreciseScrollingDeltas
+            if precise {
+                deltaX *= 2
+                deltaY *= 2
+            }
+
+            let paneID = id.uuidString
+            let modifiers = termSurfModifiers(event.modifierFlags)
+            let forwarded: Int32 = paneID.withCString { paneIDPointer in
+                termsurf_forward_scroll_event(
+                    paneIDPointer,
+                    point.x,
+                    point.y,
+                    deltaX,
+                    deltaY,
+                    UInt64(event.phase.rawValue),
+                    UInt64(event.momentumPhase.rawValue),
+                    precise,
+                    modifiers)
+            }
+
+            return forwarded != 0
+        }
+
+        private func termSurfMouseButton(_ event: NSEvent) -> String {
+            switch event.buttonNumber {
+            case 1:
+                return "right"
+            case 2:
+                return "middle"
+            default:
+                return "left"
+            }
+        }
+
+        private func termSurfModifiers(
+            _ flags: NSEvent.ModifierFlags,
+            pressedButtons: Bool = false
+        ) -> UInt64 {
+            var modifiers: UInt64 = 0
+            if flags.contains(.shift) { modifiers |= 1 }
+            if flags.contains(.control) { modifiers |= 2 }
+            if flags.contains(.option) { modifiers |= 4 }
+            if flags.contains(.command) { modifiers |= 8 }
+
+            guard pressedButtons else { return modifiers }
+
+            let buttons = NSEvent.pressedMouseButtons
+            if buttons & (1 << 0) != 0 { modifiers |= 64 }
+            if buttons & (1 << 1) != 0 { modifiers |= 256 }
+            if buttons & (1 << 2) != 0 { modifiers |= 128 }
+            return modifiers
+        }
+
+        private func termSurfWindowsKeyCode(for event: NSEvent) -> UInt32 {
+            switch event.keyCode {
+            case 0x00: return 0x41
+            case 0x0B: return 0x42
+            case 0x08: return 0x43
+            case 0x02: return 0x44
+            case 0x0E: return 0x45
+            case 0x03: return 0x46
+            case 0x05: return 0x47
+            case 0x04: return 0x48
+            case 0x22: return 0x49
+            case 0x26: return 0x4A
+            case 0x28: return 0x4B
+            case 0x25: return 0x4C
+            case 0x2E: return 0x4D
+            case 0x2D: return 0x4E
+            case 0x1F: return 0x4F
+            case 0x23: return 0x50
+            case 0x0C: return 0x51
+            case 0x0F: return 0x52
+            case 0x01: return 0x53
+            case 0x11: return 0x54
+            case 0x20: return 0x55
+            case 0x09: return 0x56
+            case 0x0D: return 0x57
+            case 0x07: return 0x58
+            case 0x10: return 0x59
+            case 0x06: return 0x5A
+            case 0x1D: return 0x30
+            case 0x12: return 0x31
+            case 0x13: return 0x32
+            case 0x14: return 0x33
+            case 0x15: return 0x34
+            case 0x17: return 0x35
+            case 0x16: return 0x36
+            case 0x1A: return 0x37
+            case 0x1C: return 0x38
+            case 0x19: return 0x39
+            case 0x24, 0x4C: return 0x0D
+            case 0x30: return 0x09
+            case 0x33: return 0x08
+            case 0x35: return 0x1B
+            case 0x31: return 0x20
+            case 0x75: return 0x2E
+            case 0x7E: return 0x26
+            case 0x7D: return 0x28
+            case 0x7B: return 0x25
+            case 0x7C: return 0x27
+            case 0x73: return 0x24
+            case 0x77: return 0x23
+            case 0x74: return 0x21
+            case 0x79: return 0x22
+            case 0x72: return 0x2D
+            case 0x7A: return 0x70
+            case 0x78: return 0x71
+            case 0x63: return 0x72
+            case 0x76: return 0x73
+            case 0x60: return 0x74
+            case 0x61: return 0x75
+            case 0x62: return 0x76
+            case 0x64: return 0x77
+            case 0x65: return 0x78
+            case 0x6D: return 0x79
+            case 0x67: return 0x7A
+            case 0x6F: return 0x7B
+            case 0x29: return 0xBA
+            case 0x18: return 0xBB
+            case 0x2B: return 0xBC
+            case 0x1B: return 0xBD
+            case 0x2F: return 0xBE
+            case 0x2C: return 0xBF
+            case 0x32: return 0xC0
+            case 0x21: return 0xDB
+            case 0x2A: return 0xDC
+            case 0x1E: return 0xDD
+            case 0x27: return 0xDE
+            default: return 0
+            }
         }
 
         private func keyAction(

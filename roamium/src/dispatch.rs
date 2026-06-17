@@ -207,9 +207,16 @@ pub fn handle_message(msg: &TermSurfMessage) {
         Msg::CloseTab(m) => {
             let tab_id = m.tab_id;
             if let Some(t) = find_by_tab_id(tab_id) {
+                trace_pdf_input(format!(
+                    "close-tab tab_id={} pane_id={} result=destroying ffi=ts_destroy_web_contents",
+                    tab_id, t.pane_id
+                ));
                 unsafe { ffi::ts_destroy_web_contents(t.handle) };
+            } else {
+                trace_pdf_input(format!("close-tab tab_id={} result=no-tab", tab_id));
             }
             tabs().retain(|t| t.tab_id != tab_id);
+            trace_pdf_input(format!("close-tab tab_id={} result=removed", tab_id));
         }
         Msg::Navigate(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {

@@ -15,6 +15,7 @@ const build_config = @import("build_config.zig");
 const main = @import("main_ghostty.zig");
 const state = &@import("global.zig").state;
 const apprt = @import("apprt.zig");
+const termsurf = @import("apprt/termsurf.zig");
 const internal_os = @import("os/main.zig");
 
 // Some comptime assertions that our C API depends on.
@@ -154,6 +155,108 @@ pub export fn ghostty_translate(msgid: [*:0]const u8) [*:0]const u8 {
 /// Free a string allocated by Ghostty.
 pub export fn ghostty_string_free(str: String) void {
     str.deinit();
+}
+
+pub export fn termsurf_ipc_start() c_int {
+    termsurf.start() catch |err| {
+        std.log.err("failed to start TermSurf socket error={}", .{err});
+        return 1;
+    };
+    return 0;
+}
+
+pub export fn termsurf_ipc_stop() void {
+    termsurf.stop();
+}
+
+pub export fn termsurf_overlay_presented_pixels(
+    pane_id: [*:0]const u8,
+    pixel_width: u64,
+    pixel_height: u64,
+) void {
+    termsurf.overlayPresentedPixels(std.mem.span(pane_id), pixel_width, pixel_height);
+}
+
+pub export fn termsurf_forward_key_event(
+    pane_id: [*:0]const u8,
+    event_type: [*:0]const u8,
+    windows_key_code: i64,
+    utf8: [*:0]const u8,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardKeyEvent(
+        std.mem.span(pane_id),
+        std.mem.span(event_type),
+        windows_key_code,
+        std.mem.span(utf8),
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_forward_mouse_event(
+    pane_id: [*:0]const u8,
+    event_type: [*:0]const u8,
+    button: [*:0]const u8,
+    x: f64,
+    y: f64,
+    click_count: i64,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardMouseEvent(
+        std.mem.span(pane_id),
+        std.mem.span(event_type),
+        std.mem.span(button),
+        x,
+        y,
+        click_count,
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_forward_mouse_move(
+    pane_id: [*:0]const u8,
+    x: f64,
+    y: f64,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardMouseMove(
+        std.mem.span(pane_id),
+        x,
+        y,
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_forward_scroll_event(
+    pane_id: [*:0]const u8,
+    x: f64,
+    y: f64,
+    delta_x: f64,
+    delta_y: f64,
+    phase: u64,
+    momentum_phase: u64,
+    precise: bool,
+    modifiers: u64,
+) c_int {
+    return if (termsurf.forwardScrollEvent(
+        std.mem.span(pane_id),
+        x,
+        y,
+        delta_x,
+        delta_y,
+        phase,
+        momentum_phase,
+        precise,
+        modifiers,
+    )) 1 else 0;
+}
+
+pub export fn termsurf_pane_closed(pane_id: [*:0]const u8) void {
+    termsurf.paneClosed(std.mem.span(pane_id));
+}
+
+pub export fn termsurf_pane_focus_changed(pane_id: [*:0]const u8, focused: i32) void {
+    termsurf.paneFocusChanged(std.mem.span(pane_id), focused != 0);
 }
 
 test "ghostty_string_s empty string" {

@@ -153,3 +153,58 @@ Fresh-context adversarial review returned `APPROVED`.
   pristine macOS build and run baseline before any Ghostboard-specific code
   changes.
 - No required findings were reported.
+
+## Result
+
+**Result:** Fail.
+
+The pristine imported Ghostty `v1.3.1` tree did not build the macOS app on this
+VM without a source change.
+
+Confirmed environment:
+
+- `zig` is Homebrew Zig `0.15.2`.
+- `pandoc` is installed and visible on PATH.
+- `gettext` is installed.
+- Nix is installed and `nix build -L .#deps` succeeds.
+- Full Xcode is selected at `/Applications/Xcode.app/Contents/Developer`.
+- Xcode is `26.6`, macOS SDK is `26.5`, iOS SDK is `26.5`, and the Metal
+  toolchain is visible.
+
+Observed build attempts:
+
+- `nix develop -c zig build --system <deps> -Demit-macos-app=false` fails in
+  this VM because Nix's Zig cannot link a macOS build runner against libSystem.
+- Homebrew Zig plus the Nix dependency store path can produce
+  `macos/GhosttyKit.xcframework` after `pandoc` is installed.
+- Native Xcode app builds then fail at the final app link with unresolved
+  symbols from the static dependency closure.
+- Direct `zig build run` with Homebrew Zig also reaches `xcodebuild` and fails
+  at the final app link.
+- The final combined `libghostty-fat.a`/`libghostty.a` archives contain some
+  dependency objects but not the full set needed by the Xcode link. Missing
+  definitions exist in Zig's cache but are not present in the combined archive.
+
+Prior Issue 802 work explains the same family of failure: Ghostty `1.3.x` pins
+Zig `0.15.2`, and the successful no-old-Xcode workaround was a build-only
+macOS-slice patch for `GhosttyKit`. That workaround is not pristine upstream, so
+it belongs in the next experiment rather than being hidden inside this one.
+
+Logs:
+
+- `logs/ghostboard-exp4-nix-deps-homebrew-zig-pandoc-20260616-061529.log`
+- `logs/ghostboard-exp4-native-xcodebuild-20260616-061550.log`
+- `logs/ghostboard-exp4-native-xcodebuild-arm64-20260616-061636.log`
+- `logs/ghostboard-exp4-zig-build-run-pandoc-20260616-061914.log`
+- `logs/ghostboard-exp4-xcodebuild-debug-arm64-all-load-20260616-062037.log`
+- `logs/ghostboard-exp4-zig-build-native-xcframework-20260616-062235.log`
+- `logs/ghostboard-exp4-xcodebuild-debug-arm64-native-xcframework-20260616-062251.log`
+
+## Conclusion
+
+The pristine baseline is blocked in this VM, but the blocker is now narrowed to
+the Ghostty/Zig/Xcode static archive build path rather than a missing dependency
+such as Xcode, Zig, gettext, or pandoc. The next experiment should apply the
+known Issue 802 build-only macOS `GhosttyKit` workaround and verify whether
+Ghostty `v1.3.1` app/runtime code can build and launch on this VM with that
+documented deviation.

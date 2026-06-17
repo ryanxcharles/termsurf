@@ -24,8 +24,9 @@ pub fn init(
         Config.genericMacOSTarget(b, null),
     ));
 
-    // iOS
-    const ios = try GhosttyLib.initStatic(b, &try deps.retarget(
+    // iOS. Issue 808 uses the native macOS slice for the local app baseline;
+    // only construct iOS slices when building a universal xcframework.
+    const ios: GhosttyLib = if (target == .universal) try GhosttyLib.initStatic(b, &try deps.retarget(
         b,
         b.resolveTargetQuery(.{
             .cpu_arch = .aarch64,
@@ -33,10 +34,10 @@ pub fn init(
             .os_version_min = Config.osVersionMin(.ios),
             .abi = null,
         }),
-    ));
+    )) else undefined;
 
-    // iOS Simulator
-    const ios_sim = try GhosttyLib.initStatic(b, &try deps.retarget(
+    // iOS Simulator. Same universal-only construction as the iOS device slice.
+    const ios_sim: GhosttyLib = if (target == .universal) try GhosttyLib.initStatic(b, &try deps.retarget(
         b,
         b.resolveTargetQuery(.{
             .cpu_arch = .aarch64,
@@ -51,7 +52,7 @@ pub fn init(
             // back to running simulator builds.
             .cpu_model = .{ .explicit = &std.Target.aarch64.cpu.apple_a17 },
         }),
-    ));
+    )) else undefined;
 
     // The xcframework wraps our ghostty library so that we can link
     // it to the final app built with Swift.

@@ -67,7 +67,7 @@ const ThemeListElement = struct {
 };
 
 /// The `list-themes` command is used to preview or list all the available
-/// themes for Ghostty.
+/// themes for TermSurf.
 ///
 /// If this command is run from a TTY, a TUI preview of the themes will be
 /// shown. While in the preview, `F1` will bring up a help screen and `ESC` will
@@ -80,14 +80,14 @@ const ThemeListElement = struct {
 ///
 /// Two different directories will be searched for themes.
 ///
-/// The first directory is the `themes` subdirectory of your Ghostty
-/// configuration directory. This is `$XDG_CONFIG_HOME/ghostty/themes` or
-/// `~/.config/ghostty/themes`.
+/// The first directory is the `themes` subdirectory of your TermSurf
+/// configuration directory. This is `$XDG_CONFIG_HOME/termsurf/themes` or
+/// `~/.config/termsurf/themes`.
 ///
-/// The second directory is the `themes` subdirectory of the Ghostty resources
-/// directory. Ghostty ships with a multitude of themes that will be installed
+/// The second directory is the `themes` subdirectory of the TermSurf resources
+/// directory. TermSurf ships with a multitude of themes that will be installed
 /// into this directory. On macOS, this directory is the
-/// `Ghostty.app/Contents/Resources/ghostty/themes`. On Linux, this directory
+/// `TermSurf.app/Contents/Resources/ghostty/themes`. On Linux, this directory
 /// is the `share/ghostty/themes` (wherever you installed the Ghostty "share"
 /// directory). If you're running Ghostty from the source, this is the
 /// `zig-out/share/ghostty/themes` directory.
