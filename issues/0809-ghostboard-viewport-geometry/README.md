@@ -186,4 +186,4 @@ work together, not just individually.
 - [Experiment 6: Split-right divider resize](06-split-right-divider-resize.md) —
   **Pass**
 - [Experiment 7: Split-right equalize rebalance](07-split-right-equalize-rebalance.md)
-  — **Designed**
+  — **Pass**

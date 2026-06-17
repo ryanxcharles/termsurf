@@ -211,3 +211,115 @@ The design was reviewed by a fresh-context Codex adversarial subagent.
 Verdict: **Approved**.
 
 The reviewer reported no findings.
+
+## Result
+
+**Result:** Pass.
+
+The `split-right-equalize` scenario is implemented in
+`scripts/ghostboard-geometry-matrix.sh`. The harness now:
+
+- accepts `split-right-equalize` in addition to the prior scenarios;
+- adds scenario-local keybindings:
+  - `keybind = ctrl+d=new_split:right`;
+  - `keybind = ctrl+l=resize_split:right,20`;
+  - `keybind = ctrl+e=equalize_splits`;
+- creates a right-side split from the browser-owning pane;
+- records the post-split frame/pixels as the equal-split baseline;
+- resizes the divider right to make the split unequal;
+- records the divider-resized frame/pixels as the unequal baseline;
+- invokes equalize through Control-E;
+- waits for AppKit frame and presented-pixel records after equalize that return
+  to the equal-split baseline within tolerance;
+- verifies that Zig records the equalized AppKit-presented pixel size;
+- verifies that Roamium applies the equalized AppKit pixel size with
+  `ffi=ts_set_view_size` after the equalize trace boundary;
+- captures a post-equalize screenshot;
+- verifies a positive hit test inside the equalized browser overlay;
+- verifies the right sibling pane area does not route input to the original
+  browser context.
+
+No Ghostboard product source changes were needed for this row. Current
+Ghostboard already keeps the browser attached to the original pane and resizes
+it correctly after equalizing a previously moved split-right divider.
+
+Final passing artifacts:
+
+- split-right-equalize app log:
+  `logs/ghostboard-geometry-split-right-equalize-app-20260617-083757.log`
+- split-right-equalize harness log:
+  `logs/ghostboard-geometry-split-right-equalize-harness-20260617-083757.log`
+- split-right-equalize initial screenshot:
+  `logs/ghostboard-geometry-split-right-equalize-screenshot-20260617-083757.png`
+- split-right-equalize post-equalize screenshot:
+  `logs/ghostboard-geometry-split-right-equalize-split-screenshot-20260617-083757.png`
+- split-right-equalize Roamium trace:
+  `logs/ghostboard-geometry-split-right-equalize-roamium-20260617-083757.log`
+- initial-open regression app log:
+  `logs/ghostboard-geometry-initial-open-app-20260617-083854.log`
+- initial-open regression harness log:
+  `logs/ghostboard-geometry-initial-open-harness-20260617-083854.log`
+- window-resize regression app log:
+  `logs/ghostboard-geometry-window-resize-app-20260617-083903.log`
+- window-resize regression harness log:
+  `logs/ghostboard-geometry-window-resize-harness-20260617-083903.log`
+- split-right regression app log:
+  `logs/ghostboard-geometry-split-right-app-20260617-083919.log`
+- split-right regression harness log:
+  `logs/ghostboard-geometry-split-right-harness-20260617-083919.log`
+- split-down regression app log:
+  `logs/ghostboard-geometry-split-down-app-20260617-084004.log`
+- split-down regression harness log:
+  `logs/ghostboard-geometry-split-down-harness-20260617-084004.log`
+- split-right-resize regression app log:
+  `logs/ghostboard-geometry-split-right-resize-app-20260617-084018.log`
+- split-right-resize regression harness log:
+  `logs/ghostboard-geometry-split-right-resize-harness-20260617-084018.log`
+
+Key runtime evidence from the passing `split-right-equalize` run:
+
+- initial frame: `944x493`, AppKit pixel size `1888x986`;
+- post-split equal baseline: `456x493`, AppKit pixel size `912x986`;
+- divider-resized unequal baseline: `480x493`, AppKit pixel size `960x986`;
+- post-equalize frame: `456x493`, AppKit pixel size `912x986`;
+- pane id: `DF05A487-4FC3-4E08-AEBA-4F9BF5571AC1`;
+- browser tab id: `1`;
+- context id: `3095360314`;
+- positive post-equalize hit point: `276,414`;
+- sibling negative post-equalize point: `756,414`.
+
+Verification commands run:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+scripts/ghostboard-geometry-matrix.sh split-right-equalize
+scripts/ghostboard-geometry-matrix.sh initial-open
+scripts/ghostboard-geometry-matrix.sh window-resize
+scripts/ghostboard-geometry-matrix.sh split-right
+scripts/ghostboard-geometry-matrix.sh split-down
+scripts/ghostboard-geometry-matrix.sh split-right-resize
+```
+
+The existing-scenario regression sweep was run serially. No product build was
+needed because the only implementation change was to the shell harness.
+
+## Completion Review
+
+The completed experiment was reviewed by a fresh-context Codex adversarial
+subagent.
+
+Verdict: **Approved**.
+
+The reviewer reported no findings.
+
+## Conclusion
+
+The equalize/rebalance matrix row passes for a two-pane split-right layout. A
+browser in the original left pane follows the owning pane through split
+creation, divider resize, and equalization back to the equal-split baseline, and
+the AppKit, Zig, Roamium, screenshot, and input-hit evidence all agree.
+
+The next experiment should move to the next untested matrix row, most likely
+zoom/maximize pane behavior, while continuing to re-run adjacent split geometry
+scenarios serially as regressions.
