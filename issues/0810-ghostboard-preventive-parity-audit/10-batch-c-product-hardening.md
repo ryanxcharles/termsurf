@@ -388,7 +388,7 @@ parity, navigation visual smoothness, page-title/chrome state, browser context
 menus, active-pane visual polish, config-path behavior, and macOS bundle
 identity.
 
-The next audit slice should move backward to Batch B (`0516`-`0599`), because
+The next audit slice should move backward to Batch B (`0400`-`0515`), because
 Batch C references the ts5 and late prototype work as its baseline and those
 issues likely contain the earlier input, focus, compositing, and protocol
 lessons that shaped the Ghostboard port.
