@@ -26,6 +26,7 @@ SCREENSHOT_TAB_BACK="$LOG_DIR/ghostboard-geometry-${SCENARIO}-back-tab-screensho
 SCREENSHOT_TAB_BROWSER_B="$LOG_DIR/ghostboard-geometry-${SCENARIO}-browser-b-screenshot-${TS}.png"
 SCREENSHOT_TAB_BROWSER_A_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-browser-a-restored-screenshot-${TS}.png"
 SCREENSHOT_TAB_BROWSER_B_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-browser-b-restored-screenshot-${TS}.png"
+SCREENSHOT_TAB_AFTER_CLOSE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-after-close-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
@@ -907,7 +908,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -930,7 +931,7 @@ exec "$WEB" --browser "$ROAMIUM" "$URL"
 EOF
 chmod +x "$COMMAND"
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ]; then
   FIRST_RUN_MARKER="$RUN_DIR/first-web-ran"
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -949,13 +950,20 @@ window-save-state = never
 initial-command = direct:$COMMAND
 EOF
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+t=new_tab
 keybind = ctrl+1=goto_tab:1
 keybind = ctrl+2=goto_tab:2
 keybind = ctrl+p=previous_tab
 keybind = ctrl+n=next_tab
+EOF
+fi
+
+if [ "$SCENARIO" = "close-browser-tab" ]; then
+  cat >>"$CONFIG" <<'EOF'
+confirm-close-surface = false
+keybind = ctrl+w=close_tab
 EOF
 fi
 
@@ -1148,11 +1156,12 @@ if [ "$SCENARIO" = "new-terminal-tab-visibility" ]; then
   log "new_tab_command_log=$NEW_TAB_COMMAND_LOG"
   log "new_tab_marker_command=$NEW_TAB_MARKER_COMMAND"
 fi
-if [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
+if [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ]; then
   log "new_tab_screenshot=$SCREENSHOT_TAB_NEW"
   log "browser_b_screenshot=$SCREENSHOT_TAB_BROWSER_B"
   log "browser_a_restored_screenshot=$SCREENSHOT_TAB_BROWSER_A_RESTORED"
   log "browser_b_restored_screenshot=$SCREENSHOT_TAB_BROWSER_B_RESTORED"
+  log "after_close_screenshot=$SCREENSHOT_TAB_AFTER_CLOSE"
   log "second_browser_command=$SECOND_BROWSER_COMMAND"
 fi
 
@@ -1416,7 +1425,7 @@ if [ "$SCENARIO" = "new-terminal-tab-visibility" ]; then
   log "back_tab_screenshot_exit=$?"
 fi
 
-if [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
+if [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ]; then
   A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
   [ -n "$A_SELECTED_TAB_ID" ] || fail "could not extract browser A selected tab id"
   A_PANE_ID="$PANE_ID"
@@ -1569,6 +1578,113 @@ if [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
   wait_for_log_after "$B_CONTROL_START_LINE" "ModeChanged: pane_id=${B_PANE_ID} browsing=false" "browser B webtui returned to control mode"
   require_trace_after "$B_CONTROL_TRACE_START_LINE" "focus-changed tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed browser B focus=false after control mode"
 
+  if [ "$SCENARIO" = "close-browser-tab" ]; then
+    CLOSE_TAB_START_LINE="$(log_line_count)"
+    CLOSE_TAB_TRACE_START_LINE="$(trace_line_count)"
+    log "close_tab_keybind=ctrl+w=close_tab"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 13 control >>"$HARNESS_LOG" 2>&1
+    delay 1
+
+    CLOSE_SELECTED_LINE="$(wait_for_selected_tab_change_after "$CLOSE_TAB_START_LINE" "$TAB2_SELECTED_TAB_ID" "browser B native tab closed/selection changed")"
+    CLOSE_SELECTED_TAB_ID="$(extract_selected_tab_id "$CLOSE_SELECTED_LINE")"
+    [ "$CLOSE_SELECTED_TAB_ID" = "$A_SELECTED_TAB_ID" ] || fail "closing browser B tab selected unexpected tab: expected=$A_SELECTED_TAB_ID actual=$CLOSE_SELECTED_TAB_ID"
+    log "PASS: closing browser B tab selected browser A tab"
+    log "close_selected_tab_id=$CLOSE_SELECTED_TAB_ID"
+
+    A_AFTER_CLOSE_PRESENT_LINE="$(wait_for_changed_appkit_frame_after "$CLOSE_TAB_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_TABBED_FRAME" "browser A geometry restored after browser B tab close")"
+    A_AFTER_CLOSE_PIXELS_LINE="$(wait_for_changed_appkit_pixels_after "$CLOSE_TAB_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_TABBED_PIXEL" "browser A AppKit pixels restored after browser B tab close")"
+    A_AFTER_CLOSE_FRAME="$(extract_overlay_frame "$A_AFTER_CLOSE_PRESENT_LINE")"
+    A_AFTER_CLOSE_FRAME_SIZE="$(extract_frame_size "$A_AFTER_CLOSE_PRESENT_LINE")"
+    A_AFTER_CLOSE_FRAME_X="$(extract_frame_x "$A_AFTER_CLOSE_PRESENT_LINE")"
+    A_AFTER_CLOSE_FRAME_Y="$(extract_frame_y "$A_AFTER_CLOSE_PRESENT_LINE")"
+    A_AFTER_CLOSE_PIXEL="$(extract_appkit_pixel "$A_AFTER_CLOSE_PIXELS_LINE")"
+    A_AFTER_CLOSE_PIXEL_WIDTH="${A_AFTER_CLOSE_PIXEL%x*}"
+    A_AFTER_CLOSE_PIXEL_HEIGHT="${A_AFTER_CLOSE_PIXEL#*x}"
+    log "browser_a_after_close_overlay_frame=$A_AFTER_CLOSE_FRAME"
+    log "browser_a_after_close_overlay_frame_size=$A_AFTER_CLOSE_FRAME_SIZE"
+    log "browser_a_after_close_appkit_pixel=$A_AFTER_CLOSE_PIXEL"
+    require_trace_after "$CLOSE_TAB_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${A_AFTER_CLOSE_PIXEL_WIDTH} pixel_height=${A_AFTER_CLOSE_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium resized browser A after browser B tab close"
+
+    CLEAR_OVERLAY_SEEN=""
+    for _ in $(seq 1 30); do
+      if tail -n +"$((CLOSE_TAB_START_LINE + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=zig event=clear_overlay_call .*pane_id:${B_PANE_ID}" >/dev/null 2>&1; then
+        CLEAR_OVERLAY_SEEN="1"
+        break
+      fi
+      if tail -n +"$((CLOSE_TAB_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -F "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" >/dev/null 2>&1; then
+        fail "Control-W was forwarded to browser B input before close_tab cleanup"
+      fi
+      delay 1
+    done
+    [ -n "$CLEAR_OVERLAY_SEEN" ] || fail "timed out waiting for Zig records browser B clear_overlay_call after tab close"
+    log "PASS: Zig records browser B clear_overlay_call after tab close"
+
+    wait_for_log_after "$CLOSE_TAB_START_LINE" "TermSurf geometry layer=bridge event=clear_request .*pane_id:${B_PANE_ID}" "Swift bridge records browser B clear_request after tab close"
+
+    CLEAR_RESULT=""
+    for _ in $(seq 1 30); do
+      if tail -n +"$((CLOSE_TAB_START_LINE + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=bridge event=clear_target_found .*pane_id:${B_PANE_ID}" >/dev/null 2>&1 &&
+        tail -n +"$((CLOSE_TAB_START_LINE + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=clear .*pane_id:${B_PANE_ID}" >/dev/null 2>&1; then
+        CLEAR_RESULT="target-found"
+        break
+      fi
+      if tail -n +"$((CLOSE_TAB_START_LINE + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=bridge event=clear_rejected .*pane_id:${B_PANE_ID} .*note=no-surface" >/dev/null 2>&1; then
+        CLEAR_RESULT="surface-already-gone"
+        break
+      fi
+      delay 1
+    done
+    [ -n "$CLEAR_RESULT" ] || fail "missing AppKit clear or bridge no-surface cleanup evidence after browser B tab close"
+    log "PASS: observed browser B tab-close clear result clear_result=$CLEAR_RESULT"
+
+    require_log_after "$CLOSE_TAB_START_LINE" "CloseTab: pane_id=${B_PANE_ID} tab_id=${B_BROWSER_TAB_ID}" "Zig records CloseTab for browser B after tab close"
+    require_trace_after "$CLOSE_TAB_TRACE_START_LINE" "close-tab tab_id=${B_BROWSER_TAB_ID} pane_id=${B_PANE_ID} result=destroying ffi=ts_destroy_web_contents" "Roamium received CloseTab and destroyed browser B"
+    require_trace_after "$CLOSE_TAB_TRACE_START_LINE" "close-tab tab_id=${B_BROWSER_TAB_ID} result=removed" "Roamium removed closed browser B tab"
+
+    SELECT_CLOSED_START_LINE="$(log_line_count)"
+    log "select_closed_tab_keybind=ctrl+2=goto_tab:2"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 19 control >>"$HARNESS_LOG" 2>&1
+    delay 1
+    if tail -n +"$((SELECT_CLOSED_START_LINE + 1))" "$APP_LOG" |
+      grep -E "TermSurf geometry layer=appkit event=.*selected_tab_id:${TAB2_SELECTED_TAB_ID}" >/dev/null 2>&1; then
+      fail "closed browser B native tab was selectable after close"
+    fi
+    log "PASS: closed browser B native tab was not selectable by ctrl+2"
+
+    require_no_trace_after "$CLOSE_TAB_TRACE_START_LINE" "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" "close-tab and closed-tab probes did not reach browser B input"
+
+    TAB1_WIN_LINE="$(window_bounds_for "$A_SELECTED_TAB_ID")" || fail "failed to resolve browser A window bounds after tab close for window id=$A_SELECTED_TAB_ID"
+    IFS=$'\t' read -r _TAB1_WID TAB1_WX TAB1_WY TAB1_WW TAB1_WH <<<"$TAB1_WIN_LINE"
+    A_CLICK_X="$(awk -v wx="$TAB1_WX" -v frame_x="$A_AFTER_CLOSE_FRAME_X" -v frame_size="$A_AFTER_CLOSE_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wx + frame_x + (parts[1] / 2) + 0.5) }')"
+    A_CLICK_Y="$(awk -v wy="$TAB1_WY" -v frame_y="$A_AFTER_CLOSE_FRAME_Y" -v frame_size="$A_AFTER_CLOSE_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wy + frame_y + (parts[2] / 2) + 0.5) }')"
+    A_AFTER_CLOSE_HIT_START_LINE="$(log_line_count)"
+    click_global_point "$A_CLICK_X" "$A_CLICK_Y" "browser_a_after_tab_close_area"
+    A_AFTER_CLOSE_HIT_LINE="$(wait_for_hit_after "$A_AFTER_CLOSE_HIT_START_LINE" "$A_CONTEXT_ID" "browser A after tab-close hit-test")"
+    require_text "$A_AFTER_CLOSE_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "browser A after tab-close hit-test has tab 1 selected tab id"
+    require_text "$A_AFTER_CLOSE_HIT_LINE" "overlay_frame=${A_AFTER_CLOSE_FRAME}" "browser A after tab-close hit-test uses browser A post-close frame"
+    require_text "$A_AFTER_CLOSE_HIT_LINE" "web_point={" "browser A after tab-close hit-test includes webview-relative point"
+
+    A_AFTER_CLOSE_MODE_START_LINE="$(log_line_count)"
+    A_AFTER_CLOSE_MODE_TRACE_START_LINE="$(trace_line_count)"
+    log "browser_a_after_tab_close_mode_key=enter=Mode::Browse"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+    wait_for_log_after "$A_AFTER_CLOSE_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "browser A entered browse mode after browser B tab close"
+    require_trace_after "$A_AFTER_CLOSE_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed browser A focus=true after browser B tab close"
+
+    A_AFTER_CLOSE_KEY_START_LINE="$(trace_line_count)"
+    printf 'ISSUE809_EXP14_BROWSER_A_AFTER_CLOSE\n' >"$BROWSER_FOCUS_COMMAND"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+    require_trace_after "$A_AFTER_CLOSE_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "browser A keyboard marker reached browser A after browser B tab close"
+    require_no_trace_after "$A_AFTER_CLOSE_KEY_START_LINE" "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" "browser A keyboard marker did not reach closed browser B"
+
+    screencapture -x -o -l"$A_SELECTED_TAB_ID" "$SCREENSHOT_TAB_AFTER_CLOSE"
+    log "after_close_screenshot_exit=$?"
+
+    [ "$NEW_TAB_TRACE_START_LINE" -lt "$BROWSER_B_TRACE_START_LINE" ] || fail "trace boundaries for browser B open were not monotonic"
+    [ "$BROWSER_B_TRACE_START_LINE" -lt "$CLOSE_TAB_TRACE_START_LINE" ] || fail "trace boundaries for browser B close were not monotonic"
+  fi
+
+  if [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
   SWITCH_A_START_LINE="$(log_line_count)"
   SWITCH_A_TRACE_START_LINE="$(trace_line_count)"
   log "switch_to_browser_a_keybind=ctrl+p=previous_tab"
@@ -1648,6 +1764,7 @@ if [ "$SCENARIO" = "open-browser-in-new-tab" ]; then
 
   [ "$BROWSER_B_TRACE_START_LINE" -lt "$SWITCH_B_TRACE_START_LINE" ] || fail "trace boundaries for browser B restore were not monotonic"
   [ "$NEW_TAB_TRACE_START_LINE" -lt "$BROWSER_B_TRACE_START_LINE" ] || fail "trace boundaries for browser B open were not monotonic"
+  fi
 fi
 
 if [ "$SCENARIO" = "window-resize" ]; then

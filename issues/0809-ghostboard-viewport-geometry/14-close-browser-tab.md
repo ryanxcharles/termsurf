@@ -219,6 +219,108 @@ Fail criteria:
 
 ## Design Review
 
+Fresh-context adversarial review approved the design before implementation.
+
+Verdict: **APPROVED**.
+
+Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Experiment 14 added the `close-browser-tab` scenario to
+`scripts/ghostboard-geometry-matrix.sh`. No Ghostboard, Roamium, or `webtui`
+product source changes were needed.
+
+The scenario reuses the two-native-tab/two-browser setup from Experiment 13,
+then closes native tab 2 while browser B is selected and in Control mode. The
+passing run proved:
+
+- browser A and browser B initially opened with distinct native selected tab
+  ids, TermSurf pane ids, browser tab ids, CA/context ids, AppKit frames, and
+  AppKit pixel sizes;
+- browser B was visible, hit-testable, focusable, and keyboard-routable before
+  close;
+- Escape returned browser B to Control mode before `ctrl+w` was injected;
+- `ctrl+w` selected browser A's native tab after closing browser B's native tab;
+- the close-tab keybinding was not forwarded to browser B input;
+- Zig recorded `clear_overlay_call` and `CloseTab` for browser B's pane id and
+  browser tab id;
+- the Swift bridge recorded browser B overlay cleanup, with AppKit cleanup
+  accepted through `clear_rejected ... note=no-surface` because the surface had
+  already been removed by the native tab close;
+- Roamium received `CloseTab`, destroyed browser B's web contents, and removed
+  browser tab 2;
+- `ctrl+2` did not reselect browser B's former native tab id after close;
+- browser A resized from the tab-bar-adjusted frame back to the one-tab frame
+  after the tab bar disappeared;
+- Roamium received the browser A resize after browser B's tab closed;
+- browser A remained visible, hit-testable, focusable, and keyboard-routable
+  with its original pane id, browser tab id, and context id;
+- keyboard input after browser B's native tab closed reached browser A only and
+  did not reach browser B.
+
+The first `close-browser-tab` harness run failed because the harness expected
+browser A to keep the tab-bar-adjusted `944x459` frame after native tab 2
+closed. The logs showed Ghostboard correctly grew browser A back to the
+single-tab `944x493` frame after the tab bar disappeared. The harness was
+updated to wait for and assert that post-close frame and pixel resize instead.
+
+Verification:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+scripts/ghostboard-geometry-matrix.sh close-browser-tab
+scripts/ghostboard-geometry-matrix.sh open-browser-in-new-tab
+scripts/ghostboard-geometry-matrix.sh new-terminal-tab-visibility
+```
+
+Passing evidence:
+
+- Close browser tab:
+  `logs/ghostboard-geometry-close-browser-tab-harness-20260617-115609.log`
+- Close browser tab app log:
+  `logs/ghostboard-geometry-close-browser-tab-app-20260617-115609.log`
+- Close browser tab Roamium trace:
+  `logs/ghostboard-geometry-close-browser-tab-roamium-20260617-115609.log`
+- Browser B before close screenshot:
+  `logs/ghostboard-geometry-close-browser-tab-browser-b-screenshot-20260617-115609.png`
+- Browser A after close screenshot:
+  `logs/ghostboard-geometry-close-browser-tab-after-close-screenshot-20260617-115609.png`
+- Adjacent `open-browser-in-new-tab` regression:
+  `logs/ghostboard-geometry-open-browser-in-new-tab-harness-20260617-115712.log`
+- Adjacent `new-terminal-tab-visibility` regression:
+  `logs/ghostboard-geometry-new-terminal-tab-visibility-harness-20260617-115812.log`
+
+No product build was needed because only the shell harness and issue documents
+changed.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result before the
+result commit.
+
+Verdict: **APPROVED**.
+
+Findings: none.
+
+The reviewer independently checked that the result commit had not yet been made,
+the README marks Experiment 14 as `Pass`, the experiment has Result and
+Conclusion sections, and the harness uses `ctrl+w=close_tab` while separately
+proving browser B cleanup and browser A survival without accepting pre-close
+evidence as post-close proof.
+
+## Conclusion
+
+Closing a native tab that owns a browser overlay now has durable coverage in the
+geometry matrix harness. Current Ghostboard already performs the correct cleanup
+and surviving-browser resize behavior for this case. The important behavior
+learned here is that closing the second native tab removes the tab bar, so the
+surviving browser pane must grow back from the tabbed frame to the single-tab
+frame and Roamium must receive the corresponding resize.
+
 The design was reviewed by a fresh-context Codex adversarial subagent.
 
 Final verdict: **Approved**.
