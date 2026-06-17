@@ -181,3 +181,5 @@ work together, not just individually.
 - [Experiment 3: Window resize follow](03-window-resize-follow.md) — **Pass**
 - [Experiment 4: Split-right pane attachment](04-split-right-pane-attachment.md)
   — **Pass**
+- [Experiment 5: Split-down pane attachment](05-split-down-pane-attachment.md) —
+  **Designed**
