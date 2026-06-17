@@ -205,3 +205,108 @@ Fix:
 Final verdict after re-review: **APPROVED**.
 
 Findings after re-review: none.
+
+## Result
+
+**Result:** Pass
+
+Experiment 16 added the `multiple-windows-with-browsers` scenario to
+`scripts/ghostboard-geometry-matrix.sh`. No Ghostboard, Roamium, or `webtui`
+product source changes were needed.
+
+The scenario launches browser A in window A, opens window B with the public
+`new_window` action and types a real repo-built
+`web --browser ... https://example.org` command, then opens window C the same
+way and types `web --browser ... https://example.net`. The passing run proved:
+
+- windows B and C were created through user-visible `new_window` actions;
+- windows B and C started plain login shells and did not inherit the first-run
+  browser wrapper;
+- browsers A, B, and C had distinct native window ids, AppKit surface ids, pane
+  ids, browser tab ids, and CA/context ids;
+- each browser's AppKit presentation and Roamium resize trace matched that
+  browser's own window and AppKit pixel size;
+- browser A and browser B were not freshly presented as visible under window C's
+  window id after browser C opened;
+- screenshots were captured for all three windows while all three browsers were
+  alive;
+- targeting window C produced a hit-test with browser C's window id, surface id,
+  selected tab id, context id, and AppKit frame, and keyboard input reached only
+  browser C;
+- targeting window B after window C produced a hit-test with browser B's window
+  id, surface id, selected tab id, context id, and AppKit frame, and keyboard
+  input reached only browser B;
+- targeting window A after window B produced a hit-test with browser A's window
+  id, surface id, selected tab id, context id, and AppKit frame, and keyboard
+  input reached only browser A.
+
+The first implementation attempt found a harness parsing weakness rather than a
+product failure. Browser process permission logs can interleave with Zig
+`tab_ready` lines in the combined app log, corrupting the line enough that pane
+and tab extraction become unreliable. The harness now extracts second and later
+browser pane/tab/context identity from the later Zig `ca_context` record, which
+is the record needed for geometry proof and was not corrupted in the observed
+runs. `surface_id` remains sourced from AppKit presentation/hit-test records
+because Zig-side logs intentionally report `surface_id:unknown:appkit-only`.
+
+Verification:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+scripts/ghostboard-geometry-matrix.sh multiple-windows-with-browsers
+scripts/ghostboard-geometry-matrix.sh open-browser-in-new-window
+scripts/ghostboard-geometry-matrix.sh open-browser-in-new-tab
+```
+
+Passing evidence:
+
+- Multiple windows with browsers:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-harness-20260617-124833.log`
+- Multiple windows with browsers app log:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-app-20260617-124833.log`
+- Multiple windows with browsers Roamium trace:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-roamium-20260617-124833.log`
+- Window A restored screenshot:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-window-a-restored-screenshot-20260617-124833.png`
+- Window B screenshot:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-window-b-screenshot-20260617-124833.png`
+- Window B restored screenshot:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-window-b-restored-screenshot-20260617-124833.png`
+- Window C screenshot:
+  `logs/ghostboard-geometry-multiple-windows-with-browsers-window-c-screenshot-20260617-124833.png`
+- Adjacent `open-browser-in-new-window` regression:
+  `logs/ghostboard-geometry-open-browser-in-new-window-harness-20260617-124558.log`
+- Adjacent `open-browser-in-new-tab` regression:
+  `logs/ghostboard-geometry-open-browser-in-new-tab-harness-20260617-124905.log`
+
+No product build was needed because only the shell harness and issue documents
+changed.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result before the
+result commit.
+
+Verdict: **APPROVED**.
+
+Findings: none.
+
+The reviewer inspected the working-tree diff for
+`scripts/ghostboard-geometry-matrix.sh`, this experiment file, and the issue
+README; checked the issue workflow, result documentation, README status,
+parser-hardening rationale, and verification evidence; and confirmed the result
+commit had not yet been made.
+
+## Conclusion
+
+Current Ghostboard already keeps three live browser windows isolated by native
+window id, AppKit surface id, selected tab id, pane id, browser tab id, and
+CA/context id. The new durable coverage proves mouse hit-testing and Browse-mode
+keyboard routing can cycle from window C to window B to window A without leaking
+input to the other live browser windows.
+
+The reusable harness learning is that multi-browser identity extraction should
+prefer `ca_context` over `tab_ready` when the app log may contain interleaved
+browser-process output. AppKit remains the authoritative source for `surface_id`
+because the Zig logs explicitly mark it as AppKit-only.

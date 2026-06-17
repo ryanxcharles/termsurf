@@ -203,4 +203,4 @@ work together, not just individually.
 - [Experiment 15: Open browser in new window](15-open-browser-in-new-window.md)
   — **Pass**
 - [Experiment 16: Multiple windows with browsers](16-multiple-windows-with-browsers.md)
-  — **Designed**
+  — **Pass**

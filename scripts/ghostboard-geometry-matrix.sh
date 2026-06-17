@@ -12,6 +12,7 @@ WEB="${TERMSURF_WEB:-$ROOT/target/debug/web}"
 ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
 URL_B="${TERMSURF_GEOMETRY_SECOND_URL:-https://example.org}"
+URL_C="${TERMSURF_GEOMETRY_THIRD_URL:-https://example.net}"
 APP_LOG="$LOG_DIR/ghostboard-geometry-${SCENARIO}-app-${TS}.log"
 HARNESS_LOG="$LOG_DIR/ghostboard-geometry-${SCENARIO}-harness-${TS}.log"
 SCREENSHOT="$LOG_DIR/ghostboard-geometry-${SCENARIO}-screenshot-${TS}.png"
@@ -28,7 +29,9 @@ SCREENSHOT_TAB_BROWSER_A_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-brow
 SCREENSHOT_TAB_BROWSER_B_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-browser-b-restored-screenshot-${TS}.png"
 SCREENSHOT_TAB_AFTER_CLOSE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-after-close-screenshot-${TS}.png"
 SCREENSHOT_WINDOW_B="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-b-screenshot-${TS}.png"
+SCREENSHOT_WINDOW_C="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-c-screenshot-${TS}.png"
 SCREENSHOT_WINDOW_A_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-a-restored-screenshot-${TS}.png"
+SCREENSHOT_WINDOW_B_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-b-restored-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
@@ -36,6 +39,7 @@ BROWSER_FOCUS_COMMAND="$RUN_DIR/browser-focus-command.txt"
 NEW_TAB_COMMAND_LOG="$RUN_DIR/new-tab-command.log"
 NEW_TAB_MARKER_COMMAND="$RUN_DIR/new-tab-marker-command.txt"
 SECOND_BROWSER_COMMAND="$RUN_DIR/second-browser-command.txt"
+THIRD_BROWSER_COMMAND="$RUN_DIR/third-browser-command.txt"
 PID=""
 
 mkdir -p "$LOG_DIR"
@@ -184,6 +188,10 @@ extract_selected_tab_id() {
 
 extract_pane_id() {
   printf '%s\n' "$1" | sed -E 's/.*pane_id[:=]([^ ]+).*/\1/'
+}
+
+extract_surface_id() {
+  printf '%s\n' "$1" | sed -E 's/.*surface_id:([^ ]+) .*/\1/'
 }
 
 extract_browser_tab_id() {
@@ -925,7 +933,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -950,7 +958,7 @@ exec "$WEB" --browser "$ROAMIUM" "$URL"
 EOF
 chmod +x "$COMMAND"
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "open-browser-in-new-window" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "open-browser-in-new-window" ] || [ "$SCENARIO" = "multiple-windows-with-browsers" ]; then
   FIRST_RUN_MARKER="$RUN_DIR/first-web-ran"
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -986,7 +994,7 @@ keybind = ctrl+w=close_tab
 EOF
 fi
 
-if [ "$SCENARIO" = "open-browser-in-new-window" ]; then
+if [ "$SCENARIO" = "open-browser-in-new-window" ] || [ "$SCENARIO" = "multiple-windows-with-browsers" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+b=new_window
 EOF
@@ -1298,6 +1306,15 @@ if [ "$SCENARIO" = "open-browser-in-new-window" ]; then
   log "window_b_command=$SECOND_BROWSER_COMMAND"
   log "first_run_wrapper_command_log=$NEW_TAB_COMMAND_LOG"
 fi
+if [ "$SCENARIO" = "multiple-windows-with-browsers" ]; then
+  log "window_b_screenshot=$SCREENSHOT_WINDOW_B"
+  log "window_c_screenshot=$SCREENSHOT_WINDOW_C"
+  log "window_a_restored_screenshot=$SCREENSHOT_WINDOW_A_RESTORED"
+  log "window_b_restored_screenshot=$SCREENSHOT_WINDOW_B_RESTORED"
+  log "window_b_command=$SECOND_BROWSER_COMMAND"
+  log "window_c_command=$THIRD_BROWSER_COMMAND"
+  log "first_run_wrapper_command_log=$NEW_TAB_COMMAND_LOG"
+fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
 GHOSTTY_LOG=stderr \
@@ -1479,20 +1496,18 @@ if [ "$SCENARIO" = "open-browser-in-new-window" ]; then
   swift "$ROOT/scripts/ghostty-app/inject.swift" type "$SECOND_BROWSER_COMMAND" >>"$HARNESS_LOG" 2>&1
   swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
 
-  B_TAB_READY_LINE="$(wait_for_different_zig_event_after "$BROWSER_B_START_LINE" "tab_ready" "$A_PANE_ID" "browser B Zig tab_ready")"
-  B_PANE_ID="$(extract_pane_id "$B_TAB_READY_LINE")"
-  B_BROWSER_TAB_ID="$(extract_browser_tab_id "$B_TAB_READY_LINE")"
+  B_CA_CONTEXT_LINE="$(wait_for_different_zig_event_after "$BROWSER_B_START_LINE" "ca_context" "$A_PANE_ID" "browser B Zig ca_context")"
+  B_PANE_ID="$(extract_pane_id "$B_CA_CONTEXT_LINE")"
+  B_BROWSER_TAB_ID="$(extract_browser_tab_id "$B_CA_CONTEXT_LINE")"
+  B_CONTEXT_ID="$(extract_context_id "$B_CA_CONTEXT_LINE")"
   [ -n "$B_PANE_ID" ] || fail "could not extract browser B pane id"
   [ -n "$B_BROWSER_TAB_ID" ] || fail "could not extract browser B tab id"
+  [ -n "$B_CONTEXT_ID" ] || fail "could not extract browser B context id"
   [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "browser B reused browser A pane id"
   [ "$B_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "browser B reused browser A tab id"
+  [ "$B_CONTEXT_ID" != "$A_CONTEXT_ID" ] || fail "browser B reused browser A CA/context id"
   log "browser_b_pane_id=$B_PANE_ID"
   log "browser_b_browser_tab_id=$B_BROWSER_TAB_ID"
-
-  B_CA_CONTEXT_LINE="$(wait_for_line_after "$BROWSER_B_START_LINE" "TermSurf geometry layer=zig event=ca_context .*pane_id:${B_PANE_ID} .*browser_tab_id:${B_BROWSER_TAB_ID}" "browser B Zig ca_context")"
-  B_CONTEXT_ID="$(extract_context_id "$B_CA_CONTEXT_LINE")"
-  [ -n "$B_CONTEXT_ID" ] || fail "could not extract browser B context id"
-  [ "$B_CONTEXT_ID" != "$A_CONTEXT_ID" ] || fail "browser B reused browser A CA/context id"
   log "browser_b_context_id=$B_CONTEXT_ID"
 
   B_APPKIT_PRESENT_LINE="$(wait_for_line_after "$BROWSER_B_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${B_PANE_ID} .*context_id=${B_CONTEXT_ID}" "browser B AppKit presentation")"
@@ -1593,6 +1608,318 @@ if [ "$SCENARIO" = "open-browser-in-new-window" ]; then
 
   [ "$NEW_WINDOW_TRACE_START_LINE" -lt "$BROWSER_B_TRACE_START_LINE" ] || fail "trace boundaries for browser B window open were not monotonic"
   [ "$BROWSER_B_TRACE_START_LINE" -lt "$A_RESTORE_TRACE_START_LINE" ] || fail "trace boundaries for browser A window restore were not monotonic"
+fi
+
+if [ "$SCENARIO" = "multiple-windows-with-browsers" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_X="$OVERLAY_FRAME_X"
+  A_FRAME_Y="$OVERLAY_FRAME_Y"
+  A_ROOT_FRAME_SIZE="$(extract_root_frame_size "$APPKIT_PRESENT_LINE")"
+  A_PIXEL="$APPKIT_PIXEL"
+  log "browser_a_window_id=$A_WINDOW_ID"
+  log "browser_a_surface_id=$A_SURFACE_ID"
+  log "browser_a_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "browser_a_pane_id=$A_PANE_ID"
+  log "browser_a_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "browser_a_context_id=$A_CONTEXT_ID"
+
+  NEW_WINDOW_B_START_LINE="$(log_line_count)"
+  NEW_WINDOW_B_TRACE_START_LINE="$(trace_line_count)"
+  log "new_window_b_keybind=ctrl+b=new_window"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 11 control >>"$HARNESS_LOG" 2>&1
+  delay 2
+
+  require_log_after "$NEW_WINDOW_B_START_LINE" "dispatching action target=surface action=.new_window" "window B new-window action dispatched"
+  require_log_after "$NEW_WINDOW_B_START_LINE" 'starting command command=`/usr/bin/login`' "window B started plain login shell"
+  if [ -s "$NEW_TAB_COMMAND_LOG" ]; then
+    fail "window B unexpectedly inherited and ran the first-run web wrapper"
+  fi
+  log "PASS: window B did not inherit the first-run web wrapper"
+
+  B_WIN_LINE=""
+  for _ in $(seq 1 30); do
+    B_WIN_LINE="$(app_windows | awk -F '\t' -v old="$A_WINDOW_ID" '$1 != old { print; exit }' || true)"
+    if [ -n "$B_WIN_LINE" ]; then
+      break
+    fi
+    delay 1
+  done
+  [ -n "$B_WIN_LINE" ] || fail "timed out waiting for second Ghostboard window"
+  IFS=$'\t' read -r B_WINDOW_ID B_WX B_WY B_WW B_WH <<<"$B_WIN_LINE"
+  [ "$B_WINDOW_ID" != "$A_WINDOW_ID" ] || fail "window B reused browser A window id"
+  log "window_b=$B_WIN_LINE"
+
+  click_window_center "$B_WIN_LINE" "window_b_shell"
+  delay 1
+
+  BROWSER_B_START_LINE="$(log_line_count)"
+  BROWSER_B_TRACE_START_LINE="$(trace_line_count)"
+  printf '"%s" --browser "%s" "%s"' "$WEB" "$ROAMIUM" "$URL_B" >"$SECOND_BROWSER_COMMAND"
+  log "browser_b_command=$(cat "$SECOND_BROWSER_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$SECOND_BROWSER_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+
+  B_CA_CONTEXT_LINE="$(wait_for_different_zig_event_after "$BROWSER_B_START_LINE" "ca_context" "$A_PANE_ID" "browser B Zig ca_context")"
+  B_PANE_ID="$(extract_pane_id "$B_CA_CONTEXT_LINE")"
+  B_BROWSER_TAB_ID="$(extract_browser_tab_id "$B_CA_CONTEXT_LINE")"
+  B_CONTEXT_ID="$(extract_context_id "$B_CA_CONTEXT_LINE")"
+  [ -n "$B_PANE_ID" ] || fail "could not extract browser B pane id"
+  [ -n "$B_BROWSER_TAB_ID" ] || fail "could not extract browser B tab id"
+  [ -n "$B_CONTEXT_ID" ] || fail "could not extract browser B context id"
+  [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "browser B reused browser A pane id"
+  [ "$B_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "browser B reused browser A tab id"
+  [ "$B_CONTEXT_ID" != "$A_CONTEXT_ID" ] || fail "browser B reused browser A CA/context id"
+  log "browser_b_pane_id=$B_PANE_ID"
+  log "browser_b_browser_tab_id=$B_BROWSER_TAB_ID"
+  log "browser_b_context_id=$B_CONTEXT_ID"
+
+  B_APPKIT_PRESENT_LINE="$(wait_for_line_after "$BROWSER_B_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${B_PANE_ID} .*context_id=${B_CONTEXT_ID}" "browser B AppKit presentation")"
+  B_APPKIT_PIXELS_LINE="$(wait_for_line_after "$BROWSER_B_START_LINE" "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${B_PANE_ID} .*context_id=${B_CONTEXT_ID}" "browser B AppKit pixels")"
+  B_PRESENT_WINDOW_ID="$(printf '%s\n' "$B_APPKIT_PRESENT_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  B_SURFACE_ID="$(extract_surface_id "$B_APPKIT_PRESENT_LINE")"
+  B_SELECTED_TAB_ID="$(extract_selected_tab_id "$B_APPKIT_PRESENT_LINE")"
+  B_FRAME="$(extract_overlay_frame "$B_APPKIT_PRESENT_LINE")"
+  B_FRAME_SIZE="$(extract_frame_size "$B_APPKIT_PRESENT_LINE")"
+  B_FRAME_X="$(extract_frame_x "$B_APPKIT_PRESENT_LINE")"
+  B_FRAME_Y="$(extract_frame_y "$B_APPKIT_PRESENT_LINE")"
+  B_ROOT_FRAME_SIZE="$(extract_root_frame_size "$B_APPKIT_PRESENT_LINE")"
+  B_PIXEL="$(extract_appkit_pixel "$B_APPKIT_PIXELS_LINE")"
+  [ "$B_PRESENT_WINDOW_ID" = "$B_WINDOW_ID" ] || fail "browser B AppKit window id mismatch: expected=$B_WINDOW_ID actual=$B_PRESENT_WINDOW_ID"
+  [ -n "$B_SURFACE_ID" ] || fail "could not extract browser B AppKit surface id"
+  [ "$B_SURFACE_ID" != "$A_SURFACE_ID" ] || fail "browser B reused browser A surface id"
+  [ "$B_SELECTED_TAB_ID" = "$B_WINDOW_ID" ] || fail "browser B selected tab id mismatch: expected=$B_WINDOW_ID actual=$B_SELECTED_TAB_ID"
+  log "browser_b_window_id=$B_PRESENT_WINDOW_ID"
+  log "browser_b_surface_id=$B_SURFACE_ID"
+  log "browser_b_selected_tab_id=$B_SELECTED_TAB_ID"
+  log "browser_b_overlay_frame=$B_FRAME"
+  log "browser_b_appkit_pixel=$B_PIXEL"
+
+  B_PIXEL_WIDTH="${B_PIXEL%x*}"
+  B_PIXEL_HEIGHT="${B_PIXEL#*x}"
+  require_trace_after "$BROWSER_B_TRACE_START_LINE" "resize tab_id=${B_BROWSER_TAB_ID} pane_id=${B_PANE_ID} pixel_width=${B_PIXEL_WIDTH} pixel_height=${B_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied browser B resize to AppKit pixel size"
+
+  NEW_WINDOW_C_START_LINE="$(log_line_count)"
+  NEW_WINDOW_C_TRACE_START_LINE="$(trace_line_count)"
+  log "new_window_c_keybind=ctrl+b=new_window"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 11 control >>"$HARNESS_LOG" 2>&1
+  delay 2
+
+  require_log_after "$NEW_WINDOW_C_START_LINE" "dispatching action target=surface action=.new_window" "window C new-window action dispatched"
+  require_log_after "$NEW_WINDOW_C_START_LINE" 'starting command command=`/usr/bin/login`' "window C started plain login shell"
+  if [ -s "$NEW_TAB_COMMAND_LOG" ]; then
+    fail "window C unexpectedly inherited and ran the first-run web wrapper"
+  fi
+  log "PASS: window C did not inherit the first-run web wrapper"
+
+  C_WIN_LINE=""
+  for _ in $(seq 1 30); do
+    C_WIN_LINE="$(app_windows | awk -F '\t' -v a="$A_WINDOW_ID" -v b="$B_WINDOW_ID" '$1 != a && $1 != b { print; exit }' || true)"
+    if [ -n "$C_WIN_LINE" ]; then
+      break
+    fi
+    delay 1
+  done
+  [ -n "$C_WIN_LINE" ] || fail "timed out waiting for third Ghostboard window"
+  IFS=$'\t' read -r C_WINDOW_ID C_WX C_WY C_WW C_WH <<<"$C_WIN_LINE"
+  [ "$C_WINDOW_ID" != "$A_WINDOW_ID" ] || fail "window C reused browser A window id"
+  [ "$C_WINDOW_ID" != "$B_WINDOW_ID" ] || fail "window C reused browser B window id"
+  log "window_c=$C_WIN_LINE"
+
+  click_window_center "$C_WIN_LINE" "window_c_shell"
+  delay 1
+
+  BROWSER_C_START_LINE="$(log_line_count)"
+  BROWSER_C_TRACE_START_LINE="$(trace_line_count)"
+  printf '"%s" --browser "%s" "%s"' "$WEB" "$ROAMIUM" "$URL_C" >"$THIRD_BROWSER_COMMAND"
+  log "browser_c_command=$(cat "$THIRD_BROWSER_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$THIRD_BROWSER_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+
+  C_CA_CONTEXT_LINE="$(wait_for_different_zig_event_after "$BROWSER_C_START_LINE" "ca_context" "$B_PANE_ID" "browser C Zig ca_context")"
+  C_PANE_ID="$(extract_pane_id "$C_CA_CONTEXT_LINE")"
+  C_BROWSER_TAB_ID="$(extract_browser_tab_id "$C_CA_CONTEXT_LINE")"
+  C_CONTEXT_ID="$(extract_context_id "$C_CA_CONTEXT_LINE")"
+  [ -n "$C_PANE_ID" ] || fail "could not extract browser C pane id"
+  [ -n "$C_BROWSER_TAB_ID" ] || fail "could not extract browser C tab id"
+  [ -n "$C_CONTEXT_ID" ] || fail "could not extract browser C context id"
+  [ "$C_PANE_ID" != "$A_PANE_ID" ] || fail "browser C reused browser A pane id"
+  [ "$C_PANE_ID" != "$B_PANE_ID" ] || fail "browser C reused browser B pane id"
+  [ "$C_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "browser C reused browser A tab id"
+  [ "$C_BROWSER_TAB_ID" != "$B_BROWSER_TAB_ID" ] || fail "browser C reused browser B tab id"
+  [ "$C_CONTEXT_ID" != "$A_CONTEXT_ID" ] || fail "browser C reused browser A CA/context id"
+  [ "$C_CONTEXT_ID" != "$B_CONTEXT_ID" ] || fail "browser C reused browser B CA/context id"
+  log "browser_c_pane_id=$C_PANE_ID"
+  log "browser_c_browser_tab_id=$C_BROWSER_TAB_ID"
+  log "browser_c_context_id=$C_CONTEXT_ID"
+
+  C_APPKIT_PRESENT_LINE="$(wait_for_line_after "$BROWSER_C_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${C_PANE_ID} .*context_id=${C_CONTEXT_ID}" "browser C AppKit presentation")"
+  C_APPKIT_PIXELS_LINE="$(wait_for_line_after "$BROWSER_C_START_LINE" "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${C_PANE_ID} .*context_id=${C_CONTEXT_ID}" "browser C AppKit pixels")"
+  C_PRESENT_WINDOW_ID="$(printf '%s\n' "$C_APPKIT_PRESENT_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  C_SURFACE_ID="$(extract_surface_id "$C_APPKIT_PRESENT_LINE")"
+  C_SELECTED_TAB_ID="$(extract_selected_tab_id "$C_APPKIT_PRESENT_LINE")"
+  C_FRAME="$(extract_overlay_frame "$C_APPKIT_PRESENT_LINE")"
+  C_FRAME_SIZE="$(extract_frame_size "$C_APPKIT_PRESENT_LINE")"
+  C_FRAME_X="$(extract_frame_x "$C_APPKIT_PRESENT_LINE")"
+  C_FRAME_Y="$(extract_frame_y "$C_APPKIT_PRESENT_LINE")"
+  C_ROOT_FRAME_SIZE="$(extract_root_frame_size "$C_APPKIT_PRESENT_LINE")"
+  C_PIXEL="$(extract_appkit_pixel "$C_APPKIT_PIXELS_LINE")"
+  [ "$C_PRESENT_WINDOW_ID" = "$C_WINDOW_ID" ] || fail "browser C AppKit window id mismatch: expected=$C_WINDOW_ID actual=$C_PRESENT_WINDOW_ID"
+  [ -n "$C_SURFACE_ID" ] || fail "could not extract browser C AppKit surface id"
+  [ "$C_SURFACE_ID" != "$A_SURFACE_ID" ] || fail "browser C reused browser A surface id"
+  [ "$C_SURFACE_ID" != "$B_SURFACE_ID" ] || fail "browser C reused browser B surface id"
+  [ "$C_SELECTED_TAB_ID" = "$C_WINDOW_ID" ] || fail "browser C selected tab id mismatch: expected=$C_WINDOW_ID actual=$C_SELECTED_TAB_ID"
+  log "browser_c_window_id=$C_PRESENT_WINDOW_ID"
+  log "browser_c_surface_id=$C_SURFACE_ID"
+  log "browser_c_selected_tab_id=$C_SELECTED_TAB_ID"
+  log "browser_c_overlay_frame=$C_FRAME"
+  log "browser_c_appkit_pixel=$C_PIXEL"
+
+  C_PIXEL_WIDTH="${C_PIXEL%x*}"
+  C_PIXEL_HEIGHT="${C_PIXEL#*x}"
+  require_trace_after "$BROWSER_C_TRACE_START_LINE" "resize tab_id=${C_BROWSER_TAB_ID} pane_id=${C_PANE_ID} pixel_width=${C_PIXEL_WIDTH} pixel_height=${C_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied browser C resize to AppKit pixel size"
+
+  if tail -n +"$((BROWSER_C_START_LINE + 1))" "$APP_LOG" |
+    grep -E "TermSurf geometry layer=appkit event=presented .*window_id:${C_WINDOW_ID} .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID} .*visible=true" >/dev/null 2>&1; then
+    fail "browser A overlay was presented as visible in window C"
+  fi
+  log "PASS: browser A was not presented as visible in window C"
+  if tail -n +"$((BROWSER_C_START_LINE + 1))" "$APP_LOG" |
+    grep -E "TermSurf geometry layer=appkit event=presented .*window_id:${C_WINDOW_ID} .*pane_id:${B_PANE_ID} .*context_id=${B_CONTEXT_ID} .*visible=true" >/dev/null 2>&1; then
+    fail "browser B overlay was presented as visible in window C"
+  fi
+  log "PASS: browser B was not presented as visible in window C"
+
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_WINDOW_A_RESTORED"
+  log "window_a_alive_screenshot_exit=$?"
+  screencapture -x -o -l"$B_WINDOW_ID" "$SCREENSHOT_WINDOW_B"
+  log "window_b_screenshot_exit=$?"
+  screencapture -x -o -l"$C_WINDOW_ID" "$SCREENSHOT_WINDOW_C"
+  log "window_c_screenshot_exit=$?"
+
+  C_CLICK_X="$(awk -v wx="$C_WX" -v frame_x="$C_FRAME_X" -v frame_size="$C_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wx + frame_x + (parts[1] / 2) + 0.5) }')"
+  C_CLICK_Y="$(awk -v wy="$C_WY" -v frame_y="$C_FRAME_Y" -v frame_size="$C_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wy + frame_y + (parts[2] / 2) + 0.5) }')"
+  C_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$C_CLICK_X" "$C_CLICK_Y" "browser_c_window_area"
+  C_HIT_LINE="$(wait_for_hit_after "$C_HIT_START_LINE" "$C_CONTEXT_ID" "browser C hit-test in window C")"
+  require_text "$C_HIT_LINE" "window_id:${C_WINDOW_ID}" "browser C hit-test has window C id"
+  require_text "$C_HIT_LINE" "surface_id:${C_SURFACE_ID}" "browser C hit-test has surface C id"
+  require_text "$C_HIT_LINE" "selected_tab_id:${C_SELECTED_TAB_ID}" "browser C hit-test has window C selected tab id"
+  require_text "$C_HIT_LINE" "overlay_frame=${C_FRAME}" "browser C hit-test uses browser C frame"
+  require_text "$C_HIT_LINE" "web_point={" "browser C hit-test includes webview-relative point"
+
+  C_MODE_START_LINE="$(log_line_count)"
+  C_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "browser_c_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$C_MODE_START_LINE" "ModeChanged: pane_id=${C_PANE_ID} browsing=true" "browser C webtui entered browse mode"
+  require_trace_after "$C_MODE_TRACE_START_LINE" "focus-changed tab=${C_BROWSER_TAB_ID} pane=${C_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed browser C focus=true after browse mode"
+
+  C_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP16_BROWSER_C_WINDOW\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$C_KEY_START_LINE" "key-event tab=${C_BROWSER_TAB_ID} pane=${C_PANE_ID}" "browser C keyboard marker reached browser C"
+  require_no_trace_after "$C_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "browser C keyboard marker did not reach browser A"
+  require_no_trace_after "$C_KEY_START_LINE" "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" "browser C keyboard marker did not reach browser B"
+
+  C_CONTROL_START_LINE="$(log_line_count)"
+  C_CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  log "browser_c_control_key=escape=Mode::Control"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$C_CONTROL_START_LINE" "ModeChanged: pane_id=${C_PANE_ID} browsing=false" "browser C webtui returned to control mode"
+  require_trace_after "$C_CONTROL_TRACE_START_LINE" "focus-changed tab=${C_BROWSER_TAB_ID} pane=${C_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed browser C focus=false after control mode"
+
+  B_RESTORE_START_LINE="$(log_line_count)"
+  B_RESTORE_TRACE_START_LINE="$(trace_line_count)"
+  B_WIN_LINE="$(window_bounds_for "$B_WINDOW_ID")" || fail "failed to resolve browser B window bounds for window id=$B_WINDOW_ID"
+  focus_window_bounds "$B_WIN_LINE" >>"$HARNESS_LOG" 2>&1 || fail "failed to focus browser B window via accessibility"
+  IFS=$'\t' read -r _B_WID B_WX B_WY B_WW B_WH <<<"$B_WIN_LINE"
+  B_ROOT_HEIGHT="$(pair_height "$B_ROOT_FRAME_SIZE")"
+  B_CONTENT_Y_OFFSET="$(awk -v wh="$B_WH" -v root_h="$B_ROOT_HEIGHT" 'BEGIN { print int(wh - root_h) }')"
+  B_VISIBLE_X="$(awk -v wx="$B_WX" -v frame_x="$B_FRAME_X" 'BEGIN { print int(wx + frame_x + 4) }')"
+  B_VISIBLE_Y="$(awk -v wy="$B_WY" -v content_y="$B_CONTENT_Y_OFFSET" -v frame_y="$B_FRAME_Y" 'BEGIN { print int(wy + content_y + frame_y + 4) }')"
+  B_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$B_VISIBLE_X" "$B_VISIBLE_Y" "window_b_visible_edge_restore"
+  B_HIT_LINE="$(wait_for_hit_after "$B_HIT_START_LINE" "$B_CONTEXT_ID" "browser B restored visible hit-test in window B")"
+  require_no_different_appkit_frame_after "$B_RESTORE_START_LINE" "$B_PANE_ID" "$B_CONTEXT_ID" "$B_FRAME" "browser B kept AppKit frame after returning to window B"
+  require_no_different_appkit_pixels_after "$B_RESTORE_START_LINE" "$B_PANE_ID" "$B_CONTEXT_ID" "$B_PIXEL" "browser B kept AppKit pixels after returning to window B"
+  require_text "$B_HIT_LINE" "window_id:${B_WINDOW_ID}" "browser B restored hit-test has window B id"
+  require_text "$B_HIT_LINE" "surface_id:${B_SURFACE_ID}" "browser B restored hit-test has surface B id"
+  require_text "$B_HIT_LINE" "selected_tab_id:${B_SELECTED_TAB_ID}" "browser B restored hit-test has selected tab B id"
+  require_text "$B_HIT_LINE" "overlay_frame=${B_FRAME}" "browser B restored hit-test uses browser B frame"
+  require_text "$B_HIT_LINE" "web_point={" "browser B restored hit-test includes webview-relative point"
+
+  B_MODE_START_LINE="$(log_line_count)"
+  B_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "browser_b_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$B_MODE_START_LINE" "ModeChanged: pane_id=${B_PANE_ID} browsing=true" "browser B webtui entered browse mode after window restore"
+  require_trace_after "$B_MODE_TRACE_START_LINE" "focus-changed tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed browser B focus=true after window restore"
+
+  B_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP16_BROWSER_B_WINDOW\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$B_KEY_START_LINE" "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" "browser B keyboard marker reached browser B"
+  require_no_trace_after "$B_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "browser B keyboard marker did not reach browser A"
+  require_no_trace_after "$B_KEY_START_LINE" "key-event tab=${C_BROWSER_TAB_ID} pane=${C_PANE_ID}" "browser B keyboard marker did not reach browser C"
+
+  B_CONTROL_START_LINE="$(log_line_count)"
+  B_CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  log "browser_b_control_key=escape=Mode::Control"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$B_CONTROL_START_LINE" "ModeChanged: pane_id=${B_PANE_ID} browsing=false" "browser B webtui returned to control mode"
+  require_trace_after "$B_CONTROL_TRACE_START_LINE" "focus-changed tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed browser B focus=false after control mode"
+  screencapture -x -o -l"$B_WINDOW_ID" "$SCREENSHOT_WINDOW_B_RESTORED"
+  log "window_b_restored_screenshot_exit=$?"
+
+  A_RESTORE_START_LINE="$(log_line_count)"
+  A_RESTORE_TRACE_START_LINE="$(trace_line_count)"
+  A_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve browser A window bounds for window id=$A_WINDOW_ID"
+  focus_window_bounds "$A_WIN_LINE" >>"$HARNESS_LOG" 2>&1 || fail "failed to focus browser A window via accessibility"
+  IFS=$'\t' read -r _A_WID A_WX A_WY A_WW A_WH <<<"$A_WIN_LINE"
+  A_ROOT_HEIGHT="$(pair_height "$A_ROOT_FRAME_SIZE")"
+  A_CONTENT_Y_OFFSET="$(awk -v wh="$A_WH" -v root_h="$A_ROOT_HEIGHT" 'BEGIN { print int(wh - root_h) }')"
+  A_VISIBLE_X="$(awk -v wx="$A_WX" -v frame_x="$A_FRAME_X" 'BEGIN { print int(wx + frame_x + 4) }')"
+  A_VISIBLE_Y="$(awk -v wy="$A_WY" -v content_y="$A_CONTENT_Y_OFFSET" -v frame_y="$A_FRAME_Y" 'BEGIN { print int(wy + content_y + frame_y + 4) }')"
+  A_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$A_VISIBLE_X" "$A_VISIBLE_Y" "window_a_visible_edge_restore"
+  A_HIT_LINE="$(wait_for_hit_after "$A_HIT_START_LINE" "$A_CONTEXT_ID" "browser A restored visible hit-test in window A")"
+  require_no_different_appkit_frame_after "$A_RESTORE_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "browser A kept AppKit frame after returning to window A"
+  require_no_different_appkit_pixels_after "$A_RESTORE_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "browser A kept AppKit pixels after returning to window A"
+  require_text "$A_HIT_LINE" "window_id:${A_WINDOW_ID}" "browser A restored hit-test has window A id"
+  require_text "$A_HIT_LINE" "surface_id:${A_SURFACE_ID}" "browser A restored hit-test has surface A id"
+  require_text "$A_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "browser A restored hit-test has selected tab A id"
+  require_text "$A_HIT_LINE" "overlay_frame=${A_FRAME}" "browser A restored hit-test uses browser A frame"
+  require_text "$A_HIT_LINE" "web_point={" "browser A restored hit-test includes webview-relative point"
+
+  A_MODE_START_LINE="$(log_line_count)"
+  A_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "browser_a_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$A_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "browser A webtui entered browse mode after window restore"
+  require_trace_after "$A_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed browser A focus=true after window restore"
+
+  A_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP16_BROWSER_A_WINDOW\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$A_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "browser A keyboard marker reached browser A"
+  require_no_trace_after "$A_KEY_START_LINE" "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" "browser A keyboard marker did not reach browser B"
+  require_no_trace_after "$A_KEY_START_LINE" "key-event tab=${C_BROWSER_TAB_ID} pane=${C_PANE_ID}" "browser A keyboard marker did not reach browser C"
+
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_WINDOW_A_RESTORED"
+  log "window_a_restored_screenshot_exit=$?"
+
+  [ "$NEW_WINDOW_B_TRACE_START_LINE" -lt "$BROWSER_B_TRACE_START_LINE" ] || fail "trace boundaries for browser B window open were not monotonic"
+  [ "$BROWSER_B_TRACE_START_LINE" -lt "$NEW_WINDOW_C_TRACE_START_LINE" ] || fail "trace boundaries for window C open were not monotonic"
+  [ "$NEW_WINDOW_C_TRACE_START_LINE" -lt "$BROWSER_C_TRACE_START_LINE" ] || fail "trace boundaries for browser C open were not monotonic"
+  [ "$BROWSER_C_TRACE_START_LINE" -lt "$B_RESTORE_TRACE_START_LINE" ] || fail "trace boundaries for browser B window restore were not monotonic"
+  [ "$B_RESTORE_TRACE_START_LINE" -lt "$A_RESTORE_TRACE_START_LINE" ] || fail "trace boundaries for browser A window restore were not monotonic"
 fi
 
 if [ "$SCENARIO" = "new-terminal-tab-visibility" ]; then
@@ -1810,20 +2137,18 @@ if [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser
   swift "$ROOT/scripts/ghostty-app/inject.swift" type "$SECOND_BROWSER_COMMAND" >>"$HARNESS_LOG" 2>&1
   swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
 
-  B_TAB_READY_LINE="$(wait_for_different_zig_event_after "$BROWSER_B_START_LINE" "tab_ready" "$A_PANE_ID" "browser B Zig tab_ready")"
-  B_PANE_ID="$(extract_pane_id "$B_TAB_READY_LINE")"
-  B_BROWSER_TAB_ID="$(extract_browser_tab_id "$B_TAB_READY_LINE")"
+  B_CA_CONTEXT_LINE="$(wait_for_different_zig_event_after "$BROWSER_B_START_LINE" "ca_context" "$A_PANE_ID" "browser B Zig ca_context")"
+  B_PANE_ID="$(extract_pane_id "$B_CA_CONTEXT_LINE")"
+  B_BROWSER_TAB_ID="$(extract_browser_tab_id "$B_CA_CONTEXT_LINE")"
+  B_CONTEXT_ID="$(extract_context_id "$B_CA_CONTEXT_LINE")"
   [ -n "$B_PANE_ID" ] || fail "could not extract browser B pane id"
   [ -n "$B_BROWSER_TAB_ID" ] || fail "could not extract browser B tab id"
+  [ -n "$B_CONTEXT_ID" ] || fail "could not extract browser B context id"
   [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "browser B reused browser A pane id"
   [ "$B_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "browser B reused browser A tab id"
+  [ "$B_CONTEXT_ID" != "$A_CONTEXT_ID" ] || fail "browser B reused browser A CA/context id"
   log "browser_b_pane_id=$B_PANE_ID"
   log "browser_b_browser_tab_id=$B_BROWSER_TAB_ID"
-
-  B_CA_CONTEXT_LINE="$(wait_for_line_after "$BROWSER_B_START_LINE" "TermSurf geometry layer=zig event=ca_context .*pane_id:${B_PANE_ID} .*browser_tab_id:${B_BROWSER_TAB_ID}" "browser B Zig ca_context")"
-  B_CONTEXT_ID="$(extract_context_id "$B_CA_CONTEXT_LINE")"
-  [ -n "$B_CONTEXT_ID" ] || fail "could not extract browser B context id"
-  [ "$B_CONTEXT_ID" != "$A_CONTEXT_ID" ] || fail "browser B reused browser A CA/context id"
   log "browser_b_context_id=$B_CONTEXT_ID"
 
   B_APPKIT_PRESENT_LINE="$(wait_for_line_after "$BROWSER_B_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${B_PANE_ID} .*context_id=${B_CONTEXT_ID}" "browser B AppKit presentation")"
