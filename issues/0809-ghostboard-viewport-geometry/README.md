@@ -207,4 +207,4 @@ work together, not just individually.
 - [Experiment 17: Display move and backing scale](17-display-move-backing-scale.md)
   — **Partial**
 - [Experiment 18: Fullscreen and unfullscreen](18-fullscreen-unfullscreen.md) —
-  **Designed**
+  **Pass**

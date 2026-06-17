@@ -233,3 +233,105 @@ Fixes:
 Final verdict after re-review: **APPROVED**.
 
 Findings after re-review: none.
+
+## Result
+
+**Result:** Pass
+
+Experiment 18 added the `fullscreen-unfullscreen` scenario to
+`scripts/ghostboard-geometry-matrix.sh`. No Ghostboard, Roamium, or `webtui`
+product source changes were needed.
+
+The scenario uses accessibility automation against the native window's
+`AXFullScreen` attribute, not private TermSurf state mutation. It launches one
+browser in one Ghostboard window, enters native fullscreen, independently proves
+`AXFullScreen=true`, verifies browser geometry/input in fullscreen, exits
+fullscreen, independently proves `AXFullScreen=false`, and verifies browser
+geometry/input again in windowed mode.
+
+The passing run proved:
+
+- baseline browser identity was native window id `495`, AppKit surface id
+  `B99C145A-7B80-4739-81CF-CFC6AE7D13F8`, selected tab id `495`, pane id
+  `B99C145A-7B80-4739-81CF-CFC6AE7D13F8`, browser tab id `1`, and context id
+  `2888334459`;
+- native fullscreen state became true after entering fullscreen and false after
+  exiting fullscreen;
+- the same AppKit/CG window id `495` survived both fullscreen and unfullscreen
+  in this VM;
+- the same surface id, selected tab id, pane id, browser tab id, and context id
+  survived both transitions;
+- fullscreen geometry grew from `856x510` / `1712x1020` pixels to `1752x1122` /
+  `3504x2244` pixels at backing scale `2.0`;
+- Roamium received the fullscreen AppKit pixel size through `ts_set_view_size`;
+- fullscreen hit testing used the fullscreen frame, current window id, surface
+  id, selected tab id, context id, and web-relative coordinates;
+- Browse-mode keyboard input reached the same browser tab while fullscreen;
+- unfullscreen geometry returned to `856x510` / `1712x1020` pixels at backing
+  scale `2.0`;
+- Roamium received the unfullscreen AppKit pixel size through
+  `ts_set_view_size`;
+- unfullscreen hit testing and Browse-mode keyboard input still routed to the
+  same browser.
+
+Verification:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+scripts/ghostboard-geometry-matrix.sh fullscreen-unfullscreen
+scripts/ghostboard-geometry-matrix.sh window-resize
+scripts/ghostboard-geometry-matrix.sh display-move-backing-scale
+```
+
+Passing evidence:
+
+- Fullscreen/unfullscreen scenario:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-harness-20260617-131025.log`
+- Fullscreen/unfullscreen app log:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-app-20260617-131025.log`
+- Fullscreen/unfullscreen Roamium trace:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-roamium-20260617-131025.log`
+- Baseline screenshot:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-screenshot-20260617-131025.png`
+- Fullscreen screenshot:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-fullscreen-screenshot-20260617-131025.png`
+- Unfullscreen screenshot:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-unfullscreen-screenshot-20260617-131025.png`
+- Adjacent `window-resize` regression:
+  `logs/ghostboard-geometry-window-resize-harness-20260617-131051.log`
+- Adjacent `display-move-backing-scale` regression:
+  `logs/ghostboard-geometry-display-move-backing-scale-harness-20260617-131107.log`
+
+No product build was needed because only the shell harness and issue documents
+changed.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result before the
+result commit.
+
+Verdict: **APPROVED**.
+
+Findings: none.
+
+The reviewer inspected the working-tree diff for
+`scripts/ghostboard-geometry-matrix.sh`, this experiment file, and the issue
+README; checked the issue workflow, result documentation, README status,
+fullscreen-state proof, current-window identity evidence, AppKit/resize/input
+evidence, and verification logs; and confirmed the result commit had not yet
+been made.
+
+## Conclusion
+
+Current Ghostboard preserves browser overlay geometry, identity, hit testing,
+Roamium resize delivery, and keyboard routing through native macOS fullscreen
+and unfullscreen transitions. The durable harness coverage proves native
+fullscreen state independently with `AXFullScreen`, so a large ordinary resize
+cannot satisfy this matrix row by accident.
+
+In this VM the AppKit/CG window id was stable across fullscreen and
+unfullscreen. The harness still records and validates the current window id
+after each transition, so a future macOS environment that changes CG window ids
+will have to prove the overlay is rebound to the current window rather than
+passing on stale records.

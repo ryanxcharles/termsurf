@@ -34,6 +34,8 @@ SCREENSHOT_WINDOW_A_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-a-
 SCREENSHOT_WINDOW_B_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-b-restored-screenshot-${TS}.png"
 SCREENSHOT_DISPLAY_MOVED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-moved-screenshot-${TS}.png"
 SCREENSHOT_DISPLAY_RETURNED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-returned-screenshot-${TS}.png"
+SCREENSHOT_FULLSCREEN="$LOG_DIR/ghostboard-geometry-${SCENARIO}-fullscreen-screenshot-${TS}.png"
+SCREENSHOT_UNFULLSCREEN="$LOG_DIR/ghostboard-geometry-${SCENARIO}-unfullscreen-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
@@ -939,7 +941,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -958,6 +960,7 @@ APP_WINDOWS="$RUN_DIR/app-windows.swift"
 DISPLAY_INVENTORY="$RUN_DIR/display-inventory.swift"
 ACTIVATE_APP="$RUN_DIR/activate-app.swift"
 FOCUS_WINDOW="$RUN_DIR/focus-window.swift"
+FULLSCREEN_WINDOW="$RUN_DIR/fullscreen-window.swift"
 RESIZE_WINDOW="$RUN_DIR/resize-window.swift"
 cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -1210,6 +1213,112 @@ fputs("no matching accessibility window for bounds \(targetX),\(targetY) \(targe
 exit(5)
 EOF
 
+cat >"$FULLSCREEN_WINDOW" <<'EOF'
+import ApplicationServices
+import Foundation
+
+guard CommandLine.arguments.count == 7,
+      let rawPID = Int32(CommandLine.arguments[1]),
+      let targetX = Double(CommandLine.arguments[2]),
+      let targetY = Double(CommandLine.arguments[3]),
+      let targetWidth = Double(CommandLine.arguments[4]),
+      let targetHeight = Double(CommandLine.arguments[5])
+else {
+    fputs("usage: fullscreen-window.swift <pid> <x> <y> <width> <height> <enter|exit|state>\n", stderr)
+    exit(2)
+}
+
+let mode = CommandLine.arguments[6]
+guard mode == "enter" || mode == "exit" || mode == "state" else {
+    fputs("mode must be enter, exit, or state\n", stderr)
+    exit(2)
+}
+
+guard AXIsProcessTrusted() else {
+    fputs("accessibility permission is not trusted for fullscreen automation\n", stderr)
+    exit(3)
+}
+
+func point(_ value: CFTypeRef?) -> CGPoint? {
+    guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    var result = CGPoint.zero
+    guard AXValueGetValue(value as! AXValue, .cgPoint, &result) else { return nil }
+    return result
+}
+
+func size(_ value: CFTypeRef?) -> CGSize? {
+    guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    var result = CGSize.zero
+    guard AXValueGetValue(value as! AXValue, .cgSize, &result) else { return nil }
+    return result
+}
+
+let app = AXUIElementCreateApplication(pid_t(rawPID))
+var windowsValue: CFTypeRef?
+let windowsResult = AXUIElementCopyAttributeValue(
+    app,
+    kAXWindowsAttribute as CFString,
+    &windowsValue
+)
+
+guard windowsResult == .success,
+      let windows = windowsValue as? [AXUIElement]
+else {
+    fputs("could not read target app windows: \(windowsResult.rawValue)\n", stderr)
+    exit(4)
+}
+
+for window in windows {
+    var positionValue: CFTypeRef?
+    var sizeValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success,
+          AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success,
+          let position = point(positionValue),
+          let windowSize = size(sizeValue)
+    else { continue }
+
+    let positionMatches = abs(Double(position.x) - targetX) <= 12 &&
+        abs(Double(position.y) - targetY) <= 12
+    let sizeMatches = abs(Double(windowSize.width) - targetWidth) <= 16 &&
+        abs(Double(windowSize.height) - targetHeight) <= 16
+    guard positionMatches && sizeMatches else { continue }
+
+    var fullScreenValue: CFTypeRef?
+    let stateResult = AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &fullScreenValue)
+    let isFullscreen = stateResult == .success && ((fullScreenValue as? Bool) ?? false)
+    if mode == "state" {
+        print(isFullscreen ? "true" : "false")
+        exit(0)
+    }
+
+    let target = mode == "enter"
+    if isFullscreen != target {
+        let setResult = AXUIElementSetAttributeValue(
+            window,
+            "AXFullScreen" as CFString,
+            target ? kCFBooleanTrue : kCFBooleanFalse
+        )
+        guard setResult == .success else {
+            fputs("failed to set AXFullScreen: \(setResult.rawValue)\n", stderr)
+            exit(5)
+        }
+    }
+
+    Thread.sleep(forTimeInterval: 1.5)
+    var afterValue: CFTypeRef?
+    let afterResult = AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &afterValue)
+    guard afterResult == .success else {
+        fputs("failed to read AXFullScreen after set: \(afterResult.rawValue)\n", stderr)
+        exit(6)
+    }
+    print(((afterValue as? Bool) ?? false) ? "true" : "false")
+    exit(0)
+}
+
+fputs("no matching accessibility window for bounds \(targetX),\(targetY) \(targetWidth)x\(targetHeight)\n", stderr)
+exit(7)
+EOF
+
 cat >"$RESIZE_WINDOW" <<'EOF'
 import ApplicationServices
 import Foundation
@@ -1339,6 +1448,10 @@ fi
 if [ "$SCENARIO" = "display-move-backing-scale" ]; then
   log "display_moved_screenshot=$SCREENSHOT_DISPLAY_MOVED"
   log "display_returned_screenshot=$SCREENSHOT_DISPLAY_RETURNED"
+fi
+if [ "$SCENARIO" = "fullscreen-unfullscreen" ]; then
+  log "fullscreen_screenshot=$SCREENSHOT_FULLSCREEN"
+  log "unfullscreen_screenshot=$SCREENSHOT_UNFULLSCREEN"
 fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
@@ -1657,6 +1770,167 @@ EOF
 
   [ "$MOVE_TRACE_START_LINE" -lt "$MOVED_MODE_TRACE_START_LINE" ] || fail "trace boundaries for display move were not monotonic"
   [ "$MOVED_MODE_TRACE_START_LINE" -lt "$RETURN_TRACE_START_LINE" ] || fail "trace boundaries for display return were not monotonic"
+fi
+
+if [ "$SCENARIO" = "fullscreen-unfullscreen" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_X="$OVERLAY_FRAME_X"
+  A_FRAME_Y="$OVERLAY_FRAME_Y"
+  A_PIXEL="$APPKIT_PIXEL"
+  A_BACKING_SCALE="$(extract_backing_scale "$APPKIT_PRESENT_LINE")"
+  log "browser_a_window_id=$A_WINDOW_ID"
+  log "browser_a_surface_id=$A_SURFACE_ID"
+  log "browser_a_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "browser_a_pane_id=$A_PANE_ID"
+  log "browser_a_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "browser_a_context_id=$A_CONTEXT_ID"
+  log "browser_a_backing_scale=$A_BACKING_SCALE"
+
+  FULLSCREEN_START_LINE="$(log_line_count)"
+  FULLSCREEN_TRACE_START_LINE="$(trace_line_count)"
+  FULLSCREEN_STATE="$(swift "$FULLSCREEN_WINDOW" "$PID" "$WX" "$WY" "$WW" "$WH" enter >>"$HARNESS_LOG" 2>&1; tail -1 "$HARNESS_LOG")"
+  [ "$FULLSCREEN_STATE" = "true" ] || fail "AXFullScreen did not become true after entering fullscreen: $FULLSCREEN_STATE"
+  log "PASS: AXFullScreen true after enter"
+  delay 4
+
+  FULLSCREEN_WIN_LINE="$(app_windows | awk -F '\t' -v old="$A_WINDOW_ID" '$1 == old { print; found=1 } END { if (!found) exit 1 }' || true)"
+  if [ -z "$FULLSCREEN_WIN_LINE" ]; then
+    FULLSCREEN_WIN_LINE="$(app_windows | head -1 || true)"
+  fi
+  [ -n "$FULLSCREEN_WIN_LINE" ] || fail "could not resolve fullscreen Ghostboard window"
+  IFS=$'\t' read -r FULLSCREEN_WINDOW_ID FULLSCREEN_WX FULLSCREEN_WY FULLSCREEN_WW FULLSCREEN_WH <<<"$FULLSCREEN_WIN_LINE"
+  log "fullscreen_window=$FULLSCREEN_WIN_LINE"
+
+  FULLSCREEN_PRESENT_LINE="$(wait_for_line_after "$FULLSCREEN_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "fullscreen AppKit presentation" 45)"
+  FULLSCREEN_PIXELS_LINE="$(wait_for_line_after "$FULLSCREEN_START_LINE" "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "fullscreen AppKit pixels" 45)"
+  FULLSCREEN_PRESENT_WINDOW_ID="$(printf '%s\n' "$FULLSCREEN_PRESENT_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  FULLSCREEN_SURFACE_ID="$(extract_surface_id "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_SELECTED_TAB_ID="$(extract_selected_tab_id "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_FRAME="$(extract_overlay_frame "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_FRAME_SIZE="$(extract_frame_size "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_FRAME_X="$(extract_frame_x "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_FRAME_Y="$(extract_frame_y "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_SCALE="$(extract_backing_scale "$FULLSCREEN_PRESENT_LINE")"
+  FULLSCREEN_PIXEL="$(extract_appkit_pixel "$FULLSCREEN_PIXELS_LINE")"
+  [ "$FULLSCREEN_PRESENT_WINDOW_ID" = "$FULLSCREEN_WINDOW_ID" ] || fail "fullscreen AppKit window id mismatch: current=$FULLSCREEN_WINDOW_ID presented=$FULLSCREEN_PRESENT_WINDOW_ID"
+  [ "$FULLSCREEN_SURFACE_ID" = "$A_SURFACE_ID" ] || fail "fullscreen surface id changed"
+  [ "$FULLSCREEN_SELECTED_TAB_ID" = "$A_SELECTED_TAB_ID" ] || fail "fullscreen selected tab id changed"
+  [ "$FULLSCREEN_PIXEL" != "$A_PIXEL" ] || fail "fullscreen AppKit pixels did not change from baseline"
+  compare_pair "$FULLSCREEN_FRAME_SIZE" "$A_FRAME_SIZE" gt || fail "fullscreen frame did not grow from baseline: baseline=$A_FRAME_SIZE fullscreen=$FULLSCREEN_FRAME_SIZE"
+  log "fullscreen_window_id=$FULLSCREEN_PRESENT_WINDOW_ID"
+  log "fullscreen_overlay_frame=$FULLSCREEN_FRAME"
+  log "fullscreen_overlay_frame_size=$FULLSCREEN_FRAME_SIZE"
+  log "fullscreen_appkit_pixel=$FULLSCREEN_PIXEL"
+  log "fullscreen_backing_scale=$FULLSCREEN_SCALE"
+
+  FULLSCREEN_PIXEL_WIDTH="${FULLSCREEN_PIXEL%x*}"
+  FULLSCREEN_PIXEL_HEIGHT="${FULLSCREEN_PIXEL#*x}"
+  require_trace_after "$FULLSCREEN_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${FULLSCREEN_PIXEL_WIDTH} pixel_height=${FULLSCREEN_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied fullscreen resize to AppKit pixel size"
+
+  screencapture -x -o -l"$FULLSCREEN_WINDOW_ID" "$SCREENSHOT_FULLSCREEN"
+  log "fullscreen_screenshot_exit=$?"
+
+  FULLSCREEN_CLICK_X="$(awk -v wx="$FULLSCREEN_WX" -v frame_x="$FULLSCREEN_FRAME_X" -v frame_size="$FULLSCREEN_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wx + frame_x + (parts[1] / 2) + 0.5) }')"
+  FULLSCREEN_CLICK_Y="$(awk -v wy="$FULLSCREEN_WY" -v frame_y="$FULLSCREEN_FRAME_Y" -v frame_size="$FULLSCREEN_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wy + frame_y + (parts[2] / 2) + 0.5) }')"
+  FULLSCREEN_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$FULLSCREEN_CLICK_X" "$FULLSCREEN_CLICK_Y" "fullscreen_browser_area"
+  FULLSCREEN_HIT_LINE="$(wait_for_hit_after "$FULLSCREEN_HIT_START_LINE" "$A_CONTEXT_ID" "fullscreen browser hit-test")"
+  require_text "$FULLSCREEN_HIT_LINE" "window_id:${FULLSCREEN_WINDOW_ID}" "fullscreen hit-test has current window id"
+  require_text "$FULLSCREEN_HIT_LINE" "surface_id:${A_SURFACE_ID}" "fullscreen hit-test has surface id"
+  require_text "$FULLSCREEN_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "fullscreen hit-test has selected tab id"
+  require_text "$FULLSCREEN_HIT_LINE" "overlay_frame=${FULLSCREEN_FRAME}" "fullscreen hit-test uses fullscreen frame"
+  require_text "$FULLSCREEN_HIT_LINE" "web_point={" "fullscreen hit-test includes webview-relative point"
+
+  FULLSCREEN_MODE_START_LINE="$(log_line_count)"
+  FULLSCREEN_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "fullscreen_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$FULLSCREEN_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "fullscreen webtui entered browse mode"
+  require_trace_after "$FULLSCREEN_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after fullscreen"
+
+  FULLSCREEN_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP18_FULLSCREEN\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$FULLSCREEN_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "fullscreen keyboard marker reached browser"
+
+  FULLSCREEN_CONTROL_START_LINE="$(log_line_count)"
+  FULLSCREEN_CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  log "fullscreen_control_key=escape=Mode::Control"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$FULLSCREEN_CONTROL_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=false" "fullscreen webtui returned to control mode"
+  require_trace_after "$FULLSCREEN_CONTROL_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed focus=false before unfullscreen"
+
+  UNFULLSCREEN_START_LINE="$(log_line_count)"
+  UNFULLSCREEN_TRACE_START_LINE="$(trace_line_count)"
+  UNFULLSCREEN_STATE="$(swift "$FULLSCREEN_WINDOW" "$PID" "$FULLSCREEN_WX" "$FULLSCREEN_WY" "$FULLSCREEN_WW" "$FULLSCREEN_WH" exit >>"$HARNESS_LOG" 2>&1; tail -1 "$HARNESS_LOG")"
+  [ "$UNFULLSCREEN_STATE" = "false" ] || fail "AXFullScreen did not become false after exiting fullscreen: $UNFULLSCREEN_STATE"
+  log "PASS: AXFullScreen false after exit"
+  delay 4
+
+  UNFULLSCREEN_WIN_LINE="$(app_windows | awk -F '\t' -v old="$A_WINDOW_ID" '$1 == old { print; found=1 } END { if (!found) exit 1 }' || true)"
+  if [ -z "$UNFULLSCREEN_WIN_LINE" ]; then
+    UNFULLSCREEN_WIN_LINE="$(app_windows | head -1 || true)"
+  fi
+  [ -n "$UNFULLSCREEN_WIN_LINE" ] || fail "could not resolve unfullscreen Ghostboard window"
+  IFS=$'\t' read -r UNFULLSCREEN_WINDOW_ID UNFULLSCREEN_WX UNFULLSCREEN_WY UNFULLSCREEN_WW UNFULLSCREEN_WH <<<"$UNFULLSCREEN_WIN_LINE"
+  log "unfullscreen_window=$UNFULLSCREEN_WIN_LINE"
+
+  UNFULLSCREEN_PRESENT_LINE="$(wait_for_line_after "$UNFULLSCREEN_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "unfullscreen AppKit presentation" 45)"
+  UNFULLSCREEN_PIXELS_LINE="$(wait_for_line_after "$UNFULLSCREEN_START_LINE" "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "unfullscreen AppKit pixels" 45)"
+  UNFULLSCREEN_PRESENT_WINDOW_ID="$(printf '%s\n' "$UNFULLSCREEN_PRESENT_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  UNFULLSCREEN_SURFACE_ID="$(extract_surface_id "$UNFULLSCREEN_PRESENT_LINE")"
+  UNFULLSCREEN_SELECTED_TAB_ID="$(extract_selected_tab_id "$UNFULLSCREEN_PRESENT_LINE")"
+  UNFULLSCREEN_FRAME="$(extract_overlay_frame "$UNFULLSCREEN_PRESENT_LINE")"
+  UNFULLSCREEN_FRAME_SIZE="$(extract_frame_size "$UNFULLSCREEN_PRESENT_LINE")"
+  UNFULLSCREEN_SCALE="$(extract_backing_scale "$UNFULLSCREEN_PRESENT_LINE")"
+  UNFULLSCREEN_PIXEL="$(extract_appkit_pixel "$UNFULLSCREEN_PIXELS_LINE")"
+  [ "$UNFULLSCREEN_PRESENT_WINDOW_ID" = "$UNFULLSCREEN_WINDOW_ID" ] || fail "unfullscreen AppKit window id mismatch: current=$UNFULLSCREEN_WINDOW_ID presented=$UNFULLSCREEN_PRESENT_WINDOW_ID"
+  [ "$UNFULLSCREEN_SURFACE_ID" = "$A_SURFACE_ID" ] || fail "unfullscreen surface id changed"
+  [ "$UNFULLSCREEN_SELECTED_TAB_ID" = "$A_SELECTED_TAB_ID" ] || fail "unfullscreen selected tab id changed"
+  [ "$UNFULLSCREEN_PIXEL" != "$FULLSCREEN_PIXEL" ] || fail "unfullscreen AppKit pixels did not change from fullscreen"
+  log "unfullscreen_window_id=$UNFULLSCREEN_PRESENT_WINDOW_ID"
+  log "unfullscreen_overlay_frame=$UNFULLSCREEN_FRAME"
+  log "unfullscreen_overlay_frame_size=$UNFULLSCREEN_FRAME_SIZE"
+  log "unfullscreen_appkit_pixel=$UNFULLSCREEN_PIXEL"
+  log "unfullscreen_backing_scale=$UNFULLSCREEN_SCALE"
+
+  UNFULLSCREEN_PIXEL_WIDTH="${UNFULLSCREEN_PIXEL%x*}"
+  UNFULLSCREEN_PIXEL_HEIGHT="${UNFULLSCREEN_PIXEL#*x}"
+  require_trace_after "$UNFULLSCREEN_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${UNFULLSCREEN_PIXEL_WIDTH} pixel_height=${UNFULLSCREEN_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied unfullscreen resize to AppKit pixel size"
+
+  screencapture -x -o -l"$UNFULLSCREEN_WINDOW_ID" "$SCREENSHOT_UNFULLSCREEN"
+  log "unfullscreen_screenshot_exit=$?"
+
+  UNFULLSCREEN_HIT_START_LINE="$(log_line_count)"
+  click_window_center "$UNFULLSCREEN_WIN_LINE" "unfullscreen_browser_area"
+  UNFULLSCREEN_HIT_LINE="$(wait_for_hit_after "$UNFULLSCREEN_HIT_START_LINE" "$A_CONTEXT_ID" "unfullscreen browser hit-test")"
+  require_text "$UNFULLSCREEN_HIT_LINE" "window_id:${UNFULLSCREEN_WINDOW_ID}" "unfullscreen hit-test has current window id"
+  require_text "$UNFULLSCREEN_HIT_LINE" "surface_id:${A_SURFACE_ID}" "unfullscreen hit-test has surface id"
+  require_text "$UNFULLSCREEN_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "unfullscreen hit-test has selected tab id"
+  require_text "$UNFULLSCREEN_HIT_LINE" "overlay_frame=${UNFULLSCREEN_FRAME}" "unfullscreen hit-test uses unfullscreen frame"
+  require_text "$UNFULLSCREEN_HIT_LINE" "web_point={" "unfullscreen hit-test includes webview-relative point"
+
+  UNFULLSCREEN_MODE_START_LINE="$(log_line_count)"
+  UNFULLSCREEN_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "unfullscreen_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$UNFULLSCREEN_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "unfullscreen webtui entered browse mode"
+  require_trace_after "$UNFULLSCREEN_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after unfullscreen"
+
+  UNFULLSCREEN_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP18_UNFULLSCREEN\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$UNFULLSCREEN_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "unfullscreen keyboard marker reached browser"
+
+  [ "$FULLSCREEN_TRACE_START_LINE" -lt "$FULLSCREEN_MODE_TRACE_START_LINE" ] || fail "trace boundaries for fullscreen were not monotonic"
+  [ "$FULLSCREEN_MODE_TRACE_START_LINE" -lt "$UNFULLSCREEN_TRACE_START_LINE" ] || fail "trace boundaries for unfullscreen were not monotonic"
 fi
 
 if [ "$SCENARIO" = "open-browser-in-new-window" ]; then
