@@ -145,4 +145,4 @@ The final issue conclusion should include:
 - [Experiment 1: Protocol message inventory](01-protocol-message-inventory.md) —
   **Pass**
 - [Experiment 2: Protocol feature parity](02-protocol-feature-parity.md) —
-  **Designed**
+  **Pass**
