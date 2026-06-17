@@ -198,3 +198,125 @@ to the split-down matrix row, the keybinding/injection plan is plausible, and
 the verification criteria cover stale-evidence prevention, geometry resize,
 Roamium post-boundary resize, positive hit testing, negative lower-sibling hit
 testing, serial regressions, and hygiene checks.
+
+## Result
+
+**Result:** Pass.
+
+The `split-down` scenario is implemented in
+`scripts/ghostboard-geometry-matrix.sh`. The harness now:
+
+- accepts `split-down` in addition to the prior scenarios;
+- adds the scenario-local config line `keybind = ctrl+j=new_split:down`;
+- injects Control-J with `scripts/ghostty-app/inject.swift`;
+- disables Ghostty window state restoration with `window-save-state = never` in
+  every generated harness config, so scenarios start from a clean window layout;
+- waits for a post-split AppKit presentation for the original pane/context;
+- verifies that the original browser overlay height shrinks while width remains
+  stable;
+- verifies that AppKit-presented pixel height shrinks while pixel width remains
+  stable;
+- verifies that Zig records the post-split AppKit-presented pixel size for the
+  original pane;
+- verifies that Roamium applies the post-split AppKit pixel size with
+  `ffi=ts_set_view_size` after the split key injection trace boundary;
+- captures a post-split screenshot;
+- verifies a positive hit test inside the resized browser overlay;
+- verifies an explicit negative hit test in the lower sibling pane area, proving
+  the old full-height browser frame is no longer routing input to the original
+  browser context.
+
+No Ghostboard product source changes were needed for this row. Current
+Ghostboard already keeps the browser attached to the original pane and resizes
+it correctly after a downward split.
+
+One intermediate run failed because the app restored a previous split-down
+window layout before the harness injected Control-J. Adding
+`window-save-state = never` to the generated config fixed that and is now part
+of every geometry scenario.
+
+Final passing artifacts:
+
+- split-down app log:
+  `logs/ghostboard-geometry-split-down-app-20260617-081424.log`
+- split-down harness log:
+  `logs/ghostboard-geometry-split-down-harness-20260617-081424.log`
+- split-down initial screenshot:
+  `logs/ghostboard-geometry-split-down-screenshot-20260617-081424.png`
+- split-down post-split screenshot:
+  `logs/ghostboard-geometry-split-down-split-screenshot-20260617-081424.png`
+- split-down Roamium trace:
+  `logs/ghostboard-geometry-split-down-roamium-20260617-081424.log`
+- initial-open regression app log:
+  `logs/ghostboard-geometry-initial-open-app-20260617-080731.log`
+- initial-open regression harness log:
+  `logs/ghostboard-geometry-initial-open-harness-20260617-080731.log`
+- window-resize regression app log:
+  `logs/ghostboard-geometry-window-resize-app-20260617-080739.log`
+- window-resize regression harness log:
+  `logs/ghostboard-geometry-window-resize-harness-20260617-080739.log`
+- split-right regression app log:
+  `logs/ghostboard-geometry-split-right-app-20260617-081452.log`
+- split-right regression harness log:
+  `logs/ghostboard-geometry-split-right-harness-20260617-081452.log`
+
+Key passing evidence from the `split-down` run:
+
+- pre-split AppKit overlay frame: `944x493`, AppKit pixel size: `1888x986`;
+- post-split AppKit overlay frame: `944x187`, AppKit pixel size: `1888x374`;
+- the original pane id remained `983A12D5-C5D3-406A-9423-652B311DDB80`;
+- the original browser tab id remained `1`;
+- Roamium applied the post-split resize with `ffi=ts_set_view_size`;
+- the post-split positive click reported `hit=true` with a current `web_point`;
+- the lower-sibling negative click produced an explicit `hit=false` record for
+  the original browser context.
+
+Verification commands run:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+scripts/ghostboard-geometry-matrix.sh split-down
+scripts/ghostboard-geometry-matrix.sh initial-open
+scripts/ghostboard-geometry-matrix.sh window-resize
+scripts/ghostboard-geometry-matrix.sh split-right
+```
+
+The post-split screenshot was visually inspected. It shows the browser filling
+only the top pane while the new shell split occupies the lower pane.
+
+## Conclusion
+
+The vertical split-down matrix row passes in current Ghostboard. The browser
+stays attached to its original pane, resizes to the top pane's shorter viewport,
+forwards the corrected size to Roamium, and stops accepting input in the new
+lower sibling pane.
+
+## Completion Review
+
+The completed experiment was reviewed by a fresh-context Codex adversarial
+subagent.
+
+Initial verdict: **Changes required**.
+
+- Required finding: the negative hit-test helper was vacuous because it passed
+  when no post-click hit-test record appeared. The split-down result needed an
+  explicit post-click `hit=false` record for the original browser context.
+- Optional finding: the app logs show Roamium crashing on teardown with
+  `Received signal 11 SEGV_ACCERR`. This does not invalidate the split-down
+  geometry proof, but it should be kept as evidence for the later
+  cleanup/lifecycle matrix rows.
+
+Fix:
+
+- The negative hit-test helper now fails on any post-click `hit=true`, requires
+  an explicit post-click `hit=false` AppKit hit-test record by default, and only
+  allows absence for the split-right sibling-pane case where the click lands in
+  a different surface and may not invoke the original overlay hit-test.
+- The split-down scenario was rerun and passed with explicit `hit=false`
+  evidence in `logs/ghostboard-geometry-split-down-app-20260617-081424.log`.
+
+Re-review verdict: **Approved**. The reviewer confirmed the helper now fails on
+post-click `hit=true`, requires explicit post-click `hit=false` by default,
+keeps only split-right on the `allow-absent` path, verified the fresh split-down
+artifacts, and reported no new required findings.

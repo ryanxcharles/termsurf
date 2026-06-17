@@ -143,6 +143,10 @@ extract_frame_x() {
   printf '%s\n' "$1" | sed -E 's/.*overlay_frame=\{\{([^,]+), [^}]+\}, \{[^}]+\}\}.*/\1/'
 }
 
+extract_frame_y() {
+  printf '%s\n' "$1" | sed -E 's/.*overlay_frame=\{\{[^,]+, ([^}]+)\}, \{[^}]+\}\}.*/\1/'
+}
+
 pair_width() {
   printf '%s\n' "$1" | awk -Fx '{print $1}'
 }
@@ -192,6 +196,28 @@ compare_split_right_pair() {
       delta = height - ref_height
       if (delta < 0) delta = -delta
       exit !((width < ref_width) && (delta <= tolerance))
+    }'
+}
+
+compare_split_down_pair() {
+  local pair="$1"
+  local ref="$2"
+  local tolerance="$3"
+  local width height ref_width ref_height
+  width="$(pair_width "$pair")"
+  height="$(pair_height "$pair")"
+  ref_width="$(pair_width "$ref")"
+  ref_height="$(pair_height "$ref")"
+  awk \
+    -v width="$width" \
+    -v height="$height" \
+    -v ref_width="$ref_width" \
+    -v ref_height="$ref_height" \
+    -v tolerance="$tolerance" \
+    'BEGIN {
+      delta = width - ref_width
+      if (delta < 0) delta = -delta
+      exit !((height < ref_height) && (delta <= tolerance))
     }'
 }
 
@@ -277,6 +303,48 @@ wait_for_split_right_pixels_after() {
   fail "timed out waiting for $label"
 }
 
+wait_for_split_down_frame_after() {
+  local start_line="$1"
+  local pane_id="$2"
+  local context_id="$3"
+  local ref_frame="$4"
+  local label="$5"
+  local attempts="${6:-30}"
+  local line frame_size
+  for _ in $(seq 1 "$attempts"); do
+    while IFS= read -r line; do
+      frame_size="$(extract_frame_size "$line")"
+      if [ -n "$frame_size" ] && [ "$frame_size" != "$line" ] && compare_split_down_pair "$frame_size" "$ref_frame" 8; then
+        printf '%s\n' "$line"
+        return 0
+      fi
+    done < <(tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=presented .*pane_id:${pane_id} .*context_id=${context_id}" || true)
+    delay 1
+  done
+  fail "timed out waiting for $label"
+}
+
+wait_for_split_down_pixels_after() {
+  local start_line="$1"
+  local pane_id="$2"
+  local context_id="$3"
+  local ref_pixel="$4"
+  local label="$5"
+  local attempts="${6:-30}"
+  local line pixel
+  for _ in $(seq 1 "$attempts"); do
+    while IFS= read -r line; do
+      pixel="$(extract_appkit_pixel "$line")"
+      if [ -n "$pixel" ] && compare_split_down_pair "$pixel" "$ref_pixel" 16; then
+        printf '%s\n' "$line"
+        return 0
+      fi
+    done < <(tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${pane_id} .*context_id=${context_id}" || true)
+    delay 1
+  done
+  fail "timed out waiting for $label"
+}
+
 wait_for_hit_after() {
   local start_line="$1"
   local context_id="$2"
@@ -298,11 +366,26 @@ wait_for_negative_hit_after() {
   local start_line="$1"
   local context_id="$2"
   local label="$3"
-  delay 1
-  if tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=hit_test .*context_id=${context_id} .*hit=true" >/dev/null 2>&1; then
-    fail "$label routed to original browser context"
+  local mode="${4:-require-hit-false}"
+  local attempts="${5:-30}"
+  local line
+  for _ in $(seq 1 "$attempts"); do
+    if tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=hit_test .*context_id=${context_id} .*hit=true" >/dev/null 2>&1; then
+      fail "$label routed to original browser context"
+    fi
+    line="$(tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=hit_test .*context_id=${context_id} .*hit=false" | tail -1 || true)"
+    if [ -n "$line" ] && printf '%s\n' "$line" | grep -F 'overlay_frame={' >/dev/null 2>&1; then
+      printf '%s\n' "$line"
+      log "PASS: observed $label with explicit hit=false"
+      return 0
+    fi
+    delay 1
+  done
+  if [ "$mode" = "allow-absent" ]; then
+    log "PASS: $label did not route to original browser context"
+  else
+    fail "timed out waiting for $label explicit hit=false"
   fi
-  log "PASS: $label did not route to original browser context"
 }
 
 window_bounds() {
@@ -339,7 +422,7 @@ click_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right) ;;
+  initial-open|window-resize|split-right|split-down) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -363,12 +446,19 @@ EOF
 chmod +x "$COMMAND"
 
 cat >"$CONFIG" <<EOF
+window-save-state = never
 initial-command = direct:$COMMAND
 EOF
 
 if [ "$SCENARIO" = "split-right" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+d=new_split:right
+EOF
+fi
+
+if [ "$SCENARIO" = "split-down" ]; then
+  cat >>"$CONFIG" <<'EOF'
+keybind = ctrl+j=new_split:down
 EOF
 fi
 
@@ -490,7 +580,7 @@ if [ "$SCENARIO" = "window-resize" ]; then
   log "grow_screenshot=$SCREENSHOT_GROW"
   log "shrink_screenshot=$SCREENSHOT_SHRINK"
 fi
-if [ "$SCENARIO" = "split-right" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-down" ]; then
   log "split_screenshot=$SCREENSHOT_SPLIT"
 fi
 
@@ -567,6 +657,8 @@ OVERLAY_FRAME_SIZE="$(extract_frame_size "$APPKIT_PRESENT_LINE")"
 [ -n "$OVERLAY_FRAME_SIZE" ] && [ "$OVERLAY_FRAME_SIZE" != "$APPKIT_PRESENT_LINE" ] || fail "could not extract AppKit overlay frame size"
 OVERLAY_FRAME_X="$(extract_frame_x "$APPKIT_PRESENT_LINE")"
 [ -n "$OVERLAY_FRAME_X" ] && [ "$OVERLAY_FRAME_X" != "$APPKIT_PRESENT_LINE" ] || fail "could not extract AppKit overlay frame x"
+OVERLAY_FRAME_Y="$(extract_frame_y "$APPKIT_PRESENT_LINE")"
+[ -n "$OVERLAY_FRAME_Y" ] && [ "$OVERLAY_FRAME_Y" != "$APPKIT_PRESENT_LINE" ] || fail "could not extract AppKit overlay frame y"
 APPKIT_PIXEL="$(printf '%s\n' "$APPKIT_PIXELS_LINE" | sed -E 's/.*appkit_pixel=([^ ]+).*/\1/')"
 [ -n "$APPKIT_PIXEL" ] || fail "could not extract AppKit presented pixel size"
 APPKIT_PIXEL_WIDTH="${APPKIT_PIXEL%x*}"
@@ -580,6 +672,7 @@ log "correlation_browser_pixel=$BROWSER_PIXEL"
 log "correlation_overlay_frame=$OVERLAY_FRAME"
 log "correlation_overlay_frame_size=$OVERLAY_FRAME_SIZE"
 log "correlation_overlay_frame_x=$OVERLAY_FRAME_X"
+log "correlation_overlay_frame_y=$OVERLAY_FRAME_Y"
 log "correlation_appkit_pixel=$APPKIT_PIXEL"
 log "correlation_scenario=$SCENARIO"
 log "correlation_timestamp=$TS"
@@ -720,7 +813,54 @@ if [ "$SCENARIO" = "split-right" ]; then
   SPLIT_NEGATIVE_Y="$SPLIT_INSIDE_Y"
   SPLIT_NEGATIVE_START_LINE="$(log_line_count)"
   click_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
-  wait_for_negative_hit_after "$SPLIT_NEGATIVE_START_LINE" "$CONTEXT_ID" "split-right sibling-pane negative hit-test"
+  wait_for_negative_hit_after "$SPLIT_NEGATIVE_START_LINE" "$CONTEXT_ID" "split-right sibling-pane negative hit-test" allow-absent
+fi
+
+if [ "$SCENARIO" = "split-down" ]; then
+  SPLIT_START_LINE="$(log_line_count)"
+  SPLIT_TRACE_START_LINE="$(trace_line_count)"
+  log "split_keybind=ctrl+j=new_split:down"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 38 control >>"$HARNESS_LOG" 2>&1
+  delay 1
+
+  SPLIT_PRESENT_LINE="$(wait_for_split_down_frame_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$OVERLAY_FRAME_SIZE" "split-down AppKit overlay frame")"
+  SPLIT_PIXELS_LINE="$(wait_for_split_down_pixels_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$APPKIT_PIXEL" "split-down AppKit presented pixels")"
+  SPLIT_FRAME_SIZE="$(extract_frame_size "$SPLIT_PRESENT_LINE")"
+  SPLIT_FRAME_X="$(extract_frame_x "$SPLIT_PRESENT_LINE")"
+  SPLIT_FRAME_Y="$(extract_frame_y "$SPLIT_PRESENT_LINE")"
+  SPLIT_PIXEL="$(extract_appkit_pixel "$SPLIT_PIXELS_LINE")"
+  SPLIT_PIXEL_WIDTH="${SPLIT_PIXEL%x*}"
+  SPLIT_PIXEL_HEIGHT="${SPLIT_PIXEL#*x}"
+  log "PASS: observed split-down AppKit overlay frame overlay_frame_size=$SPLIT_FRAME_SIZE"
+  log "PASS: observed split-down AppKit presented pixels appkit_pixel=$SPLIT_PIXEL"
+  log "split_overlay_frame_size=$SPLIT_FRAME_SIZE"
+  log "split_overlay_frame_x=$SPLIT_FRAME_X"
+  log "split_overlay_frame_y=$SPLIT_FRAME_Y"
+  log "split_appkit_pixel=$SPLIT_PIXEL"
+  require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=zig event=appkit_presented_pixels .*pane_id:${PANE_ID} .*appkit_pixel=${SPLIT_PIXEL}" "Zig records split-down AppKit presented pixel size"
+  require_trace_after "$SPLIT_TRACE_START_LINE" "resize tab_id=${BROWSER_TAB_ID} pane_id=${PANE_ID} pixel_width=${SPLIT_PIXEL_WIDTH} pixel_height=${SPLIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied split-down resize to AppKit pixel size via ts_set_view_size"
+  screencapture -x -o -l"$WID" "$SCREENSHOT_SPLIT"
+  log "split_screenshot_exit=$?"
+
+  SPLIT_WIN_LINE="$(window_bounds)" || fail "failed to resolve split window bounds for window id=$WID"
+  IFS=$'\t' read -r _SPLIT_WID SPLIT_WX SPLIT_WY SPLIT_WW SPLIT_WH <<<"$SPLIT_WIN_LINE"
+  SPLIT_FRAME_WIDTH="$(pair_width "$SPLIT_FRAME_SIZE")"
+  SPLIT_FRAME_HEIGHT="$(pair_height "$SPLIT_FRAME_SIZE")"
+  INITIAL_FRAME_HEIGHT="$(pair_height "$OVERLAY_FRAME_SIZE")"
+  SPLIT_INSIDE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + (frame_w / 2) + 0.5) }')"
+  SPLIT_INSIDE_Y=$((SPLIT_WY + 150))
+  SPLIT_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$SPLIT_INSIDE_X" "$SPLIT_INSIDE_Y" "split_inside"
+  SPLIT_HIT_LINE="$(wait_for_hit_after "$SPLIT_HIT_START_LINE" "$CONTEXT_ID" "split-down AppKit hit-test")"
+  log "PASS: observed split-down AppKit hit-test"
+  require_text "$SPLIT_HIT_LINE" "overlay_frame=" "split-down hit-test includes current overlay frame"
+  require_text "$SPLIT_HIT_LINE" "web_point={" "split-down hit-test includes webview-relative point"
+
+  SPLIT_NEGATIVE_X="$SPLIT_INSIDE_X"
+  SPLIT_NEGATIVE_Y=$((SPLIT_WY + 285))
+  SPLIT_NEGATIVE_START_LINE="$(log_line_count)"
+  click_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
+  wait_for_negative_hit_after "$SPLIT_NEGATIVE_START_LINE" "$CONTEXT_ID" "split-down sibling-pane negative hit-test"
 fi
 
 log "PASS: scenario $SCENARIO"

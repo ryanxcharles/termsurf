@@ -182,4 +182,4 @@ work together, not just individually.
 - [Experiment 4: Split-right pane attachment](04-split-right-pane-attachment.md)
   — **Pass**
 - [Experiment 5: Split-down pane attachment](05-split-down-pane-attachment.md) —
-  **Designed**
+  **Pass**
