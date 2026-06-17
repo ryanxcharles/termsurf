@@ -150,4 +150,4 @@ The final issue conclusion should include:
 - [Experiment 4: Historical issue inventory](04-historical-issue-inventory.md) —
   **Pass**
 - [Experiment 5: Batch H restored Ghostboard audit](05-batch-h-restored-ghostboard.md)
-  — **Designed**
+  — **Pass**
