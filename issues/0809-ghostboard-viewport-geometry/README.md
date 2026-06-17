@@ -172,3 +172,8 @@ work together, not just individually.
 - The final regression result includes a per-row table with scenario, status,
   screenshot path, log path, identity tuple, rect comparisons, backing scale,
   and pass/fail notes.
+
+## Experiments
+
+- [Experiment 1: Geometry observability harness](01-geometry-observability-harness.md)
+  — **Designed**
