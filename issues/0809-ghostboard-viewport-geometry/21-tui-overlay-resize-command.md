@@ -236,3 +236,124 @@ Fresh-context adversarial re-review approved the design before implementation.
 Verdict: **APPROVED**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Implemented a user-visible `webtui` command-mode viewport resize path:
+
+- `:viewport height <rows>` / `:vp height <rows>` stores an optional viewport
+  inner-height override.
+- `:viewport reset` / `:vp reset` clears the override and returns to full-height
+  fill behavior.
+- The override changes only the rendered viewport block height; the URL bar and
+  status bar remain below it, with blank terminal background filling any unused
+  area.
+- `webtui` still emits `SetOverlay` through the existing
+  `viewport_rect != last_viewport` path, so no protocol or Ghostboard product
+  changes were needed.
+
+Added `tui-overlay-resize-command` to `scripts/ghostboard-geometry-matrix.sh`.
+The scenario launches one browser, drives real keyboard input through command
+mode, shrinks the viewport, verifies the full geometry/input chain, resets the
+viewport, and verifies the chain returns to baseline.
+
+Passing evidence:
+
+- Main scenario:
+  - Harness log:
+    `logs/ghostboard-geometry-tui-overlay-resize-command-harness-20260617-135933.log`
+  - App log:
+    `logs/ghostboard-geometry-tui-overlay-resize-command-app-20260617-135933.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-tui-overlay-resize-command-roamium-20260617-135933.log`
+  - Screenshots:
+    - `logs/ghostboard-geometry-tui-overlay-resize-command-screenshot-20260617-135933.png`
+    - `logs/ghostboard-geometry-tui-overlay-resize-command-tui-shrink-screenshot-20260617-135933.png`
+    - `logs/ghostboard-geometry-tui-overlay-resize-command-tui-reset-screenshot-20260617-135933.png`
+- Adjacent regression, font metrics:
+  - Harness log:
+    `logs/ghostboard-geometry-font-size-cell-metrics-harness-20260617-135953.log`
+- Adjacent regression, window resize:
+  - Harness log:
+    `logs/ghostboard-geometry-window-resize-harness-20260617-140011.log`
+
+Key runtime facts from the passing main scenario:
+
+- Baseline identity stayed stable: `window_id=843`,
+  `surface_id=AE0CAEE2-8775-47F3-A33A-66EB3165DD30`, `selected_tab_id=843`,
+  `pane_id=AE0CAEE2-8775-47F3-A33A-66EB3165DD30`, `browser_tab_id=1`,
+  `context_id=1162960851`.
+- Baseline grid/frame/pixels: `127x37+1+1`, `{{8, 17}, {1016, 629}}`,
+  `2032x1258`.
+- `:viewport height 12` produced a fresh Zig `set_overlay_update` after the
+  command boundary with grid `127x12+1+1`.
+- AppKit then presented the shrunken frame `{{8, 17}, {1016, 204}}` and pixels
+  `2032x408`.
+- Roamium received the shrunken AppKit pixel size through `ts_set_view_size`.
+- Clicking inside the shrunken frame hit the same browser context and used the
+  current AppKit frame.
+- Clicking in the former lower browser area produced an explicit AppKit
+  `hit=false` for the same context, proving stale lower-area hit testing did not
+  route to the browser.
+- Browse-mode keyboard input after shrink reached the same Roamium browser tab.
+- `:viewport reset` produced a fresh Zig `set_overlay_update` after the reset
+  boundary with grid `127x37+1+1`.
+- AppKit returned to the baseline frame `{{8, 17}, {1016, 629}}` and pixels
+  `2032x1258`.
+- Roamium received the reset AppKit pixel size through `ts_set_view_size`.
+- Mouse hit testing and Browse-mode keyboard input still worked after reset.
+
+Verification run:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+cargo fmt
+cargo check -p webtui
+cargo build -p webtui
+git diff --check
+scripts/ghostboard-geometry-matrix.sh tui-overlay-resize-command
+scripts/ghostboard-geometry-matrix.sh font-size-cell-metrics
+scripts/ghostboard-geometry-matrix.sh window-resize
+```
+
+The first `window-resize` adjacent regression was accidentally run in parallel
+with `font-size-cell-metrics` and failed before its resize phase because no
+initial hit-test record was captured. Running `window-resize` by itself passed.
+The useful learning is that GUI automation scenarios which activate apps and
+drive global mouse/keyboard input should be run sequentially, not in parallel.
+
+## Conclusion
+
+TUI-requested overlay resizing works end to end. `webtui` can now deliberately
+change its viewport rectangle through a real command-mode command, Ghostboard
+accepts the resulting `SetOverlay` update for the existing pane/browser, AppKit
+recomputes the native frame and pixel size, Roamium resizes to the current
+AppKit pixels, stale lower-area hit testing is rejected, and keyboard routing
+survives both shrink and reset.
+
+No Ghostboard, Swift, Zig, Roamium, or protocol changes were required for this
+matrix row.
+
+## Completion Review
+
+Fresh-context adversarial completion review approved the result before the
+result commit.
+
+Verdict: **APPROVED**.
+
+Findings: none.
+
+Reviewer verification:
+
+- `bash -n scripts/ghostboard-geometry-matrix.sh` passed.
+- `cargo check -p webtui` passed.
+- `git diff --check` passed.
+- The result commit had not been made before review: `HEAD` was still
+  `c634b3047 Plan TUI viewport resize`.
+- The experiment file had `## Result` and `## Conclusion`, and the issue README
+  marked Experiment 21 as `Pass`.
+- The command path, runtime evidence, fresh shrink/reset geometry boundaries,
+  AppKit frame/pixel updates, Roamium resize, negative hit-test after shrink,
+  and keyboard routing after shrink/reset matched the approved scope.

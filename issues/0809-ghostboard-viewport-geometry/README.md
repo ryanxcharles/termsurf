@@ -213,4 +213,4 @@ work together, not just individually.
 - [Experiment 20: Font-size cell metrics](20-font-size-cell-metrics.md) —
   **Pass**
 - [Experiment 21: TUI overlay resize command](21-tui-overlay-resize-command.md)
-  — **Designed**
+  — **Pass**

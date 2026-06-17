@@ -150,9 +150,15 @@ enum DarkAction {
     System,
 }
 
+enum ViewportCommand {
+    Height(u16),
+    Reset,
+}
+
 enum CommandResult {
     Quit,
     Dark(DarkAction),
+    Viewport(ViewportCommand),
     DevTools(String), // direction: "right", "down", "left", "up" (Issue 690).
     Error(String),    // error message for command bar (Issue 690).
     None,
@@ -176,6 +182,22 @@ const COMMANDS: &[Command] = &[
             Some("off" | "no" | "n") => CommandResult::Dark(DarkAction::Off),
             Some("system" | "s") => CommandResult::Dark(DarkAction::System),
             Some(other) => CommandResult::Error(format!("Unknown: {}", other)),
+        },
+    },
+    Command {
+        names: &["viewport", "vp"],
+        exec: |args| match args.first().copied() {
+            Some("height" | "h") => match args.get(1).copied() {
+                Some(rows) => match rows.parse::<u16>() {
+                    Ok(0) => CommandResult::Error("Viewport height must be greater than 0".into()),
+                    Ok(rows) => CommandResult::Viewport(ViewportCommand::Height(rows)),
+                    Err(_) => CommandResult::Error(format!("Invalid viewport height: {}", rows)),
+                },
+                None => CommandResult::Error("Usage: viewport height <rows>".into()),
+            },
+            Some("reset" | "r") => CommandResult::Viewport(ViewportCommand::Reset),
+            Some(other) => CommandResult::Error(format!("Unknown viewport command: {}", other)),
+            None => CommandResult::Error("Usage: viewport height <rows> | viewport reset".into()),
         },
     },
     Command {
@@ -499,6 +521,7 @@ fn main() -> io::Result<()> {
     let mut cmd_state = EditorState::new(Lines::from(""));
     cmd_state.set_clipboard(UrlClipboard::new());
     let mut cmd_handler = make_single_line_handler();
+    let mut viewport_height_override: Option<u16> = None;
 
     // Event loop.
     loop {
@@ -529,6 +552,7 @@ fn main() -> io::Result<()> {
                 &renderer_crash,
                 browser_ready,
                 chromium_wait_start,
+                viewport_height_override,
             );
         })?;
 
@@ -953,6 +977,14 @@ fn main() -> io::Result<()> {
                                         }
                                     }
                                 }
+                                CommandResult::Viewport(command) => match command {
+                                    ViewportCommand::Height(rows) => {
+                                        viewport_height_override = Some(rows);
+                                    }
+                                    ViewportCommand::Reset => {
+                                        viewport_height_override = None;
+                                    }
+                                },
                                 CommandResult::Error(msg) => {
                                     command_error = Some(msg);
                                 }
@@ -1306,6 +1338,7 @@ fn ui(
     renderer_crash: &Option<RendererCrashState>,
     browser_ready: bool,
     chromium_wait_start: Option<Instant>,
+    viewport_height_override: Option<u16>,
 ) -> Rect {
     // Paint full background.
     frame.render_widget(
@@ -1313,12 +1346,26 @@ fn ui(
         frame.area(),
     );
 
-    let layout = Layout::vertical([
-        Constraint::Min(1),    // Viewport (fill remaining)
-        Constraint::Length(3), // URL bar (1 line + top/bottom border)
-        Constraint::Length(1), // Status bar
-    ])
-    .split(frame.area());
+    let (viewport_area, url_area, status_area) = if let Some(rows) = viewport_height_override {
+        let available = frame.area().height.saturating_sub(4);
+        let viewport_height = rows.saturating_add(2).clamp(1, available.max(1));
+        let layout = Layout::vertical([
+            Constraint::Length(viewport_height), // Viewport override
+            Constraint::Min(0),                  // Filler
+            Constraint::Length(3),               // URL bar
+            Constraint::Length(1),               // Status bar
+        ])
+        .split(frame.area());
+        (layout[0], layout[2], layout[3])
+    } else {
+        let layout = Layout::vertical([
+            Constraint::Min(1),    // Viewport (fill remaining)
+            Constraint::Length(3), // URL bar (1 line + top/bottom border)
+            Constraint::Length(1), // Status bar
+        ])
+        .split(frame.area());
+        (layout[0], layout[1], layout[2])
+    };
 
     // Border colors based on mode.
     let (url_border, viewport_border) = match mode {
@@ -1362,8 +1409,8 @@ fn ui(
             cmd_block =
                 cmd_block.title_bottom(Line::from(err.as_str()).style(Style::default().fg(RED)));
         }
-        let cmd_inner = cmd_block.inner(layout[1]);
-        frame.render_widget(cmd_block, layout[1]);
+        let cmd_inner = cmd_block.inner(url_area);
+        frame.render_widget(cmd_block, url_area);
 
         // Split inner area: ":" prefix + editor.
         let cmd_layout =
@@ -1409,7 +1456,7 @@ fn ui(
             .hide_status_line();
         frame.render_widget(
             EditorView::new(editor_state).theme(theme).wrap(false),
-            layout[1],
+            url_area,
         );
     } else {
         let url_title = Line::from(vec![Span::raw("URL").style(Style::default().fg(url_border))]);
@@ -1421,7 +1468,7 @@ fn ui(
                 .title_top(url_title)
                 .style(Style::default().bg(BG)),
         );
-        frame.render_widget(url_bar, layout[1]);
+        frame.render_widget(url_bar, url_area);
     }
 
     // Viewport.
@@ -1455,7 +1502,7 @@ fn ui(
         let hover_label = Line::from(Span::raw(target_url).style(Style::default().fg(DIM)));
         viewport_block = viewport_block.title_bottom(hover_label);
     }
-    let inner = viewport_block.inner(layout[0]);
+    let inner = viewport_block.inner(viewport_area);
 
     if let Some(dialog) = pending_dialog {
         let prompt_line = match dialog.dialog_type.as_str() {
@@ -1490,7 +1537,7 @@ fn ui(
         let dialog_widget = Paragraph::new(lines)
             .style(Style::default().fg(FG).bg(BG))
             .block(viewport_block);
-        frame.render_widget(dialog_widget, layout[0]);
+        frame.render_widget(dialog_widget, viewport_area);
     } else if let Some(auth) = pending_auth {
         let password_mask = "*".repeat(auth.password.chars().count());
         let username_style = if auth.field == AuthField::Username {
@@ -1538,7 +1585,7 @@ fn ui(
         let auth_widget = Paragraph::new(lines)
             .style(Style::default().fg(FG).bg(BG))
             .block(viewport_block);
-        frame.render_widget(auth_widget, layout[0]);
+        frame.render_widget(auth_widget, viewport_area);
     } else if let Some(crash) = renderer_crash {
         let mut lines: Vec<Line> = Vec::new();
         lines.push(Line::from(""));
@@ -1574,7 +1621,7 @@ fn ui(
         let crash_widget = Paragraph::new(lines)
             .style(Style::default().fg(FG).bg(BG))
             .block(viewport_block);
-        frame.render_widget(crash_widget, layout[0]);
+        frame.render_widget(crash_widget, viewport_area);
     } else if !browser_ready && !loading_log.is_empty() {
         // Render loading log (Issue 773).
         const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -1634,12 +1681,12 @@ fn ui(
         let loading_widget = Paragraph::new(lines)
             .style(Style::default().fg(FG).bg(BG))
             .block(viewport_block);
-        frame.render_widget(loading_widget, layout[0]);
+        frame.render_widget(loading_widget, viewport_area);
     } else {
         let viewport = Paragraph::new("")
             .style(Style::default().fg(FG).bg(BG))
             .block(viewport_block);
-        frame.render_widget(viewport, layout[0]);
+        frame.render_widget(viewport, viewport_area);
     }
 
     // Status bar.
@@ -1647,7 +1694,7 @@ fn ui(
         Constraint::Fill(1),    // Key hints (left)
         Constraint::Length(14), // Mode label (right)
     ])
-    .split(layout[2]);
+    .split(status_area);
 
     let d = Style::default().fg(DIM).bg(BG);
     let f = Style::default().fg(FG).bg(BG);

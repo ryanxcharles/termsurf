@@ -40,10 +40,14 @@ SCREENSHOT_MINIMIZE_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-minimize-
 SCREENSHOT_HIDE_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-hide-restored-screenshot-${TS}.png"
 SCREENSHOT_FONT_INCREASE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-font-increase-screenshot-${TS}.png"
 SCREENSHOT_FONT_DECREASE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-font-decrease-screenshot-${TS}.png"
+SCREENSHOT_TUI_SHRINK="$LOG_DIR/ghostboard-geometry-${SCENARIO}-tui-shrink-screenshot-${TS}.png"
+SCREENSHOT_TUI_RESET="$LOG_DIR/ghostboard-geometry-${SCENARIO}-tui-reset-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
 BROWSER_FOCUS_COMMAND="$RUN_DIR/browser-focus-command.txt"
+TUI_VIEWPORT_SHRINK_COMMAND="$RUN_DIR/tui-viewport-shrink-command.txt"
+TUI_VIEWPORT_RESET_COMMAND="$RUN_DIR/tui-viewport-reset-command.txt"
 NEW_TAB_COMMAND_LOG="$RUN_DIR/new-tab-command.log"
 NEW_TAB_MARKER_COMMAND="$RUN_DIR/new-tab-marker-command.txt"
 SECOND_BROWSER_COMMAND="$RUN_DIR/second-browser-command.txt"
@@ -212,6 +216,14 @@ extract_context_id() {
 
 extract_grid() {
   printf '%s\n' "$1" | sed -E 's/.*grid=([^ ]+).*/\1/'
+}
+
+extract_grid_width() {
+  printf '%s\n' "$1" | sed -E 's/^([0-9]+)x[0-9]+.*/\1/'
+}
+
+extract_grid_height() {
+  printf '%s\n' "$1" | sed -E 's/^[0-9]+x([0-9]+).*/\1/'
 }
 
 extract_cell_size() {
@@ -967,7 +979,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1654,6 +1666,12 @@ fi
 if [ "$SCENARIO" = "font-size-cell-metrics" ]; then
   log "font_increase_screenshot=$SCREENSHOT_FONT_INCREASE"
   log "font_decrease_screenshot=$SCREENSHOT_FONT_DECREASE"
+fi
+if [ "$SCENARIO" = "tui-overlay-resize-command" ]; then
+  log "tui_shrink_screenshot=$SCREENSHOT_TUI_SHRINK"
+  log "tui_reset_screenshot=$SCREENSHOT_TUI_RESET"
+  log "tui_viewport_shrink_command=$TUI_VIEWPORT_SHRINK_COMMAND"
+  log "tui_viewport_reset_command=$TUI_VIEWPORT_RESET_COMMAND"
 fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
@@ -3444,6 +3462,190 @@ if [ "$SCENARIO" = "font-size-cell-metrics" ]; then
   printf 'ISSUE809_EXP20_FONT_DECREASE\n' >"$BROWSER_FOCUS_COMMAND"
   swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
   require_trace_after "$DECREASE_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "font-decreased keyboard marker reached browser"
+fi
+
+if [ "$SCENARIO" = "tui-overlay-resize-command" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_GRID="$(extract_grid "$APPKIT_PRESENT_LINE")"
+  A_GRID_WIDTH="$(extract_grid_width "$A_GRID")"
+  A_GRID_HEIGHT="$(extract_grid_height "$A_GRID")"
+  A_CELL="$(extract_cell_size "$APPKIT_PRESENT_LINE")"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_X="$OVERLAY_FRAME_X"
+  A_FRAME_Y="$OVERLAY_FRAME_Y"
+  A_FRAME_WIDTH="$(pair_width "$A_FRAME_SIZE")"
+  A_FRAME_HEIGHT="$(pair_height "$A_FRAME_SIZE")"
+  A_ROOT_FRAME_SIZE="$(extract_root_frame_size "$APPKIT_PRESENT_LINE")"
+  A_PIXEL="$APPKIT_PIXEL"
+  A_PIXEL_HEIGHT="${A_PIXEL#*x}"
+  A_BACKING_SCALE="$(extract_backing_scale "$APPKIT_PRESENT_LINE")"
+  log "tui_baseline_window_id=$A_WINDOW_ID"
+  log "tui_baseline_surface_id=$A_SURFACE_ID"
+  log "tui_baseline_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "tui_baseline_pane_id=$A_PANE_ID"
+  log "tui_baseline_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "tui_baseline_context_id=$A_CONTEXT_ID"
+  log "tui_baseline_grid=$A_GRID"
+  log "tui_baseline_cell=$A_CELL"
+  log "tui_baseline_frame=$A_FRAME"
+  log "tui_baseline_appkit_pixel=$A_PIXEL"
+  log "tui_baseline_backing_scale=$A_BACKING_SCALE"
+
+  SHRINK_ROWS=12
+  [ "$A_GRID_HEIGHT" -gt "$SHRINK_ROWS" ] || fail "baseline grid height is too small for TUI shrink test: baseline=$A_GRID"
+  SHRINK_START_LINE="$(log_line_count)"
+  SHRINK_TRACE_START_LINE="$(trace_line_count)"
+  printf ':viewport height %s' "$SHRINK_ROWS" >"$TUI_VIEWPORT_SHRINK_COMMAND"
+  log "tui_viewport_shrink_command_text=$(cat "$TUI_VIEWPORT_SHRINK_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$TUI_VIEWPORT_SHRINK_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  delay 1
+
+  SHRINK_SET_OVERLAY_LINE="$(wait_for_line_after "$SHRINK_START_LINE" "TermSurf geometry layer=zig event=set_overlay_update .*pane_id:${A_PANE_ID} .*browser_tab_id:${A_BROWSER_TAB_ID} .*grid=${A_GRID_WIDTH}x${SHRINK_ROWS}\\+1\\+1 .*context_id=${A_CONTEXT_ID}" "TUI shrink SetOverlay update" 45)"
+  SHRINK_PRESENT_LINE="$(wait_for_changed_appkit_frame_after "$SHRINK_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "TUI-shrunken AppKit overlay frame" 45)"
+  SHRINK_PIXELS_LINE="$(wait_for_changed_appkit_pixels_after "$SHRINK_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "TUI-shrunken AppKit pixels" 45)"
+  SHRINK_WINDOW_ID="$(printf '%s\n' "$SHRINK_PRESENT_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  SHRINK_SURFACE_ID="$(extract_surface_id "$SHRINK_PRESENT_LINE")"
+  SHRINK_SELECTED_TAB_ID="$(extract_selected_tab_id "$SHRINK_PRESENT_LINE")"
+  SHRINK_GRID="$(extract_grid "$SHRINK_PRESENT_LINE")"
+  SHRINK_GRID_WIDTH="$(extract_grid_width "$SHRINK_GRID")"
+  SHRINK_GRID_HEIGHT="$(extract_grid_height "$SHRINK_GRID")"
+  SHRINK_FRAME="$(extract_overlay_frame "$SHRINK_PRESENT_LINE")"
+  SHRINK_FRAME_SIZE="$(extract_frame_size "$SHRINK_PRESENT_LINE")"
+  SHRINK_FRAME_X="$(extract_frame_x "$SHRINK_PRESENT_LINE")"
+  SHRINK_FRAME_Y="$(extract_frame_y "$SHRINK_PRESENT_LINE")"
+  SHRINK_FRAME_WIDTH="$(pair_width "$SHRINK_FRAME_SIZE")"
+  SHRINK_FRAME_HEIGHT="$(pair_height "$SHRINK_FRAME_SIZE")"
+  SHRINK_PIXEL="$(extract_appkit_pixel "$SHRINK_PIXELS_LINE")"
+  SHRINK_PIXEL_WIDTH="${SHRINK_PIXEL%x*}"
+  SHRINK_PIXEL_HEIGHT="${SHRINK_PIXEL#*x}"
+  SHRINK_SCALE="$(extract_backing_scale "$SHRINK_PRESENT_LINE")"
+  SHRINK_CURRENT_PIXEL="$(appkit_pixel_from_geometry_line "$SHRINK_PRESENT_LINE")"
+  [ "$SHRINK_WINDOW_ID" = "$A_WINDOW_ID" ] || fail "TUI shrink window id changed: expected=$A_WINDOW_ID actual=$SHRINK_WINDOW_ID"
+  [ "$SHRINK_SURFACE_ID" = "$A_SURFACE_ID" ] || fail "TUI shrink surface id changed"
+  [ "$SHRINK_SELECTED_TAB_ID" = "$A_SELECTED_TAB_ID" ] || fail "TUI shrink selected tab id changed"
+  [ "$SHRINK_GRID_WIDTH" = "$A_GRID_WIDTH" ] || fail "TUI shrink grid width changed unexpectedly: expected=$A_GRID_WIDTH actual=$SHRINK_GRID_WIDTH"
+  [ "$SHRINK_GRID_HEIGHT" = "$SHRINK_ROWS" ] || fail "TUI shrink grid height mismatch: expected=$SHRINK_ROWS actual=$SHRINK_GRID_HEIGHT"
+  [ "$SHRINK_SCALE" = "$A_BACKING_SCALE" ] || fail "TUI shrink backing scale mismatch: expected=$A_BACKING_SCALE actual=$SHRINK_SCALE"
+  [ "$SHRINK_CURRENT_PIXEL" = "$SHRINK_PIXEL" ] || fail "TUI shrink current frame-derived pixel mismatch: expected=$SHRINK_PIXEL actual=$SHRINK_CURRENT_PIXEL"
+  [ "$SHRINK_FRAME_HEIGHT" -lt "$A_FRAME_HEIGHT" ] || fail "TUI shrink frame height did not shrink: baseline=$A_FRAME_SIZE shrink=$SHRINK_FRAME_SIZE"
+  [ "$SHRINK_PIXEL_HEIGHT" -lt "$A_PIXEL_HEIGHT" ] || fail "TUI shrink AppKit pixel height did not shrink: baseline=$A_PIXEL shrink=$SHRINK_PIXEL"
+  log "tui_shrink_set_overlay=$SHRINK_SET_OVERLAY_LINE"
+  log "tui_shrink_grid=$SHRINK_GRID"
+  log "tui_shrink_frame=$SHRINK_FRAME"
+  log "tui_shrink_appkit_pixel=$SHRINK_PIXEL"
+  log "PASS: TUI command shrank SetOverlay, AppKit frame, and AppKit pixels"
+  require_log_after "$SHRINK_START_LINE" "TermSurf geometry layer=zig event=appkit_presented_pixels .*pane_id:${A_PANE_ID} .*appkit_pixel=${SHRINK_PIXEL}" "Zig records TUI-shrunken AppKit presented pixel size"
+  require_trace_after "$SHRINK_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${SHRINK_PIXEL_WIDTH} pixel_height=${SHRINK_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied TUI shrink resize to AppKit pixel size"
+  SHRINK_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve TUI-shrunken window bounds"
+  [ "$SHRINK_WIN_LINE" = "$WIN_LINE" ] || fail "TUI shrink changed window bounds: baseline=$WIN_LINE shrink=$SHRINK_WIN_LINE"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_TUI_SHRINK"
+  log "tui_shrink_screenshot_exit=$?"
+
+  IFS=$'\t' read -r _SHRINK_WID SHRINK_WX SHRINK_WY SHRINK_WW SHRINK_WH <<<"$SHRINK_WIN_LINE"
+  SHRINK_ROOT_HEIGHT="$(pair_height "$A_ROOT_FRAME_SIZE")"
+  SHRINK_CONTENT_Y_OFFSET="$(awk -v wh="$SHRINK_WH" -v root_h="$SHRINK_ROOT_HEIGHT" 'BEGIN { print int(wh - root_h) }')"
+  SHRINK_INSIDE_X="$(awk -v wx="$SHRINK_WX" -v frame_x="$SHRINK_FRAME_X" -v frame_w="$SHRINK_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + (frame_w / 2) + 0.5) }')"
+  SHRINK_INSIDE_Y="$(awk -v wy="$SHRINK_WY" -v content_y="$SHRINK_CONTENT_Y_OFFSET" -v frame_y="$SHRINK_FRAME_Y" -v frame_h="$SHRINK_FRAME_HEIGHT" 'BEGIN { print int(wy + content_y + frame_y + (frame_h / 2) + 0.5) }')"
+  SHRINK_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$SHRINK_INSIDE_X" "$SHRINK_INSIDE_Y" "tui_shrink_inside"
+  SHRINK_HIT_LINE="$(wait_for_hit_after "$SHRINK_HIT_START_LINE" "$A_CONTEXT_ID" "TUI-shrunken browser hit-test")"
+  require_text "$SHRINK_HIT_LINE" "window_id:${A_WINDOW_ID}" "TUI-shrunken hit-test has window id"
+  require_text "$SHRINK_HIT_LINE" "surface_id:${A_SURFACE_ID}" "TUI-shrunken hit-test has surface id"
+  require_text "$SHRINK_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "TUI-shrunken hit-test has selected tab id"
+  require_text "$SHRINK_HIT_LINE" "overlay_frame=${SHRINK_FRAME}" "TUI-shrunken hit-test uses current AppKit frame"
+  require_text "$SHRINK_HIT_LINE" "web_point={" "TUI-shrunken hit-test includes webview-relative point"
+
+  FORMER_LOWER_X="$SHRINK_INSIDE_X"
+  FORMER_LOWER_Y="$(awk -v wy="$SHRINK_WY" -v content_y="$SHRINK_CONTENT_Y_OFFSET" -v frame_y="$A_FRAME_Y" -v shrink_h="$SHRINK_FRAME_HEIGHT" -v baseline_h="$A_FRAME_HEIGHT" 'BEGIN { print int(wy + content_y + frame_y + shrink_h + ((baseline_h - shrink_h) / 2) + 0.5) }')"
+  click_negative_global_point "$FORMER_LOWER_X" "$FORMER_LOWER_Y" "tui_shrink_former_lower_browser_area"
+  wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$A_CONTEXT_ID" "TUI-shrunken former lower browser area hit-test" allow-absent
+
+  SHRINK_MODE_START_LINE="$(log_line_count)"
+  SHRINK_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "tui_shrink_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$SHRINK_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "TUI-shrunken webtui entered browse mode"
+  require_trace_after "$SHRINK_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after TUI shrink"
+  SHRINK_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP21_TUI_SHRINK\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$SHRINK_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "TUI-shrunken keyboard marker reached browser"
+
+  SHRINK_CONTROL_START_LINE="$(log_line_count)"
+  SHRINK_CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  log "tui_shrink_control_key=escape=Mode::Control"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$SHRINK_CONTROL_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=false" "TUI-shrunken webtui returned to control mode"
+  require_trace_after "$SHRINK_CONTROL_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed focus=false before TUI reset"
+
+  RESET_START_LINE="$(log_line_count)"
+  RESET_TRACE_START_LINE="$(trace_line_count)"
+  printf ':viewport reset' >"$TUI_VIEWPORT_RESET_COMMAND"
+  log "tui_viewport_reset_command_text=$(cat "$TUI_VIEWPORT_RESET_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$TUI_VIEWPORT_RESET_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  delay 1
+
+  RESET_SET_OVERLAY_LINE="$(wait_for_line_after "$RESET_START_LINE" "TermSurf geometry layer=zig event=set_overlay_update .*pane_id:${A_PANE_ID} .*browser_tab_id:${A_BROWSER_TAB_ID} .*grid=${A_GRID_WIDTH}x${A_GRID_HEIGHT}\\+1\\+1 .*context_id=${A_CONTEXT_ID}" "TUI reset SetOverlay update" 45)"
+  RESET_PRESENT_LINE="$(wait_for_exact_appkit_frame_after "$RESET_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "TUI-reset AppKit overlay frame" 45)"
+  RESET_PIXELS_LINE="$(wait_for_exact_appkit_pixels_after "$RESET_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "TUI-reset AppKit pixels" 45)"
+  RESET_WINDOW_ID="$(printf '%s\n' "$RESET_PRESENT_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  RESET_SURFACE_ID="$(extract_surface_id "$RESET_PRESENT_LINE")"
+  RESET_SELECTED_TAB_ID="$(extract_selected_tab_id "$RESET_PRESENT_LINE")"
+  RESET_GRID="$(extract_grid "$RESET_PRESENT_LINE")"
+  RESET_FRAME="$(extract_overlay_frame "$RESET_PRESENT_LINE")"
+  RESET_PIXEL="$(extract_appkit_pixel "$RESET_PIXELS_LINE")"
+  RESET_PIXEL_WIDTH="${RESET_PIXEL%x*}"
+  RESET_PIXEL_HEIGHT="${RESET_PIXEL#*x}"
+  RESET_SCALE="$(extract_backing_scale "$RESET_PRESENT_LINE")"
+  RESET_CURRENT_PIXEL="$(appkit_pixel_from_geometry_line "$RESET_PRESENT_LINE")"
+  [ "$RESET_WINDOW_ID" = "$A_WINDOW_ID" ] || fail "TUI reset window id changed: expected=$A_WINDOW_ID actual=$RESET_WINDOW_ID"
+  [ "$RESET_SURFACE_ID" = "$A_SURFACE_ID" ] || fail "TUI reset surface id changed"
+  [ "$RESET_SELECTED_TAB_ID" = "$A_SELECTED_TAB_ID" ] || fail "TUI reset selected tab id changed"
+  [ "$RESET_GRID" = "$A_GRID" ] || fail "TUI reset grid mismatch: expected=$A_GRID actual=$RESET_GRID"
+  [ "$RESET_PIXEL" = "$A_PIXEL" ] || fail "TUI reset AppKit pixels did not return to baseline: expected=$A_PIXEL actual=$RESET_PIXEL"
+  [ "$RESET_SCALE" = "$A_BACKING_SCALE" ] || fail "TUI reset backing scale mismatch: expected=$A_BACKING_SCALE actual=$RESET_SCALE"
+  [ "$RESET_CURRENT_PIXEL" = "$RESET_PIXEL" ] || fail "TUI reset current frame-derived pixel mismatch: expected=$RESET_PIXEL actual=$RESET_CURRENT_PIXEL"
+  log "tui_reset_set_overlay=$RESET_SET_OVERLAY_LINE"
+  log "tui_reset_grid=$RESET_GRID"
+  log "tui_reset_frame=$RESET_FRAME"
+  log "tui_reset_appkit_pixel=$RESET_PIXEL"
+  log "PASS: TUI reset returned SetOverlay, AppKit frame, and AppKit pixels to baseline"
+  require_trace_after "$RESET_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${RESET_PIXEL_WIDTH} pixel_height=${RESET_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied TUI reset resize to AppKit pixel size"
+  RESET_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve TUI-reset window bounds"
+  [ "$RESET_WIN_LINE" = "$WIN_LINE" ] || fail "TUI reset changed window bounds: baseline=$WIN_LINE reset=$RESET_WIN_LINE"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_TUI_RESET"
+  log "tui_reset_screenshot_exit=$?"
+
+  RESET_HIT_START_LINE="$(log_line_count)"
+  click_window_center "$RESET_WIN_LINE" "tui_reset_browser_area"
+  RESET_HIT_LINE="$(wait_for_hit_after "$RESET_HIT_START_LINE" "$A_CONTEXT_ID" "TUI-reset browser hit-test")"
+  require_text "$RESET_HIT_LINE" "window_id:${A_WINDOW_ID}" "TUI-reset hit-test has window id"
+  require_text "$RESET_HIT_LINE" "surface_id:${A_SURFACE_ID}" "TUI-reset hit-test has surface id"
+  require_text "$RESET_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "TUI-reset hit-test has selected tab id"
+  require_text "$RESET_HIT_LINE" "overlay_frame=${A_FRAME}" "TUI-reset hit-test uses baseline AppKit frame"
+  require_text "$RESET_HIT_LINE" "web_point={" "TUI-reset hit-test includes webview-relative point"
+
+  RESET_MODE_START_LINE="$(log_line_count)"
+  RESET_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "tui_reset_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$RESET_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "TUI-reset webtui entered browse mode"
+  require_trace_after "$RESET_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after TUI reset"
+  RESET_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP21_TUI_RESET\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$RESET_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "TUI-reset keyboard marker reached browser"
+
+  [ "$SHRINK_TRACE_START_LINE" -lt "$SHRINK_MODE_TRACE_START_LINE" ] || fail "trace boundaries for TUI shrink were not monotonic"
+  [ "$SHRINK_MODE_TRACE_START_LINE" -lt "$RESET_TRACE_START_LINE" ] || fail "trace boundaries for TUI reset were not monotonic"
 fi
 
 if [ "$SCENARIO" = "split-right" ]; then
