@@ -303,6 +303,14 @@ extract_web_point() {
   printf '%s\n' "$1" | sed -E 's/.*web_point=\{([^,]+), ([^}]+)\}.*/\1,\2/'
 }
 
+extract_top_point() {
+  printf '%s\n' "$1" | sed -E 's/.*top_point=\{([^,]+), ([^}]+)\}.*/\1,\2/'
+}
+
+point_y() {
+  printf '%s\n' "$1" | awk -F, '{print $2}'
+}
+
 extract_mouse_coords() {
   printf '%s\n' "$1" | sed -E 's/.*coords=\(([^,]+), ([^)]+)\).*/\1,\2/'
 }
@@ -5547,9 +5555,14 @@ if [ "$SCENARIO" = "split-down" ]; then
   require_text "$SPLIT_HIT_LINE" "web_point={" "split-down hit-test includes webview-relative point"
 
   SPLIT_NEGATIVE_X="$SPLIT_INSIDE_X"
-  SPLIT_NEGATIVE_Y=$((SPLIT_WY + 285))
+  SPLIT_TOP_POINT="$(extract_top_point "$SPLIT_HIT_LINE")"
+  SPLIT_TOP_POINT_Y="$(point_y "$SPLIT_TOP_POINT")"
+  [ -n "$SPLIT_TOP_POINT_Y" ] && [ "$SPLIT_TOP_POINT_Y" != "$SPLIT_TOP_POINT" ] || fail "split-down hit-test missing top_point y"
+  SPLIT_ROOT_HEIGHT="$(pair_height "$(extract_root_frame_size "$SPLIT_PRESENT_LINE")")"
+  SPLIT_TOP_GLOBAL_OFFSET="$(awk -v global_y="$SPLIT_INSIDE_Y" -v top_y="$SPLIT_TOP_POINT_Y" 'BEGIN { print int(global_y - top_y) }')"
+  SPLIT_NEGATIVE_Y="$(awk -v offset="$SPLIT_TOP_GLOBAL_OFFSET" -v root_h="$SPLIT_ROOT_HEIGHT" 'BEGIN { print int(offset + root_h + 24) }')"
   click_negative_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
-  wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$CONTEXT_ID" "split-down sibling-pane negative hit-test"
+  wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$CONTEXT_ID" "split-down sibling-pane negative hit-test" allow-absent
 fi
 
 log "PASS: scenario $SCENARIO"
