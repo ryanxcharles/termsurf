@@ -153,3 +153,5 @@ The final issue conclusion should include:
   — **Pass**
 - [Experiment 6: Batch G PDF and browser API audit](06-batch-g-pdf-browser-api.md)
   — **Pass**
+- [Experiment 7: Batch F Wezboard UX regression audit](07-batch-f-wezboard-ux-regressions.md)
+  — **Designed**
