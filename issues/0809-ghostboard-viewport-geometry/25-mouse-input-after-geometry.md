@@ -208,3 +208,91 @@ Fix:
 Fresh-context adversarial re-review returned **APPROVED**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Implemented `mouse-after-geometry-change` in
+`scripts/ghostboard-geometry-matrix.sh` as a harness-only regression scenario.
+No Ghostboard, Roamium, Zig, Swift, or Rust product code changed.
+
+The scenario now:
+
+- normalizes the test window to a smaller size when a previous run left it too
+  large to grow on the VM display;
+- drives window grow, window shrink, TUI viewport shrink/reset, split-right,
+  split-right divider resize, and split-right equalize;
+- brackets AppKit and Roamium logs for every asserted click so pre-transition
+  evidence cannot satisfy a post-transition assertion;
+- parses AppKit `web_point={x, y}` and Roamium
+  `mouse-event ... type=down button=left coords=(x, y)`;
+- compares those coordinates within one CSS pixel;
+- verifies stale post-shrink and post-split coordinates do not route mouse
+  events to Roamium.
+
+Verification passed:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+scripts/ghostboard-geometry-matrix.sh mouse-after-geometry-change
+scripts/ghostboard-geometry-matrix.sh split-right
+scripts/ghostboard-geometry-matrix.sh tui-overlay-resize-command
+```
+
+Passing evidence:
+
+- Mouse scenario harness:
+  `logs/ghostboard-geometry-mouse-after-geometry-change-harness-20260617-152044.log`
+- Mouse scenario app:
+  `logs/ghostboard-geometry-mouse-after-geometry-change-app-20260617-152044.log`
+- Mouse scenario Roamium trace:
+  `logs/ghostboard-geometry-mouse-after-geometry-change-roamium-20260617-152044.log`
+- `split-right` adjacent harness:
+  `logs/ghostboard-geometry-split-right-harness-20260617-151633.log`
+- `tui-overlay-resize-command` adjacent harness:
+  `logs/ghostboard-geometry-tui-overlay-resize-command-harness-20260617-151723.log`
+
+Representative coordinate proofs from the passing mouse scenario:
+
+- Window grow: AppKit `web_point=788,468`, Roamium `mouse_coords=788.00,468.00`.
+- Window shrink: AppKit `web_point=668,374`, Roamium
+  `mouse_coords=668.00,374.00`.
+- TUI shrink: AppKit `web_point=668,102`, Roamium `mouse_coords=668.00,102.00`.
+- TUI reset: AppKit `web_point=668,374`, Roamium `mouse_coords=668.00,374.00`.
+- Split-right: AppKit `web_point=328,374`, Roamium `mouse_coords=328.00,374.00`.
+- Divider resize: AppKit `web_point=336,374`, Roamium
+  `mouse_coords=336.00,374.00`.
+- Equalize: AppKit `web_point=328,374`, Roamium `mouse_coords=328.00,374.00`.
+
+Stale-coordinate proofs:
+
+- After TUI shrink, the former lower browser area produced AppKit `hit=false`
+  and no Roamium `mouse-event` for the browser tab/pane.
+- After split-right, the former right-side browser area produced AppKit
+  `hit=false` and no Roamium `mouse-event` for the browser tab/pane.
+
+Completion review returned **APPROVED** with one optional finding: the initial
+implementation allowed stale AppKit negative checks to pass if no hit-test
+record appeared. The harness now requires explicit AppKit `hit=false` for stale
+mouse assertions, and the mouse scenario was rerun successfully with that
+stricter check.
+
+One harness learning: split creation, divider resize, and equalize can leave the
+browser pane unfocused. In that state, the first click into the browser pane
+focuses the pane and Roamium receives pointer movement, but not necessarily the
+click-down event. The durable mouse assertion therefore primes focus with a
+separate current-frame hit-test click, then brackets the actual click-down
+assertion after that focus step.
+
+## Conclusion
+
+Mouse hit testing and click coordinate forwarding now have a durable regression
+guard across representative geometry changes. The guard proves that Ghostboard
+uses the current AppKit overlay frame for hit testing and that Roamium receives
+matching click-down coordinates for the owning browser tab/pane after the
+window, TUI overlay, split, divider, and equalize transitions.
+
+The next experiment should cover the final remaining input matrix row: keyboard
+input after tab/window switch.

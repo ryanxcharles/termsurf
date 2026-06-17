@@ -201,6 +201,18 @@ wait_for_trace_line_after() {
   fail "timed out waiting for $label"
 }
 
+wait_for_mouse_down_after() {
+  local start_line="$1"
+  local tab_id="$2"
+  local pane_id="$3"
+  local label="$4"
+  wait_for_trace_line_after \
+    "$start_line" \
+    "mouse-event tab=${tab_id} pane=${pane_id} ffi=ts_forward_mouse_event type=down button=left coords=\\([0-9.-]+, [0-9.-]+\\)" \
+    "$label" \
+    30
+}
+
 require_text() {
   local haystack="$1"
   local needle="$2"
@@ -287,6 +299,14 @@ extract_root_frame_size() {
   printf '%s\n' "$1" | sed -E 's/.*root_frame=\{\{[^}]+\}, \{([^,]+), ([^}]+)\}\}.*/\1x\2/'
 }
 
+extract_web_point() {
+  printf '%s\n' "$1" | sed -E 's/.*web_point=\{([^,]+), ([^}]+)\}.*/\1,\2/'
+}
+
+extract_mouse_coords() {
+  printf '%s\n' "$1" | sed -E 's/.*coords=\(([^,]+), ([^)]+)\).*/\1,\2/'
+}
+
 extract_backing_scale() {
   printf '%s\n' "$1" | sed -E 's/.*backing_scale=([^ ]+).*/\1/'
 }
@@ -313,6 +333,33 @@ pair_height() {
   printf '%s\n' "$1" | awk -Fx '{print $2}'
 }
 
+click_point_for_frame() {
+  local win_line="$1"
+  local present_line="$2"
+  local _wid wx wy ww wh
+  local frame_size frame_x frame_y frame_width frame_height root_frame_size root_height content_y_offset
+  IFS=$'\t' read -r _wid wx wy ww wh <<<"$win_line"
+  frame_size="$(extract_frame_size "$present_line")"
+  frame_x="$(extract_frame_x "$present_line")"
+  frame_y="$(extract_frame_y "$present_line")"
+  frame_width="$(pair_width "$frame_size")"
+  frame_height="$(pair_height "$frame_size")"
+  root_frame_size="$(extract_root_frame_size "$present_line")"
+  root_height="$(pair_height "$root_frame_size")"
+  content_y_offset="$(awk -v wh="$wh" -v root_h="$root_height" 'BEGIN { print int(wh - root_h) }')"
+  awk \
+    -v wx="$wx" \
+    -v wy="$wy" \
+    -v content_y="$content_y_offset" \
+    -v frame_x="$frame_x" \
+    -v frame_y="$frame_y" \
+    -v frame_width="$frame_width" \
+    -v frame_height="$frame_height" \
+    'BEGIN {
+      print int(wx + frame_x + (frame_width / 2) + 0.5) "\t" int(wy + content_y + frame_y + (frame_height / 2) + 0.5)
+    }'
+}
+
 compare_pair() {
   local pair="$1"
   local ref="$2"
@@ -333,6 +380,156 @@ compare_pair() {
       if (mode == "lt") { exit !((width < ref_width) && (height < ref_height)) }
       exit 1
     }'
+}
+
+compare_pair_width() {
+  local pair="$1"
+  local ref="$2"
+  local mode="$3"
+  local width ref_width
+  width="$(pair_width "$pair")"
+  ref_width="$(pair_width "$ref")"
+  awk \
+    -v width="$width" \
+    -v ref_width="$ref_width" \
+    -v mode="$mode" \
+    'BEGIN {
+      if (mode == "gt") { exit !(width > ref_width) }
+      if (mode == "lt") { exit !(width < ref_width) }
+      exit 1
+    }'
+}
+
+wait_for_appkit_frame_width_after() {
+  local start_line="$1"
+  local ref_frame="$2"
+  local mode="$3"
+  local label="$4"
+  local attempts="${5:-30}"
+  local line frame_size
+  for _ in $(seq 1 "$attempts"); do
+    while IFS= read -r line; do
+      frame_size="$(extract_frame_size "$line")"
+      if [ -n "$frame_size" ] && [ "$frame_size" != "$line" ] && compare_pair_width "$frame_size" "$ref_frame" "$mode"; then
+        printf '%s\n' "$line"
+        return 0
+      fi
+    done < <(tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E 'TermSurf geometry layer=appkit event=presented ' || true)
+    delay 1
+  done
+  fail "timed out waiting for $label"
+}
+
+wait_for_appkit_pixels_width_after() {
+  local start_line="$1"
+  local ref_pixel="$2"
+  local mode="$3"
+  local label="$4"
+  local attempts="${5:-30}"
+  local line pixel
+  for _ in $(seq 1 "$attempts"); do
+    while IFS= read -r line; do
+      pixel="$(extract_appkit_pixel "$line")"
+      if [ -n "$pixel" ] && compare_pair_width "$pixel" "$ref_pixel" "$mode"; then
+        printf '%s\n' "$line"
+        return 0
+      fi
+    done < <(tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E 'TermSurf geometry layer=appkit event=presented_pixels' || true)
+    delay 1
+  done
+  fail "timed out waiting for $label"
+}
+
+compare_points_within_tolerance() {
+  local actual="$1"
+  local expected="$2"
+  local tolerance="$3"
+  awk \
+    -v actual="$actual" \
+    -v expected="$expected" \
+    -v tolerance="$tolerance" \
+    'BEGIN {
+      split(actual, a, ",")
+      split(expected, e, ",")
+      dx = a[1] - e[1]
+      dy = a[2] - e[2]
+      if (dx < 0) dx = -dx
+      if (dy < 0) dy = -dy
+      exit !((dx <= tolerance) && (dy <= tolerance))
+    }'
+}
+
+assert_mouse_click_matches_hit() {
+  local hit_line="$1"
+  local mouse_line="$2"
+  local label="$3"
+  local web_point
+  local mouse_coords
+  web_point="$(extract_web_point "$hit_line")"
+  mouse_coords="$(extract_mouse_coords "$mouse_line")"
+  [ -n "$web_point" ] && [ "$web_point" != "$hit_line" ] || fail "$label missing AppKit web_point"
+  [ -n "$mouse_coords" ] && [ "$mouse_coords" != "$mouse_line" ] || fail "$label missing Roamium mouse coords"
+  if compare_points_within_tolerance "$mouse_coords" "$web_point" 1; then
+    log "PASS: $label Roamium mouse coords match AppKit web_point within 1 CSS pixel web_point=$web_point mouse_coords=$mouse_coords"
+  else
+    fail "$label Roamium mouse coords mismatch: web_point=$web_point mouse_coords=$mouse_coords"
+  fi
+}
+
+assert_mouse_after_click() {
+  local x="$1"
+  local y="$2"
+  local click_label="$3"
+  local context_id="$4"
+  local tab_id="$5"
+  local pane_id="$6"
+  local expected_frame="$7"
+  local assert_label="$8"
+  local log_start
+  local trace_start
+  local hit_line
+  local mouse_line
+  log_start="$(log_line_count)"
+  trace_start="$(trace_line_count)"
+  click_global_point "$x" "$y" "$click_label"
+  hit_line="$(wait_for_hit_after "$log_start" "$context_id" "$assert_label AppKit hit-test")"
+  require_text "$hit_line" "overlay_frame=${expected_frame}" "$assert_label hit-test uses current AppKit frame"
+  require_text "$hit_line" "web_point={" "$assert_label hit-test includes webview-relative point"
+  mouse_line="$(wait_for_mouse_down_after "$trace_start" "$tab_id" "$pane_id" "$assert_label Roamium mouse down")"
+  assert_mouse_click_matches_hit "$hit_line" "$mouse_line" "$assert_label"
+}
+
+prime_mouse_focus() {
+  local x="$1"
+  local y="$2"
+  local click_label="$3"
+  local context_id="$4"
+  local expected_frame="$5"
+  local assert_label="$6"
+  local log_start
+  local hit_line
+  log_start="$(log_line_count)"
+  click_global_point "$x" "$y" "$click_label"
+  hit_line="$(wait_for_hit_after "$log_start" "$context_id" "$assert_label focus-prime AppKit hit-test")"
+  require_text "$hit_line" "overlay_frame=${expected_frame}" "$assert_label focus-prime uses current AppKit frame"
+  delay 0.5
+}
+
+assert_stale_click_misses_browser() {
+  local x="$1"
+  local y="$2"
+  local click_label="$3"
+  local context_id="$4"
+  local tab_id="$5"
+  local pane_id="$6"
+  local assert_label="$7"
+  local log_start
+  local trace_start
+  log_start="$(log_line_count)"
+  trace_start="$(trace_line_count)"
+  click_global_point "$x" "$y" "$click_label"
+  wait_for_negative_hit_after "$log_start" "$context_id" "$assert_label AppKit stale-coordinate hit-test" require-hit-false 5
+  require_no_trace_after "$trace_start" "mouse-event tab=${tab_id} pane=${pane_id}" "$assert_label stale coordinate did not reach Roamium mouse input"
 }
 
 compare_split_right_pair() {
@@ -1083,7 +1280,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|mouse-after-geometry-change) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1181,7 +1378,7 @@ keybind = ctrl+b=scroll_to_bottom
 EOF
 fi
 
-if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "split-right-zoom" ] || [ "$SCENARIO" = "split-right-focus-switch" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "split-right-zoom" ] || [ "$SCENARIO" = "split-right-focus-switch" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+d=new_split:right
 EOF
@@ -1203,13 +1400,13 @@ keybind = ctrl+k=close_surface
 EOF
 fi
 
-if [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ]; then
+if [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+l=resize_split:right,20
 EOF
 fi
 
-if [ "$SCENARIO" = "split-right-equalize" ]; then
+if [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+e=equalize_splits
 EOF
@@ -1808,6 +2005,13 @@ fi
 if [ "$SCENARIO" = "devtools-split-geometry" ]; then
   log "devtools_split_screenshot=$SCREENSHOT_DEVTOOLS_SPLIT"
   log "devtools_command=$DEVTOOLS_COMMAND"
+fi
+if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
+  log "mouse_grow_screenshot=$SCREENSHOT_GROW"
+  log "mouse_shrink_screenshot=$SCREENSHOT_SHRINK"
+  log "mouse_split_screenshot=$SCREENSHOT_SPLIT"
+  log "mouse_tui_shrink_screenshot=$SCREENSHOT_TUI_SHRINK"
+  log "mouse_tui_reset_screenshot=$SCREENSHOT_TUI_RESET"
 fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
@@ -3453,6 +3657,248 @@ if [ "$SCENARIO" = "window-resize" ]; then
   log "PASS: observed shrunken AppKit hit-test"
   require_text "$SHRINK_HIT_LINE" "overlay_frame=" "shrunken hit-test includes current overlay frame"
   require_text "$SHRINK_HIT_LINE" "web_point={" "shrunken hit-test includes webview-relative point"
+fi
+
+if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_GRID="$(extract_grid "$APPKIT_PRESENT_LINE")"
+  A_GRID_WIDTH="$(extract_grid_width "$A_GRID")"
+  A_GRID_HEIGHT="$(extract_grid_height "$A_GRID")"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_WIDTH="$(pair_width "$A_FRAME_SIZE")"
+  A_FRAME_HEIGHT="$(pair_height "$A_FRAME_SIZE")"
+  A_PIXEL="$APPKIT_PIXEL"
+  log "mouse_baseline_window_id=$A_WINDOW_ID"
+  log "mouse_baseline_surface_id=$A_SURFACE_ID"
+  log "mouse_baseline_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "mouse_baseline_pane_id=$A_PANE_ID"
+  log "mouse_baseline_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "mouse_baseline_context_id=$A_CONTEXT_ID"
+  log "mouse_baseline_grid=$A_GRID"
+  log "mouse_baseline_frame=$A_FRAME"
+  log "mouse_baseline_appkit_pixel=$A_PIXEL"
+
+  if awk -v width="$A_FRAME_WIDTH" 'BEGIN { exit !(width > 1300) }'; then
+    NORMALIZE_START_LINE="$(log_line_count)"
+    NORMALIZE_TRACE_START_LINE="$(trace_line_count)"
+    log "mouse_normalize_window_target=1280x992"
+    set_window_size 1280 992 >>"$HARNESS_LOG" 2>&1 || fail "failed to normalize mouse scenario window via System Events"
+    delay 1
+    NORMALIZE_PRESENT_LINE="$(wait_for_appkit_frame_width_after "$NORMALIZE_START_LINE" "$A_FRAME_SIZE" lt "mouse normalized AppKit overlay frame")"
+    NORMALIZE_PIXELS_LINE="$(wait_for_appkit_pixels_width_after "$NORMALIZE_START_LINE" "$A_PIXEL" lt "mouse normalized AppKit presented pixels")"
+    A_FRAME="$(extract_overlay_frame "$NORMALIZE_PRESENT_LINE")"
+    A_FRAME_SIZE="$(extract_frame_size "$NORMALIZE_PRESENT_LINE")"
+    A_FRAME_WIDTH="$(pair_width "$A_FRAME_SIZE")"
+    A_FRAME_HEIGHT="$(pair_height "$A_FRAME_SIZE")"
+    A_GRID="$(extract_grid "$NORMALIZE_PRESENT_LINE")"
+    A_GRID_WIDTH="$(extract_grid_width "$A_GRID")"
+    A_GRID_HEIGHT="$(extract_grid_height "$A_GRID")"
+    A_PIXEL="$(extract_appkit_pixel "$NORMALIZE_PIXELS_LINE")"
+    A_PIXEL_WIDTH="${A_PIXEL%x*}"
+    A_PIXEL_HEIGHT="${A_PIXEL#*x}"
+    WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve normalized mouse window bounds"
+    IFS=$'\t' read -r WID WX WY WW WH <<<"$WIN_LINE"
+    log "mouse_normalized_window=$WIN_LINE"
+    log "mouse_normalized_grid=$A_GRID"
+    log "mouse_normalized_frame=$A_FRAME"
+    log "mouse_normalized_appkit_pixel=$A_PIXEL"
+    require_trace_after "$NORMALIZE_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${A_PIXEL_WIDTH} pixel_height=${A_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse normalization resize"
+  fi
+
+  INITIAL_WW="$WW"
+  INITIAL_WH="$WH"
+  GROW_WIDTH=$((INITIAL_WW + 320))
+  GROW_HEIGHT=$((INITIAL_WH + 220))
+  GROW_START_LINE="$(log_line_count)"
+  GROW_TRACE_START_LINE="$(trace_line_count)"
+  log "mouse_resize_grow_target=${GROW_WIDTH}x${GROW_HEIGHT}"
+  set_window_size "$GROW_WIDTH" "$GROW_HEIGHT" >>"$HARNESS_LOG" 2>&1 || fail "failed to grow window via System Events"
+  delay 1
+  GROW_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve grown window bounds"
+  log "mouse_grow_window=$GROW_WIN_LINE"
+  GROW_PRESENT_LINE="$(wait_for_appkit_frame_width_after "$GROW_START_LINE" "$A_FRAME_SIZE" gt "mouse width-grown AppKit overlay frame")"
+  GROW_PIXELS_LINE="$(wait_for_appkit_pixels_width_after "$GROW_START_LINE" "$A_PIXEL" gt "mouse width-grown AppKit presented pixels")"
+  GROW_FRAME="$(extract_overlay_frame "$GROW_PRESENT_LINE")"
+  GROW_FRAME_SIZE="$(extract_frame_size "$GROW_PRESENT_LINE")"
+  GROW_PIXEL="$(extract_appkit_pixel "$GROW_PIXELS_LINE")"
+  GROW_PIXEL_WIDTH="${GROW_PIXEL%x*}"
+  GROW_PIXEL_HEIGHT="${GROW_PIXEL#*x}"
+  log "mouse_grow_frame=$GROW_FRAME"
+  log "mouse_grow_appkit_pixel=$GROW_PIXEL"
+  require_log_after "$GROW_START_LINE" "TermSurf geometry layer=zig event=appkit_presented_pixels .*pane_id:${A_PANE_ID} .*appkit_pixel=${GROW_PIXEL}" "Zig records mouse grown AppKit presented pixel size"
+  require_trace_after "$GROW_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${GROW_PIXEL_WIDTH} pixel_height=${GROW_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse grow resize"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_GROW"
+  log "mouse_grow_screenshot_exit=$?"
+  IFS=$'\t' read -r GROW_CLICK_X GROW_CLICK_Y <<<"$(click_point_for_frame "$GROW_WIN_LINE" "$GROW_PRESENT_LINE")"
+  assert_mouse_after_click "$GROW_CLICK_X" "$GROW_CLICK_Y" "mouse_grow_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$GROW_FRAME" "mouse grown overlay"
+
+  SHRINK_WIDTH=$((INITIAL_WW + 80))
+  SHRINK_HEIGHT=$((INITIAL_WH - 60))
+  [ "$SHRINK_HEIGHT" -ge 700 ] || SHRINK_HEIGHT=700
+  SHRINK_START_LINE="$(log_line_count)"
+  SHRINK_TRACE_START_LINE="$(trace_line_count)"
+  log "mouse_resize_shrink_target=${SHRINK_WIDTH}x${SHRINK_HEIGHT}"
+  set_window_size "$SHRINK_WIDTH" "$SHRINK_HEIGHT" >>"$HARNESS_LOG" 2>&1 || fail "failed to shrink window via System Events"
+  delay 1
+  SHRINK_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve shrunken window bounds"
+  log "mouse_shrink_window=$SHRINK_WIN_LINE"
+  SHRINK_PRESENT_LINE="$(wait_for_appkit_frame_after "$SHRINK_START_LINE" "$GROW_FRAME_SIZE" lt "mouse shrunken AppKit overlay frame")"
+  SHRINK_PIXELS_LINE="$(wait_for_appkit_pixels_after "$SHRINK_START_LINE" "$GROW_PIXEL" lt "mouse shrunken AppKit presented pixels")"
+  SHRINK_GRID="$(extract_grid "$SHRINK_PRESENT_LINE")"
+  SHRINK_GRID_WIDTH="$(extract_grid_width "$SHRINK_GRID")"
+  SHRINK_FRAME="$(extract_overlay_frame "$SHRINK_PRESENT_LINE")"
+  SHRINK_FRAME_SIZE="$(extract_frame_size "$SHRINK_PRESENT_LINE")"
+  SHRINK_PIXEL="$(extract_appkit_pixel "$SHRINK_PIXELS_LINE")"
+  SHRINK_PIXEL_WIDTH="${SHRINK_PIXEL%x*}"
+  SHRINK_PIXEL_HEIGHT="${SHRINK_PIXEL#*x}"
+  log "mouse_shrink_frame=$SHRINK_FRAME"
+  log "mouse_shrink_grid=$SHRINK_GRID"
+  log "mouse_shrink_appkit_pixel=$SHRINK_PIXEL"
+  require_log_after "$SHRINK_START_LINE" "TermSurf geometry layer=zig event=appkit_presented_pixels .*pane_id:${A_PANE_ID} .*appkit_pixel=${SHRINK_PIXEL}" "Zig records mouse shrunken AppKit presented pixel size"
+  require_trace_after "$SHRINK_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${SHRINK_PIXEL_WIDTH} pixel_height=${SHRINK_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse shrink resize"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_SHRINK"
+  log "mouse_shrink_screenshot_exit=$?"
+  IFS=$'\t' read -r SHRINK_CLICK_X SHRINK_CLICK_Y <<<"$(click_point_for_frame "$SHRINK_WIN_LINE" "$SHRINK_PRESENT_LINE")"
+  assert_mouse_after_click "$SHRINK_CLICK_X" "$SHRINK_CLICK_Y" "mouse_shrink_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$SHRINK_FRAME" "mouse shrunken overlay"
+
+  SHRINK_ROWS=12
+  [ "$A_GRID_HEIGHT" -gt "$SHRINK_ROWS" ] || fail "baseline grid height is too small for mouse TUI shrink test: baseline=$A_GRID"
+  TUI_SHRINK_START_LINE="$(log_line_count)"
+  TUI_SHRINK_TRACE_START_LINE="$(trace_line_count)"
+  printf ':viewport height %s' "$SHRINK_ROWS" >"$TUI_VIEWPORT_SHRINK_COMMAND"
+  log "mouse_tui_viewport_shrink_command_text=$(cat "$TUI_VIEWPORT_SHRINK_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$TUI_VIEWPORT_SHRINK_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  delay 1
+  TUI_SHRINK_SET_OVERLAY_LINE="$(wait_for_line_after "$TUI_SHRINK_START_LINE" "TermSurf geometry layer=zig event=set_overlay_update .*pane_id:${A_PANE_ID} .*browser_tab_id:${A_BROWSER_TAB_ID} .*grid=${SHRINK_GRID_WIDTH}x${SHRINK_ROWS}\\+1\\+1 .*context_id=${A_CONTEXT_ID}" "mouse TUI shrink SetOverlay update" 45)"
+  TUI_SHRINK_PRESENT_LINE="$(wait_for_changed_appkit_frame_after "$TUI_SHRINK_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SHRINK_FRAME" "mouse TUI-shrunken AppKit overlay frame" 45)"
+  TUI_SHRINK_PIXELS_LINE="$(wait_for_changed_appkit_pixels_after "$TUI_SHRINK_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SHRINK_PIXEL" "mouse TUI-shrunken AppKit pixels" 45)"
+  TUI_SHRINK_FRAME="$(extract_overlay_frame "$TUI_SHRINK_PRESENT_LINE")"
+  TUI_SHRINK_FRAME_SIZE="$(extract_frame_size "$TUI_SHRINK_PRESENT_LINE")"
+  TUI_SHRINK_FRAME_HEIGHT="$(pair_height "$TUI_SHRINK_FRAME_SIZE")"
+  TUI_SHRINK_PIXEL="$(extract_appkit_pixel "$TUI_SHRINK_PIXELS_LINE")"
+  TUI_SHRINK_PIXEL_WIDTH="${TUI_SHRINK_PIXEL%x*}"
+  TUI_SHRINK_PIXEL_HEIGHT="${TUI_SHRINK_PIXEL#*x}"
+  [ "$TUI_SHRINK_FRAME_HEIGHT" -lt "$(pair_height "$SHRINK_FRAME_SIZE")" ] || fail "mouse TUI shrink frame height did not shrink"
+  log "mouse_tui_shrink_set_overlay=$TUI_SHRINK_SET_OVERLAY_LINE"
+  log "mouse_tui_shrink_frame=$TUI_SHRINK_FRAME"
+  log "mouse_tui_shrink_appkit_pixel=$TUI_SHRINK_PIXEL"
+  require_trace_after "$TUI_SHRINK_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${TUI_SHRINK_PIXEL_WIDTH} pixel_height=${TUI_SHRINK_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse TUI shrink resize"
+  TUI_SHRINK_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve mouse TUI-shrunken window bounds"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_TUI_SHRINK"
+  log "mouse_tui_shrink_screenshot_exit=$?"
+  IFS=$'\t' read -r TUI_SHRINK_CLICK_X TUI_SHRINK_CLICK_Y <<<"$(click_point_for_frame "$TUI_SHRINK_WIN_LINE" "$TUI_SHRINK_PRESENT_LINE")"
+  assert_mouse_after_click "$TUI_SHRINK_CLICK_X" "$TUI_SHRINK_CLICK_Y" "mouse_tui_shrink_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$TUI_SHRINK_FRAME" "mouse TUI-shrunken overlay"
+
+  IFS=$'\t' read -r _TUI_WID TUI_WX TUI_WY TUI_WW TUI_WH <<<"$TUI_SHRINK_WIN_LINE"
+  TUI_SHRINK_FRAME_Y="$(extract_frame_y "$TUI_SHRINK_PRESENT_LINE")"
+  TUI_SHRINK_ROOT_HEIGHT="$(pair_height "$(extract_root_frame_size "$TUI_SHRINK_PRESENT_LINE")")"
+  TUI_SHRINK_CONTENT_Y_OFFSET="$(awk -v wh="$TUI_WH" -v root_h="$TUI_SHRINK_ROOT_HEIGHT" 'BEGIN { print int(wh - root_h) }')"
+  TUI_STALE_X="$TUI_SHRINK_CLICK_X"
+  TUI_STALE_Y="$(awk -v wy="$TUI_WY" -v content_y="$TUI_SHRINK_CONTENT_Y_OFFSET" -v frame_y="$TUI_SHRINK_FRAME_Y" -v shrink_h="$TUI_SHRINK_FRAME_HEIGHT" -v old_h="$(pair_height "$SHRINK_FRAME_SIZE")" 'BEGIN { print int(wy + content_y + frame_y + shrink_h + ((old_h - shrink_h) / 2) + 0.5) }')"
+  assert_stale_click_misses_browser "$TUI_STALE_X" "$TUI_STALE_Y" "mouse_tui_shrink_stale_lower" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "mouse TUI-shrunken former lower area"
+
+  TUI_RESET_START_LINE="$(log_line_count)"
+  TUI_RESET_TRACE_START_LINE="$(trace_line_count)"
+  printf ':viewport reset' >"$TUI_VIEWPORT_RESET_COMMAND"
+  log "mouse_tui_viewport_reset_command_text=$(cat "$TUI_VIEWPORT_RESET_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$TUI_VIEWPORT_RESET_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  delay 1
+  TUI_RESET_PRESENT_LINE="$(wait_for_exact_appkit_frame_after "$TUI_RESET_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SHRINK_FRAME" "mouse TUI-reset AppKit overlay frame" 45)"
+  TUI_RESET_PIXELS_LINE="$(wait_for_exact_appkit_pixels_after "$TUI_RESET_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SHRINK_PIXEL" "mouse TUI-reset AppKit pixels" 45)"
+  TUI_RESET_FRAME="$(extract_overlay_frame "$TUI_RESET_PRESENT_LINE")"
+  TUI_RESET_FRAME_SIZE="$(extract_frame_size "$TUI_RESET_PRESENT_LINE")"
+  TUI_RESET_PIXEL="$(extract_appkit_pixel "$TUI_RESET_PIXELS_LINE")"
+  TUI_RESET_PIXEL_WIDTH="${TUI_RESET_PIXEL%x*}"
+  TUI_RESET_PIXEL_HEIGHT="${TUI_RESET_PIXEL#*x}"
+  log "mouse_tui_reset_frame=$TUI_RESET_FRAME"
+  log "mouse_tui_reset_appkit_pixel=$TUI_RESET_PIXEL"
+  require_trace_after "$TUI_RESET_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${TUI_RESET_PIXEL_WIDTH} pixel_height=${TUI_RESET_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse TUI reset resize"
+  TUI_RESET_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve mouse TUI-reset window bounds"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_TUI_RESET"
+  log "mouse_tui_reset_screenshot_exit=$?"
+  IFS=$'\t' read -r TUI_RESET_CLICK_X TUI_RESET_CLICK_Y <<<"$(click_point_for_frame "$TUI_RESET_WIN_LINE" "$TUI_RESET_PRESENT_LINE")"
+  assert_mouse_after_click "$TUI_RESET_CLICK_X" "$TUI_RESET_CLICK_Y" "mouse_tui_reset_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$TUI_RESET_FRAME" "mouse TUI-reset overlay"
+
+  SPLIT_START_LINE="$(log_line_count)"
+  SPLIT_TRACE_START_LINE="$(trace_line_count)"
+  log "mouse_split_keybind=ctrl+d=new_split:right"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 2 control >>"$HARNESS_LOG" 2>&1
+  delay 1
+  SPLIT_PRESENT_LINE="$(wait_for_split_right_frame_after "$SPLIT_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$TUI_RESET_FRAME_SIZE" "mouse split-right AppKit overlay frame")"
+  SPLIT_PIXELS_LINE="$(wait_for_split_right_pixels_after "$SPLIT_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$TUI_RESET_PIXEL" "mouse split-right AppKit pixels")"
+  SPLIT_FRAME="$(extract_overlay_frame "$SPLIT_PRESENT_LINE")"
+  SPLIT_FRAME_SIZE="$(extract_frame_size "$SPLIT_PRESENT_LINE")"
+  SPLIT_FRAME_X="$(extract_frame_x "$SPLIT_PRESENT_LINE")"
+  SPLIT_FRAME_WIDTH="$(pair_width "$SPLIT_FRAME_SIZE")"
+  SPLIT_PIXEL="$(extract_appkit_pixel "$SPLIT_PIXELS_LINE")"
+  SPLIT_PIXEL_WIDTH="${SPLIT_PIXEL%x*}"
+  SPLIT_PIXEL_HEIGHT="${SPLIT_PIXEL#*x}"
+  log "mouse_split_frame=$SPLIT_FRAME"
+  log "mouse_split_appkit_pixel=$SPLIT_PIXEL"
+  require_trace_after "$SPLIT_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${SPLIT_PIXEL_WIDTH} pixel_height=${SPLIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse split-right resize"
+  SPLIT_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve mouse split window bounds"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_SPLIT"
+  log "mouse_split_screenshot_exit=$?"
+  IFS=$'\t' read -r SPLIT_CLICK_X SPLIT_CLICK_Y <<<"$(click_point_for_frame "$SPLIT_WIN_LINE" "$SPLIT_PRESENT_LINE")"
+  prime_mouse_focus "$SPLIT_CLICK_X" "$SPLIT_CLICK_Y" "mouse_split_focus_prime" "$A_CONTEXT_ID" "$SPLIT_FRAME" "mouse split-right overlay"
+  assert_mouse_after_click "$SPLIT_CLICK_X" "$SPLIT_CLICK_Y" "mouse_split_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$SPLIT_FRAME" "mouse split-right overlay"
+  IFS=$'\t' read -r _SPLIT_WID SPLIT_WX SPLIT_WY SPLIT_WW SPLIT_WH <<<"$SPLIT_WIN_LINE"
+  SPLIT_STALE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" -v old_w="$(pair_width "$TUI_RESET_FRAME_SIZE")" 'BEGIN { print int(wx + frame_x + frame_w + ((old_w - frame_w) / 2) + 0.5) }')"
+  assert_stale_click_misses_browser "$SPLIT_STALE_X" "$SPLIT_CLICK_Y" "mouse_split_stale_sibling" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "mouse split-right stale sibling area"
+
+  DIVIDER_START_LINE="$(log_line_count)"
+  DIVIDER_TRACE_START_LINE="$(trace_line_count)"
+  log "mouse_resize_split_keybind=ctrl+l=resize_split:right,20"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 37 control >>"$HARNESS_LOG" 2>&1
+  delay 1
+  DIVIDER_PRESENT_LINE="$(wait_for_split_right_resize_frame_after "$DIVIDER_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SPLIT_FRAME_SIZE" "mouse divider-resized AppKit overlay frame")"
+  DIVIDER_PIXELS_LINE="$(wait_for_split_right_resize_pixels_after "$DIVIDER_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SPLIT_PIXEL" "mouse divider-resized AppKit pixels")"
+  DIVIDER_FRAME="$(extract_overlay_frame "$DIVIDER_PRESENT_LINE")"
+  DIVIDER_FRAME_SIZE="$(extract_frame_size "$DIVIDER_PRESENT_LINE")"
+  DIVIDER_PIXEL="$(extract_appkit_pixel "$DIVIDER_PIXELS_LINE")"
+  DIVIDER_PIXEL_WIDTH="${DIVIDER_PIXEL%x*}"
+  DIVIDER_PIXEL_HEIGHT="${DIVIDER_PIXEL#*x}"
+  log "mouse_divider_frame=$DIVIDER_FRAME"
+  log "mouse_divider_appkit_pixel=$DIVIDER_PIXEL"
+  require_trace_after "$DIVIDER_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${DIVIDER_PIXEL_WIDTH} pixel_height=${DIVIDER_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse divider resize"
+  DIVIDER_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve mouse divider window bounds"
+  IFS=$'\t' read -r DIVIDER_CLICK_X DIVIDER_CLICK_Y <<<"$(click_point_for_frame "$DIVIDER_WIN_LINE" "$DIVIDER_PRESENT_LINE")"
+  prime_mouse_focus "$DIVIDER_CLICK_X" "$DIVIDER_CLICK_Y" "mouse_divider_focus_prime" "$A_CONTEXT_ID" "$DIVIDER_FRAME" "mouse divider-resized overlay"
+  assert_mouse_after_click "$DIVIDER_CLICK_X" "$DIVIDER_CLICK_Y" "mouse_divider_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$DIVIDER_FRAME" "mouse divider-resized overlay"
+
+  EQUALIZE_START_LINE="$(log_line_count)"
+  EQUALIZE_TRACE_START_LINE="$(trace_line_count)"
+  log "mouse_equalize_keybind=ctrl+e=equalize_splits"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 14 control >>"$HARNESS_LOG" 2>&1
+  delay 1
+  EQUALIZE_PRESENT_LINE="$(wait_for_split_right_equalize_frame_after "$EQUALIZE_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SPLIT_FRAME_SIZE" "$DIVIDER_FRAME_SIZE" "mouse equalized AppKit overlay frame")"
+  EQUALIZE_PIXELS_LINE="$(wait_for_split_right_equalize_pixels_after "$EQUALIZE_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$SPLIT_PIXEL" "$DIVIDER_PIXEL" "mouse equalized AppKit pixels")"
+  EQUALIZE_FRAME="$(extract_overlay_frame "$EQUALIZE_PRESENT_LINE")"
+  EQUALIZE_PIXEL="$(extract_appkit_pixel "$EQUALIZE_PIXELS_LINE")"
+  EQUALIZE_PIXEL_WIDTH="${EQUALIZE_PIXEL%x*}"
+  EQUALIZE_PIXEL_HEIGHT="${EQUALIZE_PIXEL#*x}"
+  log "mouse_equalize_frame=$EQUALIZE_FRAME"
+  log "mouse_equalize_appkit_pixel=$EQUALIZE_PIXEL"
+  require_trace_after "$EQUALIZE_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${EQUALIZE_PIXEL_WIDTH} pixel_height=${EQUALIZE_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied mouse equalize resize"
+  EQUALIZE_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve mouse equalized window bounds"
+  IFS=$'\t' read -r EQUALIZE_CLICK_X EQUALIZE_CLICK_Y <<<"$(click_point_for_frame "$EQUALIZE_WIN_LINE" "$EQUALIZE_PRESENT_LINE")"
+  prime_mouse_focus "$EQUALIZE_CLICK_X" "$EQUALIZE_CLICK_Y" "mouse_equalize_focus_prime" "$A_CONTEXT_ID" "$EQUALIZE_FRAME" "mouse equalized overlay"
+  assert_mouse_after_click "$EQUALIZE_CLICK_X" "$EQUALIZE_CLICK_Y" "mouse_equalize_inside" "$A_CONTEXT_ID" "$A_BROWSER_TAB_ID" "$A_PANE_ID" "$EQUALIZE_FRAME" "mouse equalized overlay"
+
+  [ "$GROW_TRACE_START_LINE" -lt "$SHRINK_TRACE_START_LINE" ] || fail "trace boundaries for mouse grow/shrink were not monotonic"
+  [ "$SHRINK_TRACE_START_LINE" -lt "$TUI_SHRINK_TRACE_START_LINE" ] || fail "trace boundaries for mouse shrink/TUI shrink were not monotonic"
+  [ "$TUI_SHRINK_TRACE_START_LINE" -lt "$TUI_RESET_TRACE_START_LINE" ] || fail "trace boundaries for mouse TUI shrink/reset were not monotonic"
+  [ "$TUI_RESET_TRACE_START_LINE" -lt "$SPLIT_TRACE_START_LINE" ] || fail "trace boundaries for mouse TUI reset/split were not monotonic"
+  [ "$SPLIT_TRACE_START_LINE" -lt "$DIVIDER_TRACE_START_LINE" ] || fail "trace boundaries for mouse split/divider were not monotonic"
+  [ "$DIVIDER_TRACE_START_LINE" -lt "$EQUALIZE_TRACE_START_LINE" ] || fail "trace boundaries for mouse divider/equalize were not monotonic"
 fi
 
 if [ "$SCENARIO" = "font-size-cell-metrics" ]; then

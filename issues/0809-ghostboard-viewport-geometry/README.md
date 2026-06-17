@@ -221,4 +221,4 @@ work together, not just individually.
 - [Experiment 24: DevTools split geometry](24-devtools-split-geometry.md) —
   **Pass**
 - [Experiment 25: Mouse input after geometry](25-mouse-input-after-geometry.md)
-  — **Designed**
+  — **Pass**
