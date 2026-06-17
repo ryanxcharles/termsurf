@@ -44,12 +44,14 @@ SCREENSHOT_TUI_SHRINK="$LOG_DIR/ghostboard-geometry-${SCENARIO}-tui-shrink-scree
 SCREENSHOT_TUI_RESET="$LOG_DIR/ghostboard-geometry-${SCENARIO}-tui-reset-screenshot-${TS}.png"
 SCREENSHOT_SCROLLBACK_UP="$LOG_DIR/ghostboard-geometry-${SCENARIO}-scrollback-up-screenshot-${TS}.png"
 SCREENSHOT_SCROLLBACK_BOTTOM="$LOG_DIR/ghostboard-geometry-${SCENARIO}-scrollback-bottom-screenshot-${TS}.png"
+SCREENSHOT_NAVIGATED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-navigated-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
 BROWSER_FOCUS_COMMAND="$RUN_DIR/browser-focus-command.txt"
 TUI_VIEWPORT_SHRINK_COMMAND="$RUN_DIR/tui-viewport-shrink-command.txt"
 TUI_VIEWPORT_RESET_COMMAND="$RUN_DIR/tui-viewport-reset-command.txt"
+NAVIGATION_APPEND_COMMAND="$RUN_DIR/navigation-append-command.txt"
 NEW_TAB_COMMAND_LOG="$RUN_DIR/new-tab-command.log"
 NEW_TAB_MARKER_COMMAND="$RUN_DIR/new-tab-marker-command.txt"
 SECOND_BROWSER_COMMAND="$RUN_DIR/second-browser-command.txt"
@@ -1060,7 +1062,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1777,6 +1779,10 @@ fi
 if [ "$SCENARIO" = "terminal-scrollback-movement" ]; then
   log "scrollback_up_screenshot=$SCREENSHOT_SCROLLBACK_UP"
   log "scrollback_bottom_screenshot=$SCREENSHOT_SCROLLBACK_BOTTOM"
+fi
+if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
+  log "navigated_screenshot=$SCREENSHOT_NAVIGATED"
+  log "navigation_append_command=$NAVIGATION_APPEND_COMMAND"
 fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
@@ -3884,6 +3890,81 @@ if [ "$SCENARIO" = "terminal-scrollback-movement" ]; then
 
   [ "$SCROLL_UP_TRACE_START_LINE" -lt "$SCROLL_MODE_TRACE_START_LINE" ] || fail "trace boundaries for scrollback-up were not monotonic"
   [ "$SCROLL_MODE_TRACE_START_LINE" -lt "$BOTTOM_TRACE_START_LINE" ] || fail "trace boundaries for scrollback-bottom were not monotonic"
+fi
+
+if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_GRID="$(extract_grid "$APPKIT_PRESENT_LINE")"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_X="$OVERLAY_FRAME_X"
+  A_FRAME_Y="$OVERLAY_FRAME_Y"
+  A_FRAME_WIDTH="$(pair_width "$A_FRAME_SIZE")"
+  A_FRAME_HEIGHT="$(pair_height "$A_FRAME_SIZE")"
+  A_ROOT_FRAME_SIZE="$(extract_root_frame_size "$APPKIT_PRESENT_LINE")"
+  A_PIXEL="$APPKIT_PIXEL"
+  A_PIXEL_WIDTH="${A_PIXEL%x*}"
+  A_PIXEL_HEIGHT="${A_PIXEL#*x}"
+  A_BACKING_SCALE="$(extract_backing_scale "$APPKIT_PRESENT_LINE")"
+  log "navigation_baseline_window_id=$A_WINDOW_ID"
+  log "navigation_baseline_surface_id=$A_SURFACE_ID"
+  log "navigation_baseline_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "navigation_baseline_pane_id=$A_PANE_ID"
+  log "navigation_baseline_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "navigation_baseline_context_id=$A_CONTEXT_ID"
+  log "navigation_baseline_grid=$A_GRID"
+  log "navigation_baseline_frame=$A_FRAME"
+  log "navigation_baseline_appkit_pixel=$A_PIXEL"
+  log "navigation_baseline_backing_scale=$A_BACKING_SCALE"
+
+  NAV_MARKER="termsurf_issue809_exp23=${TS}"
+  printf '?%s' "$NAV_MARKER" >"$NAVIGATION_APPEND_COMMAND"
+  log "navigation_append_command_text=$(cat "$NAVIGATION_APPEND_COMMAND")"
+  NAV_START_LINE="$(log_line_count)"
+  NAV_TRACE_START_LINE="$(trace_line_count)"
+  log "navigation_edit_key=shift+a=edit-url-end"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 0 shift >>"$HARNESS_LOG" 2>&1
+  delay 0.5
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$NAVIGATION_APPEND_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  delay 1
+
+  require_trace_after "$NAV_TRACE_START_LINE" "navigate tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" "Roamium received Navigate for browser tab"
+  require_trace_after "$NAV_TRACE_START_LINE" "$NAV_MARKER" "Roamium navigation/url trace contains marker"
+  require_trace_after "$NAV_TRACE_START_LINE" "url-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" "Roamium observed UrlChanged for browser tab"
+  wait_for_log_after "$NAV_START_LINE" "TermSurf message decoded type=UrlChanged" "Ghostboard decoded UrlChanged after browser navigation" 45
+  wait_for_log_after "$NAV_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "webtui returned to browse mode after navigation" 45
+  require_no_different_appkit_frame_after "$NAV_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "browser navigation AppKit frame stayed stable"
+  require_no_different_appkit_pixels_after "$NAV_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "browser navigation AppKit pixels stayed stable"
+  require_no_trace_after "$NAV_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID}" "browser navigation did not resize Roamium"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_NAVIGATED"
+  log "navigation_screenshot_exit=$?"
+
+  NAV_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve post-navigation window bounds"
+  [ "$NAV_WIN_LINE" = "$WIN_LINE" ] || fail "browser navigation changed window bounds: baseline=$WIN_LINE navigated=$NAV_WIN_LINE"
+  IFS=$'\t' read -r _NAV_WID NAV_WX NAV_WY NAV_WW NAV_WH <<<"$NAV_WIN_LINE"
+  NAV_ROOT_HEIGHT="$(pair_height "$A_ROOT_FRAME_SIZE")"
+  NAV_CONTENT_Y_OFFSET="$(awk -v wh="$NAV_WH" -v root_h="$NAV_ROOT_HEIGHT" 'BEGIN { print int(wh - root_h) }')"
+  NAV_INSIDE_X="$(awk -v wx="$NAV_WX" -v frame_x="$A_FRAME_X" -v frame_w="$A_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + (frame_w / 2) + 0.5) }')"
+  NAV_INSIDE_Y="$(awk -v wy="$NAV_WY" -v content_y="$NAV_CONTENT_Y_OFFSET" -v frame_y="$A_FRAME_Y" -v frame_h="$A_FRAME_HEIGHT" 'BEGIN { print int(wy + content_y + frame_y + (frame_h / 2) + 0.5) }')"
+  NAV_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$NAV_INSIDE_X" "$NAV_INSIDE_Y" "navigation_inside"
+  NAV_HIT_LINE="$(wait_for_hit_after "$NAV_HIT_START_LINE" "$A_CONTEXT_ID" "post-navigation browser hit-test")"
+  require_text "$NAV_HIT_LINE" "window_id:${A_WINDOW_ID}" "post-navigation hit-test has window id"
+  require_text "$NAV_HIT_LINE" "surface_id:${A_SURFACE_ID}" "post-navigation hit-test has surface id"
+  require_text "$NAV_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "post-navigation hit-test has selected tab id"
+  require_text "$NAV_HIT_LINE" "overlay_frame=${A_FRAME}" "post-navigation hit-test uses baseline AppKit frame"
+  require_text "$NAV_HIT_LINE" "web_point={" "post-navigation hit-test includes webview-relative point"
+
+  NAV_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP23_NAVIGATION\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$NAV_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "post-navigation keyboard marker reached browser"
 fi
 
 if [ "$SCENARIO" = "split-right" ]; then

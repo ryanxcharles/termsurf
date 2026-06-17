@@ -221,6 +221,10 @@ pub fn handle_message(msg: &TermSurfMessage) {
         Msg::Navigate(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
                 let url = CString::new(m.url.as_str()).unwrap();
+                trace_pdf_input(format!(
+                    "navigate tab={} pane={} url={} ffi=ts_load_url",
+                    m.tab_id, t.pane_id, m.url
+                ));
                 unsafe { ffi::ts_load_url(t.handle, url.as_ptr()) };
             }
         }
@@ -516,6 +520,10 @@ pub unsafe extern "C" fn on_url_changed(
         .to_string_lossy()
         .into_owned();
     t.last_url = url_str.clone();
+    trace_pdf_input(format!(
+        "url-changed tab={} pane={} url={}",
+        t.tab_id, t.pane_id, url_str
+    ));
     let msg = TermSurfMessage {
         msg: Some(Msg::UrlChanged(proto::termsurf::UrlChanged {
             tab_id: t.tab_id,

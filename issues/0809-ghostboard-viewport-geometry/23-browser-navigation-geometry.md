@@ -186,3 +186,118 @@ Fail criteria:
 Fresh-context adversarial design review returned **APPROVED**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Experiment 23 implemented and verified browser navigation geometry for one
+Ghostboard window with one browser overlay.
+
+Changes made:
+
+- `scripts/ghostboard-geometry-matrix.sh`
+  - Added the `browser-navigation-geometry` scenario.
+  - Drove navigation through public `webtui` keyboard behavior: `Shift+A` to
+    edit at the end of the URL, typed a query marker, and Enter to submit.
+  - Required fresh Roamium `Navigate` and `UrlChanged` trace evidence after the
+    submit boundary.
+  - Required Ghostboard to decode `UrlChanged` after browser navigation.
+  - Required AppKit frame and pixels to remain equal to baseline, with no
+    Roamium resize during navigation.
+  - Verified post-navigation mouse hit testing and Browse-mode keyboard routing
+    against the same identity/context.
+- `roamium/src/dispatch.rs`
+  - Added trace-only `navigate` and `url-changed` records under the existing
+    Roamium trace mechanism so the harness can prove the intended tab and pane
+    navigated to the marked URL.
+
+Passing runtime evidence:
+
+- Main scenario:
+  `logs/ghostboard-geometry-browser-navigation-geometry-harness-20260617-143125.log`
+- App log:
+  `logs/ghostboard-geometry-browser-navigation-geometry-app-20260617-143125.log`
+- Roamium trace:
+  `logs/ghostboard-geometry-browser-navigation-geometry-roamium-20260617-143125.log`
+- Screenshots:
+  - `logs/ghostboard-geometry-browser-navigation-geometry-screenshot-20260617-143125.png`
+  - `logs/ghostboard-geometry-browser-navigation-geometry-navigated-screenshot-20260617-143125.png`
+
+Key evidence from the passing run:
+
+- Baseline identity: `window_id=1008`,
+  `surface_id=B51B085E-06B3-4EB3-AF07-740D22B380B8`, `selected_tab_id=1008`,
+  `pane_id=B51B085E-06B3-4EB3-AF07-740D22B380B8`, `browser_tab_id=1`,
+  `context_id=1954288889`.
+- Baseline frame and pixels: `overlay_frame={{8, 17}, {1176, 748}}`,
+  `appkit_pixel=2352x1496`, `backing_scale=2.0`.
+- Navigation command: `?termsurf_issue809_exp23=20260617-143125`.
+- Roamium trace showed `navigate tab=1` and `url-changed tab=1` for
+  `pane=B51B085E-06B3-4EB3-AF07-740D22B380B8`, and both contained the experiment
+  marker.
+- Ghostboard decoded `UrlChanged` after browser navigation.
+- `webtui` returned to Browse mode after navigation.
+- AppKit frame stayed stable, AppKit pixels stayed stable, and no Roamium resize
+  was emitted during navigation.
+- Post-navigation mouse hit testing used the baseline AppKit frame and matching
+  identity.
+- `ISSUE809_EXP23_NAVIGATION` reached the same browser after navigation.
+
+Verification commands:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+cargo fmt --check
+cargo check -p webtui
+cargo check -p roamium
+cargo build -p webtui
+cargo build -p roamium
+scripts/build.sh roamium
+scripts/ghostboard-geometry-matrix.sh browser-navigation-geometry
+scripts/ghostboard-geometry-matrix.sh terminal-scrollback-movement
+scripts/ghostboard-geometry-matrix.sh window-resize
+```
+
+All verification commands passed.
+
+Adjacent regression evidence:
+
+- Terminal scrollback movement:
+  `logs/ghostboard-geometry-terminal-scrollback-movement-harness-20260617-143140.log`
+- Window resize:
+  `logs/ghostboard-geometry-window-resize-harness-20260617-143159.log`
+
+## Conclusion
+
+Browser navigation does not reset or corrupt Ghostboard overlay geometry. The
+same browser identity and AppKit geometry survive a public `webtui` URL edit and
+navigation, and mouse/keyboard input continues to route to the same browser
+after the page load.
+
+The useful learning is that this runtime path sends `Navigate` directly from
+`webtui` to Roamium, while `UrlChanged` returns through Ghostboard. The harness
+therefore proves navigation at Roamium and proves the post-navigation browser
+state propagation at Ghostboard with `UrlChanged`, instead of requiring a
+Ghostboard-decoded `Navigate` record that does not exist on this direct browser
+connection path.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **APPROVED**.
+
+Findings: none.
+
+Reviewer checks passed:
+
+- `bash -n scripts/ghostboard-geometry-matrix.sh`
+- `git diff --check`
+- `cargo fmt --check`
+- `cargo check -p webtui`
+- `cargo check -p roamium`
+- `cargo build -p webtui`
+- `cargo build -p roamium`
+
+The reviewer also confirmed the result commit had not been made before review;
+`HEAD` was still the Experiment 23 plan commit.
