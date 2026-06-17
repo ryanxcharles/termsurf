@@ -32,6 +32,8 @@ SCREENSHOT_WINDOW_B="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-b-screensho
 SCREENSHOT_WINDOW_C="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-c-screenshot-${TS}.png"
 SCREENSHOT_WINDOW_A_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-a-restored-screenshot-${TS}.png"
 SCREENSHOT_WINDOW_B_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-window-b-restored-screenshot-${TS}.png"
+SCREENSHOT_DISPLAY_MOVED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-moved-screenshot-${TS}.png"
+SCREENSHOT_DISPLAY_RETURNED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-returned-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
@@ -220,6 +222,10 @@ extract_frame_y() {
 
 extract_root_frame_size() {
   printf '%s\n' "$1" | sed -E 's/.*root_frame=\{\{[^}]+\}, \{([^,]+), ([^}]+)\}\}.*/\1x\2/'
+}
+
+extract_backing_scale() {
+  printf '%s\n' "$1" | sed -E 's/.*backing_scale=([^ ]+).*/\1/'
 }
 
 pair_width() {
@@ -933,7 +939,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -949,6 +955,7 @@ COMMAND="$RUN_DIR/run-web.sh"
 CONFIG="$RUN_DIR/config"
 WINDOW_BOUNDS="$RUN_DIR/window-bounds.swift"
 APP_WINDOWS="$RUN_DIR/app-windows.swift"
+DISPLAY_INVENTORY="$RUN_DIR/display-inventory.swift"
 ACTIVATE_APP="$RUN_DIR/activate-app.swift"
 FOCUS_WINDOW="$RUN_DIR/focus-window.swift"
 RESIZE_WINDOW="$RUN_DIR/resize-window.swift"
@@ -1095,6 +1102,20 @@ for window in info {
     let height = Int((bounds["Height"] as? Double) ?? 0)
     guard width >= 50, height >= 50 else { continue }
     print("\(id)\t\(x)\t\(y)\t\(width)\t\(height)")
+}
+EOF
+
+cat >"$DISPLAY_INVENTORY" <<'EOF'
+import AppKit
+import Foundation
+
+for screen in NSScreen.screens {
+    let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue ?? -1
+    let frame = screen.frame
+    let visible = screen.visibleFrame
+    let scale = screen.backingScaleFactor
+    let isMain = screen == NSScreen.main
+    print("\(id)\t\(Int(frame.origin.x))\t\(Int(frame.origin.y))\t\(Int(frame.size.width))\t\(Int(frame.size.height))\t\(Int(visible.origin.x))\t\(Int(visible.origin.y))\t\(Int(visible.size.width))\t\(Int(visible.size.height))\t\(scale)\t\(isMain ? "main" : "secondary")")
 }
 EOF
 
@@ -1315,6 +1336,10 @@ if [ "$SCENARIO" = "multiple-windows-with-browsers" ]; then
   log "window_c_command=$THIRD_BROWSER_COMMAND"
   log "first_run_wrapper_command_log=$NEW_TAB_COMMAND_LOG"
 fi
+if [ "$SCENARIO" = "display-move-backing-scale" ]; then
+  log "display_moved_screenshot=$SCREENSHOT_DISPLAY_MOVED"
+  log "display_returned_screenshot=$SCREENSHOT_DISPLAY_RETURNED"
+fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
 GHOSTTY_LOG=stderr \
@@ -1441,6 +1466,198 @@ require_log "TermSurf geometry .*scenario=${SCENARIO}" "timestamped run contains
 require_log 'window_id:[^ ]+ surface_id:[^ ]+ selected_tab_id:[^ ]+ pane_id:[^ ]+ browser_tab_id:[^ ]+' "canonical identity tuple fields"
 require_readable "$ROAMIUM_TRACE"
 require_trace "resize tab_id=${BROWSER_TAB_ID} pane_id=${PANE_ID} pixel_width=${APPKIT_PIXEL_WIDTH} pixel_height=${APPKIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied resize to AppKit pixel size via ts_set_view_size"
+
+if [ "$SCENARIO" = "display-move-backing-scale" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_X="$OVERLAY_FRAME_X"
+  A_FRAME_Y="$OVERLAY_FRAME_Y"
+  A_ROOT_FRAME_SIZE="$(extract_root_frame_size "$APPKIT_PRESENT_LINE")"
+  A_PIXEL="$APPKIT_PIXEL"
+  A_BACKING_SCALE="$(extract_backing_scale "$APPKIT_PRESENT_LINE")"
+  log "browser_a_window_id=$A_WINDOW_ID"
+  log "browser_a_surface_id=$A_SURFACE_ID"
+  log "browser_a_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "browser_a_pane_id=$A_PANE_ID"
+  log "browser_a_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "browser_a_context_id=$A_CONTEXT_ID"
+  log "browser_a_backing_scale=$A_BACKING_SCALE"
+
+  DISPLAY_LINES="$(swift "$DISPLAY_INVENTORY")"
+  DISPLAY_COUNT="$(printf '%s\n' "$DISPLAY_LINES" | awk 'NF { count++ } END { print count + 0 }')"
+  log "display_count=$DISPLAY_COUNT"
+  while IFS= read -r display_line; do
+    [ -n "$display_line" ] && log "display=$display_line"
+  done <<EOF
+$DISPLAY_LINES
+EOF
+
+  if [ "$DISPLAY_COUNT" -lt 2 ]; then
+    log "PARTIAL: only one display is available; cross-display move cannot run in this VM"
+    screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_DISPLAY_MOVED"
+    log "single_display_screenshot_exit=$?"
+
+    SINGLE_HIT_START_LINE="$(log_line_count)"
+    click_window_center "$WIN_LINE" "single_display_browser_area"
+    SINGLE_HIT_LINE="$(wait_for_hit_after "$SINGLE_HIT_START_LINE" "$A_CONTEXT_ID" "single-display browser hit-test")"
+    require_text "$SINGLE_HIT_LINE" "window_id:${A_WINDOW_ID}" "single-display hit-test has window id"
+    require_text "$SINGLE_HIT_LINE" "surface_id:${A_SURFACE_ID}" "single-display hit-test has surface id"
+    require_text "$SINGLE_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "single-display hit-test has selected tab id"
+    require_text "$SINGLE_HIT_LINE" "overlay_frame=${A_FRAME}" "single-display hit-test uses AppKit frame"
+    require_text "$SINGLE_HIT_LINE" "web_point={" "single-display hit-test includes webview-relative point"
+
+    SINGLE_MODE_START_LINE="$(log_line_count)"
+    SINGLE_MODE_TRACE_START_LINE="$(trace_line_count)"
+    log "single_display_mode_key=enter=Mode::Browse"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+    wait_for_log_after "$SINGLE_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "single-display webtui entered browse mode"
+    require_trace_after "$SINGLE_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true on single display"
+
+    SINGLE_KEY_START_LINE="$(trace_line_count)"
+    printf 'ISSUE809_EXP17_SINGLE_DISPLAY\n' >"$BROWSER_FOCUS_COMMAND"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+    require_trace_after "$SINGLE_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "single-display keyboard marker reached browser"
+    log "PASS: scenario display-move-backing-scale partial-single-display"
+    exit 0
+  fi
+
+  ORIGINAL_WIN_LINE="$WIN_LINE"
+  IFS=$'\t' read -r _ORIG_WID ORIG_WX ORIG_WY ORIG_WW ORIG_WH <<<"$ORIGINAL_WIN_LINE"
+  ORIG_CENTER_X="$(awk -v x="$ORIG_WX" -v w="$ORIG_WW" 'BEGIN { print int(x + (w / 2)) }')"
+  ORIG_CENTER_Y="$(awk -v y="$ORIG_WY" -v h="$ORIG_WH" 'BEGIN { print int(y + (h / 2)) }')"
+  SOURCE_DISPLAY_LINE="$(printf '%s\n' "$DISPLAY_LINES" | awk -F '\t' -v x="$ORIG_CENTER_X" -v y="$ORIG_CENTER_Y" '$2 <= x && x < ($2 + $4) && $3 <= y && y < ($3 + $5) { print; exit }')"
+  [ -n "$SOURCE_DISPLAY_LINE" ] || fail "could not identify source display for window center"
+  SOURCE_DISPLAY_ID="$(printf '%s\n' "$SOURCE_DISPLAY_LINE" | awk -F '\t' '{print $1}')"
+  SOURCE_SCALE="$(printf '%s\n' "$SOURCE_DISPLAY_LINE" | awk -F '\t' '{print $10}')"
+  DEST_DISPLAY_LINE="$(printf '%s\n' "$DISPLAY_LINES" | awk -F '\t' -v source="$SOURCE_DISPLAY_ID" '$1 != source { print; exit }')"
+  [ -n "$DEST_DISPLAY_LINE" ] || fail "could not identify destination display"
+  IFS=$'\t' read -r DEST_DISPLAY_ID DEST_X DEST_Y DEST_W DEST_H DEST_VX DEST_VY DEST_VW DEST_VH DEST_SCALE _DEST_KIND <<<"$DEST_DISPLAY_LINE"
+  log "source_display=$SOURCE_DISPLAY_LINE"
+  log "destination_display=$DEST_DISPLAY_LINE"
+
+  MOVE_START_LINE="$(log_line_count)"
+  MOVE_TRACE_START_LINE="$(trace_line_count)"
+  DEST_WINDOW_X="$(awk -v x="$DEST_VX" 'BEGIN { print int(x + 40) }')"
+  DEST_WINDOW_Y="$(awk -v y="$DEST_VY" 'BEGIN { print int(y + 40) }')"
+  swift "$RESIZE_WINDOW" "$PID" "$DEST_WINDOW_X" "$DEST_WINDOW_Y" "$ORIG_WW" "$ORIG_WH" >>"$HARNESS_LOG" 2>&1
+  delay 2
+  MOVED_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve moved window bounds"
+  log "moved_window=$MOVED_WIN_LINE"
+  IFS=$'\t' read -r _MOVED_WID MOVED_WX MOVED_WY MOVED_WW MOVED_WH <<<"$MOVED_WIN_LINE"
+  MOVED_CENTER_X="$(awk -v x="$MOVED_WX" -v w="$MOVED_WW" 'BEGIN { print int(x + (w / 2)) }')"
+  MOVED_CENTER_Y="$(awk -v y="$MOVED_WY" -v h="$MOVED_WH" 'BEGIN { print int(y + (h / 2)) }')"
+  awk -F '\t' -v x="$MOVED_CENTER_X" -v y="$MOVED_CENTER_Y" '{
+    exit !(($2 <= x) && (x < ($2 + $4)) && ($3 <= y) && (y < ($3 + $5)))
+  }' <<EOF || fail "moved window center is not inside destination display"
+$DEST_DISPLAY_LINE
+EOF
+  log "PASS: moved window center is inside destination display"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_DISPLAY_MOVED"
+  log "display_moved_screenshot_exit=$?"
+  MOVED_PRESENT_LINE="$(wait_for_line_after "$MOVE_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "display-moved AppKit presentation")"
+  MOVED_PIXELS_LINE="$(wait_for_line_after "$MOVE_START_LINE" "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "display-moved AppKit pixels")"
+  MOVED_FRAME="$(extract_overlay_frame "$MOVED_PRESENT_LINE")"
+  MOVED_FRAME_SIZE="$(extract_frame_size "$MOVED_PRESENT_LINE")"
+  MOVED_SCALE="$(extract_backing_scale "$MOVED_PRESENT_LINE")"
+  MOVED_PIXEL="$(extract_appkit_pixel "$MOVED_PIXELS_LINE")"
+  [ "$MOVED_FRAME" = "$A_FRAME" ] || fail "browser AppKit frame changed after display move: expected=$A_FRAME actual=$MOVED_FRAME"
+  [ "$MOVED_SCALE" = "$DEST_SCALE" ] || fail "display-moved backing scale mismatch: expected=$DEST_SCALE actual=$MOVED_SCALE"
+  MOVED_EXPECTED_PIXEL="$(awk -v size="$MOVED_FRAME_SIZE" -v scale="$MOVED_SCALE" 'BEGIN { split(size, parts, "x"); printf "%dx%d", int((parts[1] * scale) + 0.5), int((parts[2] * scale) + 0.5) }')"
+  [ "$MOVED_PIXEL" = "$MOVED_EXPECTED_PIXEL" ] || fail "display-moved AppKit pixel mismatch: expected=$MOVED_EXPECTED_PIXEL actual=$MOVED_PIXEL"
+  log "PASS: display-moved AppKit frame, pixels, and backing scale match destination display"
+  if [ "$MOVED_PIXEL" != "$A_PIXEL" ]; then
+    MOVED_PIXEL_WIDTH="${MOVED_PIXEL%x*}"
+    MOVED_PIXEL_HEIGHT="${MOVED_PIXEL#*x}"
+    require_trace_after "$MOVE_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${MOVED_PIXEL_WIDTH} pixel_height=${MOVED_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied display-moved resize to AppKit pixel size"
+  else
+    log "PASS: display-moved AppKit pixels unchanged; no Roamium resize required"
+  fi
+
+  MOVED_ROOT_HEIGHT="$(pair_height "$A_ROOT_FRAME_SIZE")"
+  MOVED_CONTENT_Y_OFFSET="$(awk -v wh="$MOVED_WH" -v root_h="$MOVED_ROOT_HEIGHT" 'BEGIN { print int(wh - root_h) }')"
+  MOVED_X="$(awk -v wx="$MOVED_WX" -v frame_x="$A_FRAME_X" 'BEGIN { print int(wx + frame_x + 4) }')"
+  MOVED_Y="$(awk -v wy="$MOVED_WY" -v content_y="$MOVED_CONTENT_Y_OFFSET" -v frame_y="$A_FRAME_Y" 'BEGIN { print int(wy + content_y + frame_y + 4) }')"
+  MOVED_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$MOVED_X" "$MOVED_Y" "display_moved_browser_area"
+  MOVED_HIT_LINE="$(wait_for_hit_after "$MOVED_HIT_START_LINE" "$A_CONTEXT_ID" "display-moved browser hit-test")"
+  require_text "$MOVED_HIT_LINE" "window_id:${A_WINDOW_ID}" "display-moved hit-test has window id"
+  require_text "$MOVED_HIT_LINE" "surface_id:${A_SURFACE_ID}" "display-moved hit-test has surface id"
+  require_text "$MOVED_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "display-moved hit-test has selected tab id"
+  require_text "$MOVED_HIT_LINE" "overlay_frame=${A_FRAME}" "display-moved hit-test uses AppKit frame"
+  require_text "$MOVED_HIT_LINE" "web_point={" "display-moved hit-test includes webview-relative point"
+
+  MOVED_MODE_START_LINE="$(log_line_count)"
+  MOVED_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "display_moved_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$MOVED_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "display-moved webtui entered browse mode"
+  require_trace_after "$MOVED_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after display move"
+  MOVED_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP17_MOVED_DISPLAY\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$MOVED_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "display-moved keyboard marker reached browser"
+
+  RETURN_CONTROL_START_LINE="$(log_line_count)"
+  RETURN_CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  log "display_moved_control_key=escape=Mode::Control"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$RETURN_CONTROL_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=false" "display-moved webtui returned to control mode"
+  require_trace_after "$RETURN_CONTROL_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed focus=false before return move"
+
+  RETURN_START_LINE="$(log_line_count)"
+  RETURN_TRACE_START_LINE="$(trace_line_count)"
+  swift "$RESIZE_WINDOW" "$PID" "$ORIG_WX" "$ORIG_WY" "$ORIG_WW" "$ORIG_WH" >>"$HARNESS_LOG" 2>&1
+  delay 2
+  RETURNED_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve returned window bounds"
+  log "returned_window=$RETURNED_WIN_LINE"
+  IFS=$'\t' read -r _RETURNED_WID RETURNED_WX RETURNED_WY RETURNED_WW RETURNED_WH <<<"$RETURNED_WIN_LINE"
+  RETURNED_CENTER_X="$(awk -v x="$RETURNED_WX" -v w="$RETURNED_WW" 'BEGIN { print int(x + (w / 2)) }')"
+  RETURNED_CENTER_Y="$(awk -v y="$RETURNED_WY" -v h="$RETURNED_WH" 'BEGIN { print int(y + (h / 2)) }')"
+  awk -F '\t' -v x="$RETURNED_CENTER_X" -v y="$RETURNED_CENTER_Y" '{
+    exit !(($2 <= x) && (x < ($2 + $4)) && ($3 <= y) && (y < ($3 + $5)))
+  }' <<EOF || fail "returned window center is not inside source display"
+$SOURCE_DISPLAY_LINE
+EOF
+  log "PASS: returned window center is inside source display"
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_DISPLAY_RETURNED"
+  log "display_returned_screenshot_exit=$?"
+  RETURNED_PRESENT_LINE="$(wait_for_line_after "$RETURN_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "display-returned AppKit presentation")"
+  RETURNED_PIXELS_LINE="$(wait_for_line_after "$RETURN_START_LINE" "TermSurf geometry layer=appkit event=presented_pixels .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "display-returned AppKit pixels")"
+  RETURNED_FRAME="$(extract_overlay_frame "$RETURNED_PRESENT_LINE")"
+  RETURNED_FRAME_SIZE="$(extract_frame_size "$RETURNED_PRESENT_LINE")"
+  RETURNED_SCALE="$(extract_backing_scale "$RETURNED_PRESENT_LINE")"
+  RETURNED_PIXEL="$(extract_appkit_pixel "$RETURNED_PIXELS_LINE")"
+  [ "$RETURNED_FRAME" = "$A_FRAME" ] || fail "browser AppKit frame changed after display return: expected=$A_FRAME actual=$RETURNED_FRAME"
+  [ "$RETURNED_SCALE" = "$SOURCE_SCALE" ] || fail "display-returned backing scale mismatch: expected=$SOURCE_SCALE actual=$RETURNED_SCALE"
+  RETURNED_EXPECTED_PIXEL="$(awk -v size="$RETURNED_FRAME_SIZE" -v scale="$RETURNED_SCALE" 'BEGIN { split(size, parts, "x"); printf "%dx%d", int((parts[1] * scale) + 0.5), int((parts[2] * scale) + 0.5) }')"
+  [ "$RETURNED_PIXEL" = "$RETURNED_EXPECTED_PIXEL" ] || fail "display-returned AppKit pixel mismatch: expected=$RETURNED_EXPECTED_PIXEL actual=$RETURNED_PIXEL"
+  log "PASS: display-returned AppKit frame, pixels, and backing scale match source display"
+  if [ "$RETURNED_PIXEL" != "$MOVED_PIXEL" ]; then
+    RETURNED_PIXEL_WIDTH="${RETURNED_PIXEL%x*}"
+    RETURNED_PIXEL_HEIGHT="${RETURNED_PIXEL#*x}"
+    require_trace_after "$RETURN_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${RETURNED_PIXEL_WIDTH} pixel_height=${RETURNED_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied display-returned resize to AppKit pixel size"
+  else
+    log "PASS: display-returned AppKit pixels unchanged; no Roamium resize required"
+  fi
+
+  RETURN_HIT_START_LINE="$(log_line_count)"
+  click_window_center "$RETURNED_WIN_LINE" "display_returned_browser_area"
+  RETURN_HIT_LINE="$(wait_for_hit_after "$RETURN_HIT_START_LINE" "$A_CONTEXT_ID" "display-returned browser hit-test")"
+  require_text "$RETURN_HIT_LINE" "window_id:${A_WINDOW_ID}" "display-returned hit-test has window id"
+  require_text "$RETURN_HIT_LINE" "surface_id:${A_SURFACE_ID}" "display-returned hit-test has surface id"
+  require_text "$RETURN_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "display-returned hit-test has selected tab id"
+  require_text "$RETURN_HIT_LINE" "overlay_frame=${A_FRAME}" "display-returned hit-test uses AppKit frame"
+  require_text "$RETURN_HIT_LINE" "web_point={" "display-returned hit-test includes webview-relative point"
+
+  [ "$MOVE_TRACE_START_LINE" -lt "$MOVED_MODE_TRACE_START_LINE" ] || fail "trace boundaries for display move were not monotonic"
+  [ "$MOVED_MODE_TRACE_START_LINE" -lt "$RETURN_TRACE_START_LINE" ] || fail "trace boundaries for display return were not monotonic"
+fi
 
 if [ "$SCENARIO" = "open-browser-in-new-window" ]; then
   A_WINDOW_ID="$WID"
