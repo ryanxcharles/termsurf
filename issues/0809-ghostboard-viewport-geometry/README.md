@@ -216,3 +216,5 @@ work together, not just individually.
   — **Pass**
 - [Experiment 22: Terminal scrollback movement](22-terminal-scrollback-movement.md)
   — **Pass**
+- [Experiment 23: Browser navigation geometry](23-browser-navigation-geometry.md)
+  — **Designed**
