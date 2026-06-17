@@ -36,6 +36,8 @@ SCREENSHOT_DISPLAY_MOVED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-moved-screens
 SCREENSHOT_DISPLAY_RETURNED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-returned-screenshot-${TS}.png"
 SCREENSHOT_FULLSCREEN="$LOG_DIR/ghostboard-geometry-${SCENARIO}-fullscreen-screenshot-${TS}.png"
 SCREENSHOT_UNFULLSCREEN="$LOG_DIR/ghostboard-geometry-${SCENARIO}-unfullscreen-screenshot-${TS}.png"
+SCREENSHOT_MINIMIZE_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-minimize-restored-screenshot-${TS}.png"
+SCREENSHOT_HIDE_RESTORED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-hide-restored-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
@@ -228,6 +230,20 @@ extract_root_frame_size() {
 
 extract_backing_scale() {
   printf '%s\n' "$1" | sed -E 's/.*backing_scale=([^ ]+).*/\1/'
+}
+
+appkit_pixel_from_geometry_line() {
+  local line="$1"
+  local frame_size
+  local width
+  local height
+  local scale
+  frame_size="$(extract_frame_size "$line")"
+  width="$(pair_width "$frame_size")"
+  height="$(pair_height "$frame_size")"
+  scale="$(extract_backing_scale "$line")"
+  awk -v width="$width" -v height="$height" -v scale="$scale" \
+    'BEGIN { printf "%dx%d\n", int((width * scale) + 0.5), int((height * scale) + 0.5) }'
 }
 
 pair_width() {
@@ -941,7 +957,7 @@ click_negative_global_point() {
 }
 
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -961,6 +977,8 @@ DISPLAY_INVENTORY="$RUN_DIR/display-inventory.swift"
 ACTIVATE_APP="$RUN_DIR/activate-app.swift"
 FOCUS_WINDOW="$RUN_DIR/focus-window.swift"
 FULLSCREEN_WINDOW="$RUN_DIR/fullscreen-window.swift"
+MINIMIZE_WINDOW="$RUN_DIR/minimize-window.swift"
+HIDE_APP="$RUN_DIR/hide-app.swift"
 RESIZE_WINDOW="$RUN_DIR/resize-window.swift"
 cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -1319,6 +1337,165 @@ fputs("no matching accessibility window for bounds \(targetX),\(targetY) \(targe
 exit(7)
 EOF
 
+cat >"$MINIMIZE_WINDOW" <<'EOF'
+import ApplicationServices
+import Foundation
+
+guard CommandLine.arguments.count == 7,
+      let rawPID = Int32(CommandLine.arguments[1]),
+      let targetX = Double(CommandLine.arguments[2]),
+      let targetY = Double(CommandLine.arguments[3]),
+      let targetWidth = Double(CommandLine.arguments[4]),
+      let targetHeight = Double(CommandLine.arguments[5])
+else {
+    fputs("usage: minimize-window.swift <pid> <x> <y> <width> <height> <minimize|restore|state>\n", stderr)
+    exit(2)
+}
+
+let mode = CommandLine.arguments[6]
+guard mode == "minimize" || mode == "restore" || mode == "state" else {
+    fputs("mode must be minimize, restore, or state\n", stderr)
+    exit(2)
+}
+
+guard AXIsProcessTrusted() else {
+    fputs("accessibility permission is not trusted for minimize automation\n", stderr)
+    exit(3)
+}
+
+func point(_ value: CFTypeRef?) -> CGPoint? {
+    guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    var result = CGPoint.zero
+    guard AXValueGetValue(value as! AXValue, .cgPoint, &result) else { return nil }
+    return result
+}
+
+func size(_ value: CFTypeRef?) -> CGSize? {
+    guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+    var result = CGSize.zero
+    guard AXValueGetValue(value as! AXValue, .cgSize, &result) else { return nil }
+    return result
+}
+
+let app = AXUIElementCreateApplication(pid_t(rawPID))
+var windowsValue: CFTypeRef?
+let windowsResult = AXUIElementCopyAttributeValue(
+    app,
+    kAXWindowsAttribute as CFString,
+    &windowsValue
+)
+
+guard windowsResult == .success,
+      let windows = windowsValue as? [AXUIElement]
+else {
+    fputs("could not read target app windows: \(windowsResult.rawValue)\n", stderr)
+    exit(4)
+}
+
+for window in windows {
+    var positionValue: CFTypeRef?
+    var sizeValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success,
+          AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success,
+          let position = point(positionValue),
+          let windowSize = size(sizeValue)
+    else { continue }
+
+    let positionMatches = abs(Double(position.x) - targetX) <= 16 &&
+        abs(Double(position.y) - targetY) <= 16
+    let sizeMatches = abs(Double(windowSize.width) - targetWidth) <= 16 &&
+        abs(Double(windowSize.height) - targetHeight) <= 16
+    guard positionMatches && sizeMatches else { continue }
+
+    var minimizedValue: CFTypeRef?
+    let stateResult = AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue)
+    let isMinimized = stateResult == .success && ((minimizedValue as? Bool) ?? false)
+    if mode == "state" {
+        print(isMinimized ? "true" : "false")
+        exit(0)
+    }
+
+    let target = mode == "minimize"
+    if isMinimized != target {
+        let setResult = AXUIElementSetAttributeValue(
+            window,
+            kAXMinimizedAttribute as CFString,
+            target ? kCFBooleanTrue : kCFBooleanFalse
+        )
+        guard setResult == .success else {
+            fputs("failed to set AXMinimized: \(setResult.rawValue)\n", stderr)
+            exit(5)
+        }
+    }
+
+    Thread.sleep(forTimeInterval: 1.0)
+    var afterValue: CFTypeRef?
+    let afterResult = AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &afterValue)
+    guard afterResult == .success else {
+        fputs("failed to read AXMinimized after set: \(afterResult.rawValue)\n", stderr)
+        exit(6)
+    }
+    print(((afterValue as? Bool) ?? false) ? "true" : "false")
+    exit(0)
+}
+
+fputs("no matching accessibility window for bounds \(targetX),\(targetY) \(targetWidth)x\(targetHeight)\n", stderr)
+exit(7)
+EOF
+
+cat >"$HIDE_APP" <<'EOF'
+import AppKit
+import Foundation
+
+guard CommandLine.arguments.count == 3,
+      let rawPID = Int32(CommandLine.arguments[1]),
+      let app = NSRunningApplication(processIdentifier: pid_t(rawPID))
+else {
+    fputs("usage: hide-app.swift <pid> <hide|show>\n", stderr)
+    exit(2)
+}
+
+let mode = CommandLine.arguments[2]
+func setVisibleWithSystemEvents(_ visible: Bool) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    let state = visible ? "true" : "false"
+    process.arguments = [
+        "-e",
+        "tell application \"System Events\" to set visible of (first application process whose unix id is \(rawPID)) to \(state)"
+    ]
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    } catch {
+        return false
+    }
+}
+
+if mode == "hide" {
+    app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+    Thread.sleep(forTimeInterval: 0.5)
+    guard app.hide() || setVisibleWithSystemEvents(false) else {
+        fputs("failed to hide app through AppKit and System Events\n", stderr)
+        exit(3)
+    }
+    Thread.sleep(forTimeInterval: 1.0)
+    print("hidden")
+} else if mode == "show" {
+    guard app.unhide() || setVisibleWithSystemEvents(true) else {
+        fputs("failed to unhide app through AppKit and System Events\n", stderr)
+        exit(4)
+    }
+    app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+    Thread.sleep(forTimeInterval: 1.0)
+    print("visible")
+} else {
+    fputs("mode must be hide or show\n", stderr)
+    exit(2)
+}
+EOF
+
 cat >"$RESIZE_WINDOW" <<'EOF'
 import ApplicationServices
 import Foundation
@@ -1452,6 +1629,10 @@ fi
 if [ "$SCENARIO" = "fullscreen-unfullscreen" ]; then
   log "fullscreen_screenshot=$SCREENSHOT_FULLSCREEN"
   log "unfullscreen_screenshot=$SCREENSHOT_UNFULLSCREEN"
+fi
+if [ "$SCENARIO" = "minimize-hide-restore" ]; then
+  log "minimize_restored_screenshot=$SCREENSHOT_MINIMIZE_RESTORED"
+  log "hide_restored_screenshot=$SCREENSHOT_HIDE_RESTORED"
 fi
 
 GHOSTTY_CONFIG_PATH="$CONFIG" \
@@ -1931,6 +2112,153 @@ if [ "$SCENARIO" = "fullscreen-unfullscreen" ]; then
 
   [ "$FULLSCREEN_TRACE_START_LINE" -lt "$FULLSCREEN_MODE_TRACE_START_LINE" ] || fail "trace boundaries for fullscreen were not monotonic"
   [ "$FULLSCREEN_MODE_TRACE_START_LINE" -lt "$UNFULLSCREEN_TRACE_START_LINE" ] || fail "trace boundaries for unfullscreen were not monotonic"
+fi
+
+if [ "$SCENARIO" = "minimize-hide-restore" ]; then
+  A_WINDOW_ID="$WID"
+  A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  A_FRAME="$OVERLAY_FRAME"
+  A_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
+  A_FRAME_X="$OVERLAY_FRAME_X"
+  A_FRAME_Y="$OVERLAY_FRAME_Y"
+  A_ROOT_FRAME_SIZE="$(extract_root_frame_size "$APPKIT_PRESENT_LINE")"
+  A_PIXEL="$APPKIT_PIXEL"
+  A_BACKING_SCALE="$(extract_backing_scale "$APPKIT_PRESENT_LINE")"
+  log "browser_a_window_id=$A_WINDOW_ID"
+  log "browser_a_surface_id=$A_SURFACE_ID"
+  log "browser_a_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "browser_a_pane_id=$A_PANE_ID"
+  log "browser_a_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "browser_a_context_id=$A_CONTEXT_ID"
+  log "browser_a_backing_scale=$A_BACKING_SCALE"
+
+  FORMER_CLICK_X="$(awk -v wx="$WX" -v frame_x="$A_FRAME_X" -v frame_size="$A_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wx + frame_x + (parts[1] / 2) + 0.5) }')"
+  FORMER_CLICK_Y="$(awk -v wy="$WY" -v frame_y="$A_FRAME_Y" -v frame_size="$A_FRAME_SIZE" 'BEGIN { split(frame_size, parts, "x"); print int(wy + frame_y + (parts[2] / 2) + 0.5) }')"
+
+  MINIMIZE_START_LINE="$(log_line_count)"
+  MINIMIZE_STATE="$(swift "$MINIMIZE_WINDOW" "$PID" "$WX" "$WY" "$WW" "$WH" minimize >>"$HARNESS_LOG" 2>&1; tail -1 "$HARNESS_LOG")"
+  [ "$MINIMIZE_STATE" = "true" ] || fail "AXMinimized did not become true after minimize: $MINIMIZE_STATE"
+  log "PASS: AXMinimized true after minimize"
+  delay 2
+  if app_windows | awk -F '\t' -v wid="$A_WINDOW_ID" '$1 == wid { found=1 } END { exit found ? 0 : 1 }'; then
+    fail "minimized window remained visible in onscreen CG window list"
+  fi
+  log "PASS: minimized window absent from onscreen CG window list"
+
+  MINIMIZED_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$FORMER_CLICK_X" "$FORMER_CLICK_Y" "minimized_former_browser_area"
+  wait_for_negative_hit_after "$MINIMIZED_HIT_START_LINE" "$A_CONTEXT_ID" "minimized former browser area hit-test" allow-absent 3
+
+  RESTORE_START_LINE="$(log_line_count)"
+  RESTORE_STATE="$(swift "$MINIMIZE_WINDOW" "$PID" "$WX" "$WY" "$WW" "$WH" restore >>"$HARNESS_LOG" 2>&1; tail -1 "$HARNESS_LOG")"
+  [ "$RESTORE_STATE" = "false" ] || fail "AXMinimized did not become false after restore: $RESTORE_STATE"
+  log "PASS: AXMinimized false after restore"
+  delay 2
+  RESTORE_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve restored window bounds"
+  log "minimize_restored_window=$RESTORE_WIN_LINE"
+  IFS=$'\t' read -r RESTORE_WINDOW_ID RESTORE_WX RESTORE_WY RESTORE_WW RESTORE_WH <<<"$RESTORE_WIN_LINE"
+  [ "$RESTORE_WINDOW_ID" = "$A_WINDOW_ID" ] || fail "minimize restore window id changed unexpectedly: expected=$A_WINDOW_ID actual=$RESTORE_WINDOW_ID"
+  RESTORE_BACKING_LINE="$(wait_for_line_after "$RESTORE_START_LINE" "TermSurf geometry layer=appkit event=backing_properties_changed .*pane_id:${A_PANE_ID} .*context_id=${A_CONTEXT_ID}" "minimize-restored AppKit backing properties" 45)"
+  RESTORE_PRESENT_WINDOW_ID="$(printf '%s\n' "$RESTORE_BACKING_LINE" | sed -E 's/.*window_id:([^ ]+) .*/\1/')"
+  RESTORE_SURFACE_ID="$(extract_surface_id "$RESTORE_BACKING_LINE")"
+  RESTORE_SELECTED_TAB_ID="$(extract_selected_tab_id "$RESTORE_BACKING_LINE")"
+  RESTORE_FRAME="$(extract_overlay_frame "$RESTORE_BACKING_LINE")"
+  RESTORE_SCALE="$(extract_backing_scale "$RESTORE_BACKING_LINE")"
+  RESTORE_PIXEL="$(appkit_pixel_from_geometry_line "$RESTORE_BACKING_LINE")"
+  [ "$RESTORE_PRESENT_WINDOW_ID" = "$A_WINDOW_ID" ] || fail "minimize-restored AppKit window id mismatch"
+  [ "$RESTORE_SURFACE_ID" = "$A_SURFACE_ID" ] || fail "minimize-restored surface id changed"
+  [ "$RESTORE_SELECTED_TAB_ID" = "$A_SELECTED_TAB_ID" ] || fail "minimize-restored selected tab id changed"
+  [ "$RESTORE_FRAME" = "$A_FRAME" ] || fail "minimize-restored frame mismatch: expected=$A_FRAME actual=$RESTORE_FRAME"
+  [ "$RESTORE_SCALE" = "$A_BACKING_SCALE" ] || fail "minimize-restored backing scale mismatch: expected=$A_BACKING_SCALE actual=$RESTORE_SCALE"
+  [ "$RESTORE_PIXEL" = "$A_PIXEL" ] || fail "minimize-restored current AppKit pixel mismatch: expected=$A_PIXEL actual=$RESTORE_PIXEL"
+  log "PASS: minimize-restored current AppKit pixel matched baseline"
+  require_no_different_appkit_frame_after "$RESTORE_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "minimize-restored AppKit frame stayed stable"
+  require_no_different_appkit_pixels_after "$RESTORE_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "minimize-restored AppKit pixels stayed stable"
+
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_MINIMIZE_RESTORED"
+  log "minimize_restored_screenshot_exit=$?"
+  RESTORE_HIT_START_LINE="$(log_line_count)"
+  click_window_center "$RESTORE_WIN_LINE" "minimize_restored_browser_area"
+  RESTORE_HIT_LINE="$(wait_for_hit_after "$RESTORE_HIT_START_LINE" "$A_CONTEXT_ID" "minimize-restored browser hit-test")"
+  require_text "$RESTORE_HIT_LINE" "window_id:${A_WINDOW_ID}" "minimize-restored hit-test has window id"
+  require_text "$RESTORE_HIT_LINE" "surface_id:${A_SURFACE_ID}" "minimize-restored hit-test has surface id"
+  require_text "$RESTORE_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "minimize-restored hit-test has selected tab id"
+  require_text "$RESTORE_HIT_LINE" "overlay_frame=${A_FRAME}" "minimize-restored hit-test uses AppKit frame"
+  require_text "$RESTORE_HIT_LINE" "web_point={" "minimize-restored hit-test includes webview-relative point"
+
+  RESTORE_MODE_START_LINE="$(log_line_count)"
+  RESTORE_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "minimize_restored_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$RESTORE_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "minimize-restored webtui entered browse mode"
+  require_trace_after "$RESTORE_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after minimize restore"
+  RESTORE_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP19_MINIMIZE_RESTORE\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$RESTORE_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "minimize-restored keyboard marker reached browser"
+
+  RESTORE_CONTROL_START_LINE="$(log_line_count)"
+  RESTORE_CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  log "minimize_restored_control_key=escape=Mode::Control"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$RESTORE_CONTROL_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=false" "minimize-restored webtui returned to control mode"
+  require_trace_after "$RESTORE_CONTROL_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=false" "Roamium observed focus=false before hide"
+
+  HIDE_START_LINE="$(log_line_count)"
+  HIDE_RESULT="$(swift "$HIDE_APP" "$PID" hide >>"$HARNESS_LOG" 2>&1; tail -1 "$HARNESS_LOG")"
+  [ "$HIDE_RESULT" = "hidden" ] || fail "app hide did not report hidden: $HIDE_RESULT"
+  log "PASS: app hide reported hidden"
+  delay 2
+  if app_windows | awk -F '\t' -v wid="$A_WINDOW_ID" '$1 == wid { found=1 } END { exit found ? 0 : 1 }'; then
+    fail "hidden window remained visible in onscreen CG window list"
+  fi
+  log "PASS: hidden window absent from onscreen CG window list"
+
+  HIDDEN_HIT_START_LINE="$(log_line_count)"
+  click_global_point "$FORMER_CLICK_X" "$FORMER_CLICK_Y" "hidden_former_browser_area"
+  wait_for_negative_hit_after "$HIDDEN_HIT_START_LINE" "$A_CONTEXT_ID" "hidden former browser area hit-test" allow-absent 3
+
+  SHOW_START_LINE="$(log_line_count)"
+  SHOW_RESULT="$(swift "$HIDE_APP" "$PID" show >>"$HARNESS_LOG" 2>&1; tail -1 "$HARNESS_LOG")"
+  [ "$SHOW_RESULT" = "visible" ] || fail "app show did not report visible: $SHOW_RESULT"
+  log "PASS: app show reported visible"
+  delay 2
+  SHOW_WIN_LINE="$(window_bounds_for "$A_WINDOW_ID")" || fail "failed to resolve unhidden window bounds"
+  log "hide_restored_window=$SHOW_WIN_LINE"
+  IFS=$'\t' read -r SHOW_WINDOW_ID SHOW_WX SHOW_WY SHOW_WW SHOW_WH <<<"$SHOW_WIN_LINE"
+  [ "$SHOW_WINDOW_ID" = "$A_WINDOW_ID" ] || fail "hide restore window id changed unexpectedly: expected=$A_WINDOW_ID actual=$SHOW_WINDOW_ID"
+  require_no_different_appkit_frame_after "$SHOW_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "hide-restored AppKit frame stayed stable"
+  require_no_different_appkit_pixels_after "$SHOW_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "hide-restored AppKit pixels stayed stable"
+
+  screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_HIDE_RESTORED"
+  log "hide_restored_screenshot_exit=$?"
+  SHOW_HIT_START_LINE="$(log_line_count)"
+  click_window_center "$SHOW_WIN_LINE" "hide_restored_browser_area"
+  SHOW_HIT_LINE="$(wait_for_hit_after "$SHOW_HIT_START_LINE" "$A_CONTEXT_ID" "hide-restored browser hit-test")"
+  require_text "$SHOW_HIT_LINE" "window_id:${A_WINDOW_ID}" "hide-restored hit-test has window id"
+  require_text "$SHOW_HIT_LINE" "surface_id:${A_SURFACE_ID}" "hide-restored hit-test has surface id"
+  require_text "$SHOW_HIT_LINE" "selected_tab_id:${A_SELECTED_TAB_ID}" "hide-restored hit-test has selected tab id"
+  require_text "$SHOW_HIT_LINE" "overlay_frame=${A_FRAME}" "hide-restored hit-test uses AppKit frame"
+  require_text "$SHOW_HIT_LINE" "backing_scale=${A_BACKING_SCALE}" "hide-restored hit-test has backing scale"
+  require_text "$SHOW_HIT_LINE" "web_point={" "hide-restored hit-test includes webview-relative point"
+  SHOW_PIXEL="$(appkit_pixel_from_geometry_line "$SHOW_HIT_LINE")"
+  [ "$SHOW_PIXEL" = "$A_PIXEL" ] || fail "hide-restored current AppKit pixel mismatch: expected=$A_PIXEL actual=$SHOW_PIXEL"
+  log "PASS: hide-restored current AppKit pixel matched baseline"
+
+  SHOW_MODE_START_LINE="$(log_line_count)"
+  SHOW_MODE_TRACE_START_LINE="$(trace_line_count)"
+  log "hide_restored_mode_key=enter=Mode::Browse"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$SHOW_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "hide-restored webtui entered browse mode"
+  require_trace_after "$SHOW_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true after hide restore"
+  SHOW_KEY_START_LINE="$(trace_line_count)"
+  printf 'ISSUE809_EXP19_HIDE_RESTORE\n' >"$BROWSER_FOCUS_COMMAND"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$SHOW_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "hide-restored keyboard marker reached browser"
 fi
 
 if [ "$SCENARIO" = "open-browser-in-new-window" ]; then

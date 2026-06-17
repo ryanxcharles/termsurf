@@ -203,3 +203,128 @@ Fresh-context adversarial review approved the design before implementation.
 Verdict: **APPROVED**.
 
 Findings: none.
+
+## Result
+
+**Result:** Pass
+
+Implemented the `minimize-hide-restore` scenario in
+`scripts/ghostboard-geometry-matrix.sh`.
+
+The passing target run was:
+
+```bash
+scripts/ghostboard-geometry-matrix.sh minimize-hide-restore
+```
+
+Evidence:
+
+- Harness log:
+  `logs/ghostboard-geometry-minimize-hide-restore-harness-20260617-133208.log`
+- App log:
+  `logs/ghostboard-geometry-minimize-hide-restore-app-20260617-133208.log`
+- Roamium trace:
+  `logs/ghostboard-geometry-minimize-hide-restore-roamium-20260617-133208.log`
+- Baseline screenshot:
+  `logs/ghostboard-geometry-minimize-hide-restore-screenshot-20260617-133208.png`
+- Minimize restore screenshot:
+  `logs/ghostboard-geometry-minimize-hide-restore-minimize-restored-screenshot-20260617-133208.png`
+- Hide restore screenshot:
+  `logs/ghostboard-geometry-minimize-hide-restore-hide-restored-screenshot-20260617-133208.png`
+
+The run proved:
+
+- the native window minimized through Accessibility by setting `AXMinimized`;
+- the minimized window disappeared from the onscreen layer-0 CG window list;
+- a click in the former browser area while minimized did not route a fresh
+  hit-test to the browser context;
+- deminimize restored the same native window id, surface id, selected tab id,
+  pane id, browser tab id, and context id;
+- a fresh post-restore AppKit backing-properties record proved the restored
+  browser kept the same AppKit frame and backing scale, and the harness computed
+  the current AppKit pixel size from that current frame and scale;
+- restored mouse hit-testing used the restored AppKit frame and included
+  webview-relative coordinates;
+- Browse-mode keyboard input after minimize restore reached Roamium;
+- app hide succeeded in this VM through the System Events fallback after
+  `NSRunningApplication.hide()` returned false;
+- the hidden window disappeared from the onscreen layer-0 CG window list;
+- a click in the former browser area while hidden did not route a fresh hit-test
+  to the browser context;
+- unhide/show restored the same native window id, and a fresh post-unhide
+  hit-test proved the current AppKit frame and backing scale while the harness
+  computed the current AppKit pixel size from that current frame and scale;
+- mouse hit-testing and Browse-mode keyboard input worked again after unhide.
+
+Adjacent regression runs also passed:
+
+```bash
+scripts/ghostboard-geometry-matrix.sh fullscreen-unfullscreen
+scripts/ghostboard-geometry-matrix.sh open-browser-in-new-window
+```
+
+Evidence:
+
+- Fullscreen harness log:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-harness-20260617-133244.log`
+- Fullscreen app log:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-app-20260617-133244.log`
+- Fullscreen Roamium trace:
+  `logs/ghostboard-geometry-fullscreen-unfullscreen-roamium-20260617-133244.log`
+- New-window harness log:
+  `logs/ghostboard-geometry-open-browser-in-new-window-harness-20260617-133310.log`
+- New-window app log:
+  `logs/ghostboard-geometry-open-browser-in-new-window-app-20260617-133310.log`
+- New-window Roamium trace:
+  `logs/ghostboard-geometry-open-browser-in-new-window-roamium-20260617-133310.log`
+
+Validation:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+git diff --check
+```
+
+Both checks passed.
+
+## Conclusion
+
+Ghostboard keeps browser overlays correctly non-interactive while the owning
+window is minimized or hidden, and restores the same browser identity, geometry,
+hit-testing, and keyboard routing when the window becomes visible again.
+
+One automation learning matters for future experiments: in this macOS VM,
+`NSRunningApplication.hide()` can return false even after activation. The
+harness therefore uses AppKit first and falls back to the public System Events
+visibility path for app hide/show automation.
+
+## Completion Review
+
+Fresh-context adversarial completion review initially returned **CHANGES
+REQUIRED**.
+
+Required findings:
+
+- The restore and unhide pixel assertions could pass without any fresh AppKit
+  pixel evidence because they only checked that no different later
+  `presented_pixels` line appeared.
+- The hide/show path did not require a fresh AppKit geometry record after unhide
+  while the result claimed AppKit frame, pixel size, and backing scale
+  stability.
+
+Fixes:
+
+- Added `appkit_pixel_from_geometry_line` to compute current AppKit pixel size
+  from a fresh geometry line's overlay frame and backing scale.
+- Required the post-minimize-restore backing-properties record to compute the
+  expected current AppKit pixel size.
+- Required the post-hide-restore hit-test record to compute the expected current
+  AppKit pixel size.
+- Reran the target scenario and adjacent regressions, then updated the result
+  evidence paths and claims.
+
+Fresh-context adversarial re-review approved the completed result.
+
+Verdict: **APPROVED**.
+
+Findings: none.
