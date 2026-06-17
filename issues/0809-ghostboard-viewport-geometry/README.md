@@ -187,3 +187,5 @@ work together, not just individually.
   **Pass**
 - [Experiment 7: Split-right equalize rebalance](07-split-right-equalize-rebalance.md)
   — **Pass**
+- [Experiment 8: Split-right zoom restore](08-split-right-zoom-restore.md) —
+  **Designed**
