@@ -222,3 +222,5 @@ work together, not just individually.
   **Pass**
 - [Experiment 25: Mouse input after geometry](25-mouse-input-after-geometry.md)
   — **Pass**
+- [Experiment 26: Keyboard input after tab and window switch](26-keyboard-input-after-tab-window-switch.md)
+  — **Designed**
