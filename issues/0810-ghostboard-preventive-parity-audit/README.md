@@ -143,4 +143,4 @@ The final issue conclusion should include:
 ## Experiments
 
 - [Experiment 1: Protocol message inventory](01-protocol-message-inventory.md) —
-  **Designed**
+  **Pass**
