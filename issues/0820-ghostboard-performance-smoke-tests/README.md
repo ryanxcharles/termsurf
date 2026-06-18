@@ -40,4 +40,4 @@ benchmarks.
 - [Experiment 1: Add bounded performance smoke runner](01-add-bounded-performance-smoke-runner.md)
   — **Partial**
 - [Experiment 2: Unblock pointer-dependent diagnostics](02-unblock-pointer-dependent-diagnostics.md)
-  — **Designed**
+  — **Partial**

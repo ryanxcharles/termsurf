@@ -164,3 +164,81 @@ After implementation and verification:
   file; and
 - commit the reviewed result separately before designing or implementing the
   next experiment.
+
+## Result
+
+**Result:** Partial
+
+Implemented selectable pointer-driver plumbing in
+`scripts/ghostboard-geometry-matrix.sh`, then proved the current diagnostic
+blocker is not fixed by switching click delivery from CGEvent to System Events.
+Both pointer drivers reach AppKit overlay presentation and fail before an AppKit
+hit-test geometry record appears.
+
+Changed files:
+
+- `scripts/ghostboard-geometry-matrix.sh`
+  - Adds `TERMSURF_GEOMETRY_POINTER_DRIVER`, defaulting to `cgevent`.
+  - Adds `pointer_move` and `pointer_click` helper functions.
+  - Routes `click_window_center`, `click_global_point`, `move_global_point`, and
+    `click_negative_global_point` through the selected driver.
+  - Implements `system-events` clicks with AppleScript
+    `tell application "System Events" to click at {x, y}`.
+  - Keeps move-only actions on the CGEvent injector when
+    `TERMSURF_GEOMETRY_POINTER_DRIVER=system-events`, and logs that fallback
+    because System Events does not provide a move-only hover primitive.
+  - Logs the selected `pointer_driver` in each harness run.
+
+Verification passed:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh scripts/ghostboard-performance-smoke.sh
+git diff --check
+scripts/ghostboard-performance-smoke.sh --fast
+```
+
+Runtime evidence:
+
+| Check                          | Result | Evidence                                                               |
+| ------------------------------ | ------ | ---------------------------------------------------------------------- |
+| Default `initial-open`         | Fail   | `logs/ghostboard-geometry-initial-open-harness-20260618-050751.log`    |
+| System Events `initial-open`   | Fail   | `logs/ghostboard-geometry-initial-open-harness-20260618-050801.log`    |
+| Fast performance startup row 1 | Pass   | `logs/ghostboard-performance-smoke-fast-startup-1-20260618-050811.log` |
+| Fast performance startup row 2 | Pass   | `logs/ghostboard-performance-smoke-fast-startup-2-20260618-050811.log` |
+| Fast performance startup row 3 | Pass   | `logs/ghostboard-performance-smoke-fast-startup-3-20260618-050811.log` |
+| Fast performance summary       | Pass   | `logs/ghostboard-performance-smoke-fast-20260618-050811.log`           |
+
+The default `initial-open` run used `pointer_driver=cgevent`, reached
+presentation, and failed with `FAIL: missing AppKit hit-test geometry record`.
+The System Events run used `pointer_driver=system-events`, logged
+`initial_pointer_click_driver=system-events`, reached presentation, and failed
+with the same missing AppKit hit-test record. That proves the blocked diagnostic
+rows are still blocked at the generic pointer/hit-test prerequisite in this VM,
+not at the performance-smoke wrapper.
+
+Generated logs and screenshots were left under `logs/` and were not staged.
+
+## Conclusion
+
+Experiment 2 did not unblock pointer-dependent diagnostics. It did make the
+pointer driver explicit and proved that simply switching click delivery from
+CGEvent to System Events is not enough on this VM.
+
+The fast repeated-startup smoke remains intact. The next experiment should add
+or adapt non-pointer performance diagnostics so Issue 820 can cover resize or
+split responsiveness without depending on the currently blocked initial hit-test
+gate. Pointer, scroll, and mouse hot-path rows should remain classified as
+blocked until the VM/input-permission problem is solved.
+
+## Completion Review
+
+External Codex completion review using `skills/codex-review`:
+
+- **Verdict:** Approved.
+- **Required findings:** None.
+- **Optional findings:** None.
+- **Evidence checked:** The reviewer confirmed the implementation is scoped to
+  the geometry harness, the fast smoke remains preserved, the Partial result is
+  accurate, the runtime evidence does not overclaim, the cited logs match the
+  default/System Events hit-test failures and fast-profile pass, and the result
+  commit had not already been made.

@@ -15,6 +15,7 @@ WEB="${TERMSURF_WEB:-$ROOT/target/debug/web}"
 ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
 INSTALLED_ROAMIUM="${TERMSURF_INSTALLED_ROAMIUM:-$ROAMIUM}"
 ROAMIUM_PATH_FOR_APP="$ROAMIUM"
+POINTER_DRIVER="${TERMSURF_GEOMETRY_POINTER_DRIVER:-cgevent}"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
 HELLO_CONFIG_HOMEPAGE="${TERMSURF_HELLO_CONFIG_HOMEPAGE:-https://example.net/issue-815-homepage}"
 HELLO_CONFIG_SECOND_BROWSER="${TERMSURF_HELLO_CONFIG_SECOND_BROWSER:-debug-roamium}"
@@ -102,6 +103,41 @@ fail() {
 
 delay() {
   osascript -e "delay ${1:-0.5}" >/dev/null
+}
+
+pointer_move() {
+  local x="$1"
+  local y="$2"
+  local label="$3"
+  case "$POINTER_DRIVER" in
+    cgevent|system-events)
+      if [ "$POINTER_DRIVER" = "system-events" ]; then
+        log "${label}_pointer_move_driver=cgevent fallback=system-events-has-no-move-only"
+      fi
+      swift "$ROOT/scripts/ghostty-app/inject.swift" move "$x" "$y" >>"$HARNESS_LOG" 2>&1
+      ;;
+    *)
+      fail "unsupported TERMSURF_GEOMETRY_POINTER_DRIVER: $POINTER_DRIVER"
+      ;;
+  esac
+}
+
+pointer_click() {
+  local x="$1"
+  local y="$2"
+  local label="$3"
+  case "$POINTER_DRIVER" in
+    cgevent)
+      swift "$ROOT/scripts/ghostty-app/inject.swift" click "$x" "$y" left 1 >>"$HARNESS_LOG" 2>&1
+      ;;
+    system-events)
+      log "${label}_pointer_click_driver=system-events"
+      osascript -e "tell application \"System Events\" to click at {$x, $y}" >>"$HARNESS_LOG" 2>&1
+      ;;
+    *)
+      fail "unsupported TERMSURF_GEOMETRY_POINTER_DRIVER: $POINTER_DRIVER"
+      ;;
+  esac
 }
 
 require_file() {
@@ -1558,9 +1594,9 @@ click_window_center() {
   click_x=$((bx + bw / 2))
   click_y=$((by + bh / 2))
   log "${label}_input_point=${click_x},${click_y}"
-  swift "$ROOT/scripts/ghostty-app/inject.swift" move "$click_x" "$click_y" >>"$HARNESS_LOG" 2>&1
+  pointer_move "$click_x" "$click_y" "$label"
   delay 0.25
-  swift "$ROOT/scripts/ghostty-app/inject.swift" click "$click_x" "$click_y" left 1 >>"$HARNESS_LOG" 2>&1
+  pointer_click "$click_x" "$click_y" "$label"
 }
 
 click_global_point() {
@@ -1568,9 +1604,9 @@ click_global_point() {
   local y="$2"
   local label="$3"
   log "${label}_input_point=${x},${y}"
-  swift "$ROOT/scripts/ghostty-app/inject.swift" move "$x" "$y" >>"$HARNESS_LOG" 2>&1
+  pointer_move "$x" "$y" "$label"
   delay 0.25
-  swift "$ROOT/scripts/ghostty-app/inject.swift" click "$x" "$y" left 1 >>"$HARNESS_LOG" 2>&1
+  pointer_click "$x" "$y" "$label"
 }
 
 move_global_point() {
@@ -1578,7 +1614,7 @@ move_global_point() {
   local y="$2"
   local label="$3"
   log "${label}_input_point=${x},${y}"
-  swift "$ROOT/scripts/ghostty-app/inject.swift" move "$x" "$y" >>"$HARNESS_LOG" 2>&1
+  pointer_move "$x" "$y" "$label"
 }
 
 click_negative_global_point() {
@@ -1586,10 +1622,10 @@ click_negative_global_point() {
   local y="$2"
   local label="$3"
   log "${label}_input_point=${x},${y}"
-  swift "$ROOT/scripts/ghostty-app/inject.swift" move "$x" "$y" >>"$HARNESS_LOG" 2>&1
+  pointer_move "$x" "$y" "$label"
   delay 0.75
   NEGATIVE_HIT_START_LINE="$(log_line_count)"
-  swift "$ROOT/scripts/ghostty-app/inject.swift" click "$x" "$y" left 1 >>"$HARNESS_LOG" 2>&1
+  pointer_click "$x" "$y" "$label"
 }
 
 click_browser_frame_center() {
@@ -3625,6 +3661,7 @@ log "run_dir=$RUN_DIR"
 log "app=$APP"
 log "web=$WEB"
 log "roamium=$ROAMIUM"
+log "pointer_driver=$POINTER_DRIVER"
 log "url=$URL"
 if [ "$SCENARIO" = "hello-config-homepage" ]; then
   log "hello_config_homepage=$HELLO_CONFIG_HOMEPAGE"
