@@ -14,6 +14,7 @@ const max_clients: usize = 128;
 const max_panes: usize = 256;
 const max_servers: usize = 64;
 const max_tab_lookups: usize = 512;
+const max_devtools_reservations: usize = 256;
 const max_pane_id_len: usize = 128;
 const max_profile_len: usize = 128;
 const max_browser_len: usize = std.fs.max_path_bytes;
@@ -23,6 +24,8 @@ const default_browser = "roamium";
 const fallback_cell_width: u64 = 10;
 const fallback_cell_height: u64 = 20;
 const geometry_trace_env = "TERMSURF_GEOMETRY_TRACE";
+const devtools_reservation_timeout_env = "TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS";
+const default_devtools_reservation_timeout_ms: i64 = 15_000;
 
 extern "c" fn termsurf_open_split(
     pane_id: [*:0]const u8,
@@ -143,6 +146,39 @@ const TabLookupState = struct {
     fn paneId(self: *const TabLookupState) []const u8 {
         return self.pane_id[0..self.pane_id_len];
     }
+};
+
+const DevtoolsReservationState = struct {
+    in_use: bool = false,
+    pane_id: [max_pane_id_len]u8 = undefined,
+    pane_id_len: usize = 0,
+    profile: [max_profile_len]u8 = undefined,
+    profile_len: usize = 0,
+    browser: [max_browser_len]u8 = undefined,
+    browser_len: usize = 0,
+    inspected_tab_id: i64 = 0,
+    created_ms: i64 = 0,
+    handoff_used: bool = false,
+
+    fn paneId(self: *const DevtoolsReservationState) []const u8 {
+        return self.pane_id[0..self.pane_id_len];
+    }
+
+    fn profileName(self: *const DevtoolsReservationState) []const u8 {
+        return self.profile[0..self.profile_len];
+    }
+
+    fn browserName(self: *const DevtoolsReservationState) []const u8 {
+        return self.browser[0..self.browser_len];
+    }
+};
+
+const QueryDevtoolsStatus = enum {
+    success,
+    not_found,
+    duplicate,
+    key_too_long,
+    reservation_limit,
 };
 
 const BrowserReadySnapshot = struct {
@@ -365,6 +401,7 @@ var clients: [max_clients]ClientSlot = [_]ClientSlot{.{}} ** max_clients;
 var panes: [max_panes]PaneState = [_]PaneState{.{}} ** max_panes;
 var servers: [max_servers]ServerState = [_]ServerState{.{}} ** max_servers;
 var tab_lookups: [max_tab_lookups]TabLookupState = [_]TabLookupState{.{}} ** max_tab_lookups;
+var devtools_reservations: [max_devtools_reservations]DevtoolsReservationState = [_]DevtoolsReservationState{.{}} ** max_devtools_reservations;
 var last_browser_pane: [max_pane_id_len]u8 = undefined;
 var last_browser_pane_len: usize = 0;
 var gui_active: bool = false;
@@ -809,19 +846,36 @@ fn sendQueryDevtoolsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryDevtoolsRe
         if (query.*.inspected_tab_id == 0) {
             break :blk "DevTools target tab id is required";
         }
-        if (fillQueryDevtoolsSuccess(&reply, profile, browser, query.*.inspected_tab_id, &profile_buf, &profile_len, &browser_buf, &browser_len)) {
-            break :blk "";
+        const pane_id = cString(query.*.pane_id);
+        switch (fillQueryDevtoolsReply(&reply, pane_id, profile, browser, query.*.inspected_tab_id, &profile_buf, &profile_len, &browser_buf, &browser_len)) {
+            .success => break :blk "",
+            .not_found => {
+                const error_len = std.fmt.count(
+                    "Inspected tab {} not found in {s}/{s}",
+                    .{ query.*.inspected_tab_id, browser, profile },
+                );
+                allocated_error = try allocator.alloc(u8, error_len + 1);
+                break :blk std.fmt.bufPrintZ(
+                    allocated_error.?,
+                    "Inspected tab {} not found in {s}/{s}",
+                    .{ query.*.inspected_tab_id, browser, profile },
+                ) catch unreachable;
+            },
+            .duplicate => {
+                const error_len = std.fmt.count(
+                    "Tab {} already has DevTools open in {s}/{s}",
+                    .{ query.*.inspected_tab_id, browser, profile },
+                );
+                allocated_error = try allocator.alloc(u8, error_len + 1);
+                break :blk std.fmt.bufPrintZ(
+                    allocated_error.?,
+                    "Tab {} already has DevTools open in {s}/{s}",
+                    .{ query.*.inspected_tab_id, browser, profile },
+                ) catch unreachable;
+            },
+            .key_too_long => break :blk "DevTools target key is too long",
+            .reservation_limit => break :blk "Too many pending DevTools launches",
         }
-        const error_len = std.fmt.count(
-            "Inspected tab {} not found in {s}/{s}",
-            .{ query.*.inspected_tab_id, browser, profile },
-        );
-        allocated_error = try allocator.alloc(u8, error_len + 1);
-        break :blk std.fmt.bufPrintZ(
-            allocated_error.?,
-            "Inspected tab {} not found in {s}/{s}",
-            .{ query.*.inspected_tab_id, browser, profile },
-        ) catch unreachable;
     } else "DevTools target browser is required";
     reply.@"error" = @constCast(error_msg.ptr);
     if (error_msg.len == 0) {
@@ -835,11 +889,12 @@ fn sendQueryDevtoolsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryDevtoolsRe
     wrapper.unnamed_0.query_devtools_reply = &reply;
 
     try sendProtobuf(fd, &wrapper);
-    log.info("TermSurf QueryDevtoolsReply sent", .{});
+    log.info("TermSurf QueryDevtoolsReply sent error={s}", .{error_msg});
 }
 
-fn fillQueryDevtoolsSuccess(
+fn fillQueryDevtoolsReply(
     reply: *c.Termsurf__QueryDevtoolsReply,
+    pane_id: []const u8,
     profile: []const u8,
     browser: []const u8,
     inspected_tab_id: i64,
@@ -847,16 +902,129 @@ fn fillQueryDevtoolsSuccess(
     profile_len: *usize,
     browser_buf: []u8,
     browser_len: *usize,
-) bool {
+) QueryDevtoolsStatus {
     state_mutex.lock();
     defer state_mutex.unlock();
 
-    if (findTabLookup(profile, browser, inspected_tab_id) == null) return false;
-    if (!copyText(profile_buf, profile_len, profile)) return false;
-    if (!copyText(browser_buf, browser_len, browser)) return false;
+    const now_ms = std.time.milliTimestamp();
+    const reservation_timeout_ms = devtoolsReservationTimeoutMs();
+    expireDevtoolsReservations(now_ms, reservation_timeout_ms);
+
+    if (findTabLookup(profile, browser, inspected_tab_id) == null) return .not_found;
+    if (!copyText(profile_buf, profile_len, profile)) return .key_too_long;
+    if (!copyText(browser_buf, browser_len, browser)) return .key_too_long;
+
+    const claim_status = claimDevtoolsTarget(pane_id, profile, browser, inspected_tab_id, now_ms, reservation_timeout_ms);
+    if (claim_status != .success) return claim_status;
 
     reply.tab_id = inspected_tab_id;
-    return true;
+    return .success;
+}
+
+fn claimDevtoolsTarget(
+    pane_id: []const u8,
+    profile: []const u8,
+    browser: []const u8,
+    inspected_tab_id: i64,
+    now_ms: i64,
+    reservation_timeout_ms: i64,
+) QueryDevtoolsStatus {
+    if (hasLiveDevtoolsTarget(profile, browser, inspected_tab_id)) return .duplicate;
+
+    if (findDevtoolsReservation(profile, browser, inspected_tab_id)) |index| {
+        const reservation = &devtools_reservations[index];
+        if (!reservation.handoff_used and !std.mem.eql(u8, reservation.paneId(), pane_id)) {
+            reservation.handoff_used = true;
+            reservation.created_ms = now_ms;
+            log.info(
+                "DevTools reservation handoff: profile={s} browser={s} inspected_tab_id={} from_pane={s} to_pane={s}",
+                .{ profile, browser, inspected_tab_id, reservation.paneId(), pane_id },
+            );
+            return .success;
+        }
+        return .duplicate;
+    }
+
+    return reserveDevtoolsTarget(pane_id, profile, browser, inspected_tab_id, now_ms, reservation_timeout_ms);
+}
+
+fn hasLiveDevtoolsTarget(profile: []const u8, browser: []const u8, inspected_tab_id: i64) bool {
+    return findLiveDevtoolsTarget(profile, browser, inspected_tab_id) != null;
+}
+
+fn findLiveDevtoolsTarget(profile: []const u8, browser: []const u8, inspected_tab_id: i64) ?usize {
+    for (&panes, 0..) |*pane, i| {
+        if (pane.in_use and
+            pane.inspected_tab_id == inspected_tab_id and
+            std.mem.eql(u8, pane.profileName(), profile) and
+            std.mem.eql(u8, pane.browserName(), browser))
+        {
+            return i;
+        }
+    }
+
+    return null;
+}
+
+fn findDevtoolsReservation(profile: []const u8, browser: []const u8, inspected_tab_id: i64) ?usize {
+    for (&devtools_reservations, 0..) |*reservation, i| {
+        if (reservation.in_use and
+            reservation.inspected_tab_id == inspected_tab_id and
+            std.mem.eql(u8, reservation.profileName(), profile) and
+            std.mem.eql(u8, reservation.browserName(), browser))
+        {
+            return i;
+        }
+    }
+    return null;
+}
+
+fn reserveDevtoolsTarget(pane_id: []const u8, profile: []const u8, browser: []const u8, inspected_tab_id: i64, now_ms: i64, reservation_timeout_ms: i64) QueryDevtoolsStatus {
+    for (&devtools_reservations) |*reservation| {
+        if (!reservation.in_use) {
+            if (!copyText(&reservation.pane_id, &reservation.pane_id_len, pane_id)) return .key_too_long;
+            if (!copyText(&reservation.profile, &reservation.profile_len, profile)) return .key_too_long;
+            if (!copyText(&reservation.browser, &reservation.browser_len, browser)) return .key_too_long;
+            reservation.inspected_tab_id = inspected_tab_id;
+            reservation.created_ms = now_ms;
+            reservation.handoff_used = false;
+            reservation.in_use = true;
+            log.info(
+                "DevTools reservation: profile={s} browser={s} inspected_tab_id={} pane_id={s} timeout_ms={}",
+                .{ profile, browser, inspected_tab_id, pane_id, reservation_timeout_ms },
+            );
+            return .success;
+        }
+    }
+
+    return .reservation_limit;
+}
+
+fn clearDevtoolsReservation(profile: []const u8, browser: []const u8, inspected_tab_id: i64, reason: []const u8) void {
+    if (findDevtoolsReservation(profile, browser, inspected_tab_id)) |index| {
+        devtools_reservations[index] = .{};
+        log.info(
+            "DevTools reservation cleared: profile={s} browser={s} inspected_tab_id={} reason={s}",
+            .{ profile, browser, inspected_tab_id, reason },
+        );
+    }
+}
+
+fn expireDevtoolsReservations(now_ms: i64, reservation_timeout_ms: i64) void {
+    for (&devtools_reservations) |*reservation| {
+        if (!reservation.in_use) continue;
+        if (now_ms - reservation.created_ms < reservation_timeout_ms) continue;
+        log.info(
+            "DevTools reservation expired: profile={s} browser={s} inspected_tab_id={}",
+            .{ reservation.profileName(), reservation.browserName(), reservation.inspected_tab_id },
+        );
+        reservation.* = .{};
+    }
+}
+
+fn devtoolsReservationTimeoutMs() i64 {
+    const value = std.posix.getenv(devtools_reservation_timeout_env) orelse return default_devtools_reservation_timeout_ms;
+    return std.fmt.parseInt(i64, value, 10) catch default_devtools_reservation_timeout_ms;
 }
 
 fn sendQueryTabsReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryTabsRequest) !void {
@@ -1065,6 +1233,7 @@ fn handleSetDevtoolsOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetDevtoo
             state_mutex.unlock();
             return;
         }
+        clearDevtoolsReservation(profile, browser, inspected_tab_id, "set-devtools-overlay-update");
         panes[pane_index].tui_fd = tui_fd;
         resize_snapshot = snapshotResize(&panes[pane_index]);
         log.info(
@@ -1080,6 +1249,15 @@ fn handleSetDevtoolsOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetDevtoo
         return;
     }
 
+    if (findLiveDevtoolsTarget(profile, browser, inspected_tab_id)) |existing_index| {
+        log.warn(
+            "SetDevtoolsOverlay: duplicate target rejected pane_id={s} existing_pane_id={s} profile={s} browser={s} inspected_tab_id={}",
+            .{ pane_id, panes[existing_index].paneId(), profile, browser, inspected_tab_id },
+        );
+        state_mutex.unlock();
+        return;
+    }
+
     const pane_index = reservePane() orelse {
         log.warn("SetDevtoolsOverlay: pane limit reached pane_id={s}", .{pane_id});
         state_mutex.unlock();
@@ -1090,6 +1268,7 @@ fn handleSetDevtoolsOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetDevtoo
         state_mutex.unlock();
         return;
     }
+    clearDevtoolsReservation(profile, browser, inspected_tab_id, "set-devtools-overlay-create");
     panes[pane_index].tui_fd = tui_fd;
 
     const server_index = findServer(profile, browser) orelse {

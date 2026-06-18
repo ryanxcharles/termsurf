@@ -184,3 +184,109 @@ Fresh-context adversarial review by Codex subagent `Feynman`:
   profile/browser scoping.
 - **Re-review verdict:** Approved.
 - **Re-review findings:** None.
+
+## Result
+
+**Result:** Pass
+
+Implemented a Ghostboard-side DevTools singleton guard in
+`ghostboard/src/apprt/termsurf.zig` and a new `devtools-singleton-guard`
+regression scenario in `scripts/ghostboard-geometry-matrix.sh`.
+
+The implementation now:
+
+- reserves a DevTools target as soon as `QueryDevtoolsRequest` succeeds, keyed
+  by `profile`, `browser`, and `inspected_tab_id`;
+- rejects same-key duplicate queries with
+  `Tab {N} already has DevTools open in {browser}/{profile}`;
+- treats both live DevTools panes and pending reservations as blocking;
+- expires abandoned reservations using
+  `TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS` with a default of 15 seconds;
+- permits exactly one handoff from the source browser pane to the new DevTools
+  split pane, matching webtui's two-step launch flow where the browser command
+  queries first and the launched DevTools TUI queries again before
+  `SetDevtoolsOverlay`;
+- clears the reservation when `SetDevtoolsOverlay` creates or updates the live
+  DevTools pane;
+- rejects duplicate direct `SetDevtoolsOverlay` creates when a different live
+  pane already owns the same `profile`, `browser`, and `inspected_tab_id`.
+
+Verification commands:
+
+1. `zig fmt ghostboard/src/apprt/termsurf.zig`
+2. `bash -n scripts/ghostboard-geometry-matrix.sh`
+3. `cd ghostboard && zig build -Demit-macos-app=false`
+4. `cd ghostboard && macos/build.nu --scheme Ghostty --configuration Debug --action build`
+5. `cargo check -p roamium`
+6. `cargo check -p webtui`
+7. `git diff --check`
+8. `scripts/ghostboard-geometry-matrix.sh devtools-singleton-guard`
+
+Notes:
+
+- `shellcheck` is not installed on this VM, so that optional check was skipped.
+- `cargo check -p web` was not a valid package name in this workspace; the
+  correct package check is `cargo check -p webtui`.
+- An earlier local Xcode build failure was caused by stale generated XCTest
+  artifacts inside `ghostboard/macos/build/Debug/TermSurf.app`; removing those
+  generated artifacts and rebuilding succeeded.
+
+Final passing runtime evidence:
+
+- Harness log:
+  `logs/ghostboard-geometry-devtools-singleton-guard-harness-20260617-204402.log`
+- App log:
+  `logs/ghostboard-geometry-devtools-singleton-guard-app-20260617-204402.log`
+- Roamium trace:
+  `logs/ghostboard-geometry-devtools-singleton-guard-roamium-20260617-204402.log`
+- Screenshots:
+  `logs/ghostboard-geometry-devtools-singleton-guard-screenshot-20260617-204402.png`
+  and
+  `logs/ghostboard-geometry-devtools-singleton-guard-devtools-split-screenshot-20260617-204402.png`
+
+The final run proved:
+
+- the first direct in-flight query succeeds and creates a pending reservation;
+- a second direct query for the same pane/profile/browser/tab is rejected and
+  creates no split, no DevTools overlay, and no DevTools tab;
+- the abandoned reservation expires and a later query for the same target
+  succeeds;
+- the normal `:devtools right` flow succeeds after reservation expiry;
+- the browser-pane query hands off to the new DevTools split-pane query before
+  `SetDevtoolsOverlay`;
+- a direct raw-protobuf duplicate `SetDevtoolsOverlay` for another pane id is
+  rejected and does not create a DevTools tab;
+- a live duplicate `:devtools right` for browser A is rejected before
+  `OpenSplit`;
+- closing browser A's DevTools pane sends `CloseTab`, destroys/removes the
+  Roamium DevTools tab, and releases live pane state;
+- reopening DevTools for browser A succeeds and receives a new DevTools tab and
+  CA context;
+- opening browser B in a distinct native tab and opening DevTools there succeeds
+  while browser A's reopened DevTools remains open.
+
+## Conclusion
+
+Ghostboard now enforces the one-DevTools-frontend-per-inspected-tab invariant at
+query time, including the previously dangerous in-flight interval before a
+DevTools pane registers with `SetDevtoolsOverlay`. The guard remains scoped by
+profile and browser in source and was proven at runtime not to block an
+unrelated inspected tab. The existing DevTools geometry, CA context, mouse,
+focus, and keyboard coverage remains intact in the expanded regression scenario.
+
+## Completion Review
+
+Fresh-context adversarial review by Codex subagent `Beauvoir`:
+
+- **Initial verdict:** Changes required.
+- **Required finding:** A client could bypass `QueryDevtoolsRequest` and send a
+  duplicate `SetDevtoolsOverlay` directly for the same inspected tab, because
+  the singleton check only ran on the query path.
+- **Resolution:** Added a live DevTools target lookup to
+  `handleSetDevtoolsOverlay` so same-pane updates remain allowed but different
+  pane creates for the same `profile`, `browser`, and `inspected_tab_id` are
+  rejected before `CreateDevtoolsTab`. Added a direct raw-protobuf
+  `SetDevtoolsOverlay` probe to the `devtools-singleton-guard` scenario and
+  verified it reaches Ghostboard, is rejected, and creates no DevTools tab.
+- **Re-review verdict:** Approved.
+- **Re-review findings:** None.

@@ -37,4 +37,4 @@ Verification should include:
 ## Experiments
 
 - [Experiment 1: Guard duplicate DevTools requests](01-guard-duplicate-devtools-requests.md)
-  — **Designed**
+  — **Pass**

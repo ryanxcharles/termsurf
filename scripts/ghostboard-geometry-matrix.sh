@@ -54,6 +54,8 @@ TUI_VIEWPORT_SHRINK_COMMAND="$RUN_DIR/tui-viewport-shrink-command.txt"
 TUI_VIEWPORT_RESET_COMMAND="$RUN_DIR/tui-viewport-reset-command.txt"
 NAVIGATION_APPEND_COMMAND="$RUN_DIR/navigation-append-command.txt"
 DEVTOOLS_COMMAND="$RUN_DIR/devtools-command.txt"
+DEVTOOLS_QUERY_PROBE="$RUN_DIR/devtools-query-probe.py"
+DEVTOOLS_OVERLAY_PROBE="$RUN_DIR/devtools-overlay-probe.py"
 NEW_TAB_COMMAND_LOG="$RUN_DIR/new-tab-command.log"
 NEW_TAB_MARKER_COMMAND="$RUN_DIR/new-tab-marker-command.txt"
 SECOND_BROWSER_COMMAND="$RUN_DIR/second-browser-command.txt"
@@ -125,6 +127,17 @@ require_log_after() {
     log "PASS: $label"
   else
     fail "missing $label"
+  fi
+}
+
+require_no_log_after() {
+  local start_line="$1"
+  local pattern="$2"
+  local label="$3"
+  if tail -n +"$((start_line + 1))" "$APP_LOG" | grep -E "$pattern" >/dev/null 2>&1; then
+    fail "$label"
+  else
+    log "PASS: $label"
   fi
 }
 
@@ -1380,8 +1393,26 @@ assert_gui_active_cycle() {
   require_no_trace_after "$trace_start_line" "set-gui-active tab=${inactive_tab_id} pane=${inactive_pane_id} active=true reason=gui_activated" "$label Roamium did not receive stale active state for unfocused browser"
 }
 
+devtools_probe() {
+  local socket_path="$1"
+  local pane_id="$2"
+  local tab_id="$3"
+  local profile="$4"
+  local browser="$5"
+  python3 "$DEVTOOLS_QUERY_PROBE" "$socket_path" "$pane_id" "$tab_id" "$profile" "$browser"
+}
+
+devtools_overlay_probe() {
+  local socket_path="$1"
+  local pane_id="$2"
+  local tab_id="$3"
+  local profile="$4"
+  local browser="$5"
+  python3 "$DEVTOOLS_OVERLAY_PROBE" "$socket_path" "$pane_id" "$tab_id" "$profile" "$browser"
+}
+
 case "$SCENARIO" in
-  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1421,7 +1452,7 @@ EOF
   chmod +x "$COMMAND"
 fi
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "open-browser-in-new-window" ] || [ "$SCENARIO" = "multiple-windows-with-browsers" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "open-browser-in-new-window" ] || [ "$SCENARIO" = "multiple-windows-with-browsers" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ] || [ "$SCENARIO" = "devtools-singleton-guard" ]; then
   FIRST_RUN_MARKER="$RUN_DIR/first-web-ran"
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -1440,7 +1471,7 @@ window-save-state = never
 initial-command = direct:$COMMAND
 EOF
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ] || [ "$SCENARIO" = "devtools-singleton-guard" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+t=new_tab
 keybind = ctrl+1=goto_tab:1
@@ -1501,6 +1532,13 @@ keybind = ctrl+k=close_surface
 EOF
 fi
 
+if [ "$SCENARIO" = "devtools-singleton-guard" ]; then
+  cat >>"$CONFIG" <<'EOF'
+confirm-close-surface = false
+keybind = ctrl+k=close_surface
+EOF
+fi
+
 if [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+l=resize_split:right,20
@@ -1524,6 +1562,175 @@ if [ "$SCENARIO" = "split-down" ]; then
 keybind = ctrl+j=new_split:down
 EOF
 fi
+
+cat >"$DEVTOOLS_QUERY_PROBE" <<'PY'
+#!/usr/bin/env python3
+import socket
+import struct
+import sys
+
+
+def varint(value):
+    out = bytearray()
+    value = int(value)
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def read_varint(data, offset):
+    value = 0
+    shift = 0
+    while True:
+        if offset >= len(data):
+            raise ValueError("truncated varint")
+        byte = data[offset]
+        offset += 1
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, offset
+        shift += 7
+
+
+def field_varint(field, value):
+    return varint((field << 3) | 0) + varint(value)
+
+
+def field_string(field, value):
+    payload = value.encode()
+    return varint((field << 3) | 2) + varint(len(payload)) + payload
+
+
+def read_exact(conn, size):
+    chunks = bytearray()
+    while len(chunks) < size:
+        chunk = conn.recv(size - len(chunks))
+        if not chunk:
+            raise EOFError("socket closed")
+        chunks.extend(chunk)
+    return bytes(chunks)
+
+
+def decode_reply(payload):
+    reply = {"tab": 0, "error": "", "browser": "", "profile": ""}
+    offset = 0
+    while offset < len(payload):
+        tag, offset = read_varint(payload, offset)
+        field = tag >> 3
+        wire = tag & 7
+        if wire == 0:
+            value, offset = read_varint(payload, offset)
+            if field == 1:
+                reply["tab"] = value
+        elif wire == 2:
+            size, offset = read_varint(payload, offset)
+            value = payload[offset:offset + size]
+            offset += size
+            if field == 2:
+                reply["error"] = value.decode()
+            elif field == 3:
+                reply["browser"] = value.decode()
+            elif field == 4:
+                reply["profile"] = value.decode()
+        else:
+            raise ValueError(f"unsupported reply wire type {wire}")
+    return reply
+
+
+def main():
+    socket_path, pane_id, tab_id, profile, browser = sys.argv[1:6]
+    request = b"".join(
+        [
+            field_string(1, pane_id),
+            field_varint(2, int(tab_id)),
+            field_string(3, profile),
+            field_string(4, browser),
+        ]
+    )
+    wrapper = varint((27 << 3) | 2) + varint(len(request)) + request
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.connect(socket_path)
+        conn.sendall(struct.pack("<I", len(wrapper)) + wrapper)
+        size = struct.unpack("<I", read_exact(conn, 4))[0]
+        data = read_exact(conn, size)
+
+    offset = 0
+    while offset < len(data):
+        tag, offset = read_varint(data, offset)
+        field = tag >> 3
+        wire = tag & 7
+        if wire != 2:
+            raise ValueError(f"unexpected wrapper wire type {wire}")
+        size, offset = read_varint(data, offset)
+        payload = data[offset:offset + size]
+        offset += size
+        if field == 28:
+            reply = decode_reply(payload)
+            print(f"tab={reply['tab']}\terror={reply['error']}\tbrowser={reply['browser']}\tprofile={reply['profile']}")
+            return
+    raise ValueError("QueryDevtoolsReply not found")
+
+
+if __name__ == "__main__":
+    main()
+PY
+chmod +x "$DEVTOOLS_QUERY_PROBE"
+
+cat >"$DEVTOOLS_OVERLAY_PROBE" <<'PY'
+#!/usr/bin/env python3
+import socket
+import struct
+import sys
+
+
+def varint(value):
+    out = bytearray()
+    value = int(value)
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def field_varint(field, value):
+    return varint((field << 3) | 0) + varint(value)
+
+
+def field_string(field, value):
+    payload = value.encode()
+    return varint((field << 3) | 2) + varint(len(payload)) + payload
+
+
+def main():
+    socket_path, pane_id, tab_id, profile, browser = sys.argv[1:6]
+    request = b"".join(
+        [
+            field_string(1, pane_id),
+            field_varint(2, 0),
+            field_varint(3, 0),
+            field_varint(4, 80),
+            field_varint(5, 24),
+            field_string(6, profile),
+            field_varint(7, 1),
+            field_varint(8, int(tab_id)),
+            field_string(9, browser),
+        ]
+    )
+    wrapper = varint((20 << 3) | 2) + varint(len(request)) + request
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.connect(socket_path)
+        conn.sendall(struct.pack("<I", len(wrapper)) + wrapper)
+
+
+if __name__ == "__main__":
+    main()
+PY
+chmod +x "$DEVTOOLS_OVERLAY_PROBE"
 
 cat >"$WINDOW_BOUNDS" <<'EOF'
 import CoreGraphics
@@ -2114,9 +2321,11 @@ if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
   log "navigated_screenshot=$SCREENSHOT_NAVIGATED"
   log "navigation_append_command=$NAVIGATION_APPEND_COMMAND"
 fi
-if [ "$SCENARIO" = "devtools-split-geometry" ]; then
+if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-singleton-guard" ]; then
   log "devtools_split_screenshot=$SCREENSHOT_DEVTOOLS_SPLIT"
   log "devtools_command=$DEVTOOLS_COMMAND"
+  log "devtools_query_probe=$DEVTOOLS_QUERY_PROBE"
+  log "devtools_overlay_probe=$DEVTOOLS_OVERLAY_PROBE"
 fi
 if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   log "mouse_grow_screenshot=$SCREENSHOT_GROW"
@@ -2130,6 +2339,7 @@ GHOSTTY_CONFIG_PATH="$CONFIG" \
 GHOSTTY_LOG=stderr \
 TERMSURF_GEOMETRY_TRACE=1 \
 TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
+TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
 TERMSURF_INPUT_TRACE=1 \
 TERMSURF_PDF_INPUT_TRACE=1 \
 TERMSURF_PDF_INPUT_TRACE_FILE="$ROAMIUM_TRACE" \
@@ -4836,7 +5046,7 @@ if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
   require_trace_after "$NAV_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "post-navigation keyboard marker reached browser"
 fi
 
-if [ "$SCENARIO" = "devtools-split-geometry" ]; then
+if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-singleton-guard" ]; then
   A_WINDOW_ID="$WID"
   A_SURFACE_ID="$(extract_surface_id "$APPKIT_PRESENT_LINE")"
   A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
@@ -4858,6 +5068,41 @@ if [ "$SCENARIO" = "devtools-split-geometry" ]; then
   log "devtools_normal_baseline_frame=$A_FRAME"
   log "devtools_normal_baseline_appkit_pixel=$A_PIXEL"
   log "devtools_normal_baseline_backing_scale=$A_BACKING_SCALE"
+
+  if [ "$SCENARIO" = "devtools-singleton-guard" ]; then
+    GUI_SOCKET="$(sed -nE 's/.*TermSurf socket listening on (.*)$/\1/p' "$APP_LOG" | tail -1)"
+    [ -S "$GUI_SOCKET" ] || fail "failed to resolve Ghostboard TermSurf socket: $GUI_SOCKET"
+    log "devtools_gui_socket=$GUI_SOCKET"
+
+    INFLIGHT_START_LINE="$(log_line_count)"
+    INFLIGHT_FIRST_REPLY="$(devtools_probe "$GUI_SOCKET" "$A_PANE_ID" "$A_BROWSER_TAB_ID" "default" "$ROAMIUM")"
+    log "devtools_inflight_first_reply=$INFLIGHT_FIRST_REPLY"
+    case "$INFLIGHT_FIRST_REPLY" in
+      *"tab=${A_BROWSER_TAB_ID}"*$'\t'"error="*) ;;
+      *) fail "in-flight first query did not succeed: $INFLIGHT_FIRST_REPLY" ;;
+    esac
+    require_log_after "$INFLIGHT_START_LINE" "DevTools reservation: profile=default browser=${ROAMIUM} inspected_tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} timeout_ms=1000" "Ghostboard reserved in-flight DevTools target"
+
+    INFLIGHT_DUPLICATE_REPLY="$(devtools_probe "$GUI_SOCKET" "$A_PANE_ID" "$A_BROWSER_TAB_ID" "default" "$ROAMIUM")"
+    log "devtools_inflight_duplicate_reply=$INFLIGHT_DUPLICATE_REPLY"
+    case "$INFLIGHT_DUPLICATE_REPLY" in
+      *"error=Tab ${A_BROWSER_TAB_ID} already has DevTools open in ${ROAMIUM}/default"*) ;;
+      *) fail "in-flight duplicate query was not rejected: $INFLIGHT_DUPLICATE_REPLY" ;;
+    esac
+    require_no_log_after "$INFLIGHT_START_LINE" "OpenSplit: pane_id=${A_PANE_ID} direction=right" "in-flight duplicate direct query did not open a split"
+    require_no_log_after "$INFLIGHT_START_LINE" "SetDevtoolsOverlay: pane_id=.*inspected_tab_id=${A_BROWSER_TAB_ID}" "in-flight duplicate direct query did not create a DevTools overlay"
+    require_no_log_after "$INFLIGHT_START_LINE" "CreateDevtoolsTab: pane_id=.*inspected_tab_id=${A_BROWSER_TAB_ID}" "in-flight duplicate direct query did not create a DevTools tab"
+
+    delay 2
+    INFLIGHT_TIMEOUT_REPLY="$(devtools_probe "$GUI_SOCKET" "$A_PANE_ID" "$A_BROWSER_TAB_ID" "default" "$ROAMIUM")"
+    log "devtools_inflight_timeout_reply=$INFLIGHT_TIMEOUT_REPLY"
+    case "$INFLIGHT_TIMEOUT_REPLY" in
+      *"tab=${A_BROWSER_TAB_ID}"*$'\t'"error="*) ;;
+      *) fail "query did not succeed after abandoned reservation timeout: $INFLIGHT_TIMEOUT_REPLY" ;;
+    esac
+    require_log_after "$INFLIGHT_START_LINE" "DevTools reservation expired: profile=default browser=${ROAMIUM} inspected_tab_id=${A_BROWSER_TAB_ID}" "Ghostboard expired abandoned DevTools reservation"
+    delay 2
+  fi
 
   DEVTOOLS_START_LINE="$(log_line_count)"
   DEVTOOLS_TRACE_START_LINE="$(trace_line_count)"
@@ -4980,6 +5225,110 @@ if [ "$SCENARIO" = "devtools-split-geometry" ]; then
   swift "$ROOT/scripts/ghostty-app/inject.swift" type "$BROWSER_FOCUS_COMMAND" >>"$HARNESS_LOG" 2>&1
   require_trace_after "$A_KEY_START_LINE" "key-event tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID}" "normal browser keyboard marker reached normal browser"
   require_no_trace_after "$A_KEY_START_LINE" "key-event tab=${DT_BROWSER_TAB_ID} pane=${DT_PANE_ID}" "normal browser keyboard marker did not reach DevTools"
+
+  if [ "$SCENARIO" = "devtools-singleton-guard" ]; then
+    leave_browser_browse "devtools_singleton_normal_after_first" "$A_PANE_ID" "$A_BROWSER_TAB_ID"
+
+    DIRECT_SET_START_LINE="$(log_line_count)"
+    DIRECT_SET_PANE_ID="direct-duplicate-${A_BROWSER_TAB_ID}"
+    log "devtools_direct_duplicate_set_pane_id=$DIRECT_SET_PANE_ID"
+    devtools_overlay_probe "$GUI_SOCKET" "$DIRECT_SET_PANE_ID" "$A_BROWSER_TAB_ID" "default" "$ROAMIUM"
+    wait_for_log_after "$DIRECT_SET_START_LINE" "SetDevtoolsOverlay: pane_id=${DIRECT_SET_PANE_ID} profile=default browser=${ROAMIUM} inspected_tab_id=${A_BROWSER_TAB_ID}" "direct duplicate SetDevtoolsOverlay reached Ghostboard" 45
+    wait_for_log_after "$DIRECT_SET_START_LINE" "SetDevtoolsOverlay: duplicate target rejected pane_id=${DIRECT_SET_PANE_ID} existing_pane_id=${DT_PANE_ID} profile=default browser=${ROAMIUM} inspected_tab_id=${A_BROWSER_TAB_ID}" "direct duplicate SetDevtoolsOverlay rejected" 45
+    require_no_log_after "$DIRECT_SET_START_LINE" "CreateDevtoolsTab: pane_id=${DIRECT_SET_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "direct duplicate SetDevtoolsOverlay did not create a DevTools tab"
+
+    LIVE_DUPLICATE_START_LINE="$(log_line_count)"
+    printf ':devtools right' >"$DEVTOOLS_COMMAND"
+    log "devtools_live_duplicate_command_text=$(cat "$DEVTOOLS_COMMAND")"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" type "$DEVTOOLS_COMMAND" >>"$HARNESS_LOG" 2>&1
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+    wait_for_log_after "$LIVE_DUPLICATE_START_LINE" "TermSurf QueryDevtoolsRequest pane_id=${A_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "live duplicate DevTools query request for browser A" 45
+    wait_for_log_after "$LIVE_DUPLICATE_START_LINE" "TermSurf QueryDevtoolsReply sent error=Tab ${A_BROWSER_TAB_ID} already has DevTools open in ${ROAMIUM}/default" "live duplicate DevTools query rejected" 45
+    require_no_log_after "$LIVE_DUPLICATE_START_LINE" "OpenSplit: pane_id=${A_PANE_ID} direction=right" "live duplicate DevTools query did not open a split"
+    require_no_log_after "$LIVE_DUPLICATE_START_LINE" "SetDevtoolsOverlay: pane_id=.*inspected_tab_id=${A_BROWSER_TAB_ID}" "live duplicate DevTools query did not create another overlay"
+    require_no_log_after "$LIVE_DUPLICATE_START_LINE" "CreateDevtoolsTab: pane_id=.*inspected_tab_id=${A_BROWSER_TAB_ID}" "live duplicate DevTools query did not create another DevTools tab"
+
+    DEVTOOLS_CLOSE_START_LINE="$(log_line_count)"
+    DEVTOOLS_CLOSE_TRACE_START_LINE="$(trace_line_count)"
+    click_global_point "$DT_INSIDE_X" "$DT_INSIDE_Y" "devtools_singleton_focus_before_close"
+    log "devtools_singleton_close_keybind=ctrl+k=close_surface"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 40 control >>"$HARNESS_LOG" 2>&1
+    delay 1
+    require_log_after "$DEVTOOLS_CLOSE_START_LINE" "Pane close cleanup: pane_id=${DT_PANE_ID} tab_id=${DT_BROWSER_TAB_ID}" "Ghostboard cleaned up first DevTools pane"
+    require_log_after "$DEVTOOLS_CLOSE_START_LINE" "CloseTab: pane_id=${DT_PANE_ID} tab_id=${DT_BROWSER_TAB_ID}" "Ghostboard sent CloseTab for first DevTools pane"
+    require_trace_after "$DEVTOOLS_CLOSE_TRACE_START_LINE" "close-tab tab_id=${DT_BROWSER_TAB_ID} pane_id=${DT_PANE_ID} result=destroying ffi=ts_destroy_web_contents" "Roamium destroyed first DevTools tab"
+    require_trace_after "$DEVTOOLS_CLOSE_TRACE_START_LINE" "close-tab tab_id=${DT_BROWSER_TAB_ID} result=removed" "Roamium removed first DevTools tab"
+
+    REOPEN_START_LINE="$(log_line_count)"
+    REOPEN_TRACE_START_LINE="$(trace_line_count)"
+    click_global_point "$A_SPLIT_INSIDE_X" "$A_SPLIT_INSIDE_Y" "devtools_singleton_normal_before_reopen"
+    log "devtools_singleton_normal_before_reopen_control_key=escape"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+    delay 1
+    printf ':devtools right' >"$DEVTOOLS_COMMAND"
+    log "devtools_reopen_command_text=$(cat "$DEVTOOLS_COMMAND")"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" type "$DEVTOOLS_COMMAND" >>"$HARNESS_LOG" 2>&1
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+    wait_for_log_after "$REOPEN_START_LINE" "TermSurf QueryDevtoolsRequest pane_id=${A_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "reopen DevTools query request for browser A" 45
+    wait_for_log_after "$REOPEN_START_LINE" "TermSurf QueryDevtoolsReply sent error=" "reopen DevTools query succeeded" 45
+    wait_for_log_after "$REOPEN_START_LINE" "OpenSplit: pane_id=${A_PANE_ID} direction=right" "reopen DevTools split opened to the right" 45
+    DT2_SET_LINE="$(wait_for_line_after "$REOPEN_START_LINE" "SetDevtoolsOverlay: pane_id=[^ ]+ .*inspected_tab_id=${A_BROWSER_TAB_ID}" "reopen DevTools SetDevtoolsOverlay" 60)"
+    DT2_PANE_ID="$(printf '%s\n' "$DT2_SET_LINE" | sed -E 's/.*SetDevtoolsOverlay: pane_id=([^ ]+) .*/\1/')"
+    [ -n "$DT2_PANE_ID" ] || fail "failed to extract reopened DevTools pane id"
+    [ "$DT2_PANE_ID" != "$DT_PANE_ID" ] || fail "reopened DevTools reused the closed DevTools pane id"
+    log "devtools_reopened_pane_id=$DT2_PANE_ID"
+    wait_for_log_after "$REOPEN_START_LINE" "CreateDevtoolsTab: pane_id=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for reopened DevTools pane" 60
+    DT2_TAB_READY_LINE="$(wait_for_trace_line_after "$REOPEN_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported reopened DevTools tab ready" 60)"
+    DT2_BROWSER_TAB_ID="$(printf '%s\n' "$DT2_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    [ -n "$DT2_BROWSER_TAB_ID" ] || fail "failed to extract reopened DevTools browser tab id"
+    log "devtools_reopened_browser_tab_id=$DT2_BROWSER_TAB_ID"
+    require_trace_after "$REOPEN_TRACE_START_LINE" "ca-context tab=${DT2_BROWSER_TAB_ID} pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported reopened DevTools CA context"
+
+    B_TAB_START_LINE="$(log_line_count)"
+    B_TAB_TRACE_START_LINE="$(trace_line_count)"
+    log "devtools_singleton_new_tab_keybind=ctrl+t=new_tab"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 17 control >>"$HARNESS_LOG" 2>&1
+    delay 1
+    require_log_after "$B_TAB_START_LINE" "dispatching action target=surface action=.new_tab" "DevTools singleton browser B native tab action dispatched"
+    require_log_after "$B_TAB_START_LINE" 'starting command command=`/usr/bin/login`' "DevTools singleton browser B native tab started login shell"
+    printf '"%s" --browser "%s" "%s"' "$WEB" "$ROAMIUM" "$URL_B" >"$SECOND_BROWSER_COMMAND"
+    log "devtools_singleton_browser_b_command=$(cat "$SECOND_BROWSER_COMMAND")"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" type "$SECOND_BROWSER_COMMAND" >>"$HARNESS_LOG" 2>&1
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+    B_SET_LINE="$(wait_for_line_after "$B_TAB_START_LINE" "SetOverlay: pane_id=[^ ]+ profile=default browser=${ROAMIUM} url=${URL_B}" "DevTools singleton browser B SetOverlay" 60)"
+    B_PANE_ID="$(printf '%s\n' "$B_SET_LINE" | sed -E 's/.*SetOverlay: pane_id=([^ ]+) .*/\1/')"
+    [ -n "$B_PANE_ID" ] || fail "failed to extract DevTools singleton browser B pane id"
+    [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "DevTools singleton browser B reused browser A pane id"
+    log "devtools_singleton_browser_b_pane_id=$B_PANE_ID"
+    B_TAB_READY_LINE="$(wait_for_trace_line_after "$B_TAB_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_PANE_ID} inspected_tab_id=0" "Roamium reported DevTools singleton browser B tab ready" 60)"
+    B_BROWSER_TAB_ID="$(printf '%s\n' "$B_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    [ -n "$B_BROWSER_TAB_ID" ] || fail "failed to extract DevTools singleton browser B tab id"
+    [ "$B_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "DevTools singleton browser B reused browser A tab id"
+    log "devtools_singleton_browser_b_tab_id=$B_BROWSER_TAB_ID"
+    log "devtools_singleton_browser_b_before_devtools_control_key=escape"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
+    delay 1
+
+    B_DEVTOOLS_START_LINE="$(log_line_count)"
+    B_DEVTOOLS_TRACE_START_LINE="$(trace_line_count)"
+    printf ':devtools right' >"$DEVTOOLS_COMMAND"
+    log "devtools_singleton_browser_b_devtools_command=$(cat "$DEVTOOLS_COMMAND")"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" type "$DEVTOOLS_COMMAND" >>"$HARNESS_LOG" 2>&1
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+    wait_for_log_after "$B_DEVTOOLS_START_LINE" "TermSurf QueryDevtoolsRequest pane_id=${B_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "browser B DevTools query request while browser A DevTools is open" 45
+    wait_for_log_after "$B_DEVTOOLS_START_LINE" "TermSurf QueryDevtoolsReply sent error=" "browser B DevTools query succeeded while browser A DevTools is open" 45
+    wait_for_log_after "$B_DEVTOOLS_START_LINE" "OpenSplit: pane_id=${B_PANE_ID} direction=right" "browser B DevTools split opened while browser A DevTools is open" 45
+    B_DT_SET_LINE="$(wait_for_line_after "$B_DEVTOOLS_START_LINE" "SetDevtoolsOverlay: pane_id=[^ ]+ .*inspected_tab_id=${B_BROWSER_TAB_ID}" "browser B DevTools SetDevtoolsOverlay" 60)"
+    B_DT_PANE_ID="$(printf '%s\n' "$B_DT_SET_LINE" | sed -E 's/.*SetDevtoolsOverlay: pane_id=([^ ]+) .*/\1/')"
+    [ -n "$B_DT_PANE_ID" ] || fail "failed to extract browser B DevTools pane id"
+    log "devtools_singleton_browser_b_devtools_pane_id=$B_DT_PANE_ID"
+    wait_for_log_after "$B_DEVTOOLS_START_LINE" "CreateDevtoolsTab: pane_id=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for browser B DevTools pane" 60
+    B_DT_TAB_READY_LINE="$(wait_for_trace_line_after "$B_DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported browser B DevTools tab ready" 60)"
+    B_DT_BROWSER_TAB_ID="$(printf '%s\n' "$B_DT_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    [ -n "$B_DT_BROWSER_TAB_ID" ] || fail "failed to extract browser B DevTools browser tab id"
+    log "devtools_singleton_browser_b_devtools_tab_id=$B_DT_BROWSER_TAB_ID"
+    require_trace_after "$B_DEVTOOLS_TRACE_START_LINE" "ca-context tab=${B_DT_BROWSER_TAB_ID} pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported browser B DevTools CA context"
+  fi
 fi
 
 if [ "$SCENARIO" = "split-right" ]; then
