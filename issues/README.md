@@ -9,7 +9,6 @@
 | [0797](0797-pdf-core-workflow-coverage/README.md)               | PDF Core Workflow Coverage                            | 2026-05-30 |
 | [0798](0798-pdf-advanced-features/README.md)                    | PDF Advanced Features                                 | 2026-05-30 |
 | [0803](0803-roastty-debug-overlay/README.md)                    | Roastty Debug Overlay                                 | 2026-06-13 |
-| [0811](0811-ghostboard-cursor-feedback/README.md)               | Ghostboard Cursor Feedback                            | 2026-06-17 |
 | [0812](0812-ghostboard-gui-active-state/README.md)              | Ghostboard GUI Active State                           | 2026-06-17 |
 | [0813](0813-ghostboard-devtools-singleton-guard/README.md)      | Ghostboard One-DevTools-Per-Tab Guard                 | 2026-06-17 |
 | [0814](0814-ghostboard-launch-discovery-workflow/README.md)     | Ghostboard Launch and Browser Discovery Workflow      | 2026-06-17 |
@@ -24,6 +23,7 @@
 
 | #                                                             | Title                                                                         | Opened     | Closed     |
 | ------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0811](0811-ghostboard-cursor-feedback/README.md)             | Ghostboard Cursor Feedback                                                    | 2026-06-17 | 2026-06-17 |
 | [0810](0810-ghostboard-preventive-parity-audit/README.md)     | Ghostboard Preventive Parity Audit                                            | 2026-06-17 | 2026-06-17 |
 | [0809](0809-ghostboard-viewport-geometry/README.md)           | Ghostboard Viewport Geometry                                                  | 2026-06-17 | 2026-06-17 |
 | [0808](0808-recreate-ghostboard-from-ghostty-1-3-1/README.md) | Re-create Ghostboard from Ghostty 1.3.1                                       | 2026-06-16 | 2026-06-16 |

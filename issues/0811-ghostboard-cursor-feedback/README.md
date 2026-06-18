@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-17"
+closed = "2026-06-17"
 +++
 
 # Issue 811: Ghostboard Cursor Feedback
@@ -41,3 +42,10 @@ Verification should include at least:
 
 - [Experiment 1: Wire browser cursor updates into AppKit](01-wire-browser-cursor-updates.md)
   — **Pass**
+
+## Conclusion
+
+Ghostboard now routes Roamium `CursorChanged` messages through the Zig TermSurf
+dispatcher into the AppKit surface for the owning pane. Experiment 1 proved the
+previous ignored-message behavior, implemented per-pane cursor state, and
+verified link, input, default-background, and two-tab isolation cases.
