@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-17"
+closed = "2026-06-18"
 +++
 
 # Issue 817: Ghostboard Input and Focus Regression Matrix
@@ -44,3 +45,26 @@ manual or screenshot-heavy cases separated from fast smoke tests.
   — **Partial**
 - [Experiment 3: Fix browser drag forwarding](03-fix-browser-drag-forwarding.md)
   — **Pass**
+
+## Conclusion
+
+Issue 817 produced a focused Ghostboard input/focus regression matrix and fixed
+the only confirmed Ghostboard-owned gap found by that matrix: browser drag
+selection failed because AppKit drag-generated TermSurf mouse moves did not
+preserve the active left-button modifier.
+
+The durable automated coverage now includes:
+
+- baseline mouse geometry/click routing after geometry changes;
+- keyboard routing across tab and window focus changes;
+- GUI active/inactive focus delivery;
+- Control-mode and Browse-mode `Cmd+C` clipboard behavior;
+- browser-observed text input, special-key editing, logical caret/focus state,
+  enter activation, click counts, modifier-click, drag selection, browser
+  selection copy, Control-mode focus return, and ordered overlay drag
+  consumption.
+
+Mouse hot-path performance remains intentionally deferred to Issue 820. Any
+future product requirement for screenshot-level visual dimming or visible caret
+assertions should be added as a new targeted issue rather than reopening this
+closed record.
