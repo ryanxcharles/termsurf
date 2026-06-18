@@ -50,3 +50,5 @@ Verification should include:
   — **Partial**
 - [Experiment 8: Add testable Ghostboard app install root](08-add-testable-ghostboard-app-install-root.md)
   — **Pass**
+- [Experiment 9: Define installed Roamium discovery](09-define-installed-roamium-discovery.md)
+  — **Designed**
