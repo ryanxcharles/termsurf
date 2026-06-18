@@ -117,9 +117,15 @@ build_wezboard() {
 
 build_ghostboard() {
   local CONFIGURATION="Debug"
+  local ZIG_OPTIMIZE="Debug"
   if $RELEASE; then
     CONFIGURATION="Release"
+    ZIG_OPTIMIZE="ReleaseFast"
   fi
+
+  echo "==> Building GhostboardKit ($ZIG_OPTIMIZE)..."
+  cd "$REPO_DIR/ghostboard"
+  zig build -Demit-macos-app=false -Doptimize="$ZIG_OPTIMIZE"
 
   cd "$REPO_DIR/ghostboard/macos"
   if $CLEAN; then
@@ -129,6 +135,9 @@ build_ghostboard() {
 
   echo "==> Building Ghostboard ($CONFIGURATION)..."
   ./build.nu --configuration "$CONFIGURATION" --action build
+  if $RELEASE; then
+    codesign --force --deep --sign - "build/$CONFIGURATION/TermSurf Ghostboard.app"
+  fi
   echo "  Ghostboard: $REPO_DIR/ghostboard/macos/build/$CONFIGURATION/TermSurf Ghostboard.app"
   echo "  Ghostboard executable: $REPO_DIR/ghostboard/macos/build/$CONFIGURATION/TermSurf Ghostboard.app/Contents/MacOS/ghostboard"
 }

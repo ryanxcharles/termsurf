@@ -7,6 +7,7 @@ CHROMIUM_OUT="$REPO_DIR/chromium/src/out/Default"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 GHOSTBOARD_RELEASE_APP="$REPO_DIR/ghostboard/macos/build/Release/TermSurf Ghostboard.app"
 APPLICATIONS_DIR="${TERMSURF_APPLICATIONS_DIR:-/Applications}"
+ROAMIUM_INSTALL_DIR="${TERMSURF_ROAMIUM_INSTALL_DIR:-/opt/homebrew/opt/termsurf-roamium}"
 
 COMPONENT="${1:-}"
 
@@ -23,6 +24,15 @@ if [ "$COMPONENT" = "ghostboard" ] && [ ! -x "$GHOSTBOARD_RELEASE_APP/Contents/M
 fi
 
 needs_root() {
+  if [ "$COMPONENT" = "roamium" ] && [ "$ROAMIUM_INSTALL_DIR" != "/opt/homebrew/opt/termsurf-roamium" ]; then
+    mkdir -p "$ROAMIUM_INSTALL_DIR" || {
+      echo "Error: TERMSURF_ROAMIUM_INSTALL_DIR is not writable: $ROAMIUM_INSTALL_DIR"
+      exit 1
+    }
+    [ -w "$ROAMIUM_INSTALL_DIR" ] && return 1
+    echo "Error: TERMSURF_ROAMIUM_INSTALL_DIR is not writable: $ROAMIUM_INSTALL_DIR"
+    exit 1
+  fi
   if [ "$COMPONENT" = "ghostboard" ] && [ "$APPLICATIONS_DIR" != "/Applications" ]; then
     mkdir -p "$APPLICATIONS_DIR" || {
       echo "Error: TERMSURF_APPLICATIONS_DIR is not writable: $APPLICATIONS_DIR"
@@ -37,12 +47,15 @@ needs_root() {
 
 # Re-exec as root so we only prompt for the password once.
 if [ "$(id -u)" -ne 0 ] && needs_root; then
-  exec sudo "$0" "$@"
+  exec sudo env \
+    TERMSURF_APPLICATIONS_DIR="$APPLICATIONS_DIR" \
+    TERMSURF_ROAMIUM_INSTALL_DIR="$ROAMIUM_INSTALL_DIR" \
+    "$0" "$@"
 fi
 
 install_roamium() {
   local ROAMIUM_SRC="$REPO_DIR/target/release/roamium"
-  local INSTALL_DIR="/usr/local/roamium"
+  local INSTALL_DIR="$ROAMIUM_INSTALL_DIR"
 
   if [ ! -f "$ROAMIUM_SRC" ]; then
     echo "Error: Release build not found at $ROAMIUM_SRC"
@@ -66,6 +79,7 @@ install_roamium() {
   codesign --force --sign - "$INSTALL_DIR/roamium" || true
 
   # Clean up old install locations.
+  rm -rf /usr/local/roamium
   rm -f /usr/local/bin/roamium
   rm -rf /usr/local/lib/roamium
 

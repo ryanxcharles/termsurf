@@ -183,3 +183,141 @@ After implementation and verification:
   file; and
 - commit the reviewed result separately before designing or implementing the
   next experiment.
+
+## Result
+
+**Result:** Pass
+
+Implemented installed Roamium discovery while preserving the debug resolver
+contract.
+
+Changed files:
+
+- `ghostboard/src/apprt/termsurf.zig`
+  - `roamium` still resolves through an explicit absolute
+    `TERMSURF_ROAMIUM_PATH` when that environment variable is valid.
+  - Debug Zig builds return `null` after a missing, empty, or relative
+    `TERMSURF_ROAMIUM_PATH`, so debug named/default `roamium` does not fall back
+    to installed paths.
+  - Non-debug Zig builds fall back to installed discovery. The canonical
+    installed path is `/opt/homebrew/opt/termsurf-roamium/roamium`.
+  - Release harnesses can set the absolute-only
+    `TERMSURF_INSTALLED_ROAMIUM_PATH` override to test installed discovery
+    without writing to `/opt/homebrew`.
+- `scripts/build.sh`
+  - Ghostboard builds now refresh `GhosttyKit.xcframework` with matching Zig
+    optimization before Xcode runs: `Debug` for debug app builds and
+    `ReleaseFast` for release app builds.
+  - Release app builds are deep ad-hoc signed after Xcode so embedded Sparkle
+    can load when the app is launched directly from the harness.
+- `scripts/install.sh`
+  - Manual Roamium installs now default to `/opt/homebrew/opt/termsurf-roamium`,
+    with `TERMSURF_ROAMIUM_INSTALL_DIR` available as a test/install override.
+  - Old `/usr/local/roamium`, `/usr/local/bin/roamium`, and
+    `/usr/local/lib/roamium` locations are still cleaned up.
+- `scripts/uninstall.sh`
+  - Roamium uninstall removes `/opt/homebrew/opt/termsurf-roamium` by default
+    and still removes old `/usr/local` locations.
+- `docs/ghostboard-launch-discovery.md`
+  - Documents the debug resolver contract and the release installed discovery
+    contract.
+- `scripts/ghostboard-geometry-matrix.sh`
+  - Adds `installed-roamium-release-launch`.
+  - The release scenario launches the Release app, omits
+    `TERMSURF_ROAMIUM_PATH`, writes its harness config through a temporary
+    `$XDG_CONFIG_HOME/termsurf/config`, and sets
+    `TERMSURF_INSTALLED_ROAMIUM_PATH` to the repo-built Roamium binary.
+  - Resolver-only scenarios no longer require the generic initial AppKit
+    hit-test prerequisite; mouse/geometry scenarios still keep that assertion.
+
+Verification passed:
+
+```bash
+zig fmt ghostboard/src/apprt/termsurf.zig
+bash -n scripts/build.sh scripts/install.sh scripts/uninstall.sh scripts/ghostboard-geometry-matrix.sh
+git diff --check
+rg -n 'TERMSURF_ROAMIUM_PATH|TERMSURF_INSTALLED_ROAMIUM_PATH|termsurf-roamium|/usr/local/roamium|/opt/homebrew/opt/termsurf-roamium' \
+  ghostboard/src/apprt/termsurf.zig \
+  scripts/build.sh \
+  scripts/install.sh \
+  scripts/uninstall.sh \
+  scripts/ghostboard-geometry-matrix.sh \
+  docs/ghostboard-launch-discovery.md \
+  homebrew/Casks/termsurf.rb
+scripts/build.sh ghostboard
+scripts/build.sh ghostboard --release
+scripts/ghostboard-geometry-matrix.sh named-roamium-debug-launch
+scripts/ghostboard-geometry-matrix.sh named-roamium-invalid-env
+scripts/ghostboard-geometry-matrix.sh installed-roamium-release-launch
+```
+
+Runtime evidence:
+
+- `named-roamium-debug-launch` passed and proved no `--browser` argument was
+  used, `TERMSURF_ROAMIUM_PATH` resolved the named `roamium` browser, the debug
+  Roamium path spawned, `BrowserReady` preserved `browser=roamium`, and no stale
+  installed path was used.
+- `named-roamium-invalid-env` passed and proved a relative
+  `TERMSURF_ROAMIUM_PATH=roamium` logs a clear unresolved named-browser error,
+  creates no pending `default/roamium` server, and spawns no browser.
+- `installed-roamium-release-launch` passed and proved the Release app can load
+  the harness config through XDG config, discover `TERMSURF_SOCKET`, receive a
+  named/default `roamium` `SetOverlay`, avoid any
+  `env=TERMSURF_ROAMIUM_PATH path=` resolution, resolve through
+  `TERMSURF_INSTALLED_ROAMIUM_PATH`, spawn that installed override path, and
+  preserve `browser=roamium` in `BrowserReady`.
+
+The release scenario initially exposed two packaging/build issues that were
+fixed in this experiment:
+
+- the Release app launched directly from the harness could not load Sparkle
+  until the build script deep-signed the app bundle after Xcode; and
+- Xcode Release builds could link a stale Debug `GhosttyKit.xcframework`, so
+  `build_config.is_debug` stayed true and installed fallback was disabled until
+  the build script refreshed the xcframework in `ReleaseFast`.
+
+## Conclusion
+
+Issue 819 now has a deliberate installed Roamium discovery contract:
+
+1. Debug Ghostboard keeps deterministic developer behavior: named/default
+   `roamium` requires an absolute `TERMSURF_ROAMIUM_PATH`.
+2. Release Ghostboard can launch normal named/default `roamium` without
+   `TERMSURF_ROAMIUM_PATH` by resolving to the installed Roamium location.
+3. Resolver, docs, manual install/uninstall scripts, and the Homebrew cask agree
+   on `/opt/homebrew/opt/termsurf-roamium/roamium`.
+4. The Ghostboard build script now refreshes the Zig xcframework in the correct
+   optimization mode before Xcode app builds, preventing stale debug/release
+   resolver behavior from leaking across builds.
+
+The release harness proves installed discovery with an override path rather than
+a real `/opt/homebrew/opt/termsurf-roamium/roamium` install, which keeps the
+test non-destructive while still exercising the release-only fallback path.
+
+## Completion Review
+
+Fresh-context adversarial completion review by Codex subagent `Boyle the 2nd`:
+
+- **Initial verdict:** Changes required.
+- **Required finding:** `scripts/install.sh` accepted
+  `TERMSURF_ROAMIUM_INSTALL_DIR`, but a normal non-root
+  `scripts/install.sh roamium` would re-exec through `sudo` without preserving
+  the override, causing the install to fall back to
+  `/opt/homebrew/opt/termsurf-roamium`.
+- **Fix:** `scripts/install.sh` and `scripts/uninstall.sh` now treat a
+  non-default writable `TERMSURF_ROAMIUM_INSTALL_DIR` like the existing
+  `TERMSURF_APPLICATIONS_DIR` override, and both scripts preserve
+  `TERMSURF_ROAMIUM_INSTALL_DIR` through `sudo env` if escalation is still
+  needed.
+
+Fresh-context adversarial re-review by Codex subagent `Euclid the 2nd`:
+
+- **Final verdict:** Approved.
+- **Resolved finding:** The reviewer confirmed `scripts/install.sh roamium` now
+  avoids `sudo` for a writable non-default `TERMSURF_ROAMIUM_INSTALL_DIR`, and
+  preserves the override through `sudo env` if escalation is required.
+- **Additional check:** The reviewer confirmed `scripts/uninstall.sh` mirrors
+  the same override handling.
+- **Read-only verification rerun by reviewer:**
+  `bash -n scripts/build.sh scripts/install.sh scripts/uninstall.sh scripts/ghostboard-geometry-matrix.sh`
+  and `git diff --check` passed.

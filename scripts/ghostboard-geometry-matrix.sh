@@ -7,9 +7,13 @@ TS="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="$ROOT/logs"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/termsurf-ghostboard-geometry-${SCENARIO}.XXXXXX")"
 APP="${TERMSURF_GHOSTBOARD_APP:-$ROOT/ghostboard/macos/build/Debug/TermSurf Ghostboard.app}"
+if [ "$SCENARIO" = "installed-roamium-release-launch" ] && [ -z "${TERMSURF_GHOSTBOARD_APP:-}" ]; then
+  APP="$ROOT/ghostboard/macos/build/Release/TermSurf Ghostboard.app"
+fi
 APP_BIN="$APP/Contents/MacOS/ghostboard"
 WEB="${TERMSURF_WEB:-$ROOT/target/debug/web}"
 ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
+INSTALLED_ROAMIUM="${TERMSURF_INSTALLED_ROAMIUM:-$ROAMIUM}"
 ROAMIUM_PATH_FOR_APP="$ROAMIUM"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
 HELLO_CONFIG_HOMEPAGE="${TERMSURF_HELLO_CONFIG_HOMEPAGE:-https://example.net/issue-815-homepage}"
@@ -1727,15 +1731,23 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
 esac
 
+RESOLVER_ONLY_SCENARIO=0
+if [ "$SCENARIO" = "named-roamium-debug-launch" ] || [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+  RESOLVER_ONLY_SCENARIO=1
+fi
+
 require_file "$APP_BIN"
 require_file "$WEB"
 require_file "$ROAMIUM"
+if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+  require_file "$INSTALLED_ROAMIUM"
+fi
 require_readable "$ROOT/scripts/ghostty-app/inject.swift"
 require_readable "$ROOT/scripts/ghostty-app/winid.swift"
 
@@ -2519,6 +2531,7 @@ fi
 
 COMMAND="$RUN_DIR/run-web.sh"
 CONFIG="$RUN_DIR/config"
+RELEASE_XDG_CONFIG_HOME="$RUN_DIR/release-xdg"
 WINDOW_BOUNDS="$RUN_DIR/window-bounds.swift"
 APP_WINDOWS="$RUN_DIR/app-windows.swift"
 DISPLAY_INVENTORY="$RUN_DIR/display-inventory.swift"
@@ -2542,7 +2555,7 @@ EOF
   chmod +x "$COMMAND"
 fi
 
-if [ "$SCENARIO" = "named-roamium-debug-launch" ] || [ "$SCENARIO" = "named-roamium-invalid-env" ]; then
+if [ "$SCENARIO" = "named-roamium-debug-launch" ] || [ "$SCENARIO" = "named-roamium-invalid-env" ] || [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
 exec "$WEB" "$URL"
@@ -2691,6 +2704,11 @@ if [ "$SCENARIO" = "hello-empty-browser-list" ]; then
   cat >>"$CONFIG" <<'EOF'
 browser = ""
 EOF
+fi
+
+if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+  mkdir -p "$RELEASE_XDG_CONFIG_HOME/termsurf"
+  cp "$CONFIG" "$RELEASE_XDG_CONFIG_HOME/termsurf/config"
 fi
 
 if [ "$SCENARIO" = "ghostboard-config-paths" ]; then
@@ -3752,17 +3770,31 @@ if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   log "mouse_tui_reset_screenshot=$SCREENSHOT_TUI_RESET"
 fi
 
-GHOSTTY_CONFIG_PATH="$CONFIG" \
-GHOSTTY_LOG=stderr \
-TERMSURF_GEOMETRY_TRACE=1 \
-TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
-TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
-TERMSURF_ROAMIUM_PATH="$ROAMIUM_PATH_FOR_APP" \
-TERMSURF_WEBTUI_STATE_TRACE_FILE="$WEBTUI_STATE_TRACE" \
-TERMSURF_INPUT_TRACE=1 \
-TERMSURF_PDF_INPUT_TRACE=1 \
-TERMSURF_PDF_INPUT_TRACE_FILE="$ROAMIUM_TRACE" \
-  "$APP_BIN" >"$APP_LOG" 2>&1 &
+if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+  XDG_CONFIG_HOME="$RELEASE_XDG_CONFIG_HOME" \
+  GHOSTTY_LOG=stderr \
+  TERMSURF_GEOMETRY_TRACE=1 \
+  TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
+  TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
+  TERMSURF_INSTALLED_ROAMIUM_PATH="$INSTALLED_ROAMIUM" \
+  TERMSURF_WEBTUI_STATE_TRACE_FILE="$WEBTUI_STATE_TRACE" \
+  TERMSURF_INPUT_TRACE=1 \
+  TERMSURF_PDF_INPUT_TRACE=1 \
+  TERMSURF_PDF_INPUT_TRACE_FILE="$ROAMIUM_TRACE" \
+    "$APP_BIN" >"$APP_LOG" 2>&1 &
+else
+  GHOSTTY_CONFIG_PATH="$CONFIG" \
+  GHOSTTY_LOG=stderr \
+  TERMSURF_GEOMETRY_TRACE=1 \
+  TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
+  TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
+  TERMSURF_ROAMIUM_PATH="$ROAMIUM_PATH_FOR_APP" \
+  TERMSURF_WEBTUI_STATE_TRACE_FILE="$WEBTUI_STATE_TRACE" \
+  TERMSURF_INPUT_TRACE=1 \
+  TERMSURF_PDF_INPUT_TRACE=1 \
+  TERMSURF_PDF_INPUT_TRACE_FILE="$ROAMIUM_TRACE" \
+    "$APP_BIN" >"$APP_LOG" 2>&1 &
+fi
 PID="$!"
 log "pid=$PID"
 
@@ -3807,7 +3839,11 @@ delay 1
 require_log 'TermSurf geometry layer=zig' "Zig geometry record"
 require_log 'TermSurf geometry layer=bridge' "bridge geometry record"
 require_log 'TermSurf geometry layer=appkit event=presented ' "AppKit presented geometry record"
-require_log 'TermSurf geometry layer=appkit event=hit_test .*hit=true' "AppKit hit-test geometry record"
+if [ "$RESOLVER_ONLY_SCENARIO" = "0" ]; then
+  require_log 'TermSurf geometry layer=appkit event=hit_test .*hit=true' "AppKit hit-test geometry record"
+else
+  log "PASS: resolver-only scenario skipped generic initial hit-test prerequisite"
+fi
 require_log "scenario=${SCENARIO}" "scenario id in geometry records"
 
 CA_CONTEXT_LINE="$(grep -E 'TermSurf geometry layer=zig event=ca_context' "$APP_LOG" | tail -1)"
@@ -3815,14 +3851,16 @@ ZIG_PRESENT_LINE="$(grep -E 'TermSurf geometry layer=zig event=present_overlay_c
 BRIDGE_PRESENT_LINE="$(grep -E 'TermSurf geometry layer=bridge event=present_target_found' "$APP_LOG" | tail -1)"
 APPKIT_PRESENT_LINE="$(grep -E 'TermSurf geometry layer=appkit event=presented ' "$APP_LOG" | tail -1)"
 APPKIT_PIXELS_LINE="$(grep -E 'TermSurf geometry layer=appkit event=presented_pixels' "$APP_LOG" | tail -1)"
-HIT_TEST_LINE="$(grep -E 'TermSurf geometry layer=appkit event=hit_test .*hit=true' "$APP_LOG" | tail -1)"
+HIT_TEST_LINE="$(grep -E 'TermSurf geometry layer=appkit event=hit_test .*hit=true' "$APP_LOG" | tail -1 || true)"
 
 [ -n "$CA_CONTEXT_LINE" ] || fail "missing Zig ca_context geometry line"
 [ -n "$ZIG_PRESENT_LINE" ] || fail "missing Zig present_overlay_call geometry line"
 [ -n "$BRIDGE_PRESENT_LINE" ] || fail "missing bridge present_target_found geometry line"
 [ -n "$APPKIT_PRESENT_LINE" ] || fail "missing AppKit presented geometry line"
 [ -n "$APPKIT_PIXELS_LINE" ] || fail "missing AppKit presented-pixels geometry line"
-[ -n "$HIT_TEST_LINE" ] || fail "missing AppKit hit-test geometry line"
+if [ "$RESOLVER_ONLY_SCENARIO" = "0" ]; then
+  [ -n "$HIT_TEST_LINE" ] || fail "missing AppKit hit-test geometry line"
+fi
 
 PANE_ID="$(printf '%s\n' "$CA_CONTEXT_LINE" | sed -E 's/.*pane_id:([^ ]+).*/\1/')"
 [ -n "$PANE_ID" ] || fail "could not extract pane id"
@@ -3889,9 +3927,11 @@ require_text "$APPKIT_PIXELS_LINE" "appkit_pixel=${APPKIT_PIXEL}" "AppKit report
 require_log "TermSurf geometry layer=zig event=appkit_presented_pixels .*pane_id:${PANE_ID} .*appkit_pixel=${APPKIT_PIXEL}" "Zig records AppKit presented pixel size"
 require_log "TermSurf geometry layer=zig event=appkit_corrective_resize .*pane_id:${PANE_ID} .*appkit_pixel=${APPKIT_PIXEL}" "Zig sends corrective resize for AppKit pixel size"
 require_log "TermSurf geometry layer=appkit .*context_id=${CONTEXT_ID}" "AppKit shares context id"
-require_text "$HIT_TEST_LINE" "context_id=${CONTEXT_ID}" "hit-test shares context"
-require_text "$HIT_TEST_LINE" "hit=true" "hit-test is inside overlay"
-require_text "$HIT_TEST_LINE" "web_point={" "hit-test includes webview-relative point"
+if [ "$RESOLVER_ONLY_SCENARIO" = "0" ]; then
+  require_text "$HIT_TEST_LINE" "context_id=${CONTEXT_ID}" "hit-test shares context"
+  require_text "$HIT_TEST_LINE" "hit=true" "hit-test is inside overlay"
+  require_text "$HIT_TEST_LINE" "web_point={" "hit-test includes webview-relative point"
+fi
 require_log "TermSurf geometry .*scenario=${SCENARIO}" "timestamped run contains scenario id"
 require_log 'window_id:[^ ]+ surface_id:[^ ]+ selected_tab_id:[^ ]+ pane_id:[^ ]+ browser_tab_id:[^ ]+' "canonical identity tuple fields"
 require_readable "$ROAMIUM_TRACE"
@@ -4748,6 +4788,22 @@ if [ "$SCENARIO" = "named-roamium-debug-launch" ]; then
     fail "named Roamium debug launch used a stale installed Roamium path"
   fi
   log "PASS: named Roamium debug launch did not use a stale installed path"
+fi
+
+if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+  if grep -F -- "--browser" "$COMMAND" >/dev/null 2>&1; then
+    fail "installed Roamium release launch command unexpectedly contains --browser"
+  fi
+  log "PASS: installed Roamium release launch command omits --browser"
+  require_log "TermSurf message decoded type=HelloRequest" "release webtui discovered TERMSURF_SOCKET"
+  require_log "SetOverlay: pane_id=${PANE_ID} profile=default browser=roamium url=${URL}" "release named Roamium SetOverlay"
+  if grep -F "env=TERMSURF_ROAMIUM_PATH path=" "$APP_LOG" >/dev/null 2>&1; then
+    fail "release installed Roamium scenario unexpectedly resolved through TERMSURF_ROAMIUM_PATH"
+  fi
+  log "PASS: release installed Roamium scenario did not resolve through TERMSURF_ROAMIUM_PATH"
+  require_log "SetOverlay: named browser resolved browser=roamium env=TERMSURF_INSTALLED_ROAMIUM_PATH path=${INSTALLED_ROAMIUM}" "release Ghostboard resolved Roamium through installed override"
+  require_log "spawned browser path=${INSTALLED_ROAMIUM} pid=[0-9]+ profile=default" "release Ghostboard spawned installed override Roamium path"
+  require_log "BrowserReady: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} socket=.* browser=roamium" "release BrowserReady preserved named Roamium key"
 fi
 
 if [ "$SCENARIO" = "hello-config-homepage" ]; then

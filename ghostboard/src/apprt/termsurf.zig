@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_config = @import("../build_config.zig");
 const internal_os = @import("../os/main.zig");
 
 const c = @cImport({
@@ -31,6 +32,8 @@ const geometry_trace_env = "TERMSURF_GEOMETRY_TRACE";
 const devtools_reservation_timeout_env = "TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS";
 const default_devtools_reservation_timeout_ms: i64 = 15_000;
 const roamium_path_env = "TERMSURF_ROAMIUM_PATH";
+const installed_roamium_path_env = "TERMSURF_INSTALLED_ROAMIUM_PATH";
+const installed_roamium_path = "/opt/homebrew/opt/termsurf-roamium/roamium";
 
 extern "c" fn termsurf_open_split(
     pane_id: [*:0]const u8,
@@ -1421,25 +1424,46 @@ fn resolveBrowserExecutable(browser: []const u8) ?[]const u8 {
     }
 
     if (std.mem.eql(u8, browser, default_browser)) {
-        const resolved = std.posix.getenv(roamium_path_env) orelse {
-            log.warn(
-                "SetOverlay: named browser unresolved browser={s} env={s}",
-                .{ browser, roamium_path_env },
-            );
-            return null;
-        };
-        if (resolved.len == 0 or !isAbsolutePath(resolved)) {
+        if (std.posix.getenv(roamium_path_env)) |resolved| {
+            if (resolved.len != 0 and isAbsolutePath(resolved)) {
+                log.info(
+                    "SetOverlay: named browser resolved browser={s} env={s} path={s}",
+                    .{ browser, roamium_path_env, resolved },
+                );
+                return resolved;
+            }
             log.warn(
                 "SetOverlay: named browser unresolved browser={s} env={s} value={s}",
                 .{ browser, roamium_path_env, resolved },
             );
-            return null;
+        } else {
+            log.warn(
+                "SetOverlay: named browser unresolved browser={s} env={s}",
+                .{ browser, roamium_path_env },
+            );
         }
+
+        if (comptime build_config.is_debug) return null;
+
+        if (std.posix.getenv(installed_roamium_path_env)) |resolved| {
+            if (resolved.len != 0 and isAbsolutePath(resolved)) {
+                log.info(
+                    "SetOverlay: named browser resolved browser={s} env={s} path={s}",
+                    .{ browser, installed_roamium_path_env, resolved },
+                );
+                return resolved;
+            }
+            log.warn(
+                "SetOverlay: installed browser override ignored browser={s} env={s} value={s}",
+                .{ browser, installed_roamium_path_env, resolved },
+            );
+        }
+
         log.info(
-            "SetOverlay: named browser resolved browser={s} env={s} path={s}",
-            .{ browser, roamium_path_env, resolved },
+            "SetOverlay: named browser resolved browser={s} installed_path={s}",
+            .{ browser, installed_roamium_path },
         );
-        return resolved;
+        return installed_roamium_path;
     }
 
     log.warn("SetOverlay: named browser unsupported browser={s}", .{browser});

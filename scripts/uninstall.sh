@@ -3,6 +3,7 @@ set -euo pipefail
 
 COMPONENT="${1:-}"
 APPLICATIONS_DIR="${TERMSURF_APPLICATIONS_DIR:-/Applications}"
+ROAMIUM_INSTALL_DIR="${TERMSURF_ROAMIUM_INSTALL_DIR:-/opt/homebrew/opt/termsurf-roamium}"
 
 if [ -z "$COMPONENT" ]; then
   echo "Usage: $0 <component>"
@@ -11,6 +12,15 @@ if [ -z "$COMPONENT" ]; then
 fi
 
 needs_root() {
+  if [ "$COMPONENT" = "roamium" ] && [ "$ROAMIUM_INSTALL_DIR" != "/opt/homebrew/opt/termsurf-roamium" ]; then
+    mkdir -p "$ROAMIUM_INSTALL_DIR" || {
+      echo "Error: TERMSURF_ROAMIUM_INSTALL_DIR is not writable: $ROAMIUM_INSTALL_DIR"
+      exit 1
+    }
+    [ -w "$ROAMIUM_INSTALL_DIR" ] && return 1
+    echo "Error: TERMSURF_ROAMIUM_INSTALL_DIR is not writable: $ROAMIUM_INSTALL_DIR"
+    exit 1
+  fi
   if [ "$COMPONENT" = "ghostboard" ] && [ "$APPLICATIONS_DIR" != "/Applications" ]; then
     mkdir -p "$APPLICATIONS_DIR" || {
       echo "Error: TERMSURF_APPLICATIONS_DIR is not writable: $APPLICATIONS_DIR"
@@ -25,18 +35,22 @@ needs_root() {
 
 # Re-exec as root so we only prompt for the password once.
 if [ "$(id -u)" -ne 0 ] && needs_root; then
-  exec sudo "$0" "$@"
+  exec sudo env \
+    TERMSURF_APPLICATIONS_DIR="$APPLICATIONS_DIR" \
+    TERMSURF_ROAMIUM_INSTALL_DIR="$ROAMIUM_INSTALL_DIR" \
+    "$0" "$@"
 fi
 
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 
 uninstall_roamium() {
   echo "==> Uninstalling Roamium..."
+  rm -rf "$ROAMIUM_INSTALL_DIR"
   rm -rf /usr/local/roamium
   rm -f /usr/local/bin/roamium
   rm -rf /usr/local/lib/roamium
 
-  echo "  Removed: /usr/local/roamium"
+  echo "  Removed: $ROAMIUM_INSTALL_DIR"
 }
 
 uninstall_wezboard() {

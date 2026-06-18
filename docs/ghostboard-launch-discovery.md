@@ -15,7 +15,7 @@ old installed Roamium.
 The debug app binary is:
 
 ```bash
-ghostboard/macos/build/Debug/TermSurf.app/Contents/MacOS/termsurf
+ghostboard/macos/build/Debug/TermSurf Ghostboard.app/Contents/MacOS/ghostboard
 ```
 
 The geometry harness launches this binary directly from
@@ -31,13 +31,13 @@ claim is trusted.
 
 Ghostboard currently supports these browser selection rules:
 
-| Web command                                   | Browser field received by Ghostboard       | Spawn behavior                           |
-| --------------------------------------------- | ------------------------------------------ | ---------------------------------------- |
-| `web --browser /absolute/path/to/roamium URL` | absolute path                              | Spawn exactly that path.                 |
-| `web URL`                                     | named/default `roamium`                    | Resolve through `TERMSURF_ROAMIUM_PATH`. |
-| `web --browser relative-name URL`             | named browser other than supported default | Fail as unsupported.                     |
+| Web command                                   | Browser field received by Ghostboard       | Spawn behavior                                                      |
+| --------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------- |
+| `web --browser /absolute/path/to/roamium URL` | absolute path                              | Spawn exactly that path.                                            |
+| `web URL`                                     | named/default `roamium`                    | Debug: resolve through `TERMSURF_ROAMIUM_PATH`; release: installed. |
+| `web --browser relative-name URL`             | named browser other than supported default | Fail as unsupported.                                                |
 
-The named/default `roamium` path is intentionally explicit:
+In debug builds, the named/default `roamium` path is intentionally explicit:
 
 - `TERMSURF_ROAMIUM_PATH` must be set;
 - it must be an absolute path;
@@ -47,6 +47,19 @@ The named/default `roamium` path is intentionally explicit:
 - Ghostboard must not fall through to `/usr/local/roamium`,
   `/usr/local/bin/roamium`, or `/opt/homebrew/opt/termsurf-roamium` during debug
   testing.
+
+In non-debug builds, named/default `roamium` first accepts an absolute
+`TERMSURF_ROAMIUM_PATH` if one is present, then resolves through installed
+Roamium discovery. The canonical installed Roamium binary is:
+
+```bash
+/opt/homebrew/opt/termsurf-roamium/roamium
+```
+
+Release harnesses may set `TERMSURF_INSTALLED_ROAMIUM_PATH` to an absolute
+Roamium binary path to test installed discovery without writing to
+`/opt/homebrew`. This override is for release/installed discovery tests; it does
+not change the debug no-installed-fallback contract.
 
 Ghostboard keeps the pane/server/browser key as the requested browser name
 (`roamium`) even when it spawns the executable from `TERMSURF_ROAMIUM_PATH`.
@@ -71,7 +84,10 @@ Runtime coverage is provided by:
   default/named `roamium` resolving through `TERMSURF_ROAMIUM_PATH`; and
 - `scripts/ghostboard-geometry-matrix.sh named-roamium-invalid-env` for clear
   failure without creating a pending `default/roamium` server or spawning a
-  browser process.
+  browser process; and
+- `scripts/ghostboard-geometry-matrix.sh installed-roamium-release-launch` for
+  release named/default `roamium` resolving through installed discovery without
+  `TERMSURF_ROAMIUM_PATH`.
 
 ## Boundary With Issue 819
 
@@ -79,6 +95,7 @@ Issue 814 does not define the final installed distribution path. It defines the
 debug contract and prevents accidental installed-binary fallback while the app
 is being tested from the repository.
 
-Issue 819 owns packaging identity and normal installed distribution behavior,
-including app bundle identity, installed Roamium locations, and any future
-LaunchServices or Homebrew resolution policy.
+Issue 819 owns packaging identity and normal installed distribution behavior. It
+defines the installed Roamium location as
+`/opt/homebrew/opt/termsurf-roamium/roamium`, matching the Homebrew cask and
+manual install scripts.
