@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-17"
+closed = "2026-06-17"
 +++
 
 # Issue 813: Ghostboard One-DevTools-Per-Tab Guard
@@ -38,3 +39,15 @@ Verification should include:
 
 - [Experiment 1: Guard duplicate DevTools requests](01-guard-duplicate-devtools-requests.md)
   — **Pass**
+
+## Conclusion
+
+Ghostboard now enforces one DevTools frontend per inspected tab. The guard runs
+when webtui queries for DevTools, reserves the target during the split launch
+window, allows the legitimate handoff from the browser pane to the DevTools
+pane, rejects same-target live duplicates before `OpenSplit`, and rejects direct
+duplicate `SetDevtoolsOverlay` creates before `CreateDevtoolsTab`.
+
+Experiment 1 also verified abandoned reservation expiry, close/reopen behavior,
+and an unrelated inspected tab opening DevTools while browser A's DevTools
+remained open.
