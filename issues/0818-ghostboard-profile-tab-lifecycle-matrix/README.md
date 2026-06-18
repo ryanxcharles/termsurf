@@ -44,4 +44,4 @@ process exit.
 - [Experiment 3: Prove same-profile server reuse and cleanup](03-prove-same-profile-server-reuse-cleanup.md)
   — **Partial**
 - [Experiment 4: Fix native tab-close TermSurf cleanup](04-fix-native-tab-close-termsurf-cleanup.md)
-  — **Designed**
+  — **Pass**

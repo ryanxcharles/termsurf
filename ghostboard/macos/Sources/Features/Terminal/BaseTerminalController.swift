@@ -449,11 +449,7 @@ class BaseTerminalController: NSWindowController,
     /// This does no confirmation and assumes confirmation is already done.
     private func removeSurfaceNode(_ node: SplitTree<Ghostty.SurfaceView>.Node, closeTermSurfPanes: Bool = true) {
         if closeTermSurfPanes {
-            for view in node {
-                view.id.uuidString.withCString { paneID in
-                    termsurf_pane_closed(paneID)
-                }
-            }
+            notifyTermSurfPanesClosed(in: node)
         }
 
         // Move focus if the closed surface was focused and we have a next target
@@ -471,6 +467,19 @@ class BaseTerminalController: NSWindowController,
             moveFocusFrom: focusedSurface,
             undoAction: "Close Terminal"
         )
+    }
+
+    func closeTermSurfPanes() {
+        guard let root = surfaceTree.root else { return }
+        notifyTermSurfPanesClosed(in: root)
+    }
+
+    private func notifyTermSurfPanesClosed(in node: SplitTree<Ghostty.SurfaceView>.Node) {
+        for view in node {
+            view.id.uuidString.withCString { paneID in
+                termsurf_pane_closed(paneID)
+            }
+        }
     }
 
     func replaceSurfaceTree(

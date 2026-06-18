@@ -134,3 +134,80 @@ Required findings and fixes:
 Re-review approved with no required findings. `Kant the 2nd` verified the macOS
 hygiene checks, native-close-only cleanup criteria, and final-shutdown criteria
 are now aligned with the experiment goal and current harness behavior.
+
+## Result
+
+**Result:** Pass
+
+Implemented the native tab-close cleanup and final profile-server cleanup path.
+The passing run was:
+
+```text
+scripts/ghostboard-geometry-matrix.sh same-profile-server-lifecycle
+timestamp: 20260618-022204
+```
+
+Runtime evidence:
+
+- Harness log:
+  `logs/ghostboard-geometry-same-profile-server-lifecycle-harness-20260618-022204.log`
+- App log:
+  `logs/ghostboard-geometry-same-profile-server-lifecycle-app-20260618-022204.log`
+- Roamium trace:
+  `logs/ghostboard-geometry-same-profile-server-lifecycle-roamium-20260618-022204.log`
+
+Passing observations:
+
+- Browser A created the `default/${ROAMIUM}` server and spawned shared Roamium
+  pid `30820`.
+- Browser B reused the same server and pid, then native tab close selected
+  browser A, sent `CloseTab`, destroyed/removed browser B in Roamium, and did
+  not leak input.
+- Browser C reopened with the same profile/server/pid, received fresh
+  pane/tab/context identity, routed input only to browser C, and native tab
+  close sent timely `Pane close cleanup` / `CloseTab` before teardown.
+- Late `SetOverlay` messages from already-closed native tabs were ignored for
+  the same TUI fd, preventing closed panes from recreating hidden Roamium tabs.
+- Browser A remained interactive after browser C closed.
+- Final browser A close sent `CloseTab`; Roamium removed the last tab and
+  exited; Ghostboard reaped the child; the harness reported
+  `PASS: shared Roamium pid exited after final browser close`.
+
+Verification run:
+
+- `prettier --write --prose-wrap always --print-width 80 issues/0818-ghostboard-profile-tab-lifecycle-matrix/README.md issues/0818-ghostboard-profile-tab-lifecycle-matrix/04-fix-native-tab-close-termsurf-cleanup.md`
+- `zig fmt src/apprt/termsurf.zig`
+- `zig build -Demit-macos-app=false` from `ghostboard`
+- `cd ghostboard && macos/build.nu --configuration Debug --action build`
+- `swiftlint lint --strict Sources/Features/Terminal/BaseTerminalController.swift Sources/Features/Terminal/TerminalController.swift`
+  from `ghostboard/macos`
+- `cargo fmt -- roamium/src/dispatch.rs roamium/src/ffi.rs`
+- `./scripts/build.sh roamium`
+- `git diff --check`
+- `bash -n scripts/ghostboard-geometry-matrix.sh`
+- `scripts/ghostboard-geometry-matrix.sh same-profile-server-lifecycle`
+
+Notes:
+
+- Full `swiftlint lint --strict` currently reports an unrelated existing
+  violation in `Sources/Ghostty/Surface View/SurfaceView_AppKit.swift:2175`. The
+  edited Swift files passed strict lint, and the macOS app build succeeded.
+
+## Conclusion
+
+Native tab close now notifies TermSurf before the AppKit tab window disappears,
+so browser panes close through the same cleanup semantics that split close
+already used. TermSurf also blocks late `SetOverlay` messages from a TUI fd
+after the GUI has closed that pane, which prevents hidden browser tab recreation
+during terminal teardown.
+
+When a profile server's final pane closes, Ghostboard now shuts down the browser
+socket, clears the server state, and reaps the Roamium child process. Roamium
+also exits deterministically after its last tab is removed. Together these fixes
+prove same-profile reuse, close/reopen, and final process cleanup in the
+`same-profile-server-lifecycle` guard.
+
+## Completion Review
+
+Adversarial completion review by `Galileo the 2nd` approved the experiment
+result with no findings.

@@ -15,6 +15,7 @@ const max_panes: usize = 256;
 const max_servers: usize = 64;
 const max_tab_lookups: usize = 512;
 const max_devtools_reservations: usize = 256;
+const max_closed_panes: usize = max_panes;
 const max_hello_browsers: usize = 16;
 const max_pane_id_len: usize = 128;
 const max_profile_len: usize = 128;
@@ -101,6 +102,17 @@ const PaneState = struct {
 
     fn browserName(self: *const PaneState) []const u8 {
         return self.browser[0..self.browser_len];
+    }
+};
+
+const ClosedPaneState = struct {
+    in_use: bool = false,
+    pane_id: [max_pane_id_len]u8 = undefined,
+    pane_id_len: usize = 0,
+    tui_fd: std.posix.fd_t = -1,
+
+    fn paneId(self: *const ClosedPaneState) []const u8 {
+        return self.pane_id[0..self.pane_id_len];
     }
 };
 
@@ -380,6 +392,23 @@ const CloseTabSnapshot = struct {
     }
 };
 
+const ServerShutdownSnapshot = struct {
+    browser_fd: std.posix.fd_t = -1,
+    child_pid: std.process.Child.Id = 0,
+    profile: [max_profile_len]u8 = undefined,
+    profile_len: usize = 0,
+    browser: [max_browser_len]u8 = undefined,
+    browser_len: usize = 0,
+
+    fn profileName(self: *const ServerShutdownSnapshot) []const u8 {
+        return self.profile[0..self.profile_len];
+    }
+
+    fn browserName(self: *const ServerShutdownSnapshot) []const u8 {
+        return self.browser[0..self.browser_len];
+    }
+};
+
 const CreateDevtoolsTabSnapshot = struct {
     browser_fd: std.posix.fd_t = -1,
     pane_id: [max_pane_id_len]u8 = undefined,
@@ -403,6 +432,7 @@ var socket_path_buf: [std.fs.max_path_bytes]u8 = undefined;
 var socket_path_len: usize = 0;
 var clients: [max_clients]ClientSlot = [_]ClientSlot{.{}} ** max_clients;
 var panes: [max_panes]PaneState = [_]PaneState{.{}} ** max_panes;
+var closed_panes: [max_closed_panes]ClosedPaneState = [_]ClosedPaneState{.{}} ** max_closed_panes;
 var servers: [max_servers]ServerState = [_]ServerState{.{}} ** max_servers;
 var tab_lookups: [max_tab_lookups]TabLookupState = [_]TabLookupState{.{}} ** max_tab_lookups;
 var devtools_reservations: [max_devtools_reservations]DevtoolsReservationState = [_]DevtoolsReservationState{.{}} ** max_devtools_reservations;
@@ -1275,6 +1305,12 @@ fn handleSetOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetOverlay) void 
     var overlay_snapshot: ?OverlaySnapshot = null;
 
     state_mutex.lock();
+
+    if (findClosedPane(pane_id, tui_fd)) |_| {
+        log.info("SetOverlay ignored for closed pane_id={s} fd={}", .{ pane_id, tui_fd });
+        state_mutex.unlock();
+        return;
+    }
 
     if (findPane(pane_id)) |pane_index| {
         if (!updatePane(&panes[pane_index], overlay, pane_id, profile, browser, url)) {
@@ -2178,6 +2214,37 @@ fn sendCloseTab(snapshot: *const CloseTabSnapshot) !void {
     log.info("CloseTab: pane_id={s} tab_id={}", .{ snapshot.paneId(), snapshot.tab_id });
 }
 
+fn shutdownServer(snapshot: *const ServerShutdownSnapshot) void {
+    std.posix.shutdown(snapshot.browser_fd, .both) catch |err| {
+        log.warn(
+            "Server shutdown failed profile={s} browser={s} err={}",
+            .{ snapshot.profileName(), snapshot.browserName(), err },
+        );
+        return;
+    };
+    log.info(
+        "Server shutdown: profile={s} browser={s}",
+        .{ snapshot.profileName(), snapshot.browserName() },
+    );
+
+    if (snapshot.child_pid == 0) return;
+    for (0..50) |_| {
+        const res = std.posix.waitpid(snapshot.child_pid, std.c.W.NOHANG);
+        if (res.pid != 0) {
+            log.info(
+                "Server child reaped: profile={s} browser={s} pid={}",
+                .{ snapshot.profileName(), snapshot.browserName(), snapshot.child_pid },
+            );
+            return;
+        }
+        std.Thread.sleep(100 * std.time.ns_per_ms);
+    }
+    log.warn(
+        "Server child reap timed out: profile={s} browser={s} pid={}",
+        .{ snapshot.profileName(), snapshot.browserName(), snapshot.child_pid },
+    );
+}
+
 fn handleTabReady(req: ?*c.Termsurf__TabReady) void {
     const ready = req orelse {
         log.warn("TabReady: missing payload", .{});
@@ -2504,6 +2571,8 @@ fn cleanupTuiPanes(fd: std.posix.fd_t) void {
     var close_tab_count: usize = 0;
     var clear_overlays: [max_panes]ClearOverlaySnapshot = undefined;
     var clear_overlay_count: usize = 0;
+    var server_shutdowns: [max_servers]ServerShutdownSnapshot = undefined;
+    var server_shutdown_count: usize = 0;
 
     state_mutex.lock();
 
@@ -2538,6 +2607,14 @@ fn cleanupTuiPanes(fd: std.posix.fd_t) void {
                     close_tab_count += 1;
                 }
             }
+
+            if (servers[server_index].pane_count == 0) {
+                if (snapshotServerShutdown(&servers[server_index])) |snapshot| {
+                    server_shutdowns[server_shutdown_count] = snapshot;
+                    server_shutdown_count += 1;
+                }
+                servers[server_index] = .{};
+            }
         }
 
         if (pane.ca_context_id != 0) {
@@ -2552,6 +2629,7 @@ fn cleanupTuiPanes(fd: std.posix.fd_t) void {
         pane.* = .{};
     }
 
+    forgetClosedPanesForFd(fd);
     state_mutex.unlock();
 
     for (clear_overlays[0..clear_overlay_count]) |*snapshot| {
@@ -2563,11 +2641,16 @@ fn cleanupTuiPanes(fd: std.posix.fd_t) void {
             log.warn("CloseTab send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
         };
     }
+
+    for (server_shutdowns[0..server_shutdown_count]) |*snapshot| {
+        shutdownServer(snapshot);
+    }
 }
 
 pub fn paneClosed(pane_id: []const u8) void {
     var close_tab: ?CloseTabSnapshot = null;
     var clear_overlay: ?ClearOverlaySnapshot = null;
+    var server_shutdown: ?ServerShutdownSnapshot = null;
 
     state_mutex.lock();
 
@@ -2576,6 +2659,7 @@ pub fn paneClosed(pane_id: []const u8) void {
         const profile = pane.profileName();
         const browser = pane.browserName();
         const tab_id = pane.tab_id;
+        const tui_fd = pane.tui_fd;
 
         if (last_browser_pane_len > 0 and
             std.mem.eql(u8, last_browser_pane[0..last_browser_pane_len], pane_id))
@@ -2599,6 +2683,11 @@ pub fn paneClosed(pane_id: []const u8) void {
                     close_tab = snapshot;
                 }
             }
+
+            if (servers[server_index].pane_count == 0) {
+                server_shutdown = snapshotServerShutdown(&servers[server_index]);
+                servers[server_index] = .{};
+            }
         }
 
         if (pane.ca_context_id != 0) {
@@ -2608,6 +2697,7 @@ pub fn paneClosed(pane_id: []const u8) void {
             }
         }
 
+        rememberClosedPane(pane_id, tui_fd);
         log.info("Pane close cleanup: pane_id={s} tab_id={}", .{ pane_id, tab_id });
         pane.* = .{};
     } else {
@@ -2624,6 +2714,10 @@ pub fn paneClosed(pane_id: []const u8) void {
         sendCloseTab(snapshot) catch |err| {
             log.warn("CloseTab send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
         };
+    }
+
+    if (server_shutdown) |*snapshot| {
+        shutdownServer(snapshot);
     }
 }
 
@@ -2761,6 +2855,54 @@ fn findPane(pane_id: []const u8) ?usize {
         if (pane.in_use and std.mem.eql(u8, pane.paneId(), pane_id)) return i;
     }
     return null;
+}
+
+fn findClosedPane(pane_id: []const u8, tui_fd: std.posix.fd_t) ?usize {
+    for (&closed_panes, 0..) |*pane, i| {
+        if (pane.in_use and
+            pane.tui_fd == tui_fd and
+            std.mem.eql(u8, pane.paneId(), pane_id))
+        {
+            return i;
+        }
+    }
+    return null;
+}
+
+fn rememberClosedPane(pane_id: []const u8, tui_fd: std.posix.fd_t) void {
+    if (tui_fd < 0) return;
+    if (findClosedPane(pane_id, tui_fd) != null) return;
+
+    for (&closed_panes) |*pane| {
+        if (!pane.in_use) {
+            if (!copyText(&pane.pane_id, &pane.pane_id_len, pane_id)) return;
+            pane.tui_fd = tui_fd;
+            pane.in_use = true;
+            return;
+        }
+    }
+
+    log.warn("Closed pane limit reached pane_id={s} fd={}", .{ pane_id, tui_fd });
+}
+
+fn forgetClosedPanesForFd(tui_fd: std.posix.fd_t) void {
+    for (&closed_panes) |*pane| {
+        if (pane.in_use and pane.tui_fd == tui_fd) {
+            pane.* = .{};
+        }
+    }
+}
+
+fn snapshotServerShutdown(server: *const ServerState) ?ServerShutdownSnapshot {
+    if (server.attached_fd < 0) return null;
+
+    var snapshot: ServerShutdownSnapshot = .{
+        .browser_fd = server.attached_fd,
+        .child_pid = server.child_pid,
+    };
+    if (!copyText(&snapshot.profile, &snapshot.profile_len, server.profileName())) return null;
+    if (!copyText(&snapshot.browser, &snapshot.browser_len, server.browserName())) return null;
+    return snapshot;
 }
 
 fn findServer(profile: []const u8, browser: []const u8) ?usize {

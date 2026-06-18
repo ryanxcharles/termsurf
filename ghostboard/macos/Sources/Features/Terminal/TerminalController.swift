@@ -671,6 +671,7 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
             }
         }
 
+        closeTermSurfPanes()
         window.close()
     }
 
@@ -776,12 +777,14 @@ class TerminalController: BaseTerminalController, TabGroupCloseCoordinator.Contr
                 // This prevents unnecessary undos registered since AppKit may
                 // process them on later ticks so we can't just disable undo registration.
                 if let controller = window.windowController as? TerminalController {
+                    controller.closeTermSurfPanes()
                     controller.surfaceTree = .init()
                 }
 
                 window.close()
             }
         } else {
+            closeTermSurfPanes()
             window.close()
         }
     }

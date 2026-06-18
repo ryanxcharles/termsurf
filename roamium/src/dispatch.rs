@@ -270,6 +270,16 @@ pub fn handle_message(msg: &TermSurfMessage) {
             }
             tabs().retain(|t| t.tab_id != tab_id);
             trace_pdf_input(format!("close-tab tab_id={} result=removed", tab_id));
+            if tabs().is_empty() {
+                trace_pdf_input(
+                    "close-tab result=no-tabs-remaining ffi=ts_destroy_browser_context".to_string(),
+                );
+                unsafe { ffi::ts_destroy_browser_context(crate::browser_context()) };
+                trace_pdf_input("close-tab result=no-tabs-remaining ffi=ts_quit".to_string());
+                unsafe { ffi::ts_quit() };
+                trace_pdf_input("close-tab result=no-tabs-remaining process-exit".to_string());
+                std::process::exit(0);
+            }
         }
         Msg::Navigate(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
