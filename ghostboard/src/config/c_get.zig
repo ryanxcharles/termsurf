@@ -23,6 +23,29 @@ pub fn get(config: *const Config, k: Key, ptr_raw: *anyopaque) bool {
     }
 }
 
+pub fn repeatableStringCount(config: *const Config, k: Key) ?usize {
+    @setEvalBranchQuota(10_000);
+    switch (k) {
+        inline else => |tag| {
+            const value = fieldByKey(config, tag);
+            if (@TypeOf(value) != Config.RepeatableString) return null;
+            return value.list.items.len;
+        },
+    }
+}
+
+pub fn repeatableStringValue(config: *const Config, k: Key, idx: usize) ?[*:0]const u8 {
+    @setEvalBranchQuota(10_000);
+    switch (k) {
+        inline else => |tag| {
+            const value = fieldByKey(config, tag);
+            if (@TypeOf(value) != Config.RepeatableString) return null;
+            if (idx >= value.list.items.len) return null;
+            return value.list.items[idx].ptr;
+        },
+    }
+}
+
 /// Get the value anytype and put it into the pointer. Returns false if
 /// the type is not supported by the C API yet or the value is null.
 fn getValue(ptr_raw: *anyopaque, value: anytype) bool {

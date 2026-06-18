@@ -15,6 +15,7 @@ const max_panes: usize = 256;
 const max_servers: usize = 64;
 const max_tab_lookups: usize = 512;
 const max_devtools_reservations: usize = 256;
+const max_hello_browsers: usize = 16;
 const max_pane_id_len: usize = 128;
 const max_profile_len: usize = 128;
 const max_browser_len: usize = std.fs.max_path_bytes;
@@ -409,6 +410,9 @@ var last_browser_pane: [max_pane_id_len]u8 = undefined;
 var last_browser_pane_len: usize = 0;
 var hello_homepage: [max_homepage_len:0]u8 = undefined;
 var hello_homepage_len: usize = 0;
+var hello_browsers: [max_hello_browsers][max_browser_len:0]u8 = undefined;
+var hello_browser_lens: [max_hello_browsers]usize = undefined;
+var hello_browser_count: usize = 0;
 var gui_active: bool = false;
 var pending_gui_activation: bool = false;
 
@@ -748,13 +752,16 @@ fn readExactOrEof(fd: std.posix.fd_t, buf: []u8) !bool {
 fn sendHelloReply(fd: std.posix.fd_t) !void {
     var reply: c.Termsurf__HelloReply = undefined;
     c.termsurf__hello_reply__init(&reply);
-    var browsers = [_][*:0]u8{@constCast(default_browser.ptr)};
     var homepage_buf: [max_homepage_len:0]u8 = undefined;
     var homepage_len: usize = 0;
+    var browser_bufs: [max_hello_browsers][max_browser_len:0]u8 = undefined;
+    var browser_lens: [max_hello_browsers]usize = undefined;
+    var browser_ptrs: [max_hello_browsers][*:0]u8 = undefined;
     const homepage = currentHelloHomepage(&homepage_buf, &homepage_len);
+    const browser_count = currentHelloBrowsers(&browser_bufs, &browser_lens, &browser_ptrs);
     reply.homepage = @constCast(homepage.ptr);
-    reply.n_browsers = browsers.len;
-    reply.browsers = @ptrCast(&browsers);
+    reply.n_browsers = browser_count;
+    reply.browsers = @ptrCast(&browser_ptrs);
 
     var wrapper: c.Termsurf__TermSurfMessage = undefined;
     c.termsurf__term_surf_message__init(&wrapper);
@@ -762,13 +769,15 @@ fn sendHelloReply(fd: std.posix.fd_t) !void {
     wrapper.unnamed_0.hello_reply = &reply;
 
     try sendProtobuf(fd, &wrapper);
+    var browser_log_buf: [1024]u8 = undefined;
+    const browser_log = browserListForLog(browser_ptrs[0..browser_count], &browser_log_buf);
     log.info(
         "TermSurf HelloReply sent homepage={s} browsers={s}",
-        .{ homepage, default_browser },
+        .{ homepage, browser_log },
     );
 }
 
-pub fn helloConfigChanged(homepage: []const u8) void {
+pub fn helloConfigChanged(homepage: []const u8, browser_payload: []const u8) void {
     const next_homepage = if (homepage.len == 0) default_homepage else homepage;
 
     state_mutex.lock();
@@ -782,24 +791,123 @@ pub fn helloConfigChanged(homepage: []const u8) void {
             "TermSurf Hello config homepage too long len={} max={} using_default={s}",
             .{ next_homepage.len, hello_homepage.len, default_homepage },
         );
-        return;
+    } else {
+        @memcpy(hello_homepage[0..next_homepage.len], next_homepage);
+        hello_homepage[next_homepage.len] = 0;
+        hello_homepage_len = next_homepage.len;
     }
 
-    @memcpy(hello_homepage[0..next_homepage.len], next_homepage);
-    hello_homepage[next_homepage.len] = 0;
-    hello_homepage_len = next_homepage.len;
-    log.info("TermSurf Hello config homepage={s}", .{next_homepage});
+    setHelloBrowsersLocked(browser_payload);
+
+    var browser_log_buf: [1024]u8 = undefined;
+    const browser_log = currentHelloBrowsersForLogLocked(&browser_log_buf);
+    log.info(
+        "TermSurf Hello config homepage={s} browsers={s}",
+        .{ currentHelloHomepageLocked(), browser_log },
+    );
 }
 
 fn currentHelloHomepage(buf: *[max_homepage_len:0]u8, len: *usize) [:0]const u8 {
     state_mutex.lock();
     defer state_mutex.unlock();
 
-    const current = if (hello_homepage_len == 0) default_homepage else hello_homepage[0..hello_homepage_len];
+    const current = currentHelloHomepageLocked();
     @memcpy(buf[0..current.len], current);
     buf[current.len] = 0;
     len.* = current.len;
     return buf[0..len.* :0];
+}
+
+fn currentHelloHomepageLocked() []const u8 {
+    return if (hello_homepage_len == 0) default_homepage else hello_homepage[0..hello_homepage_len];
+}
+
+fn setHelloBrowsersLocked(browser_payload: []const u8) void {
+    var next_count: usize = 0;
+    var it = std.mem.splitScalar(u8, browser_payload, '\n');
+    while (it.next()) |raw| {
+        const browser = std.mem.trim(u8, raw, " \t\r");
+        if (browser.len == 0) continue;
+        if (next_count >= hello_browsers.len or browser.len > hello_browsers[next_count].len) {
+            setDefaultHelloBrowsersLocked();
+            log.warn(
+                "TermSurf Hello config browsers invalid count={} len={} using_default={s}",
+                .{ next_count, browser.len, default_browser },
+            );
+            return;
+        }
+
+        @memcpy(hello_browsers[next_count][0..browser.len], browser);
+        hello_browsers[next_count][browser.len] = 0;
+        hello_browser_lens[next_count] = browser.len;
+        next_count += 1;
+    }
+
+    if (next_count == 0) {
+        setDefaultHelloBrowsersLocked();
+        return;
+    }
+
+    hello_browser_count = next_count;
+}
+
+fn setDefaultHelloBrowsersLocked() void {
+    @memcpy(hello_browsers[0][0..default_browser.len], default_browser);
+    hello_browsers[0][default_browser.len] = 0;
+    hello_browser_lens[0] = default_browser.len;
+    hello_browser_count = 1;
+}
+
+fn currentHelloBrowsers(
+    bufs: *[max_hello_browsers][max_browser_len:0]u8,
+    lens: *[max_hello_browsers]usize,
+    ptrs: *[max_hello_browsers][*:0]u8,
+) usize {
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    if (hello_browser_count == 0) setDefaultHelloBrowsersLocked();
+
+    for (0..hello_browser_count) |idx| {
+        const len = hello_browser_lens[idx];
+        @memcpy(bufs[idx][0..len], hello_browsers[idx][0..len]);
+        bufs[idx][len] = 0;
+        lens[idx] = len;
+        ptrs[idx] = @ptrCast(bufs[idx][0..len :0].ptr);
+    }
+
+    return hello_browser_count;
+}
+
+fn currentHelloBrowsersForLogLocked(buf: []u8) []const u8 {
+    if (hello_browser_count == 0) setDefaultHelloBrowsersLocked();
+    var pos: usize = 0;
+    for (0..hello_browser_count) |idx| {
+        if (idx > 0 and pos < buf.len) {
+            buf[pos] = ',';
+            pos += 1;
+        }
+        const browser = hello_browsers[idx][0..hello_browser_lens[idx]];
+        const writable = @min(browser.len, buf.len -| pos);
+        @memcpy(buf[pos .. pos + writable], browser[0..writable]);
+        pos += writable;
+    }
+    return buf[0..pos];
+}
+
+fn browserListForLog(browsers: [][*:0]u8, buf: []u8) []const u8 {
+    var pos: usize = 0;
+    for (browsers, 0..) |browser_ptr, idx| {
+        if (idx > 0 and pos < buf.len) {
+            buf[pos] = ',';
+            pos += 1;
+        }
+        const browser = std.mem.span(browser_ptr);
+        const writable = @min(browser.len, buf.len -| pos);
+        @memcpy(buf[pos .. pos + writable], browser[0..writable]);
+        pos += writable;
+    }
+    return buf[0..pos];
 }
 
 fn sendQueryLastReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryLastRequest) !void {

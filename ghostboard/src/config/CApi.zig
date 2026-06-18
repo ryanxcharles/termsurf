@@ -100,6 +100,25 @@ export fn ghostty_config_get(
     return c_get.get(self, key, ptr);
 }
 
+export fn ghostty_config_get_repeatable_string_count(
+    self: *Config,
+    key_str: [*]const u8,
+    len: usize,
+) usize {
+    const key = std.meta.stringToEnum(Key, key_str[0..len]) orelse return 0;
+    return c_get.repeatableStringCount(self, key) orelse 0;
+}
+
+export fn ghostty_config_get_repeatable_string_value(
+    self: *Config,
+    key_str: [*]const u8,
+    len: usize,
+    idx: usize,
+) ?[*:0]const u8 {
+    const key = std.meta.stringToEnum(Key, key_str[0..len]) orelse return null;
+    return c_get.repeatableStringValue(self, key, idx);
+}
+
 export fn ghostty_config_trigger(
     self: *Config,
     str: [*]const u8,
@@ -226,6 +245,34 @@ test "ghostty_config_get: sentinel string" {
     try testing.expect(ghostty_config_get(&cfg, @ptrCast(&out), key, key.len));
     const str = std.mem.sliceTo(out, 0);
     try testing.expectEqualStrings("https://example.net/custom-homepage", str);
+}
+
+test "ghostty_config_get_repeatable_string: browser list" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    try cfg.browser.parseCLI(cfg._arena.?.allocator(), "roamium");
+    try cfg.browser.parseCLI(cfg._arena.?.allocator(), "debug-roamium");
+
+    const key = "browser";
+    try testing.expectEqual(
+        @as(usize, 2),
+        ghostty_config_get_repeatable_string_count(&cfg, key, key.len),
+    );
+
+    const first = ghostty_config_get_repeatable_string_value(&cfg, key, key.len, 0).?;
+    const second = ghostty_config_get_repeatable_string_value(&cfg, key, key.len, 1).?;
+    try testing.expectEqualStrings("roamium", std.mem.sliceTo(first, 0));
+    try testing.expectEqualStrings("debug-roamium", std.mem.sliceTo(second, 0));
+    try testing.expect(ghostty_config_get_repeatable_string_value(&cfg, key, key.len, 2) == null);
+
+    try cfg.browser.parseCLI(cfg._arena.?.allocator(), "");
+    try testing.expectEqual(
+        @as(usize, 0),
+        ghostty_config_get_repeatable_string_count(&cfg, key, key.len),
+    );
 }
 
 test "ghostty_config_get: float" {

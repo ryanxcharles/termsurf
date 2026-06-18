@@ -6,4 +6,4 @@
 void termsurf_pane_closed(const char *pane_id);
 void termsurf_pane_focus_changed(const char *pane_id, int focused);
 void termsurf_gui_active_changed(int active);
-void termsurf_hello_config_changed(const char *homepage);
+void termsurf_hello_config_changed(const char *homepage, const char *browsers);

@@ -166,3 +166,98 @@ Fresh-context adversarial review by Codex subagent `Dalton`:
 - **Second re-review verdict:** Approved. The reviewer confirmed the formatting
   action and check-only command now include `ghostboard/src/config/CApi.zig` and
   `ghostboard/src/config/c_get.zig`, with no new required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented configurable browser-list flow end to end:
+
+- Added repeatable `browser = ...` config entries using Ghostty's existing
+  `RepeatableString` semantics.
+- Added generic C accessors for repeatable string config values and covered them
+  with a C API regression test.
+- Added `Ghostty.Config.browserList`, falling back to `["roamium"]` when the
+  repeatable config is absent or reset to empty.
+- Extended the hello-config bridge to pass homepage and the parsed browser list
+  together.
+- Stored the current browser list in Zig-owned fixed storage guarded by
+  `state_mutex`.
+- Updated `sendHelloReply` to snapshot homepage and browsers into stack storage
+  before the synchronous protobuf send.
+- Added `hello-config-browser-list` and `hello-empty-browser-list` runtime
+  harness scenarios.
+
+Verification run:
+
+- `prettier --check --prose-wrap always --print-width 80 issues/0815-ghostboard-hello-reply-config/README.md issues/0815-ghostboard-hello-reply-config/03-flow-configured-browser-list-into-hello-reply.md`
+  — pass.
+- `zig fmt --check ghostboard/src/config/Config.zig ghostboard/src/config/CApi.zig ghostboard/src/config/c_get.zig ghostboard/src/apprt/termsurf.zig ghostboard/src/main_c.zig`
+  — pass.
+- `bash -n scripts/ghostboard-geometry-matrix.sh` — pass.
+- `cd ghostboard && zig build -Demit-macos-app=false` — pass.
+- `cd ghostboard && macos/build.nu --scheme Ghostty --configuration Debug --action build`
+  — pass.
+- `git diff --check` — pass.
+- `scripts/ghostboard-geometry-matrix.sh named-roamium-debug-launch` — pass.
+  - Harness log:
+    `logs/ghostboard-geometry-named-roamium-debug-launch-harness-20260617-214938.log`
+  - App log:
+    `logs/ghostboard-geometry-named-roamium-debug-launch-app-20260617-214938.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-named-roamium-debug-launch-roamium-20260617-214938.log`
+- `scripts/ghostboard-geometry-matrix.sh hello-config-browser-list` — pass.
+  - Harness log:
+    `logs/ghostboard-geometry-hello-config-browser-list-harness-20260617-214949.log`
+  - App log:
+    `logs/ghostboard-geometry-hello-config-browser-list-app-20260617-214949.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-hello-config-browser-list-roamium-20260617-214949.log`
+- `scripts/ghostboard-geometry-matrix.sh hello-empty-browser-list` — pass.
+  - Harness log:
+    `logs/ghostboard-geometry-hello-empty-browser-list-harness-20260617-215051.log`
+  - App log:
+    `logs/ghostboard-geometry-hello-empty-browser-list-app-20260617-215051.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-hello-empty-browser-list-roamium-20260617-215051.log`
+- `scripts/ghostboard-geometry-matrix.sh hello-config-homepage` — pass.
+  - Harness log:
+    `logs/ghostboard-geometry-hello-config-homepage-harness-20260617-215102.log`
+  - App log:
+    `logs/ghostboard-geometry-hello-config-homepage-app-20260617-215102.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-hello-config-homepage-roamium-20260617-215102.log`
+
+Skipped optional check:
+
+- `shellcheck scripts/ghostboard-geometry-matrix.sh` was not run because
+  `shellcheck` is not installed on this VM.
+
+## Conclusion
+
+Ghostboard now advertises browser names from repeatable `browser = ...` config
+entries in `HelloReply.browsers`. The runtime harness proves that webtui uses
+the first configured browser when `--browser` is omitted, that `browser = ""`
+falls back to `roamium`, and that the configured-homepage path from Experiment 2
+still works after the bridge change.
+
+## Completion Review
+
+Fresh-context adversarial result review by Codex subagent `McClintock`:
+
+- **Initial verdict:** Changes required.
+- **Required finding:** `ghostboard/include/ghostty.h` still declared
+  `termsurf_hello_config_changed(const char*)`, while `main_c.zig` and the Swift
+  bridging header used the new two-argument ABI.
+- **Resolution:** Accepted. Updated `ghostboard/include/ghostty.h` to declare
+  `termsurf_hello_config_changed(const char*, const char*)`.
+- **Post-fix verification:** `prettier --check`, `zig fmt --check`,
+  `bash -n scripts/ghostboard-geometry-matrix.sh`, `git diff --check`,
+  `cd ghostboard && zig build -Demit-macos-app=false`, and
+  `cd ghostboard && macos/build.nu --scheme Ghostty --configuration Debug --action build`
+  all passed. A parallel rerun of the Zig and macOS app builds briefly failed
+  because Xcode saw `GhosttyKit.xcframework` while the Zig build was
+  regenerating it; rerunning the macOS build by itself passed.
+- **Re-review verdict:** Approved. The reviewer confirmed the public header,
+  Swift bridging header, and Zig export now all use the same two-argument ABI,
+  with no new required findings.

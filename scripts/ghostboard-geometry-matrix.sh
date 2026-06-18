@@ -13,6 +13,7 @@ ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
 ROAMIUM_PATH_FOR_APP="$ROAMIUM"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
 HELLO_CONFIG_HOMEPAGE="${TERMSURF_HELLO_CONFIG_HOMEPAGE:-https://example.net/issue-815-homepage}"
+HELLO_CONFIG_SECOND_BROWSER="${TERMSURF_HELLO_CONFIG_SECOND_BROWSER:-debug-roamium}"
 URL_B="${TERMSURF_GEOMETRY_SECOND_URL:-https://example.org}"
 URL_C="${TERMSURF_GEOMETRY_THIRD_URL:-https://example.net}"
 APP_LOG="$LOG_DIR/ghostboard-geometry-${SCENARIO}-app-${TS}.log"
@@ -1414,7 +1415,7 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1455,6 +1456,14 @@ if [ "$SCENARIO" = "hello-config-homepage" ]; then
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
 exec "$WEB"
+EOF
+  chmod +x "$COMMAND"
+fi
+
+if [ "$SCENARIO" = "hello-config-browser-list" ] || [ "$SCENARIO" = "hello-empty-browser-list" ]; then
+  cat >"$COMMAND" <<EOF
+#!/usr/bin/env bash
+exec "$WEB" "$URL"
 EOF
   chmod +x "$COMMAND"
 fi
@@ -1536,6 +1545,19 @@ EOF
 if [ "$SCENARIO" = "hello-config-homepage" ]; then
   cat >>"$CONFIG" <<EOF
 homepage = "$HELLO_CONFIG_HOMEPAGE"
+EOF
+fi
+
+if [ "$SCENARIO" = "hello-config-browser-list" ]; then
+  cat >>"$CONFIG" <<EOF
+browser = roamium
+browser = $HELLO_CONFIG_SECOND_BROWSER
+EOF
+fi
+
+if [ "$SCENARIO" = "hello-empty-browser-list" ]; then
+  cat >>"$CONFIG" <<'EOF'
+browser = ""
 EOF
 fi
 
@@ -2296,6 +2318,9 @@ log "url=$URL"
 if [ "$SCENARIO" = "hello-config-homepage" ]; then
   log "hello_config_homepage=$HELLO_CONFIG_HOMEPAGE"
 fi
+if [ "$SCENARIO" = "hello-config-browser-list" ]; then
+  log "hello_config_browsers=roamium,$HELLO_CONFIG_SECOND_BROWSER"
+fi
 log "app_log=$APP_LOG"
 log "roamium_trace=$ROAMIUM_TRACE"
 log "screenshot=$SCREENSHOT"
@@ -2580,6 +2605,28 @@ if [ "$SCENARIO" = "hello-config-homepage" ]; then
   require_log "TermSurf HelloReply sent homepage=${HELLO_CONFIG_HOMEPAGE} browsers=roamium" "Ghostboard sent configured HelloReply homepage"
   require_log "SetOverlay: pane_id=${PANE_ID} profile=default browser=roamium url=${HELLO_CONFIG_HOMEPAGE}" "webtui consumed configured homepage from HelloReply"
   require_log "BrowserReady: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} socket=.* browser=roamium" "BrowserReady preserved named Roamium key with configured homepage"
+fi
+
+if [ "$SCENARIO" = "hello-config-browser-list" ]; then
+  if grep -F -- "--browser" "$COMMAND" >/dev/null 2>&1; then
+    fail "hello config browser-list command unexpectedly contains --browser"
+  fi
+  log "PASS: hello config browser-list command omits --browser"
+  require_log "TermSurf Hello config homepage=https://termsurf.com/welcome browsers=roamium,${HELLO_CONFIG_SECOND_BROWSER}" "Ghostboard loaded configured HelloReply browser list"
+  require_log "TermSurf HelloReply sent homepage=https://termsurf.com/welcome browsers=roamium,${HELLO_CONFIG_SECOND_BROWSER}" "Ghostboard sent configured HelloReply browser list"
+  require_log "SetOverlay: pane_id=${PANE_ID} profile=default browser=roamium url=${URL}" "webtui consumed first configured browser from HelloReply"
+  require_log "BrowserReady: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} socket=.* browser=roamium" "BrowserReady preserved first configured browser key"
+fi
+
+if [ "$SCENARIO" = "hello-empty-browser-list" ]; then
+  if grep -F -- "--browser" "$COMMAND" >/dev/null 2>&1; then
+    fail "hello empty browser-list command unexpectedly contains --browser"
+  fi
+  log "PASS: hello empty browser-list command omits --browser"
+  require_log "TermSurf Hello config homepage=https://termsurf.com/welcome browsers=roamium" "Ghostboard fell back to default HelloReply browser list"
+  require_log "TermSurf HelloReply sent homepage=https://termsurf.com/welcome browsers=roamium" "Ghostboard sent fallback HelloReply browser list"
+  require_log "SetOverlay: pane_id=${PANE_ID} profile=default browser=roamium url=${URL}" "webtui consumed fallback browser from HelloReply"
+  require_log "BrowserReady: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} socket=.* browser=roamium" "BrowserReady preserved fallback browser key"
 fi
 
 if [ "$SCENARIO" = "display-move-backing-scale" ]; then

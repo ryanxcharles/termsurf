@@ -1306,6 +1306,13 @@ env: RepeatableStringMap = .{},
 /// The default homepage URL opened by `web` when no URL is supplied.
 homepage: [:0]const u8 = "https://termsurf.com/welcome",
 
+/// The browser names advertised to `web`.
+///
+/// The first browser is used by `web` as the default when it is launched without
+/// `--browser`. Repeat this option to advertise multiple browser names. Set it
+/// to `""` to clear the list and use Ghostboard's default `roamium` fallback.
+browser: RepeatableString = .{},
+
 /// Data to send as input to the command on startup.
 ///
 /// The configured `command` will be launched using the typical rules,

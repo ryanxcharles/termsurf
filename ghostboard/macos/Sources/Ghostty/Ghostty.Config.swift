@@ -188,6 +188,27 @@ extension Ghostty {
             return value.isEmpty ? defaultValue : value
         }
 
+        var browserList: [String] {
+            let defaultValue = ["roamium"]
+            guard let config = self.config else { return defaultValue }
+
+            let key = "browser"
+            let keyLen = UInt(key.lengthOfBytes(using: .utf8))
+            let count = ghostty_config_get_repeatable_string_count(config, key, keyLen)
+            guard count > 0 else { return defaultValue }
+
+            var browsers: [String] = []
+            for idx in 0..<count {
+                guard let ptr = ghostty_config_get_repeatable_string_value(config, key, keyLen, idx) else { continue }
+                let value = String(cString: ptr)
+                if !value.isEmpty {
+                    browsers.append(value)
+                }
+            }
+
+            return browsers.isEmpty ? defaultValue : browsers
+        }
+
         var splitPreserveZoom: SplitPreserveZoom {
             guard let config = self.config else { return .init() }
             var v: CUnsignedInt = 0

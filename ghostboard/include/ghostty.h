@@ -1039,7 +1039,7 @@ const char* ghostty_translate(const char*);
 void ghostty_string_free(ghostty_string_s);
 int termsurf_ipc_start(void);
 void termsurf_ipc_stop(void);
-void termsurf_hello_config_changed(const char*);
+void termsurf_hello_config_changed(const char*, const char*);
 void termsurf_overlay_presented_pixels(const char*, uint64_t, uint64_t);
 int termsurf_forward_key_event(const char*, const char*, int64_t, const char*, uint64_t);
 int termsurf_forward_mouse_event(const char*, const char*, const char*, double, double, int64_t, uint64_t);
@@ -1055,6 +1055,8 @@ void ghostty_config_load_default_files(ghostty_config_t);
 void ghostty_config_load_recursive_files(ghostty_config_t);
 void ghostty_config_finalize(ghostty_config_t);
 bool ghostty_config_get(ghostty_config_t, void*, const char*, uintptr_t);
+uintptr_t ghostty_config_get_repeatable_string_count(ghostty_config_t, const char*, uintptr_t);
+const char* ghostty_config_get_repeatable_string_value(ghostty_config_t, const char*, uintptr_t, uintptr_t);
 ghostty_input_trigger_s ghostty_config_trigger(ghostty_config_t,
                                                const char*,
                                                uintptr_t);

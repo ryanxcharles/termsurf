@@ -771,8 +771,11 @@ class AppDelegate: NSObject,
     }
 
     private func termsurfHelloConfigChanged(config: Ghostty.Config) {
+        let browsers = config.browserList.joined(separator: "\n")
         config.homepage.withCString { homepage in
-            termsurf_hello_config_changed(homepage)
+            browsers.withCString { browserList in
+                termsurf_hello_config_changed(homepage, browserList)
+            }
         }
     }
 
