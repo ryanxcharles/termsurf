@@ -36,3 +36,5 @@ Verification should include:
   — **Pass**
 - [Experiment 2: Flow configured homepage into HelloReply](02-flow-configured-homepage-into-hello-reply.md)
   — **Pass**
+- [Experiment 3: Flow configured browser list into HelloReply](03-flow-configured-browser-list-into-hello-reply.md)
+  — **Designed**
