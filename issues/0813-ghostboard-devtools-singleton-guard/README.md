@@ -33,3 +33,8 @@ Verification should include:
 - reopening DevTools after close succeeds;
 - multi-profile or multi-tab DevTools cases do not block unrelated inspected
   tabs.
+
+## Experiments
+
+- [Experiment 1: Guard duplicate DevTools requests](01-guard-duplicate-devtools-requests.md)
+  — **Designed**
