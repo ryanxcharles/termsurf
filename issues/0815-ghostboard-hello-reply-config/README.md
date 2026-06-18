@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-17"
+closed = "2026-06-17"
 +++
 
 # Issue 815: Ghostboard HelloReply Configuration
@@ -38,3 +39,18 @@ Verification should include:
   — **Pass**
 - [Experiment 3: Flow configured browser list into HelloReply](03-flow-configured-browser-list-into-hello-reply.md)
   — **Pass**
+
+## Conclusion
+
+Issue 815 is closed. Ghostboard now sends complete `HelloReply` data needed by
+webtui:
+
+- deterministic defaults for `homepage=https://termsurf.com/welcome` and
+  `browsers=["roamium"]`;
+- configured homepage from the normal Ghostboard config file;
+- configured repeatable browser list from `browser = ...` entries;
+- fallback to `roamium` when the browser list is missing or reset to empty.
+
+The runtime harness proves webtui consumes the GUI-provided homepage when no URL
+is supplied, consumes the first GUI-provided browser when `--browser` is
+omitted, and still launches named Roamium through the debug resolver.
