@@ -1551,6 +1551,19 @@ extension Ghostty {
                 return false
             }
 
+            if isTermSurfBrowserNavigationKeyEquivalent(event) {
+                if forwardTermSurfKeyDown(event) {
+                    termSurfLogGeometry(
+                        event: "perform_key_equivalent_browser_forwarded",
+                        note: "key_code=\(event.keyCode) modifiers=\(termSurfModifiers(event.modifierFlags)) focused=\(focused)")
+                    return true
+                }
+
+                termSurfLogGeometry(
+                    event: "perform_key_equivalent_browser_rejected",
+                    note: "key_code=\(event.keyCode) modifiers=\(termSurfModifiers(event.modifierFlags)) focused=\(focused)")
+            }
+
             // Get information about if this is a binding.
             let bindingFlags = surfaceModel.flatMap { surface in
                 var ghosttyEvent = event.ghosttyKeyEvent(GHOSTTY_ACTION_PRESS)
@@ -1786,6 +1799,23 @@ extension Ghostty {
                 termsurfPressedBrowserKeys.remove(event.keyCode)
             }
             return forwarded
+        }
+
+        private func isTermSurfBrowserNavigationKeyEquivalent(_ event: NSEvent) -> Bool {
+            guard event.modifierFlags.contains(.command),
+                  !event.modifierFlags.contains(.shift),
+                  !event.modifierFlags.contains(.control),
+                  !event.modifierFlags.contains(.option)
+            else {
+                return false
+            }
+
+            switch event.keyCode {
+            case 0x21, 0x1E, 0x0F:
+                return true
+            default:
+                return false
+            }
         }
 
         private func forwardTermSurfKeyEvent(_ event: NSEvent, type: String) -> Bool {

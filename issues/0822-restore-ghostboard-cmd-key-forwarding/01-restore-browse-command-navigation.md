@@ -104,3 +104,68 @@ Initial verdict: **Changes Required**.
 
 Re-review verdict: **Approved**. The reviewer confirmed both findings were
 resolved and found no new required issues.
+
+## Result
+
+**Result:** Pass
+
+Implemented the narrow AppKit key-equivalent forwarding path for browser-owned
+navigation shortcuts. `performKeyEquivalent(with:)` now recognizes command-only
+`[`, `]`, and `R` before Ghostty binding/menu fallback. It calls the existing
+TermSurf browser forwarding path and returns `true` only when that path accepts
+the event.
+
+Added `browser-command-navigation` to `scripts/ghostboard-geometry-matrix.sh`.
+The scenario reuses the local browser-state fixture and proves:
+
+- a pre-browse `Cmd+[` attempt emits no browser-forwarded AppKit log and no
+  Roamium key event;
+- browse-mode `Cmd+[` emits `perform_key_equivalent_browser_forwarded`, reaches
+  Zig/Roamium as `windows_key_code=219` with modifier `8`, and navigates Back to
+  the original URL;
+- browse-mode `Cmd+]` emits `perform_key_equivalent_browser_forwarded`, reaches
+  Zig/Roamium as `windows_key_code=221` with modifier `8`, and navigates Forward
+  to the second URL.
+
+Updated `docs/keybindings.md` to state that browser navigation shortcuts are
+forwarded from AppKit key equivalents to Chromium.
+
+Verification:
+
+- `bash -n scripts/ghostboard-geometry-matrix.sh` — Pass.
+- `./scripts/build.sh ghostboard` — Pass. The build completed successfully;
+  pre-existing Swift/dSYM warnings were emitted outside this change.
+- `./scripts/ghostboard-geometry-matrix.sh browser-command-navigation` — Pass.
+  Evidence logs:
+  - `logs/ghostboard-geometry-browser-command-navigation-app-20260618-064336.log`
+  - `logs/ghostboard-geometry-browser-command-navigation-roamium-20260618-064336.log`
+  - `logs/ghostboard-geometry-browser-command-navigation-webtui-20260618-064336.log`
+- `./scripts/ghostboard-geometry-matrix.sh copy-current-url-smoke` — Pass.
+  Evidence logs:
+  - `logs/ghostboard-geometry-copy-current-url-smoke-app-20260618-064355.log`
+  - `logs/ghostboard-geometry-copy-current-url-smoke-roamium-20260618-064355.log`
+  - `logs/ghostboard-geometry-copy-current-url-smoke-webtui-20260618-064355.log`
+- `git diff --check` — Pass.
+
+## Conclusion
+
+The missing path was AppKit key-equivalent routing, not Chromium navigation
+handling. Direct browser forwarding from `performKeyEquivalent(with:)`, gated by
+the existing TermSurf browser state check, restores `Cmd+[` Back and `Cmd+]`
+Forward in browse mode while preserving Control-mode `Cmd+C`.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Initial verdict: **Changes Required**.
+
+- Required: the issue README had already been marked closed while completion
+  review was still pending and before the result commit existed. Fixed by
+  restoring Issue 822 to `status = "open"`, removing the premature README
+  conclusion, regenerating the issue index, and leaving final issue closure for
+  after the approved result commit.
+
+Re-review verdict: **Approved**. The reviewer confirmed Issue 822 is open again,
+the premature README conclusion is gone, the issue index lists Issue 822 as
+open, and the result commit has not yet been made.

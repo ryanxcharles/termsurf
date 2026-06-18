@@ -101,4 +101,4 @@ not in browse mode.
 ## Experiments
 
 - [Experiment 1: Restore Browse-Mode Command Navigation Forwarding](01-restore-browse-command-navigation.md)
-  — **Designed**
+  — **Pass**

@@ -39,9 +39,9 @@ Chromium handles them internally via its default keybinding logic.
 
 | Key   | Mode   | Action  | Notes                                       |
 | ----- | ------ | ------- | ------------------------------------------- |
-| Cmd+[ | Browse | Back    | Forwarded as key event, handled by Chromium |
-| Cmd+] | Browse | Forward | Forwarded as key event, handled by Chromium |
-| Cmd+R | Browse | Reload  | Forwarded as key event, handled by Chromium |
+| Cmd+[ | Browse | Back    | AppKit key equivalent forwarded to Chromium |
+| Cmd+] | Browse | Forward | AppKit key equivalent forwarded to Chromium |
+| Cmd+R | Browse | Reload  | AppKit key equivalent forwarded to Chromium |
 
 ## Commands
 

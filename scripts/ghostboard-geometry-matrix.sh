@@ -1809,7 +1809,7 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|browser-command-navigation|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1834,7 +1834,7 @@ fi
 require_readable "$ROOT/scripts/ghostty-app/inject.swift"
 require_readable "$ROOT/scripts/ghostty-app/winid.swift"
 
-if [ "$SCENARIO" = "browser-state-smoke" ]; then
+if [ "$SCENARIO" = "browser-state-smoke" ] || [ "$SCENARIO" = "browser-command-navigation" ]; then
   STATE_HTTP_PORT="$(python3 - <<'PY'
 import socket
 
@@ -3719,8 +3719,10 @@ fi
 log "app_log=$APP_LOG"
 log "roamium_trace=$ROAMIUM_TRACE"
 log "screenshot=$SCREENSHOT"
-if [ "$SCENARIO" = "browser-state-smoke" ]; then
+if [ "$SCENARIO" = "browser-state-smoke" ] || [ "$SCENARIO" = "browser-command-navigation" ]; then
   log "webtui_state_trace=$WEBTUI_STATE_TRACE"
+fi
+if [ "$SCENARIO" = "browser-state-smoke" ]; then
   log "hover_screenshot=$SCREENSHOT_BROWSER_STATE_HOVER"
   log "reload_screenshot=$SCREENSHOT_BROWSER_STATE_RELOAD"
   log "blank_screenshot=$SCREENSHOT_BROWSER_STATE_BLANK"
@@ -4024,6 +4026,53 @@ require_log "TermSurf geometry .*scenario=${SCENARIO}" "timestamped run contains
 require_log 'window_id:[^ ]+ surface_id:[^ ]+ selected_tab_id:[^ ]+ pane_id:[^ ]+ browser_tab_id:[^ ]+' "canonical identity tuple fields"
 require_readable "$ROAMIUM_TRACE"
 require_trace "resize tab_id=${BROWSER_TAB_ID} pane_id=${PANE_ID} pixel_width=${APPKIT_PIXEL_WIDTH} pixel_height=${APPKIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied resize to AppKit pixel size via ts_set_view_size"
+
+if [ "$SCENARIO" = "browser-command-navigation" ]; then
+  STATE_HOVER_URL="http://127.0.0.1:${STATE_HTTP_PORT}/hover-target.html"
+
+  wait_for_state_trace "event=url_changed.*url=${URL}" "webtui URL state changed to command-navigation fixture URL" 45
+  wait_for_state_trace "event=loading_state.*state=done" "webtui command-navigation initial load finished" 45
+
+  CONTROL_LOG_START_LINE="$(log_line_count)"
+  CONTROL_TRACE_START_LINE="$(trace_line_count)"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1 || true
+  delay 0.5
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 33 command >>"$HARNESS_LOG" 2>&1
+  delay 0.5
+  require_no_log_after "$CONTROL_LOG_START_LINE" "perform_key_equivalent_browser_forwarded .*key_code=33" "pre-browse Cmd+[ did not log browser forwarding"
+  if tail -n +"$((CONTROL_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" |
+    grep -E "key-event tab=${BROWSER_TAB_ID} pane=${PANE_ID} .*type=down .*windows_key_code=219 .*modifiers=8" >/dev/null 2>&1; then
+    fail "pre-browse Cmd+[ reached browser"
+  fi
+  log "PASS: pre-browse Cmd+[ did not reach browser"
+
+  COMMAND_MODE_TRACE_START_LINE="$(trace_line_count)"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  require_trace_after "$COMMAND_MODE_TRACE_START_LINE" "focus-changed tab=${BROWSER_TAB_ID} pane=${PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed command-navigation browse focus=true"
+
+  IFS=$'\t' read -r COMMAND_NAV_X COMMAND_NAV_Y <<<"$(global_point_for_web_point "$WIN_LINE" "$APPKIT_PRESENT_LINE" 90 44)"
+  COMMAND_NAV_STATE_START_LINE="$(state_trace_line_count)"
+  click_global_point "$COMMAND_NAV_X" "$COMMAND_NAV_Y" "command_navigation_hover_link"
+  wait_for_state_trace_after "$COMMAND_NAV_STATE_START_LINE" "event=url_changed[[:space:]]+url=${STATE_HOVER_URL}" "browser-command-navigation reached second URL" 45
+
+  COMMAND_BACK_LOG_START_LINE="$(log_line_count)"
+  COMMAND_BACK_TRACE_START_LINE="$(trace_line_count)"
+  COMMAND_BACK_STATE_START_LINE="$(state_trace_line_count)"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 33 command >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$COMMAND_BACK_LOG_START_LINE" "perform_key_equivalent_browser_forwarded .*key_code=33 .*modifiers=8" "Cmd+[ key equivalent forwarded to browser" 15
+  wait_for_log_after "$COMMAND_BACK_LOG_START_LINE" "KeyEvent: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} type=down windows_key_code=219 .*modifiers=8" "Zig forwarded Cmd+[ as browser Back key event" 15
+  wait_for_trace_line_after "$COMMAND_BACK_TRACE_START_LINE" "key-event tab=${BROWSER_TAB_ID} pane=${PANE_ID} .*type=down .*windows_key_code=219 .*modifiers=8" "Roamium received Cmd+[ browser Back key event" 15 >/dev/null
+  wait_for_state_trace_after "$COMMAND_BACK_STATE_START_LINE" "event=url_changed[[:space:]]+url=${URL}" "Cmd+[ navigated back to original URL" 45
+
+  COMMAND_FORWARD_LOG_START_LINE="$(log_line_count)"
+  COMMAND_FORWARD_TRACE_START_LINE="$(trace_line_count)"
+  COMMAND_FORWARD_STATE_START_LINE="$(state_trace_line_count)"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 30 command >>"$HARNESS_LOG" 2>&1
+  wait_for_log_after "$COMMAND_FORWARD_LOG_START_LINE" "perform_key_equivalent_browser_forwarded .*key_code=30 .*modifiers=8" "Cmd+] key equivalent forwarded to browser" 15
+  wait_for_log_after "$COMMAND_FORWARD_LOG_START_LINE" "KeyEvent: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} type=down windows_key_code=221 .*modifiers=8" "Zig forwarded Cmd+] as browser Forward key event" 15
+  wait_for_trace_line_after "$COMMAND_FORWARD_TRACE_START_LINE" "key-event tab=${BROWSER_TAB_ID} pane=${PANE_ID} .*type=down .*windows_key_code=221 .*modifiers=8" "Roamium received Cmd+] browser Forward key event" 15 >/dev/null
+  wait_for_state_trace_after "$COMMAND_FORWARD_STATE_START_LINE" "event=url_changed[[:space:]]+url=${STATE_HOVER_URL}" "Cmd+] navigated forward to second URL" 45
+fi
 
 if [ "$SCENARIO" = "browser-state-smoke" ]; then
   STATE_HOVER_URL="http://127.0.0.1:${STATE_HTTP_PORT}/hover-target.html"
