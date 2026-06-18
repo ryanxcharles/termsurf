@@ -34,3 +34,5 @@ Verification should include:
 
 - [Experiment 1: Send deterministic HelloReply defaults](01-send-deterministic-hello-reply-defaults.md)
   — **Pass**
+- [Experiment 2: Flow configured homepage into HelloReply](02-flow-configured-homepage-into-hello-reply.md)
+  — **Designed**
