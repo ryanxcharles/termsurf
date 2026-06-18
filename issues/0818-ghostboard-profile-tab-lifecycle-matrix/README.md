@@ -50,4 +50,4 @@ process exit.
 - [Experiment 6: Prove TUI disconnect reconnect](06-prove-tui-disconnect-reconnect.md)
   — **Pass**
 - [Experiment 7: Prove visible profile identity](07-prove-visible-profile-identity.md)
-  — **Designed**
+  — **Pass**

@@ -1727,7 +1727,7 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|two-browser-split-routing|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -2621,7 +2621,7 @@ EOF
   chmod +x "$COMMAND"
 fi
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "same-profile-server-lifecycle" ] || [ "$SCENARIO" = "tui-disconnect-reconnect" ] || [ "$SCENARIO" = "open-browser-in-new-window" ] || [ "$SCENARIO" = "multiple-windows-with-browsers" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ] || [ "$SCENARIO" = "devtools-singleton-guard" ] || [ "$SCENARIO" = "multi-profile-isolation" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "same-profile-server-lifecycle" ] || [ "$SCENARIO" = "tui-disconnect-reconnect" ] || [ "$SCENARIO" = "visible-profile-identity" ] || [ "$SCENARIO" = "open-browser-in-new-window" ] || [ "$SCENARIO" = "multiple-windows-with-browsers" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ] || [ "$SCENARIO" = "devtools-singleton-guard" ] || [ "$SCENARIO" = "multi-profile-isolation" ]; then
   FIRST_RUN_MARKER="$RUN_DIR/first-web-ran"
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -2685,7 +2685,7 @@ browser = ""
 EOF
 fi
 
-if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "same-profile-server-lifecycle" ] || [ "$SCENARIO" = "tui-disconnect-reconnect" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ] || [ "$SCENARIO" = "devtools-singleton-guard" ] || [ "$SCENARIO" = "multi-profile-isolation" ]; then
+if [ "$SCENARIO" = "new-terminal-tab-visibility" ] || [ "$SCENARIO" = "open-browser-in-new-tab" ] || [ "$SCENARIO" = "close-browser-tab" ] || [ "$SCENARIO" = "same-profile-server-lifecycle" ] || [ "$SCENARIO" = "tui-disconnect-reconnect" ] || [ "$SCENARIO" = "visible-profile-identity" ] || [ "$SCENARIO" = "keyboard-after-tab-window-switch" ] || [ "$SCENARIO" = "gui-active-multi-tab" ] || [ "$SCENARIO" = "devtools-singleton-guard" ] || [ "$SCENARIO" = "multi-profile-isolation" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+t=new_tab
 keybind = ctrl+1=goto_tab:1
@@ -3472,6 +3472,9 @@ if [ "$SCENARIO" = "browser-input-granularity" ]; then
   log "webtui_state_trace=$WEBTUI_STATE_TRACE"
   log "browser_input_type_command=$INPUT_TYPE_COMMAND"
 fi
+if [ "$SCENARIO" = "visible-profile-identity" ]; then
+  log "webtui_state_trace=$WEBTUI_STATE_TRACE"
+fi
 if [ "$SCENARIO" = "window-resize" ]; then
   log "grow_screenshot=$SCREENSHOT_GROW"
   log "shrink_screenshot=$SCREENSHOT_SHRINK"
@@ -4084,6 +4087,82 @@ EOF
 
   require_no_trace_after "$B_DISCONNECT_TRACE_START_LINE" "key-event tab=${B_BROWSER_TAB_ID} pane=${B_PANE_ID}" "disconnected browser B received no later keyboard input"
   log "PASS: scenario tui-disconnect-reconnect"
+fi
+
+if [ "$SCENARIO" = "visible-profile-identity" ]; then
+  A_SELECTED_TAB_ID="$(extract_selected_tab_id "$APPKIT_PRESENT_LINE")"
+  [ -n "$A_SELECTED_TAB_ID" ] || fail "could not extract browser A selected tab id"
+  A_PANE_ID="$PANE_ID"
+  A_BROWSER_TAB_ID="$BROWSER_TAB_ID"
+  A_CONTEXT_ID="$CONTEXT_ID"
+  log "identity_browser_a_selected_tab_id=$A_SELECTED_TAB_ID"
+  log "identity_browser_a_pane_id=$A_PANE_ID"
+  log "identity_browser_a_browser_tab_id=$A_BROWSER_TAB_ID"
+  log "identity_browser_a_context_id=$A_CONTEXT_ID"
+
+  require_log "SetOverlay: pane_id=${A_PANE_ID} profile=default browser=${ROAMIUM}" "browser A SetOverlay uses default profile and absolute Roamium path"
+  require_trace "tab-ready tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} inspected_tab_id=0" "browser A Roamium tab-ready identity"
+  wait_for_state_trace "event=render_state.*identity_label=roamium/default#${A_BROWSER_TAB_ID}.*browser_label=roamium.*profile=default.*is_devtools=false.*current_tab_id=${A_BROWSER_TAB_ID}.*inspected_tab_id=-1" "browser A visible default-profile identity label" 45
+
+  B_TAB_START_LINE="$(log_line_count)"
+  B_TAB_TRACE_START_LINE="$(trace_line_count)"
+  B_TAB_STATE_START_LINE="$(state_trace_line_count)"
+  log "identity_browser_b_new_tab_keybind=ctrl+t=new_tab"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 17 control >>"$HARNESS_LOG" 2>&1
+  delay 1
+  require_log_after "$B_TAB_START_LINE" "dispatching action target=surface action=.new_tab" "browser B identity native tab action dispatched"
+  require_log_after "$B_TAB_START_LINE" 'starting command command=`/usr/bin/login`' "browser B identity native tab started login shell"
+
+  log "identity_browser_b_select_tab2_keybind=ctrl+2=goto_tab:2"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 19 control >>"$HARNESS_LOG" 2>&1
+  delay 1
+  B_SELECTED_LINE="$(wait_for_selected_tab_change_after "$B_TAB_START_LINE" "$A_SELECTED_TAB_ID" "browser B identity tab selected")"
+  B_SELECTED_TAB_ID="$(extract_selected_tab_id "$B_SELECTED_LINE")"
+  [ -n "$B_SELECTED_TAB_ID" ] || fail "failed to extract browser B selected tab id"
+  [ "$B_SELECTED_TAB_ID" != "$A_SELECTED_TAB_ID" ] || fail "browser B reused browser A selected tab id"
+  log "identity_browser_b_selected_tab_id=$B_SELECTED_TAB_ID"
+
+  printf '"%s" --browser "%s" --profile profilea "%s"' "$WEB" "$ROAMIUM" "$URL_B" >"$SECOND_BROWSER_COMMAND"
+  log "identity_browser_b_command=$(cat "$SECOND_BROWSER_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$SECOND_BROWSER_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+
+  B_SET_LINE="$(wait_for_line_after "$B_TAB_START_LINE" "SetOverlay: pane_id=[^ ]+ profile=profilea browser=${ROAMIUM} url=${URL_B}" "browser B identity SetOverlay" 60)"
+  B_PANE_ID="$(printf '%s\n' "$B_SET_LINE" | sed -E 's/.*SetOverlay: pane_id=([^ ]+) .*/\1/')"
+  [ -n "$B_PANE_ID" ] || fail "failed to extract browser B pane id"
+  [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "browser B reused browser A pane id"
+  B_TAB_READY_LINE="$(wait_for_trace_line_after "$B_TAB_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_PANE_ID} inspected_tab_id=0" "browser B Roamium tab-ready identity" 60)"
+  B_BROWSER_TAB_ID="$(printf '%s\n' "$B_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+  [ -n "$B_BROWSER_TAB_ID" ] || fail "failed to extract browser B browser tab id"
+  log "identity_browser_b_pane_id=$B_PANE_ID"
+  log "identity_browser_b_browser_tab_id=$B_BROWSER_TAB_ID"
+  wait_for_state_trace_after "$B_TAB_STATE_START_LINE" "event=render_state.*identity_label=roamium/profilea#${B_BROWSER_TAB_ID}.*browser_label=roamium.*profile=profilea.*is_devtools=false.*current_tab_id=${B_BROWSER_TAB_ID}.*inspected_tab_id=-1" "browser B visible profilea identity label" 45
+
+  DEVTOOLS_START_LINE="$(log_line_count)"
+  DEVTOOLS_TRACE_START_LINE="$(trace_line_count)"
+  DEVTOOLS_STATE_START_LINE="$(state_trace_line_count)"
+  printf ':devtools right' >"$DEVTOOLS_COMMAND"
+  log "identity_devtools_command_text=$(cat "$DEVTOOLS_COMMAND")"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" type "$DEVTOOLS_COMMAND" >>"$HARNESS_LOG" 2>&1
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
+  delay 1
+
+  wait_for_log_after "$DEVTOOLS_START_LINE" "TermSurf QueryDevtoolsRequest pane_id=${B_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "identity DevTools query request for browser B" 45
+  wait_for_log_after "$DEVTOOLS_START_LINE" "TermSurf QueryDevtoolsReply sent error=" "identity DevTools query reply for browser B" 45
+  DEVTOOLS_SET_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "SetDevtoolsOverlay: pane_id=[^ ]+ profile=profilea browser=${ROAMIUM} inspected_tab_id=${B_BROWSER_TAB_ID}" "identity DevTools SetDevtoolsOverlay" 60)"
+  DT_PANE_ID="$(printf '%s\n' "$DEVTOOLS_SET_LINE" | sed -E 's/.*SetDevtoolsOverlay: pane_id=([^ ]+) .*/\1/')"
+  [ -n "$DT_PANE_ID" ] || fail "failed to extract identity DevTools pane id"
+  [ "$DT_PANE_ID" != "$B_PANE_ID" ] || fail "identity DevTools reused browser B pane id"
+  wait_for_log_after "$DEVTOOLS_START_LINE" "CreateDevtoolsTab: pane_id=${DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for identity DevTools pane" 60
+  DT_TAB_READY_LINE="$(wait_for_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported identity DevTools tab ready" 60)"
+  DT_BROWSER_TAB_ID="$(printf '%s\n' "$DT_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+  [ -n "$DT_BROWSER_TAB_ID" ] || fail "failed to extract identity DevTools browser tab id"
+  [ "$DT_BROWSER_TAB_ID" != "$B_BROWSER_TAB_ID" ] || fail "identity DevTools browser tab id reused inspected browser tab id"
+  log "identity_devtools_pane_id=$DT_PANE_ID"
+  log "identity_devtools_browser_tab_id=$DT_BROWSER_TAB_ID"
+  wait_for_state_trace_after "$DEVTOOLS_STATE_START_LINE" "event=render_state.*identity_label=roamium/profilea#${B_BROWSER_TAB_ID}.*browser_label=roamium.*profile=profilea.*is_devtools=true.*current_tab_id=${DT_BROWSER_TAB_ID}.*inspected_tab_id=${B_BROWSER_TAB_ID}" "DevTools visible inspected-tab profile identity label" 45
+
+  log "PASS: scenario visible-profile-identity"
 fi
 
 if [ "$SCENARIO" = "javascript-dialog-smoke" ]; then

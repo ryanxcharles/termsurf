@@ -147,3 +147,82 @@ After implementation and verification:
   file; and
 - commit the reviewed result separately before designing or implementing the
   next experiment.
+
+## Result
+
+**Result:** Pass
+
+Implemented narrow webtui render-state tracing for the existing viewport
+identity label and added the `visible-profile-identity` Ghostboard harness
+scenario.
+
+Code changes:
+
+- `webtui/src/main.rs`
+  - Factored the existing viewport footer identity text into
+    `viewport_identity_label`.
+  - Added `identity_label`, `browser_label`, `profile`, `is_devtools`,
+    `current_tab_id`, and `inspected_tab_id` to the existing
+    `TERMSURF_WEBTUI_STATE_TRACE_FILE` `render_state` event.
+  - Kept the rendered UI string and layout unchanged.
+- `scripts/ghostboard-geometry-matrix.sh`
+  - Added the `visible-profile-identity` scenario.
+  - Proved the default-profile label, non-default-profile label, and DevTools
+    inspected-tab label against Ghostboard and Roamium runtime identities.
+
+Verification passed:
+
+1. `cargo fmt -p webtui`
+2. `cargo check -p webtui`
+3. `bash -n scripts/ghostboard-geometry-matrix.sh`
+4. `git diff --check`
+5. `cargo build -p webtui`
+6. `scripts/ghostboard-geometry-matrix.sh visible-profile-identity`
+
+The passing runtime run was timestamped `20260618-030305` with logs:
+
+- `logs/ghostboard-geometry-visible-profile-identity-harness-20260618-030305.log`
+- `logs/ghostboard-geometry-visible-profile-identity-app-20260618-030305.log`
+- `logs/ghostboard-geometry-visible-profile-identity-roamium-20260618-030305.log`
+- `logs/ghostboard-geometry-visible-profile-identity-webtui-20260618-030305.log`
+- `logs/ghostboard-geometry-visible-profile-identity-screenshot-20260618-030305.png`
+
+Observed identity evidence:
+
+- Browser A launched with `profile=default`, pane
+  `CD1E9230-AB11-4E6E-A62A-BA311160535F`, browser tab `1`, and traced
+  `identity_label=roamium/default#1`.
+- Browser B launched with `profile=profilea`, pane
+  `415A283C-3FB9-4CC1-B12B-C7D4FB74DC86`, browser tab `1`, and traced
+  `identity_label=roamium/profilea#1`.
+- DevTools opened from browser B with pane
+  `ED5E001D-F2C5-4CFC-B4B0-92C6BDB9CFE5`, DevTools browser tab `2`, inspected
+  browser tab `1`, and traced `identity_label=roamium/profilea#1` with
+  `is_devtools=true`, `current_tab_id=2`, and `inspected_tab_id=1`.
+
+The trace uses the same helper that renders the viewport footer string, so the
+assertions prove the user-visible label content without OCR or screenshot pixel
+matching.
+
+## Conclusion
+
+The remaining Issue 818 user-visible profile identity row is covered. webtui
+renders and now traces the visible browser/profile/tab identity label for normal
+browser panes and DevTools panes, and Ghostboard runtime proof shows the label
+matches default profile, non-default profile, and DevTools inspected-tab
+identity.
+
+## Completion Review
+
+Fresh-context adversarial completion review by Codex subagent `Raman the 2nd`:
+
+- **Verdict:** Approved.
+- **Required findings:** None.
+- **Optional finding:** The result note mentioned a post-pass abort-trap line,
+  but the referenced timestamped logs did not preserve that console output.
+  Accepted and fixed by removing the unsupported note from the result.
+- **Reviewer checks:** The reviewer confirmed `cargo fmt -p webtui --check`,
+  `cargo check -p webtui`, `cargo build -p webtui`,
+  `bash -n scripts/ghostboard-geometry-matrix.sh`, and `git diff --check`
+  passed. The reviewer also confirmed no result commit had been made before the
+  review.

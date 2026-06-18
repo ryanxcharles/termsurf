@@ -616,8 +616,15 @@ fn main() -> io::Result<()> {
                         )
                     })
                     .unwrap_or_else(|| (false, String::new(), String::new()));
+            let identity_label = viewport_identity_label(
+                browser_label,
+                &profile,
+                is_devtools,
+                inspected_tab_id,
+                current_tab_id,
+            );
             let render_trace = format!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 url,
                 page_title,
                 target_url,
@@ -629,7 +636,13 @@ fn main() -> io::Result<()> {
                 renderer_crash_status,
                 latest_console
                     .map(|entry| entry.message.as_str())
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                identity_label,
+                browser_label,
+                profile,
+                is_devtools,
+                current_tab_id,
+                inspected_tab_id
             );
             if render_trace != last_render_trace {
                 trace.write(
@@ -650,6 +663,12 @@ fn main() -> io::Result<()> {
                                 .map(|entry| entry.message.clone())
                                 .unwrap_or_default(),
                         ),
+                        ("identity_label", identity_label),
+                        ("browser_label", browser_label.to_string()),
+                        ("profile", profile.clone()),
+                        ("is_devtools", is_devtools.to_string()),
+                        ("current_tab_id", current_tab_id.to_string()),
+                        ("inspected_tab_id", inspected_tab_id.to_string()),
                     ],
                 );
                 last_render_trace = render_trace;
@@ -1561,6 +1580,22 @@ fn shell_quote_arg(value: &str) -> String {
     }
 }
 
+fn viewport_identity_label(
+    browser_label: &str,
+    profile: &str,
+    is_devtools: bool,
+    inspected_tab_id: i64,
+    current_tab_id: i64,
+) -> String {
+    if is_devtools {
+        format!("{}/{}#{}", browser_label, profile, inspected_tab_id)
+    } else if current_tab_id > 0 {
+        format!("{}/{}#{}", browser_label, profile, current_tab_id)
+    } else {
+        format!("{}/{}#loading", browser_label, profile)
+    }
+}
+
 /// Render the UI and return the viewport inner rect (grid coordinates).
 fn ui(
     frame: &mut Frame,
@@ -1718,13 +1753,13 @@ fn ui(
     }
 
     // Viewport.
-    let identity_label = if is_devtools {
-        format!("{}/{}#{}", browser_label, profile, inspected_tab_id)
-    } else if current_tab_id > 0 {
-        format!("{}/{}#{}", browser_label, profile, current_tab_id)
-    } else {
-        format!("{}/{}#loading", browser_label, profile)
-    };
+    let identity_label = viewport_identity_label(
+        browser_label,
+        profile,
+        is_devtools,
+        inspected_tab_id,
+        current_tab_id,
+    );
 
     let viewport_title = if is_devtools {
         format!("DevTools \u{00B7} {}", identity_label)
