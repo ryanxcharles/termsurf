@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-17"
+closed = "2026-06-17"
 +++
 
 # Issue 814: Ghostboard Launch and Browser Discovery Workflow
@@ -42,3 +43,19 @@ The debug launch/discovery contract is documented in
   — **Pass**
 - [Experiment 2: Document launch discovery contract](02-document-launch-discovery-contract.md)
   — **Pass**
+
+## Conclusion
+
+Issue 814 is closed. Ghostboard now has a deterministic debug launch workflow:
+absolute browser paths still spawn exactly as provided, default/named `roamium`
+resolves through an explicit absolute `TERMSURF_ROAMIUM_PATH`, invalid named
+browser configuration fails clearly before creating a pending server, and the
+debug harness proves the contract without silently using stale installed Roamium
+paths.
+
+The launch/discovery contract is documented in
+[Ghostboard Launch Discovery](../../docs/ghostboard-launch-discovery.md), and
+`scripts/ghostboard-geometry-matrix.sh launch-discovery-contract` provides a
+cheap regression check for the command/environment rules. Normal installed app
+identity and installed Roamium discovery remain intentionally deferred to
+Issue 819.
