@@ -38,4 +38,4 @@ process exit.
 ## Experiments
 
 - [Experiment 1: Establish lifecycle baseline](01-establish-lifecycle-baseline.md)
-  — **Designed**
+  — **Partial**
