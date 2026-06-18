@@ -6,6 +6,7 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 CHROMIUM_OUT="$REPO_DIR/chromium/src/out/Default"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 GHOSTBOARD_RELEASE_APP="$REPO_DIR/ghostboard/macos/build/Release/TermSurf Ghostboard.app"
+APPLICATIONS_DIR="${TERMSURF_APPLICATIONS_DIR:-/Applications}"
 
 COMPONENT="${1:-}"
 
@@ -21,8 +22,21 @@ if [ "$COMPONENT" = "ghostboard" ] && [ ! -x "$GHOSTBOARD_RELEASE_APP/Contents/M
   exit 1
 fi
 
+needs_root() {
+  if [ "$COMPONENT" = "ghostboard" ] && [ "$APPLICATIONS_DIR" != "/Applications" ]; then
+    mkdir -p "$APPLICATIONS_DIR" || {
+      echo "Error: TERMSURF_APPLICATIONS_DIR is not writable: $APPLICATIONS_DIR"
+      exit 1
+    }
+    [ -w "$APPLICATIONS_DIR" ] && return 1
+    echo "Error: TERMSURF_APPLICATIONS_DIR is not writable: $APPLICATIONS_DIR"
+    exit 1
+  fi
+  return 0
+}
+
 # Re-exec as root so we only prompt for the password once.
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$(id -u)" -ne 0 ] && needs_root; then
   exec sudo "$0" "$@"
 fi
 
@@ -92,7 +106,11 @@ install_wezboard() {
 
 install_ghostboard() {
   local APP_SRC="$GHOSTBOARD_RELEASE_APP"
-  local APP="/Applications/TermSurf Ghostboard.app"
+  local APP_DIR="/Applications"
+  if [ "$COMPONENT" = "ghostboard" ]; then
+    APP_DIR="$APPLICATIONS_DIR"
+  fi
+  local APP="$APP_DIR/TermSurf Ghostboard.app"
 
   if [ ! -x "$APP_SRC/Contents/MacOS/ghostboard" ]; then
     echo "Error: Release app not found at $APP_SRC"
