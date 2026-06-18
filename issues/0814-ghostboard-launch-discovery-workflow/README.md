@@ -32,3 +32,8 @@ Verification should include:
 - webtui discovers `TERMSURF_SOCKET` under normal app launch;
 - stale installed binaries are not accidentally used during debug testing;
 - failure messages are clear when a browser cannot be resolved.
+
+## Experiments
+
+- [Experiment 1: Resolve named Roamium for debug launch](01-resolve-named-roamium-debug-launch.md)
+  — **Designed**
