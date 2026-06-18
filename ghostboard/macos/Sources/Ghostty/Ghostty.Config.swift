@@ -177,6 +177,17 @@ extension Ghostty {
             return .milliseconds(v)
         }
 
+        var homepage: String {
+            let defaultValue = "https://termsurf.com/welcome"
+            guard let config = self.config else { return defaultValue }
+            var v: UnsafePointer<Int8>?
+            let key = "homepage"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let ptr = v else { return defaultValue }
+            let value = String(cString: ptr)
+            return value.isEmpty ? defaultValue : value
+        }
+
         var splitPreserveZoom: SplitPreserveZoom {
             guard let config = self.config else { return .init() }
             var v: CUnsignedInt = 0

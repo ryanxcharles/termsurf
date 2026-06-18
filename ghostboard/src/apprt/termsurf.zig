@@ -19,6 +19,7 @@ const max_pane_id_len: usize = 128;
 const max_profile_len: usize = 128;
 const max_browser_len: usize = std.fs.max_path_bytes;
 const max_url_len: usize = 2048;
+const max_homepage_len: usize = max_url_len;
 const max_listen_socket_len: usize = std.fs.max_path_bytes;
 const default_browser = "roamium";
 const default_homepage = "https://termsurf.com/welcome";
@@ -406,6 +407,8 @@ var tab_lookups: [max_tab_lookups]TabLookupState = [_]TabLookupState{.{}} ** max
 var devtools_reservations: [max_devtools_reservations]DevtoolsReservationState = [_]DevtoolsReservationState{.{}} ** max_devtools_reservations;
 var last_browser_pane: [max_pane_id_len]u8 = undefined;
 var last_browser_pane_len: usize = 0;
+var hello_homepage: [max_homepage_len:0]u8 = undefined;
+var hello_homepage_len: usize = 0;
 var gui_active: bool = false;
 var pending_gui_activation: bool = false;
 
@@ -746,7 +749,10 @@ fn sendHelloReply(fd: std.posix.fd_t) !void {
     var reply: c.Termsurf__HelloReply = undefined;
     c.termsurf__hello_reply__init(&reply);
     var browsers = [_][*:0]u8{@constCast(default_browser.ptr)};
-    reply.homepage = @constCast(default_homepage.ptr);
+    var homepage_buf: [max_homepage_len:0]u8 = undefined;
+    var homepage_len: usize = 0;
+    const homepage = currentHelloHomepage(&homepage_buf, &homepage_len);
+    reply.homepage = @constCast(homepage.ptr);
     reply.n_browsers = browsers.len;
     reply.browsers = @ptrCast(&browsers);
 
@@ -758,8 +764,42 @@ fn sendHelloReply(fd: std.posix.fd_t) !void {
     try sendProtobuf(fd, &wrapper);
     log.info(
         "TermSurf HelloReply sent homepage={s} browsers={s}",
-        .{ default_homepage, default_browser },
+        .{ homepage, default_browser },
     );
+}
+
+pub fn helloConfigChanged(homepage: []const u8) void {
+    const next_homepage = if (homepage.len == 0) default_homepage else homepage;
+
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    if (next_homepage.len > hello_homepage.len) {
+        @memcpy(hello_homepage[0..default_homepage.len], default_homepage);
+        hello_homepage[default_homepage.len] = 0;
+        hello_homepage_len = default_homepage.len;
+        log.warn(
+            "TermSurf Hello config homepage too long len={} max={} using_default={s}",
+            .{ next_homepage.len, hello_homepage.len, default_homepage },
+        );
+        return;
+    }
+
+    @memcpy(hello_homepage[0..next_homepage.len], next_homepage);
+    hello_homepage[next_homepage.len] = 0;
+    hello_homepage_len = next_homepage.len;
+    log.info("TermSurf Hello config homepage={s}", .{next_homepage});
+}
+
+fn currentHelloHomepage(buf: *[max_homepage_len:0]u8, len: *usize) [:0]const u8 {
+    state_mutex.lock();
+    defer state_mutex.unlock();
+
+    const current = if (hello_homepage_len == 0) default_homepage else hello_homepage[0..hello_homepage_len];
+    @memcpy(buf[0..current.len], current);
+    buf[current.len] = 0;
+    len.* = current.len;
+    return buf[0..len.* :0];
 }
 
 fn sendQueryLastReply(fd: std.posix.fd_t, req: ?*c.Termsurf__QueryLastRequest) !void {

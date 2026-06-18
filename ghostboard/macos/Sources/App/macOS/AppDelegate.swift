@@ -205,6 +205,7 @@ class AppDelegate: NSObject,
         if termsurf_ipc_start() != GHOSTTY_SUCCESS {
             Self.logger.error("failed to start TermSurf socket")
         }
+        termsurfHelloConfigChanged(config: ghostty.config)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -769,9 +770,16 @@ class AppDelegate: NSObject,
         NSApp.dockTile.display()
     }
 
+    private func termsurfHelloConfigChanged(config: Ghostty.Config) {
+        config.homepage.withCString { homepage in
+            termsurf_hello_config_changed(homepage)
+        }
+    }
+
     private func ghosttyConfigDidChange(config: Ghostty.Config) {
         // Update the config we need to store
         self.derivedConfig = DerivedConfig(config)
+        termsurfHelloConfigChanged(config: config)
 
         // Depending on the "window-save-state" setting we have to set the NSQuitAlwaysKeepsWindows
         // configuration. This is the only way to carefully control whether macOS invokes the

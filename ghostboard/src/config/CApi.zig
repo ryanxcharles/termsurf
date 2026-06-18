@@ -213,6 +213,21 @@ test "ghostty_config_get: optional string null returns true" {
     try testing.expect(out == null);
 }
 
+test "ghostty_config_get: sentinel string" {
+    const testing = std.testing;
+    const alloc = testing.allocator;
+
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    cfg.homepage = "https://example.net/custom-homepage";
+
+    var out: [*:0]const u8 = undefined;
+    const key = "homepage";
+    try testing.expect(ghostty_config_get(&cfg, @ptrCast(&out), key, key.len));
+    const str = std.mem.sliceTo(out, 0);
+    try testing.expectEqualStrings("https://example.net/custom-homepage", str);
+}
+
 test "ghostty_config_get: float" {
     const testing = std.testing;
     const alloc = testing.allocator;

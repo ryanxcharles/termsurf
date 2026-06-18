@@ -169,6 +169,10 @@ pub export fn termsurf_ipc_stop() void {
     termsurf.stop();
 }
 
+pub export fn termsurf_hello_config_changed(homepage: [*:0]const u8) void {
+    termsurf.helloConfigChanged(std.mem.span(homepage));
+}
+
 pub export fn termsurf_overlay_presented_pixels(
     pane_id: [*:0]const u8,
     pixel_width: u64,

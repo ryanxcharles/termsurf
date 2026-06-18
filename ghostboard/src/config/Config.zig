@@ -1303,6 +1303,9 @@ command: ?Command = null,
 /// Available since: 1.2.0
 env: RepeatableStringMap = .{},
 
+/// The default homepage URL opened by `web` when no URL is supplied.
+homepage: [:0]const u8 = "https://termsurf.com/welcome",
+
 /// Data to send as input to the command on startup.
 ///
 /// The configured `command` will be launched using the typical rules,

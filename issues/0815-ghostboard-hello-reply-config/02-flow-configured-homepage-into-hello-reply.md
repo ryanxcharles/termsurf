@@ -145,3 +145,94 @@ Fresh-context adversarial review by Codex subagent `Epicurus`:
   assertion in the harness, and separate formatting/check steps.
 - **Re-review verdict:** Approved. The reviewer confirmed all prior findings
   were resolved and no new required findings were introduced.
+
+## Result
+
+**Result:** Pass
+
+Implemented the configured homepage path end to end:
+
+- Added `homepage` to `ghostboard/src/config/Config.zig`, with default
+  `https://termsurf.com/welcome`.
+- Added Swift access through `Ghostty.Config.homepage`.
+- Added `termsurf_hello_config_changed` through the public C header, bridging
+  header, `main_c.zig`, and `AppDelegate`.
+- Stored the active homepage in Zig-owned fixed storage guarded by
+  `state_mutex`, and copied a locked snapshot for each synchronous `HelloReply`.
+- Added C config getter support and a regression test for non-optional sentinel
+  strings (`[:0]const u8`), which `homepage` uses.
+- Added the `hello-config-homepage` harness scenario. It runs `web` with no
+  positional URL and no `--browser`, writes a temporary `homepage` config value,
+  and verifies that `HelloReply`, `SetOverlay`, and `BrowserReady` all carry the
+  configured homepage/default-browser behavior.
+
+The first focused runtime attempt failed because the new harness scenario wrote
+the custom homepage before the shared config fixture was composed, and the
+shared fixture overwrote it. The final harness writes the scenario command early
+but appends the `homepage` line after the shared `initial-command` config, so
+the launched app reads one final config containing both values.
+
+Verification run:
+
+- `zig fmt ghostboard/src/config/c_get.zig ghostboard/src/config/CApi.zig ghostboard/src/config/Config.zig ghostboard/src/apprt/termsurf.zig ghostboard/src/main_c.zig`
+  — pass.
+- `bash -n scripts/ghostboard-geometry-matrix.sh` — pass.
+- `cd ghostboard && ./zig-out/bin/termsurf +validate-config --config-file=<tmp>`
+  with `homepage = "https://example.net/issue-815-homepage"` — pass.
+- `cd ghostboard && ./zig-out/bin/termsurf +validate-config --config-file=<tmp>`
+  with `homepage = https://example.net/issue-815-homepage` — pass.
+- `cd ghostboard && zig build -Demit-macos-app=false` — pass.
+- `cd ghostboard && macos/build.nu --scheme Ghostty --configuration Debug --action build`
+  — pass.
+- `git diff --check` — pass.
+- `scripts/ghostboard-geometry-matrix.sh hello-config-homepage` — pass.
+  - Harness log:
+    `logs/ghostboard-geometry-hello-config-homepage-harness-20260617-213553.log`
+  - App log:
+    `logs/ghostboard-geometry-hello-config-homepage-app-20260617-213553.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-hello-config-homepage-roamium-20260617-213553.log`
+- `scripts/ghostboard-geometry-matrix.sh named-roamium-debug-launch` — pass.
+  - Harness log:
+    `logs/ghostboard-geometry-named-roamium-debug-launch-harness-20260617-213611.log`
+  - App log:
+    `logs/ghostboard-geometry-named-roamium-debug-launch-app-20260617-213611.log`
+  - Roamium trace:
+    `logs/ghostboard-geometry-named-roamium-debug-launch-roamium-20260617-213611.log`
+
+Known broad-test limitation:
+
+- `cd ghostboard && zig build test -Demit-macos-app=false` failed in the macOS
+  Swift test target before reaching the new Zig C API test:
+  `@testable import Ghostty` could not resolve module dependency `Ghostty`. This
+  is the same broad local test-target class already documented on earlier
+  Ghostboard issues, so the experiment used the successful Zig build, macOS app
+  build, config validation, and focused runtime harnesses as the authoritative
+  verification.
+
+## Conclusion
+
+Ghostboard now exposes a configurable homepage through its normal config system
+and sends that value in `HelloReply.homepage`. The focused runtime harness
+proves that `web` without arguments consumes the GUI-provided homepage and
+default browser list, and the named-Roamium regression keeps Experiment 1's
+default behavior intact.
+
+## Completion Review
+
+Fresh-context adversarial result review by Codex subagent `Wegener`:
+
+- **Verdict:** Approved.
+- **Required findings:** None.
+- **Evidence reviewed:** The reviewer confirmed the result commit had not yet
+  been made, the README marked Experiment 2 as `Pass`, the experiment file had
+  `Result` and `Conclusion`, Swift only passes a temporary C string through a
+  synchronous bridge call, Zig copies that value into owned storage immediately,
+  `sendHelloReply` snapshots the homepage under `state_mutex`, the harness
+  command is exactly `exec "$WEB"`, and the logs show the configured
+  `HelloReply` followed by `SetOverlay` with
+  `url=https://example.net/issue-815-homepage`.
+- **Independent checks run by reviewer:** `git diff --check`,
+  `bash -n scripts/ghostboard-geometry-matrix.sh`, `zig fmt --check ...`, and
+  `prettier --check ...` all passed.
+- **Unavailable optional check:** `shellcheck` was unavailable.
