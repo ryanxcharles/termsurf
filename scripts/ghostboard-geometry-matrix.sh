@@ -207,6 +207,48 @@ require_no_log_after() {
   fi
 }
 
+send_open_split_message() {
+  local socket_path="$1"
+  local pane_id="$2"
+  local direction="$3"
+  local command="$4"
+  python3 - "$socket_path" "$pane_id" "$direction" "$command" <<'PY'
+import socket
+import struct
+import sys
+
+
+def varint(value):
+    out = bytearray()
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def string_field(number, value):
+    data = value.encode("utf-8")
+    return varint((number << 3) | 2) + varint(len(data)) + data
+
+
+socket_path, pane_id, direction, command = sys.argv[1:]
+open_split = (
+    string_field(1, pane_id)
+    + string_field(2, direction)
+    + string_field(3, command)
+)
+message = varint((21 << 3) | 2) + varint(len(open_split)) + open_split
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(socket_path)
+    sock.sendall(struct.pack("<I", len(message)) + message)
+finally:
+    sock.close()
+PY
+}
+
 wait_for_log_after() {
   local start_line="$1"
   local pattern="$2"
@@ -1767,7 +1809,7 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1776,6 +1818,11 @@ esac
 RESOLVER_ONLY_SCENARIO=0
 if [ "$SCENARIO" = "named-roamium-debug-launch" ] || [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
   RESOLVER_ONLY_SCENARIO=1
+fi
+
+SKIP_INITIAL_HIT_TEST=0
+if [ "$RESOLVER_ONLY_SCENARIO" = "1" ] || [ "$SCENARIO" = "performance-window-resize" ] || [ "$SCENARIO" = "performance-split-right" ]; then
+  SKIP_INITIAL_HIT_TEST=1
 fi
 
 require_file "$APP_BIN"
@@ -3700,7 +3747,7 @@ fi
 if [ "$SCENARIO" = "visible-profile-identity" ]; then
   log "webtui_state_trace=$WEBTUI_STATE_TRACE"
 fi
-if [ "$SCENARIO" = "window-resize" ]; then
+if [ "$SCENARIO" = "window-resize" ] || [ "$SCENARIO" = "performance-window-resize" ]; then
   log "grow_screenshot=$SCREENSHOT_GROW"
   log "shrink_screenshot=$SCREENSHOT_SHRINK"
 fi
@@ -3870,16 +3917,20 @@ log "window=$WIN_LINE"
 screencapture -x -o -l"$WID" "$SCREENSHOT"
 log "screenshot_exit=$?"
 
-click_window_center "$WIN_LINE" "initial"
-delay 1
+if [ "$SKIP_INITIAL_HIT_TEST" = "0" ]; then
+  click_window_center "$WIN_LINE" "initial"
+  delay 1
+else
+  log "PASS: scenario skipped initial pointer prime"
+fi
 
 require_log 'TermSurf geometry layer=zig' "Zig geometry record"
 require_log 'TermSurf geometry layer=bridge' "bridge geometry record"
 require_log 'TermSurf geometry layer=appkit event=presented ' "AppKit presented geometry record"
-if [ "$RESOLVER_ONLY_SCENARIO" = "0" ]; then
+if [ "$SKIP_INITIAL_HIT_TEST" = "0" ]; then
   require_log 'TermSurf geometry layer=appkit event=hit_test .*hit=true' "AppKit hit-test geometry record"
 else
-  log "PASS: resolver-only scenario skipped generic initial hit-test prerequisite"
+  log "PASS: scenario skipped generic initial hit-test prerequisite"
 fi
 require_log "scenario=${SCENARIO}" "scenario id in geometry records"
 
@@ -3895,7 +3946,7 @@ HIT_TEST_LINE="$(grep -E 'TermSurf geometry layer=appkit event=hit_test .*hit=tr
 [ -n "$BRIDGE_PRESENT_LINE" ] || fail "missing bridge present_target_found geometry line"
 [ -n "$APPKIT_PRESENT_LINE" ] || fail "missing AppKit presented geometry line"
 [ -n "$APPKIT_PIXELS_LINE" ] || fail "missing AppKit presented-pixels geometry line"
-if [ "$RESOLVER_ONLY_SCENARIO" = "0" ]; then
+if [ "$SKIP_INITIAL_HIT_TEST" = "0" ]; then
   [ -n "$HIT_TEST_LINE" ] || fail "missing AppKit hit-test geometry line"
 fi
 
@@ -3964,7 +4015,7 @@ require_text "$APPKIT_PIXELS_LINE" "appkit_pixel=${APPKIT_PIXEL}" "AppKit report
 require_log "TermSurf geometry layer=zig event=appkit_presented_pixels .*pane_id:${PANE_ID} .*appkit_pixel=${APPKIT_PIXEL}" "Zig records AppKit presented pixel size"
 require_log "TermSurf geometry layer=zig event=appkit_corrective_resize .*pane_id:${PANE_ID} .*appkit_pixel=${APPKIT_PIXEL}" "Zig sends corrective resize for AppKit pixel size"
 require_log "TermSurf geometry layer=appkit .*context_id=${CONTEXT_ID}" "AppKit shares context id"
-if [ "$RESOLVER_ONLY_SCENARIO" = "0" ]; then
+if [ "$SKIP_INITIAL_HIT_TEST" = "0" ]; then
   require_text "$HIT_TEST_LINE" "context_id=${CONTEXT_ID}" "hit-test shares context"
   require_text "$HIT_TEST_LINE" "hit=true" "hit-test is inside overlay"
   require_text "$HIT_TEST_LINE" "web_point={" "hit-test includes webview-relative point"
@@ -6783,7 +6834,7 @@ if [ "$SCENARIO" = "keyboard-after-tab-window-switch" ]; then
   [ "$BROWSER_B_TRACE_START_LINE" -lt "$BROWSER_C_TRACE_START_LINE" ] || fail "keyboard switch trace boundaries for browser C open were not monotonic"
 fi
 
-if [ "$SCENARIO" = "window-resize" ]; then
+if [ "$SCENARIO" = "window-resize" ] || [ "$SCENARIO" = "performance-window-resize" ]; then
   INITIAL_PIXEL="$APPKIT_PIXEL"
   INITIAL_FRAME_SIZE="$OVERLAY_FRAME_SIZE"
   INITIAL_WW="$WW"
@@ -6811,12 +6862,16 @@ if [ "$SCENARIO" = "window-resize" ]; then
   require_trace "resize tab_id=${BROWSER_TAB_ID} pane_id=${PANE_ID} pixel_width=${GROW_PIXEL_WIDTH} pixel_height=${GROW_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied grow resize to AppKit pixel size via ts_set_view_size"
   screencapture -x -o -l"$WID" "$SCREENSHOT_GROW"
   log "grow_screenshot_exit=$?"
-  GROW_HIT_START_LINE="$(log_line_count)"
-  click_window_center "$GROW_WIN_LINE" "grow"
-  GROW_HIT_LINE="$(wait_for_hit_after "$GROW_HIT_START_LINE" "$CONTEXT_ID" "grown AppKit hit-test")"
-  log "PASS: observed grown AppKit hit-test"
-  require_text "$GROW_HIT_LINE" "overlay_frame=" "grown hit-test includes current overlay frame"
-  require_text "$GROW_HIT_LINE" "web_point={" "grown hit-test includes webview-relative point"
+  if [ "$SCENARIO" = "window-resize" ]; then
+    GROW_HIT_START_LINE="$(log_line_count)"
+    click_window_center "$GROW_WIN_LINE" "grow"
+    GROW_HIT_LINE="$(wait_for_hit_after "$GROW_HIT_START_LINE" "$CONTEXT_ID" "grown AppKit hit-test")"
+    log "PASS: observed grown AppKit hit-test"
+    require_text "$GROW_HIT_LINE" "overlay_frame=" "grown hit-test includes current overlay frame"
+    require_text "$GROW_HIT_LINE" "web_point={" "grown hit-test includes webview-relative point"
+  else
+    log "PASS: performance resize skipped grown pointer hit-test"
+  fi
 
   SHRINK_WIDTH=$((INITIAL_WW + 80))
   SHRINK_HEIGHT=$((INITIAL_WH + 60))
@@ -6840,12 +6895,16 @@ if [ "$SCENARIO" = "window-resize" ]; then
   require_trace "resize tab_id=${BROWSER_TAB_ID} pane_id=${PANE_ID} pixel_width=${SHRINK_PIXEL_WIDTH} pixel_height=${SHRINK_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied shrink resize to AppKit pixel size via ts_set_view_size"
   screencapture -x -o -l"$WID" "$SCREENSHOT_SHRINK"
   log "shrink_screenshot_exit=$?"
-  SHRINK_HIT_START_LINE="$(log_line_count)"
-  click_window_center "$SHRINK_WIN_LINE" "shrink"
-  SHRINK_HIT_LINE="$(wait_for_hit_after "$SHRINK_HIT_START_LINE" "$CONTEXT_ID" "shrunken AppKit hit-test")"
-  log "PASS: observed shrunken AppKit hit-test"
-  require_text "$SHRINK_HIT_LINE" "overlay_frame=" "shrunken hit-test includes current overlay frame"
-  require_text "$SHRINK_HIT_LINE" "web_point={" "shrunken hit-test includes webview-relative point"
+  if [ "$SCENARIO" = "window-resize" ]; then
+    SHRINK_HIT_START_LINE="$(log_line_count)"
+    click_window_center "$SHRINK_WIN_LINE" "shrink"
+    SHRINK_HIT_LINE="$(wait_for_hit_after "$SHRINK_HIT_START_LINE" "$CONTEXT_ID" "shrunken AppKit hit-test")"
+    log "PASS: observed shrunken AppKit hit-test"
+    require_text "$SHRINK_HIT_LINE" "overlay_frame=" "shrunken hit-test includes current overlay frame"
+    require_text "$SHRINK_HIT_LINE" "web_point={" "shrunken hit-test includes webview-relative point"
+  else
+    log "PASS: performance resize skipped shrunken pointer hit-test"
+  fi
 fi
 
 if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
@@ -8122,11 +8181,21 @@ if [ "$SCENARIO" = "two-browser-split-routing" ]; then
   require_no_log_after "$B_CLOSE_START_LINE" "SetOverlay: pane_id=${B_PANE_ID}" "closed browser B did not recreate a live overlay"
 fi
 
-if [ "$SCENARIO" = "split-right" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "performance-split-right" ]; then
   SPLIT_START_LINE="$(log_line_count)"
   SPLIT_TRACE_START_LINE="$(trace_line_count)"
-  log "split_keybind=ctrl+d=new_split:right"
-  swift "$ROOT/scripts/ghostty-app/inject.swift" key 2 control >>"$HARNESS_LOG" 2>&1
+  if [ "$SCENARIO" = "performance-split-right" ]; then
+    GUI_SOCKET="$(sed -nE 's/.*TermSurf socket listening on (.*)$/\1/p' "$APP_LOG" | tail -1)"
+    [ -S "$GUI_SOCKET" ] || fail "failed to resolve Ghostboard TermSurf socket: $GUI_SOCKET"
+    PERFORMANCE_SPLIT_COMMAND="/bin/sh -lc 'sleep 60'"
+    log "performance_split_socket=$GUI_SOCKET"
+    log "performance_split_protocol=OpenSplit direction=right command=${PERFORMANCE_SPLIT_COMMAND}"
+    send_open_split_message "$GUI_SOCKET" "$PANE_ID" "right" "$PERFORMANCE_SPLIT_COMMAND" >>"$HARNESS_LOG" 2>&1
+    wait_for_log_after "$SPLIT_START_LINE" "OpenSplit: pane_id=${PANE_ID} direction=right" "performance split OpenSplit handled" 30
+  else
+    log "split_keybind=ctrl+d=new_split:right"
+    swift "$ROOT/scripts/ghostty-app/inject.swift" key 2 control >>"$HARNESS_LOG" 2>&1
+  fi
   delay 1
 
   SPLIT_PRESENT_LINE="$(wait_for_split_right_frame_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$OVERLAY_FRAME_SIZE" "split-right AppKit overlay frame")"
@@ -8147,23 +8216,27 @@ if [ "$SCENARIO" = "split-right" ]; then
   screencapture -x -o -l"$WID" "$SCREENSHOT_SPLIT"
   log "split_screenshot_exit=$?"
 
-  SPLIT_WIN_LINE="$(window_bounds)" || fail "failed to resolve split window bounds for window id=$WID"
-  IFS=$'\t' read -r _SPLIT_WID SPLIT_WX SPLIT_WY SPLIT_WW SPLIT_WH <<<"$SPLIT_WIN_LINE"
-  SPLIT_FRAME_WIDTH="$(pair_width "$SPLIT_FRAME_SIZE")"
-  INITIAL_FRAME_WIDTH="$(pair_width "$OVERLAY_FRAME_SIZE")"
-  SPLIT_INSIDE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + (frame_w / 2) + 0.5) }')"
-  SPLIT_INSIDE_Y=$((SPLIT_WY + SPLIT_WH / 2))
-  SPLIT_HIT_START_LINE="$(log_line_count)"
-  click_global_point "$SPLIT_INSIDE_X" "$SPLIT_INSIDE_Y" "split_inside"
-  SPLIT_HIT_LINE="$(wait_for_hit_after "$SPLIT_HIT_START_LINE" "$CONTEXT_ID" "split-right AppKit hit-test")"
-  log "PASS: observed split-right AppKit hit-test"
-  require_text "$SPLIT_HIT_LINE" "overlay_frame=" "split-right hit-test includes current overlay frame"
-  require_text "$SPLIT_HIT_LINE" "web_point={" "split-right hit-test includes webview-relative point"
+  if [ "$SCENARIO" = "split-right" ]; then
+    SPLIT_WIN_LINE="$(window_bounds)" || fail "failed to resolve split window bounds for window id=$WID"
+    IFS=$'\t' read -r _SPLIT_WID SPLIT_WX SPLIT_WY SPLIT_WW SPLIT_WH <<<"$SPLIT_WIN_LINE"
+    SPLIT_FRAME_WIDTH="$(pair_width "$SPLIT_FRAME_SIZE")"
+    INITIAL_FRAME_WIDTH="$(pair_width "$OVERLAY_FRAME_SIZE")"
+    SPLIT_INSIDE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + (frame_w / 2) + 0.5) }')"
+    SPLIT_INSIDE_Y=$((SPLIT_WY + SPLIT_WH / 2))
+    SPLIT_HIT_START_LINE="$(log_line_count)"
+    click_global_point "$SPLIT_INSIDE_X" "$SPLIT_INSIDE_Y" "split_inside"
+    SPLIT_HIT_LINE="$(wait_for_hit_after "$SPLIT_HIT_START_LINE" "$CONTEXT_ID" "split-right AppKit hit-test")"
+    log "PASS: observed split-right AppKit hit-test"
+    require_text "$SPLIT_HIT_LINE" "overlay_frame=" "split-right hit-test includes current overlay frame"
+    require_text "$SPLIT_HIT_LINE" "web_point={" "split-right hit-test includes webview-relative point"
 
-  SPLIT_NEGATIVE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" -v old_w="$INITIAL_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + frame_w + ((old_w - frame_w) / 2) + 0.5) }')"
-  SPLIT_NEGATIVE_Y="$SPLIT_INSIDE_Y"
-  click_negative_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
-  wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$CONTEXT_ID" "split-right sibling-pane negative hit-test" allow-absent
+    SPLIT_NEGATIVE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" -v old_w="$INITIAL_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + frame_w + ((old_w - frame_w) / 2) + 0.5) }')"
+    SPLIT_NEGATIVE_Y="$SPLIT_INSIDE_Y"
+    click_negative_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
+    wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$CONTEXT_ID" "split-right sibling-pane negative hit-test" allow-absent
+  else
+    log "PASS: performance split skipped pointer hit-test assertions"
+  fi
 fi
 
 if [ "$SCENARIO" = "split-right-focus-switch" ]; then

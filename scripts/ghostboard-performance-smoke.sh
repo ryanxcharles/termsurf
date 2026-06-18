@@ -9,9 +9,7 @@ SUMMARY_LOG="$LOG_DIR/ghostboard-performance-smoke-${PROFILE}-${TS}.log"
 
 STARTUP_MAX="${TERMSURF_PERF_STARTUP_MAX_SECONDS:-90}"
 RESIZE_MAX="${TERMSURF_PERF_RESIZE_MAX_SECONDS:-150}"
-MOUSE_MAX="${TERMSURF_PERF_MOUSE_MAX_SECONDS:-210}"
-SCROLL_MAX="${TERMSURF_PERF_SCROLL_MAX_SECONDS:-210}"
-INPUT_MAX="${TERMSURF_PERF_INPUT_MAX_SECONDS:-210}"
+SPLIT_MAX="${TERMSURF_PERF_SPLIT_MAX_SECONDS:-150}"
 IDLE_CAP="${TERMSURF_PERF_IDLE_CAP_SECONDS:-60}"
 
 usage() {
@@ -22,14 +20,12 @@ Runs coarse Ghostboard performance smokes under scripts/bounded-run.sh.
 
 Profiles:
   --fast         repeated resolver-only startup
-  --diagnostic   fast profile plus resize, mouse, scroll, and input diagnostics
+  --diagnostic   fast profile plus non-pointer resize and split diagnostics
 
 Threshold env vars:
   TERMSURF_PERF_STARTUP_MAX_SECONDS
   TERMSURF_PERF_RESIZE_MAX_SECONDS
-  TERMSURF_PERF_MOUSE_MAX_SECONDS
-  TERMSURF_PERF_SCROLL_MAX_SECONDS
-  TERMSURF_PERF_INPUT_MAX_SECONDS
+  TERMSURF_PERF_SPLIT_MAX_SECONDS
   TERMSURF_PERF_IDLE_CAP_SECONDS
 EOF
 }
@@ -134,9 +130,7 @@ log "summary_log=$SUMMARY_LOG"
 log "startup_max_seconds=$STARTUP_MAX"
 if [ "$PROFILE" = "diagnostic" ]; then
   log "resize_max_seconds=$RESIZE_MAX"
-  log "mouse_max_seconds=$MOUSE_MAX"
-  log "scroll_max_seconds=$SCROLL_MAX"
-  log "input_max_seconds=$INPUT_MAX"
+  log "split_max_seconds=$SPLIT_MAX"
 fi
 
 failures=0
@@ -146,10 +140,8 @@ run_row "startup-2" "named-roamium-debug-launch" "$STARTUP_MAX" || failures=$((f
 run_row "startup-3" "named-roamium-debug-launch" "$STARTUP_MAX" || failures=$((failures + 1))
 
 if [ "$PROFILE" = "diagnostic" ]; then
-  run_row "resize" "window-resize" "$RESIZE_MAX" || failures=$((failures + 1))
-  run_row "mouse" "mouse-after-geometry-change" "$MOUSE_MAX" || failures=$((failures + 1))
-  run_row "scroll" "terminal-scrollback-movement" "$SCROLL_MAX" || failures=$((failures + 1))
-  run_row "input" "browser-input-granularity" "$INPUT_MAX" || failures=$((failures + 1))
+  run_row "resize" "performance-window-resize" "$RESIZE_MAX" || failures=$((failures + 1))
+  run_row "split" "performance-split-right" "$SPLIT_MAX" || failures=$((failures + 1))
 fi
 
 if [ "$failures" -ne 0 ]; then
