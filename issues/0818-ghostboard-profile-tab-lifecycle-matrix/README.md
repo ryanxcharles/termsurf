@@ -34,3 +34,8 @@ This issue should prove the lifecycle invariants before making fixes. Tests
 should include enough logging or screenshots to distinguish wrong pane routing,
 wrong profile routing, stale tab lookup, duplicate server spawn, and premature
 process exit.
+
+## Experiments
+
+- [Experiment 1: Establish lifecycle baseline](01-establish-lifecycle-baseline.md)
+  — **Designed**
