@@ -49,7 +49,11 @@ SCREENSHOT_SCROLLBACK_UP="$LOG_DIR/ghostboard-geometry-${SCENARIO}-scrollback-up
 SCREENSHOT_SCROLLBACK_BOTTOM="$LOG_DIR/ghostboard-geometry-${SCENARIO}-scrollback-bottom-screenshot-${TS}.png"
 SCREENSHOT_NAVIGATED="$LOG_DIR/ghostboard-geometry-${SCENARIO}-navigated-screenshot-${TS}.png"
 SCREENSHOT_DEVTOOLS_SPLIT="$LOG_DIR/ghostboard-geometry-${SCENARIO}-devtools-split-screenshot-${TS}.png"
+SCREENSHOT_BROWSER_STATE_HOVER="$LOG_DIR/ghostboard-geometry-${SCENARIO}-hover-screenshot-${TS}.png"
+SCREENSHOT_BROWSER_STATE_RELOAD="$LOG_DIR/ghostboard-geometry-${SCENARIO}-reload-screenshot-${TS}.png"
+SCREENSHOT_BROWSER_STATE_BLANK="$LOG_DIR/ghostboard-geometry-${SCENARIO}-blank-screenshot-${TS}.png"
 ROAMIUM_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-roamium-${TS}.log"
+WEBTUI_STATE_TRACE="$LOG_DIR/ghostboard-geometry-${SCENARIO}-webtui-${TS}.log"
 SIBLING_ALIVE_COMMAND="$RUN_DIR/sibling-alive-command.txt"
 SIBLING_FOCUS_COMMAND="$RUN_DIR/sibling-focus-command.txt"
 BROWSER_FOCUS_COMMAND="$RUN_DIR/browser-focus-command.txt"
@@ -59,11 +63,13 @@ NAVIGATION_APPEND_COMMAND="$RUN_DIR/navigation-append-command.txt"
 DEVTOOLS_COMMAND="$RUN_DIR/devtools-command.txt"
 DEVTOOLS_QUERY_PROBE="$RUN_DIR/devtools-query-probe.py"
 DEVTOOLS_OVERLAY_PROBE="$RUN_DIR/devtools-overlay-probe.py"
+STATE_WEB_ROOT="$RUN_DIR/browser-state-site"
 NEW_TAB_COMMAND_LOG="$RUN_DIR/new-tab-command.log"
 NEW_TAB_MARKER_COMMAND="$RUN_DIR/new-tab-marker-command.txt"
 SECOND_BROWSER_COMMAND="$RUN_DIR/second-browser-command.txt"
 THIRD_BROWSER_COMMAND="$RUN_DIR/third-browser-command.txt"
 PID=""
+HTTP_PID=""
 
 mkdir -p "$LOG_DIR"
 
@@ -89,6 +95,9 @@ require_readable() {
 }
 
 cleanup() {
+  if [ -n "${HTTP_PID:-}" ] && kill -0 "$HTTP_PID" >/dev/null 2>&1; then
+    kill "$HTTP_PID" >/dev/null 2>&1 || true
+  fi
   if [ -n "${PID:-}" ] && kill -0 "$PID" >/dev/null 2>&1; then
     kill "$PID" >/dev/null 2>&1 || true
     delay 0.5 || true
@@ -167,6 +176,150 @@ require_trace() {
   else
     fail "missing $label"
   fi
+}
+
+wait_for_state_trace() {
+  local pattern="$1"
+  local label="$2"
+  local attempts="${3:-30}"
+  for _ in $(seq 1 "$attempts"); do
+    if grep -E "$pattern" "$WEBTUI_STATE_TRACE" >/dev/null 2>&1; then
+      log "PASS: observed $label"
+      return 0
+    fi
+    delay 1
+  done
+  fail "timed out waiting for $label"
+}
+
+try_wait_state_trace() {
+  local pattern="$1"
+  local attempts="${2:-10}"
+  for _ in $(seq 1 "$attempts"); do
+    if grep -E "$pattern" "$WEBTUI_STATE_TRACE" >/dev/null 2>&1; then
+      return 0
+    fi
+    delay 1
+  done
+  return 1
+}
+
+has_state_trace() {
+  local pattern="$1"
+  grep -E "$pattern" "$WEBTUI_STATE_TRACE" >/dev/null 2>&1
+}
+
+state_trace_line_count() {
+  if [ -r "$WEBTUI_STATE_TRACE" ]; then
+    wc -l <"$WEBTUI_STATE_TRACE" | tr -d ' '
+  else
+    printf '0\n'
+  fi
+}
+
+wait_for_state_trace_after() {
+  local start_line="$1"
+  local pattern="$2"
+  local label="$3"
+  local attempts="${4:-30}"
+  for _ in $(seq 1 "$attempts"); do
+    if tail -n +"$((start_line + 1))" "$WEBTUI_STATE_TRACE" | grep -E "$pattern" >/dev/null 2>&1; then
+      log "PASS: observed $label"
+      return 0
+    fi
+    delay 1
+  done
+  fail "timed out waiting for $label"
+}
+
+require_state_trace() {
+  local pattern="$1"
+  local label="$2"
+  if grep -E "$pattern" "$WEBTUI_STATE_TRACE" >/dev/null 2>&1; then
+    log "PASS: $label"
+  else
+    fail "missing $label"
+  fi
+}
+
+assert_png_pixel_near_white() {
+  local image="$1"
+  local x="$2"
+  local y="$3"
+  local label="$4"
+  local sample
+  sample="$(python3 - "$image" "$x" "$y" <<'PY'
+import struct
+import sys
+import zlib
+
+path = sys.argv[1]
+x = int(float(sys.argv[2]))
+y = int(float(sys.argv[3]))
+data = open(path, "rb").read()
+if data[:8] != b"\x89PNG\r\n\x1a\n":
+    raise SystemExit("not a png")
+pos = 8
+width = height = bit_depth = color_type = interlace = None
+idat = bytearray()
+while pos < len(data):
+    length = struct.unpack(">I", data[pos:pos + 4])[0]
+    chunk_type = data[pos + 4:pos + 8]
+    chunk_data = data[pos + 8:pos + 8 + length]
+    pos += 12 + length
+    if chunk_type == b"IHDR":
+        width, height, bit_depth, color_type, _compression, _filter, interlace = struct.unpack(">IIBBBBB", chunk_data)
+    elif chunk_type == b"IDAT":
+        idat.extend(chunk_data)
+    elif chunk_type == b"IEND":
+        break
+
+if bit_depth != 8 or color_type not in (2, 6) or interlace != 0:
+    raise SystemExit(f"unsupported png bit_depth={bit_depth} color_type={color_type} interlace={interlace}")
+if x < 0 or y < 0 or x >= width or y >= height:
+    raise SystemExit(f"sample outside image x={x} y={y} size={width}x{height}")
+
+bpp = 4 if color_type == 6 else 3
+stride = width * bpp
+raw = zlib.decompress(bytes(idat))
+rows = []
+offset = 0
+prev = bytearray(stride)
+for _row_index in range(height):
+    filter_type = raw[offset]
+    offset += 1
+    row = bytearray(raw[offset:offset + stride])
+    offset += stride
+    for i in range(stride):
+        left = row[i - bpp] if i >= bpp else 0
+        up = prev[i]
+        up_left = prev[i - bpp] if i >= bpp else 0
+        if filter_type == 1:
+            row[i] = (row[i] + left) & 0xFF
+        elif filter_type == 2:
+            row[i] = (row[i] + up) & 0xFF
+        elif filter_type == 3:
+            row[i] = (row[i] + ((left + up) // 2)) & 0xFF
+        elif filter_type == 4:
+            p = left + up - up_left
+            pa = abs(p - left)
+            pb = abs(p - up)
+            pc = abs(p - up_left)
+            predictor = left if pa <= pb and pa <= pc else up if pb <= pc else up_left
+            row[i] = (row[i] + predictor) & 0xFF
+        elif filter_type != 0:
+            raise SystemExit(f"unsupported png filter={filter_type}")
+    rows.append(row)
+    prev = row
+
+idx = x * bpp
+r, g, b = rows[y][idx:idx + 3]
+print(f"{r},{g},{b}")
+if not (r >= 245 and g >= 245 and b >= 245):
+    raise SystemExit(f"pixel not white enough: {r},{g},{b}")
+PY
+)"
+  log "PASS: $label pixel=$sample"
 }
 
 trace_line_count() {
@@ -381,6 +534,32 @@ click_point_for_frame() {
     -v frame_height="$frame_height" \
     'BEGIN {
       print int(wx + frame_x + (frame_width / 2) + 0.5) "\t" int(wy + content_y + frame_y + (frame_height / 2) + 0.5)
+    }'
+}
+
+global_point_for_web_point() {
+  local win_line="$1"
+  local present_line="$2"
+  local web_x="$3"
+  local web_y="$4"
+  local _wid wx wy ww wh
+  local frame_x frame_y root_frame_size root_height content_y_offset
+  IFS=$'\t' read -r _wid wx wy ww wh <<<"$win_line"
+  frame_x="$(extract_frame_x "$present_line")"
+  frame_y="$(extract_frame_y "$present_line")"
+  root_frame_size="$(extract_root_frame_size "$present_line")"
+  root_height="$(pair_height "$root_frame_size")"
+  content_y_offset="$(awk -v wh="$wh" -v root_h="$root_height" 'BEGIN { print int(wh - root_h) }')"
+  awk \
+    -v wx="$wx" \
+    -v wy="$wy" \
+    -v content_y="$content_y_offset" \
+    -v frame_x="$frame_x" \
+    -v frame_y="$frame_y" \
+    -v web_x="$web_x" \
+    -v web_y="$web_y" \
+    'BEGIN {
+      print int(wx + frame_x + web_x + 0.5) "\t" int(wy + content_y + frame_y + web_y + 0.5)
     }'
 }
 
@@ -1292,6 +1471,14 @@ click_global_point() {
   swift "$ROOT/scripts/ghostty-app/inject.swift" click "$x" "$y" left 1 >>"$HARNESS_LOG" 2>&1
 }
 
+move_global_point() {
+  local x="$1"
+  local y="$2"
+  local label="$3"
+  log "${label}_input_point=${x},${y}"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" move "$x" "$y" >>"$HARNESS_LOG" 2>&1
+}
+
 click_negative_global_point() {
   local x="$1"
   local y="$2"
@@ -1415,7 +1602,7 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|browser-state-smoke|window-resize|split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -1426,6 +1613,116 @@ require_file "$WEB"
 require_file "$ROAMIUM"
 require_readable "$ROOT/scripts/ghostty-app/inject.swift"
 require_readable "$ROOT/scripts/ghostty-app/winid.swift"
+
+if [ "$SCENARIO" = "browser-state-smoke" ]; then
+  STATE_HTTP_PORT="$(python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+)"
+  mkdir -p "$STATE_WEB_ROOT"
+  cat >"$STATE_WEB_ROOT/index.html" <<'EOF'
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Issue 816 State Smoke Initial</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: #111111;
+        font: 16px -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      #white-sample {
+        position: absolute;
+        left: 20px;
+        top: 210px;
+        width: 80px;
+        height: 80px;
+        background: #ffffff;
+      }
+      a,
+      button {
+        position: absolute;
+        left: 32px;
+      }
+      #hover-link {
+        top: 32px;
+      }
+      #blank-link {
+        top: 82px;
+      }
+      #reload-count {
+        position: absolute;
+        left: 32px;
+        top: 132px;
+      }
+    </style>
+  </head>
+  <body>
+    <a id="hover-link" href="/hover-target.html">ISSUE816 hover target</a>
+    <a id="blank-link" href="/blank-target.html" target="_blank">ISSUE816 blank target</a>
+    <div id="reload-count"></div>
+    <div id="white-sample"></div>
+    <script>
+      const count = Number(sessionStorage.getItem("issue816ReloadCount") || "0") + 1;
+      sessionStorage.setItem("issue816ReloadCount", String(count));
+      document.getElementById("reload-count").textContent = `ISSUE816_RELOAD_COUNT_${count}`;
+      console.log(`ISSUE816_CONSOLE_MARKER_${count}`);
+      window.addEventListener("load", () => {
+        document.title = `Issue 816 State Smoke Updated ${count}`;
+        document.body.dataset.loaded = "true";
+      });
+    </script>
+  </body>
+</html>
+EOF
+  cat >"$STATE_WEB_ROOT/hover-target.html" <<'EOF'
+<!doctype html>
+<html>
+  <head><title>Issue 816 Hover Target</title></head>
+  <body>ISSUE816_HOVER_TARGET</body>
+</html>
+EOF
+  cat >"$STATE_WEB_ROOT/blank-target.html" <<'EOF'
+<!doctype html>
+<html>
+  <head><title>Issue 816 Blank Target</title></head>
+  <body>ISSUE816_BLANK_TARGET</body>
+</html>
+EOF
+  python3 -m http.server "$STATE_HTTP_PORT" --bind 127.0.0.1 --directory "$STATE_WEB_ROOT" >>"$HARNESS_LOG" 2>&1 &
+  HTTP_PID="$!"
+  URL="http://127.0.0.1:${STATE_HTTP_PORT}/index.html"
+  for _ in $(seq 1 30); do
+    if python3 - "$URL" <<'PY' >/dev/null 2>&1
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=1) as response:
+    raise SystemExit(0 if response.status == 200 else 1)
+PY
+    then
+      break
+    fi
+    delay 0.25
+  done
+  python3 - "$URL" <<'PY' >/dev/null 2>&1 || fail "browser-state HTTP fixture did not become ready"
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=1) as response:
+    raise SystemExit(0 if response.status == 200 else 1)
+PY
+  log "browser_state_web_root=$STATE_WEB_ROOT"
+  log "browser_state_http_pid=$HTTP_PID"
+  log "browser_state_url=$URL"
+fi
 
 COMMAND="$RUN_DIR/run-web.sh"
 CONFIG="$RUN_DIR/config"
@@ -2324,6 +2621,12 @@ fi
 log "app_log=$APP_LOG"
 log "roamium_trace=$ROAMIUM_TRACE"
 log "screenshot=$SCREENSHOT"
+if [ "$SCENARIO" = "browser-state-smoke" ]; then
+  log "webtui_state_trace=$WEBTUI_STATE_TRACE"
+  log "hover_screenshot=$SCREENSHOT_BROWSER_STATE_HOVER"
+  log "reload_screenshot=$SCREENSHOT_BROWSER_STATE_RELOAD"
+  log "blank_screenshot=$SCREENSHOT_BROWSER_STATE_BLANK"
+fi
 if [ "$SCENARIO" = "window-resize" ]; then
   log "grow_screenshot=$SCREENSHOT_GROW"
   log "shrink_screenshot=$SCREENSHOT_SHRINK"
@@ -2437,6 +2740,7 @@ TERMSURF_GEOMETRY_TRACE=1 \
 TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
 TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
 TERMSURF_ROAMIUM_PATH="$ROAMIUM_PATH_FOR_APP" \
+TERMSURF_WEBTUI_STATE_TRACE_FILE="$WEBTUI_STATE_TRACE" \
 TERMSURF_INPUT_TRACE=1 \
 TERMSURF_PDF_INPUT_TRACE=1 \
 TERMSURF_PDF_INPUT_TRACE_FILE="$ROAMIUM_TRACE" \
@@ -2574,6 +2878,59 @@ require_log "TermSurf geometry .*scenario=${SCENARIO}" "timestamped run contains
 require_log 'window_id:[^ ]+ surface_id:[^ ]+ selected_tab_id:[^ ]+ pane_id:[^ ]+ browser_tab_id:[^ ]+' "canonical identity tuple fields"
 require_readable "$ROAMIUM_TRACE"
 require_trace "resize tab_id=${BROWSER_TAB_ID} pane_id=${PANE_ID} pixel_width=${APPKIT_PIXEL_WIDTH} pixel_height=${APPKIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium applied resize to AppKit pixel size via ts_set_view_size"
+
+if [ "$SCENARIO" = "browser-state-smoke" ]; then
+  STATE_HOVER_URL="http://127.0.0.1:${STATE_HTTP_PORT}/hover-target.html"
+  STATE_BLANK_URL="http://127.0.0.1:${STATE_HTTP_PORT}/blank-target.html"
+
+  wait_for_state_trace "event=url_changed.*url=${URL}" "webtui URL state changed to fixture URL" 45
+  if has_state_trace "event=loading_state.*state=loading"; then
+    log "PASS: webtui loading state emitted loading"
+  else
+    require_state_trace "event=loading_state.*state=progress" "webtui loading state emitted progress without loading"
+    log "PARTIAL: webtui fixture load emitted progress without a literal loading state"
+  fi
+  wait_for_state_trace "event=loading_state.*state=done" "webtui loading state finished" 45
+  wait_for_state_trace "event=title_changed.*title=Issue 816 State Smoke Updated 1" "webtui received updated page title" 45
+  wait_for_state_trace "event=console_message.*message=ISSUE816_CONSOLE_MARKER_1" "webtui received console marker" 45
+  require_state_trace "event=render_state.*title=Issue 816 State Smoke Updated 1" "webtui render state includes updated title"
+  require_state_trace "event=render_state.*latest_console=ISSUE816_CONSOLE_MARKER_1" "webtui render state includes console marker"
+
+  STATE_WIN_LINE="$(window_bounds)" || fail "failed to resolve browser-state window bounds"
+  IFS=$'\t' read -r _STATE_WID STATE_WX STATE_WY _STATE_WW _STATE_WH <<<"$STATE_WIN_LINE"
+  IFS=$'\t' read -r HOVER_X HOVER_Y <<<"$(global_point_for_web_point "$STATE_WIN_LINE" "$APPKIT_PRESENT_LINE" 90 44)"
+  move_global_point "$HOVER_X" "$HOVER_Y" "browser_state_hover"
+  wait_for_state_trace "event=target_url_changed.*url=${STATE_HOVER_URL}" "webtui hover target URL" 45
+  require_state_trace "event=render_state.*target_url=${STATE_HOVER_URL}" "webtui render state includes hover target URL"
+  screencapture -x -o -l"$WID" "$SCREENSHOT_BROWSER_STATE_HOVER"
+  log "hover_screenshot_exit=$?"
+
+  IFS=$'\t' read -r WHITE_X WHITE_Y <<<"$(global_point_for_web_point "$STATE_WIN_LINE" "$APPKIT_PRESENT_LINE" 60 250)"
+  WHITE_SAMPLE_X=$((WHITE_X - STATE_WX))
+  WHITE_SAMPLE_Y=$((WHITE_Y - STATE_WY))
+  assert_png_pixel_near_white "$SCREENSHOT_BROWSER_STATE_HOVER" "$WHITE_SAMPLE_X" "$WHITE_SAMPLE_Y" "browser-state white viewport background"
+
+  log "browser_state_reload_key=cmd+r=browser_refresh"
+  enter_browser_browse "browser_state_reload" "$PANE_ID" "$BROWSER_TAB_ID"
+  swift "$ROOT/scripts/ghostty-app/inject.swift" key 15 command >>"$HARNESS_LOG" 2>&1
+  if try_wait_state_trace "event=console_message.*message=ISSUE816_CONSOLE_MARKER_2" 20; then
+    log "PASS: webtui received reload console marker"
+    wait_for_state_trace "event=title_changed.*title=Issue 816 State Smoke Updated 2" "webtui received reload title update" 45
+    require_state_trace "event=render_state.*title=Issue 816 State Smoke Updated 2" "webtui render state includes reload title"
+  else
+    log "PARTIAL: Cmd-R in Browse mode did not produce a reload console marker"
+  fi
+  screencapture -x -o -l"$WID" "$SCREENSHOT_BROWSER_STATE_RELOAD"
+  log "reload_screenshot_exit=$?"
+
+  IFS=$'\t' read -r BLANK_X BLANK_Y <<<"$(global_point_for_web_point "$STATE_WIN_LINE" "$APPKIT_PRESENT_LINE" 90 94)"
+  BLANK_TRACE_START_LINE="$(state_trace_line_count)"
+  click_global_point "$BLANK_X" "$BLANK_Y" "browser_state_blank_target"
+  wait_for_state_trace_after "$BLANK_TRACE_START_LINE" "event=url_changed[[:space:]]+url=${STATE_BLANK_URL}" "webtui target blank URL navigation" 45
+  wait_for_state_trace_after "$BLANK_TRACE_START_LINE" "event=title_changed[[:space:]]+title=Issue 816 Blank Target" "webtui target blank title" 45
+  screencapture -x -o -l"$WID" "$SCREENSHOT_BROWSER_STATE_BLANK"
+  log "blank_screenshot_exit=$?"
+fi
 
 if [ "$SCENARIO" = "named-roamium-debug-launch" ]; then
   if grep -F -- "--browser" "$COMMAND" >/dev/null 2>&1; then

@@ -135,3 +135,93 @@ Fresh-context adversarial review by Codex subagent `Avicenna`:
   `Fail` with owner evidence.
 - **Re-review verdict:** Approved. The reviewer confirmed both prior findings
   were resolved and no new required findings were introduced.
+
+## Result
+
+**Result:** Partial.
+
+Implemented a focused `browser-state-smoke` scenario in
+`scripts/ghostboard-geometry-matrix.sh` and a test-only webtui state trace
+behind `TERMSURF_WEBTUI_STATE_TRACE_FILE` in `webtui/src/main.rs`. Normal webtui
+behavior is unchanged unless that environment variable is present.
+
+Final successful runtime command:
+
+```bash
+scripts/ghostboard-geometry-matrix.sh browser-state-smoke
+```
+
+Final evidence artifacts:
+
+- Harness log:
+  `logs/ghostboard-geometry-browser-state-smoke-harness-20260617-221935.log`
+- App log:
+  `logs/ghostboard-geometry-browser-state-smoke-app-20260617-221935.log`
+- Roamium trace:
+  `logs/ghostboard-geometry-browser-state-smoke-roamium-20260617-221935.log`
+- Webtui state trace:
+  `logs/ghostboard-geometry-browser-state-smoke-webtui-20260617-221935.log`
+- Screenshots:
+  `logs/ghostboard-geometry-browser-state-smoke-screenshot-20260617-221935.png`,
+  `logs/ghostboard-geometry-browser-state-smoke-hover-screenshot-20260617-221935.png`,
+  `logs/ghostboard-geometry-browser-state-smoke-reload-screenshot-20260617-221935.png`,
+  and
+  `logs/ghostboard-geometry-browser-state-smoke-blank-screenshot-20260617-221935.png`.
+
+Per-feature result:
+
+| Feature                              | Result  | Evidence                                                                                                                                                                                                   |
+| ------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ghostboard overlay/geometry baseline | Pass    | Harness observed AppKit presentation, hit-test, identity correlation, and Roamium resize to `2672x1496`.                                                                                                   |
+| URL changed                          | Pass    | Webtui trace recorded `event=url_changed url=http://127.0.0.1:63711/index.html`.                                                                                                                           |
+| Loading finished                     | Pass    | Webtui trace recorded `event=loading_state state=done progress=100`.                                                                                                                                       |
+| Initial loading start                | Partial | Initial fixture load emitted `progress` states before `done`, but no literal `state=loading`. Reload later did emit `state=loading`.                                                                       |
+| Page title                           | Pass    | Webtui trace recorded `Issue 816 State Smoke Updated 1`, and render state included that title.                                                                                                             |
+| Console message                      | Pass    | Webtui trace recorded `ISSUE816_CONSOLE_MARKER_1`, and render state included the latest console marker.                                                                                                    |
+| Hover target URL                     | Pass    | Mouse move over the fixture link produced webtui `target_url_changed` and render-state evidence for `/hover-target.html`.                                                                                  |
+| White page background                | Pass    | Harness sampled the browser screenshot at the fixture white region and read pixel `255,255,255`.                                                                                                           |
+| Reload                               | Pass    | After entering Browse mode, Cmd-R produced `ISSUE816_CONSOLE_MARKER_2`, title update `Issue 816 State Smoke Updated 2`, and a reload screenshot.                                                           |
+| `target=_blank`                      | Pass    | Clicking the fixture target produced fresh post-click webtui URL/title evidence for `/blank-target.html` / `Issue 816 Blank Target`. Current behavior is same-pane navigation, not a separate visible tab. |
+
+Verification run:
+
+```bash
+cargo fmt -- webtui/src/main.rs
+bash -n scripts/ghostboard-geometry-matrix.sh
+cargo check -p webtui
+cargo build -p webtui
+git diff --check
+scripts/ghostboard-geometry-matrix.sh browser-state-smoke
+```
+
+`shellcheck scripts/ghostboard-geometry-matrix.sh` could not be run because
+`shellcheck` is not installed on this VM.
+
+## Completion Review
+
+Fresh-context adversarial result review by Codex subagent `Goodall`:
+
+- **Initial verdict:** Changes required.
+- **Required finding:** The `_blank` assertion could pass from pre-navigation
+  hover/status state because the regex matched `render_state` lines where
+  `target_url` contained the blank target before navigation actually happened.
+- **Resolution:** Accepted. The harness now records the webtui state trace line
+  count immediately before the `_blank` click and requires fresh post-click
+  `url_changed` evidence for `/blank-target.html` plus fresh post-click
+  `title_changed` evidence for `Issue 816 Blank Target`.
+- **Re-review verdict:** Approved. The reviewer confirmed the `_blank` assertion
+  now tails only post-click trace lines and no longer passes from earlier
+  hover/status `target_url` state.
+
+## Conclusion
+
+The normal direct Roamium-to-webtui state path is now testable at the webtui
+consumer boundary and mostly passes under Ghostboard. URL, title, console,
+hover-target status, white background, reload, and `_blank` behavior are all
+covered by durable harness assertions.
+
+The remaining finding is narrow: the initial fixture load reached webtui as
+`progress`/`done` without a literal `loading` state, although a subsequent
+Browse-mode Cmd-R reload did emit `loading` before `progress`/`done`. A future
+experiment should decide whether this initial-load difference is acceptable
+current behavior or a Roamium/webtui loading-state bug.

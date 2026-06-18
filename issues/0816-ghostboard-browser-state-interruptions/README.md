@@ -41,4 +41,5 @@ owning component before any fix.
 ## Experiments
 
 - [Experiment 1: Prove direct browser state smoke](01-prove-direct-browser-state-smoke.md)
-  — **Designed**
+  — **Partial** (initial load reports `progress`/`done` but not literal
+  `loading`)

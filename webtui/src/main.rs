@@ -1,5 +1,6 @@
 mod ipc;
 
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
@@ -86,6 +87,39 @@ struct PendingHttpAuth {
     password: String,
     field: AuthField,
     previous_mode: Mode,
+}
+
+struct StateTrace {
+    file: File,
+}
+
+impl StateTrace {
+    fn from_env() -> Option<Self> {
+        let path = std::env::var_os("TERMSURF_WEBTUI_STATE_TRACE_FILE")?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()?;
+        Some(Self { file })
+    }
+
+    fn write(&mut self, event: &str, fields: &[(&str, String)]) {
+        let _ = write!(self.file, "event={}", trace_field(event));
+        for (key, value) in fields {
+            let _ = write!(self.file, "\t{}={}", trace_field(key), trace_field(value));
+        }
+        let _ = writeln!(self.file);
+        let _ = self.file.flush();
+    }
+}
+
+fn trace_field(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
 }
 
 #[derive(Clone)]
@@ -513,6 +547,8 @@ fn main() -> io::Result<()> {
     let mut pending_auth: Option<PendingHttpAuth> = None;
     let mut handled_dialogs: Vec<(i64, u64)> = Vec::new();
     let mut handled_auth: Vec<(i64, u64)> = Vec::new();
+    let mut state_trace = StateTrace::from_env();
+    let mut last_render_trace = String::new();
     // edtui state (Issue 637, 658).
     let mut editor_state = EditorState::new(Lines::from(url.as_str()));
     editor_state.set_clipboard(UrlClipboard::new());
@@ -565,6 +601,39 @@ fn main() -> io::Result<()> {
                 viewport_height_override,
             );
         })?;
+        if let Some(trace) = state_trace.as_mut() {
+            let latest_console = console_log.last();
+            let render_trace = format!(
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                url,
+                page_title,
+                target_url,
+                page_loaded,
+                browser_ready,
+                latest_console
+                    .map(|entry| entry.message.as_str())
+                    .unwrap_or_default()
+            );
+            if render_trace != last_render_trace {
+                trace.write(
+                    "render_state",
+                    &[
+                        ("url", url.clone()),
+                        ("title", page_title.clone()),
+                        ("target_url", target_url.clone()),
+                        ("page_loaded", page_loaded.to_string()),
+                        ("browser_ready", browser_ready.to_string()),
+                        (
+                            "latest_console",
+                            latest_console
+                                .map(|entry| entry.message.clone())
+                                .unwrap_or_default(),
+                        ),
+                    ],
+                );
+                last_render_trace = render_trace;
+            }
+        }
 
         // Send overlay coordinates to compositor (only when changed).
         if viewport_rect != last_viewport {
@@ -1027,13 +1096,22 @@ fn main() -> io::Result<()> {
                     }
                     ipc::CompositorMessage::UrlChanged { url: new_url } => {
                         url = new_url;
+                        if let Some(trace) = state_trace.as_mut() {
+                            trace.write("url_changed", &[("url", url.clone())]);
+                        }
                         // Mark editor_url stale so enter_edit re-syncs (Issue 658).
                         editor_url.clear();
                     }
                     ipc::CompositorMessage::LoadingState {
                         state,
-                        _progress: _,
+                        _progress: progress,
                     } => {
+                        if let Some(trace) = state_trace.as_mut() {
+                            trace.write(
+                                "loading_state",
+                                &[("state", state.clone()), ("progress", progress.to_string())],
+                            );
+                        }
                         let mut stdout = io::stdout();
                         let _ = match state.as_str() {
                             "loading" => {
@@ -1077,9 +1155,15 @@ fn main() -> io::Result<()> {
                     }
                     ipc::CompositorMessage::TitleChanged { title } => {
                         page_title = title;
+                        if let Some(trace) = state_trace.as_mut() {
+                            trace.write("title_changed", &[("title", page_title.clone())]);
+                        }
                     }
                     ipc::CompositorMessage::TargetUrlChanged { url: new_target } => {
                         target_url = new_target;
+                        if let Some(trace) = state_trace.as_mut() {
+                            trace.write("target_url_changed", &[("url", target_url.clone())]);
+                        }
                     }
                     ipc::CompositorMessage::ConsoleMessage {
                         tab_id,
@@ -1088,6 +1172,18 @@ fn main() -> io::Result<()> {
                         line_no,
                         source_id,
                     } => {
+                        if let Some(trace) = state_trace.as_mut() {
+                            trace.write(
+                                "console_message",
+                                &[
+                                    ("tab_id", tab_id.to_string()),
+                                    ("level", level.clone()),
+                                    ("message", message.clone()),
+                                    ("line_no", line_no.to_string()),
+                                    ("source_id", source_id.clone()),
+                                ],
+                            );
+                        }
                         console_log.push(ConsoleLogEntry {
                             tab_id,
                             level,
