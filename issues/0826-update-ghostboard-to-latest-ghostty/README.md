@@ -199,3 +199,5 @@ previous experiment has produced a result.
   — **Partial**
 - [Experiment 8: Restore close-sibling split keybind](08-restore-close-sibling-split-keybind.md)
   — **Partial**
+- [Experiment 9: Tolerate closed browser sockets during cleanup](09-tolerate-closed-browser-sockets-during-cleanup.md)
+  — **Designed**
