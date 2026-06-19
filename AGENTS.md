@@ -47,14 +47,18 @@ lines) is almost entirely reusable across engines.
 
 ### Multiple GUIs
 
-TermSurf currently ships as a WezTerm fork (`wezboard/`). We will implement
-forks of all major terminal emulators:
+TermSurf's primary front-end is **Ghostboard** (`ghostboard/`), a Ghostty fork
+with TermSurf protocol support. Other front-ends are reference, deprecated, or
+planned implementations:
 
-- **Ghostboard** — Archived. Will return from a fresh Ghostty fork after the
-  protocol stabilizes.
-- **Wezboard** (wezboard/) — Active GUI. WezTerm fork, Rust. Full protocol
-  support, CALayerHost rendering, input forwarding, DevTools, direct TUI↔Browser
-  connection (Issues 715–741).
+- **Ghostboard** (`ghostboard/`) — Primary GUI. Ghostty fork, Zig/Swift. Current
+  TermSurf front-end and the focus for new frontend work.
+- **Ghostboard Legacy** (`ghostboard-legacy/`) — archived historical
+  implementation. Use it as reference for previously solved behavior.
+- **Wezboard** (`wezboard/`) — Deprecated GUI. WezTerm fork, Rust. Kept as
+  reference code unless explicitly revived for a specific issue.
+- **Roastty** (`roastty/`) — Proof-of-concept Rust rewrite of Ghostty internals.
+  Not the production frontend direction.
 - **Kitty** — Planned.
 - **Alacritty** — Planned.
 - **iTerm2** — Planned.
@@ -123,7 +127,7 @@ the architecture uniform is more valuable than optimizing for one engine.
                   │  Unix socket
            ┌──────┴──────┐
            │     GUI     │                1 GUI (terminal emulator)
-           │ (Wezboard)  │
+           │ (Ghostboard)│
            └──┬───┬───┬──┘
               │   │   │
               │   │   │  Unix sockets
@@ -146,7 +150,7 @@ composites browser overlays into the terminal window.
 
 All inter-process communication uses Unix domain sockets with length-prefixed
 protobuf messages. The GUI (terminal) listens on a PID-scoped socket
-(`$TMPDIR/termsurf/termsurf-wezboard-{pid}.sock`), and both TUIs and browser
+(`$TMPDIR/termsurf/termsurf-ghostboard-{pid}.sock`), and both TUIs and browser
 engines connect to it as clients.
 
 - **TUI → GUI:** The TUI reads the `TERMSURF_SOCKET` env var (set by the GUI) to
@@ -189,8 +193,10 @@ This keeps every issue's Chromium changes isolated and traceable.
 
 ## Directory Structure
 
-- `ghostboard/` — Archived. See docs/early-prototypes.md.
-- `wezboard/` — Wezboard (WezTerm fork, Rust). **Active development.**
+- `ghostboard/` — Ghostboard (Ghostty fork, Zig/Swift). **Primary frontend.**
+- `ghostboard-legacy/` — Archived Ghostboard implementation. Reference only.
+- `wezboard/` — Deprecated Wezboard implementation. Reference only.
+- `roastty/` — Proof-of-concept Rust rewrite. Reference only.
 - `webtui/` — The `web` TUI (Rust/ratatui). Browser chrome in the terminal pane.
 - `roamium/` — Roamium (Chromium browser binary, Rust).
 - `chromium/` — Chromium fork build workspace (gitignored).
@@ -200,24 +206,28 @@ This keeps every issue's Chromium changes isolated and traceable.
 - `docs/early-prototypes.md` — Archived prototype documentation (ts1–ts5,
   cef-rs, Ghostboard Legacy).
 
-## Wezboard (wezboard/) — Active Development
+## Frontend Development
 
 ### Current State
 
-Wezboard is a WezTerm fork with browser integration built in Rust. Current
-additions: WezTerm fork with rename script and initial build (Issue 715), build
-warning cleanup (Issue 716), cocoa crate removal and objc2 migration (Issues
-717–719), manual testing after migration (Issue 720), wgpu 25→28 upgrade (Issue
-721), cargo dependency updates (Issue 722), focused/unfocused split pane borders
-(Issue 723), TermSurf protocol implementation (Issue 724), CALayerHost browser
-overlay rendering (Issue 725), overlay lifecycle and protocol (Issue 726),
-second webview positioning (Issue 727), remaining protocol messages (Issues
-728–729), Roamium standalone install (Issue 730), scroll crash fix (Issue 731),
-Shutdown message and tab reopen fix (Issue 732).
+Ghostboard is the primary TermSurf frontend. New terminal/frontend behavior
+should target `ghostboard/` unless the user explicitly asks for legacy Wezboard
+or Roastty proof-of-concept work.
+
+Wezboard was the active GUI during an earlier phase of protocol work. It is now
+deprecated and kept as reference code. Roastty is a proof-of-concept Rust
+rewrite and is not the production frontend direction.
 
 ### Source Layout
 
-#### Wezboard
+#### Ghostboard
+
+- `ghostboard/src/` — Shared Zig core inherited from Ghostty
+- `ghostboard/macos/` — macOS app wrapper and Swift integration
+- `ghostboard/HACKING.md` — Local Ghostboard build notes
+- `ghostboard/AGENTS.md` — Local Ghostboard agent/build guidance
+
+#### Deprecated Wezboard Reference
 
 - `wezboard/wezboard/src/main.rs` — Main GUI application entry point
 - `wezboard/wezboard-gui/` — GUI rendering and window management
@@ -236,18 +246,36 @@ Shutdown message and tab reopen fix (Issue 732).
 
 ### Build & Install
 
-All build scripts live in `scripts/`. They handle Wezboard, Chromium, TUI, and
-Roamium together.
+Current Ghostboard development builds run from `ghostboard/`:
 
-| Script                                                   | Purpose                                                                  |
-| -------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `scripts/build.sh <comp> [--release] [--clean] [--open]` | Build a component. Components: wezboard, roamium, webtui, chromium, all. |
-| `scripts/install.sh <comp>`                              | Install a component. Components: wezboard, roamium, webtui, all.         |
-| `scripts/uninstall.sh <comp>`                            | Uninstall a component. Components: wezboard, roamium, webtui, all.       |
-| `scripts/deploy.sh <comp>`                               | Deploy a component. Components: website.                                 |
-| `scripts/release.sh [version]`                           | Package, upload to GitHub, and publish to Homebrew. Default: 0.1.0.      |
-| `scripts/rename-wezterm.sh [dir]`                        | Rename all WezTerm references to Wezboard in `wezboard/`. Re-runnable.   |
-| `scripts/nerd-font-test.sh`                              | Print Nerd Font test glyphs for visual verification.                     |
+```bash
+cd ghostboard
+zig build run
+```
+
+To build the macOS app bundle:
+
+```bash
+cd ghostboard
+macos/build.nu --configuration Debug --action build
+```
+
+The app output is
+`ghostboard/macos/build/<configuration>/TermSurf Ghostboard.app`.
+
+The legacy scripts in `scripts/` still describe the deprecated Wezboard/Roamium
+flow and should not be used as the default frontend development path unless the
+user explicitly asks for Wezboard work.
+
+| Script                                                   | Purpose                                                                    |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `scripts/build.sh <comp> [--release] [--clean] [--open]` | Legacy build helper. Components: wezboard, roamium, webtui, chromium, all. |
+| `scripts/install.sh <comp>`                              | Legacy install helper. Components: wezboard, roamium, webtui, all.         |
+| `scripts/uninstall.sh <comp>`                            | Legacy uninstall helper. Components: wezboard, roamium, webtui, all.       |
+| `scripts/deploy.sh <comp>`                               | Deploy a component. Components: website.                                   |
+| `scripts/release.sh [version]`                           | Package, upload to GitHub, and publish to Homebrew. Default: 0.1.0.        |
+| `scripts/rename-wezterm.sh [dir]`                        | Rename all WezTerm references to Wezboard in `wezboard/`. Re-runnable.     |
+| `scripts/nerd-font-test.sh`                              | Print Nerd Font test glyphs for visual verification.                       |
 
 The build scripts auto-detect Chromium's `protoc` so you don't need a system
 install.
@@ -263,18 +291,17 @@ Build debug components:
 ```bash
 ./scripts/build.sh chromium
 ./scripts/build.sh roamium
-./scripts/build.sh wezboard
 ./scripts/build.sh webtui
 ```
 
-Run Wezboard with the debug GUI binary directly. The binary is `wezboard-gui`
-under `wezboard/target/debug/`; it is not named `wezterm-gui`.
+Run Ghostboard from the repo:
 
 ```bash
-./wezboard/target/debug/wezboard-gui
+cd ghostboard
+zig build run
 ```
 
-Inside that Wezboard window, run the debug `web` binary directly:
+Inside that Ghostboard window, run the debug `web` binary directly:
 
 ```bash
 /Users/ryan/dev/termsurf/target/debug/web \
@@ -283,8 +310,8 @@ Inside that Wezboard window, run the debug `web` binary directly:
 ```
 
 The `--browser` argument is required for testing Chromium/Roamium changes. If it
-is omitted, `web` asks Wezboard to resolve the default browser name, and
-Wezboard may spawn an installed stable Roamium from `/usr/local/roamium` or
+is omitted, `web` asks Ghostboard to resolve the default browser name, and
+Ghostboard may spawn an installed stable Roamium from `/usr/local/roamium` or
 Homebrew instead of the repo-built binary.
 
 This flow uses debug builds only, does not launch the `.app` bundle, and does
@@ -297,7 +324,10 @@ tap (submodule at `homebrew/`).
 
 **User install:** `brew tap termsurf/termsurf && brew install --cask termsurf`
 
-**Release workflow:**
+The current cask/release workflow still packages the deprecated Wezboard
+frontend. Treat it as legacy packaging until Ghostboard packaging is updated.
+
+**Legacy release workflow:**
 
 1. Build all components: `scripts/build.sh all --release`
 2. Run: `scripts/release.sh <version>`
@@ -306,7 +336,7 @@ The release script packages a tarball (binaries + Chromium dylibs + .app
 bundle), uploads it to a GitHub Release on `termsurf/termsurf`, updates the
 Homebrew cask SHA and version, and pushes to `termsurf/homebrew-termsurf`.
 
-**Cask installs:**
+**Current cask installs:**
 
 - `.app` bundle → `/Applications/TermSurf Wezboard.app`
 - `web`, `wezboard` CLIs → `/opt/homebrew/bin/`

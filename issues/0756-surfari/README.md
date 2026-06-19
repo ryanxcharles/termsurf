@@ -82,7 +82,7 @@ libtermsurf_webkit (Objective-C/C++, C API)
         ↓ links
     Surfari (Rust binary, ~400 lines)
         ↓ connects via Unix socket
-    Wezboard (GUI)
+    Ghostboard (GUI)
 ```
 
 - `libtermsurf_webkit` — Objective-C/C++ library wrapping WebKit's internal
@@ -94,19 +94,19 @@ libtermsurf_webkit (Objective-C/C++, C API)
 ### Compositing: the key open question
 
 Chromium uses CALayerHost for zero-copy GPU compositing. A `CAContext` ID
-crosses the process boundary over a Unix socket, and Wezboard creates a
+crosses the process boundary over a Unix socket, and Ghostboard creates a
 `CALayerHost` with that ID. This is the core rendering mechanism.
 
 WebKit's rendering is tied to its view hierarchy. The key question: how do we
-get WebKit's rendered content into Wezboard's window across the process
+get WebKit's rendered content into Ghostboard's window across the process
 boundary?
 
-**Approach A: Reparent the WKWebView into Wezboard's window.** The Surfari
+**Approach A: Reparent the WKWebView into Ghostboard's window.** The Surfari
 process creates the WKWebView, then the GUI reparents it into the terminal
 window as a subview. macOS does not support cross-process NSView reparenting.
 **Not viable.**
 
-**Approach B: Create the WKWebView in the GUI process.** Wezboard creates the
+**Approach B: Create the WKWebView in the GUI process.** Ghostboard creates the
 WKWebView directly. Surfari becomes a thin control process. This breaks the
 architectural principle that the engine process owns its rendering surface. It
 also would not work cross-platform — on Linux there is no NSView, so the engine
@@ -114,17 +114,17 @@ must own its rendering surface. **Architecturally wrong.**
 
 **Approach C: Extract a CAContext from WebKit's layer tree.** WebKit has an
 internal layer tree. We create a `CAContext` from the root layer and export the
-`contextId` to Wezboard, just like Chromium. This requires a small modification
-to WebKit (~20 lines in `LayerHostingContext.mm` or similar). **Architecturally
-consistent with Roamium.** Same CALayerHost pattern, same process model, same
-Wezboard code path. Requires building WebKit from source (which we already need
-for the reasons above).
+`contextId` to Ghostboard, just like Chromium. This requires a small
+modification to WebKit (~20 lines in `LayerHostingContext.mm` or similar).
+**Architecturally consistent with Roamium.** Same CALayerHost pattern, same
+process model, same Ghostboard code path. Requires building WebKit from source
+(which we already need for the reasons above).
 
 **Approach D: Off-screen rendering.** Render into a bitmap and send pixels. This
 is the CEF approach we already rejected for performance. **Not viable.**
 
 Approach C is the recommended path. It keeps the architecture uniform across all
-engines and reuses the existing Wezboard compositing code.
+engines and reuses the existing Ghostboard compositing code.
 
 ### Multi-profile
 
@@ -169,6 +169,6 @@ recovery. Much of this code can inform Surfari's implementation.
    extract a CAContext ID (Approach C)
 3. Create `libtermsurf_webkit` (C library with `ts_*` API)
 4. Create the Surfari Rust binary (fork from Roamium, adapt)
-5. Update Wezboard to launch Surfari processes for WebKit profiles
+5. Update Ghostboard to launch Surfari processes for WebKit profiles
 6. Update the `web` TUI to support `--browser webkit` (or similar)
 7. Test with all existing protocol messages

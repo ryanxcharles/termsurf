@@ -1,6 +1,7 @@
 import SwiftUI
 import UserNotifications
 import GhosttyKit
+import System
 
 extension Ghostty {
     /// Render a terminal for the active app in the environment.
@@ -47,9 +48,6 @@ extension Ghostty {
         // Maintain whether our window has focus (is key) or not
         @State private var windowFocus: Bool = true
 
-        // True if we're hovering over the left URL view, so we can show it on the right.
-        @State private var isHoveringURLLeft: Bool = false
-
         #if canImport(AppKit)
         // Observe SecureInput to detect when its enabled
         @ObservedObject private var secureInput = SecureInput.shared
@@ -60,6 +58,39 @@ extension Ghostty {
 
         private var isFocusedSurface: Bool {
             surfaceFocus || lastFocusedSurface?.value === surfaceView
+        }
+
+        private func configNumber(_ value: Double) -> String {
+            if value.rounded() == value {
+                return String(Int(value))
+            }
+            return String(value)
+        }
+
+        private func traceSplitBorderConfig(
+            isFocused: Bool,
+            borderWidth: Double,
+            saturation: Double,
+            focusedColorPresent: Bool,
+            unfocusedColorPresent: Bool,
+            borderDrawn: Bool
+        ) {
+#if canImport(AppKit)
+            let colorKey = isFocused ? "focused-split-border-color" : "unfocused-split-border-color"
+            termsurfLogGeometry(
+                "layer=appkit event=split_border_config scenario=\(termsurfGeometryScenario()) identity=\(surfaceView.termSurfGeometryIdentity(browserTabID: "unknown:split-border")) is_split=\(isSplit) focused=\(isFocused) border_width=\(configNumber(borderWidth)) focused_color_present=\(focusedColorPresent) unfocused_color_present=\(unfocusedColorPresent) saturation=\(configNumber(saturation)) border_drawn=\(borderDrawn) border_color_key=\(colorKey) note=swift-config-bridge")
+#endif
+        }
+
+        private func traceSplitBorderDraw(
+            isFocused: Bool,
+            borderWidth: Double,
+            colorKey: String
+        ) {
+#if canImport(AppKit)
+            termsurfLogGeometry(
+                "layer=appkit event=split_border_draw scenario=\(termsurfGeometryScenario()) identity=\(surfaceView.termSurfGeometryIdentity(browserTabID: "unknown:split-border")) is_split=\(isSplit) focused=\(isFocused) border_width=\(configNumber(borderWidth)) border_color_key=\(colorKey) hit_testing=false note=stroke-border")
+#endif
         }
 
         var body: some View {
@@ -75,8 +106,19 @@ extension Ghostty {
                     let pubResign = center.publisher(for: NSWindow.didResignKeyNotification)
                     #endif
 
-                    SurfaceRepresentable(view: surfaceView, size: geo.size)
+                    let borderWidth = ghostty.config.splitBorderWidth
+                    let borderInset = CGFloat(isSplit ? borderWidth : 0)
+                    let insetSize = CGSize(
+                        width: max(10, geo.size.width - borderInset * 2),
+                        height: max(10, geo.size.height - borderInset * 2)
+                    )
+                    let saturation = ghostty.config.unfocusedSplitSaturation
+
+                    SurfaceRepresentable(view: surfaceView, size: insetSize)
+                        .frame(width: insetSize.width, height: insetSize.height)
+                        .offset(x: borderInset, y: borderInset)
                         .focused($surfaceFocus)
+                        .saturation(isSplit && !isFocusedSurface ? saturation : 1.0)
                         .focusedValue(\.ghosttySurfacePwd, surfaceView.pwd)
                         .focusedValue(\.ghosttySurfaceView, surfaceView)
                         .focusedValue(\.ghosttySurfaceCellSize, surfaceView.cellSize)
@@ -111,10 +153,12 @@ extension Ghostty {
 
                 // Progress report
                 if let progressReport = surfaceView.progressReport, progressReport.state != .remove {
+                    let borderInset = CGFloat(isSplit ? ghostty.config.splitBorderWidth : 0)
                     VStack(spacing: 0) {
                         SurfaceProgressBar(report: progressReport)
                         Spacer()
                     }
+                    .padding(borderInset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .allowsHitTesting(false)
                     .transition(.opacity)
@@ -151,51 +195,22 @@ extension Ghostty {
                     keyTables: surfaceView.keyTables,
                     keySequence: surfaceView.keySequence
                 )
+                .zIndex(1)
 #endif
 
-                // If we have a URL from hovering a link, we show that.
-                if let url = surfaceView.hoverUrl {
-                    let padding: CGFloat = 5
-                    let cornerRadius: CGFloat = 9
-                    ZStack {
-                        HStack {
-                            Spacer()
-                            VStack(alignment: .leading) {
-                                Spacer()
+                VStack(spacing: 0) {
+                    // If we have a URL from hovering a link, we show that.
+                    if let url = surfaceView.hoverUrl {
+                        URLHoverBanner(url: url)
+                    }
 
-                                Text(verbatim: url)
-                                    .padding(.init(top: padding, leading: padding, bottom: padding, trailing: padding))
-                                    .background(
-                                        UnevenRoundedRectangle(cornerRadii: .init(topLeading: cornerRadius))
-                                            .fill(.background)
-                                    )
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .opacity(isHoveringURLLeft ? 1 : 0)
-                            }
-                        }
-
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Spacer()
-
-                                Text(verbatim: url)
-                                    .padding(.init(top: padding, leading: padding, bottom: padding, trailing: padding))
-                                    .background(
-                                        UnevenRoundedRectangle(cornerRadii: .init(topTrailing: cornerRadius))
-                                            .fill(.background)
-                                    )
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .opacity(isHoveringURLLeft ? 0 : 1)
-                                    .onHover(perform: { hovering in
-                                        isHoveringURLLeft = hovering
-                                    })
-                            }
-                            Spacer()
-                        }
+                    // Show a bar to indicate a child process has exited.
+                    if let msg = surfaceView.childExitedMessage {
+                        ChildExitedMessageBar(msg: msg)
+                            .font(.system(size: min(surfaceView.cellSize.height * 0.8, 30)))
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
                 #if canImport(AppKit)
                 // If we have secure input enabled and we're the focused surface and window
@@ -214,10 +229,7 @@ extension Ghostty {
                         surfaceView: surfaceView,
                         searchState: searchState,
                         onClose: {
-#if canImport(AppKit)
-                            Ghostty.moveFocus(to: surfaceView)
-#endif
-                            surfaceView.searchState = nil
+                            surfaceView.endSearch()
                         }
                     )
                 }
@@ -252,6 +264,34 @@ extension Ghostty {
                     }
                 }
 
+                if isSplit {
+                    let borderWidth = ghostty.config.splitBorderWidth
+                    let focusedColor = ghostty.config.focusedSplitBorderColor
+                    let unfocusedColor = ghostty.config.unfocusedSplitBorderColor
+                    let isFocused = isFocusedSurface
+                    let borderColor = isFocused ? focusedColor : unfocusedColor
+                    let colorKey = isFocused ? "focused-split-border-color" : "unfocused-split-border-color"
+                    let borderDrawn = borderWidth > 0 && borderColor != nil
+                    let _: Void = traceSplitBorderConfig(
+                        isFocused: isFocused,
+                        borderWidth: borderWidth,
+                        saturation: ghostty.config.unfocusedSplitSaturation,
+                        focusedColorPresent: focusedColor != nil,
+                        unfocusedColorPresent: unfocusedColor != nil,
+                        borderDrawn: borderDrawn
+                    )
+                    if borderDrawn, let color = borderColor {
+                        let _: Void = traceSplitBorderDraw(
+                            isFocused: isFocused,
+                            borderWidth: borderWidth,
+                            colorKey: colorKey
+                        )
+                        Rectangle()
+                            .strokeBorder(color, lineWidth: CGFloat(borderWidth))
+                            .allowsHitTesting(false)
+                    }
+                }
+
                 #if canImport(AppKit)
                 // Grab handle for dragging the window. We want this to appear at the very
                 // top Z-index os it isn't faded by the unfocused overlay.
@@ -260,7 +300,6 @@ extension Ghostty {
                 SurfaceGrabHandle(surfaceView: surfaceView)
                 #endif
             }
-
         }
     }
 
@@ -430,7 +469,11 @@ extension Ghostty {
         var body: some View {
             GeometryReader { geo in
                 HStack(spacing: 4) {
-                    TextField("Search", text: $searchState.needle)
+                    BackportSelectionTextField(
+                        "Search",
+                        text: $searchState.needle,
+                        selection: $searchState.needleSelection
+                    )
                     .textFieldStyle(.plain)
                     .frame(width: 180)
                     .padding(.leading, 8)
@@ -454,6 +497,21 @@ extension Ghostty {
                                 .padding(.trailing, 8)
                         }
                     }
+                    .onChange(of: searchState.needle) { _ in
+                        searchState.writePasteboardNeedle()
+                    }
+                    .onReceive(
+                        NotificationCenter.default.publisher(
+                            for: OSApplication.didBecomeActiveNotification
+                        )
+                    ) { _ in
+                        // When the app becomes active, we want to check for external changes
+                        // to our synced needle.
+                        searchState.readPasteboardNeedle()
+                    }
+                    .onSubmit {
+                        _ = surfaceView.navigateSearchToNext()
+                    }
 #if canImport(AppKit)
                     .onExitCommand {
                         if searchState.needle.isEmpty {
@@ -464,18 +522,15 @@ extension Ghostty {
                     }
 #endif
                     .backport.onKeyPress(.return) { modifiers in
-                        guard let surface = surfaceView.surface else { return .ignored }
-                        let action = modifiers.contains(.shift)
-                        ? "navigate_search:previous"
-                        : "navigate_search:next"
-                        ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8)))
-                        return .handled
+                        if modifiers.contains(.shift) {
+                            _ = surfaceView.navigateSearchToPrevious()
+                            return .handled
+                        }
+                        return .ignored
                     }
 
                     Button(action: {
-                        guard let surface = surfaceView.surface else { return }
-                        let action = "navigate_search:next"
-                        ghostty_surface_binding_action(surface, action, UInt(action.lengthOfBytes(using: .utf8)))
+                        _ = surfaceView.navigateSearchToNext()
                     }, label: {
                         Image(systemName: "chevron.up")
                     })
@@ -641,8 +696,13 @@ extension Ghostty {
         }
 
         func updateOSView(_ scrollView: SurfaceScrollView, context: Context) {
-            // Nothing to do: SwiftUI automatically updates the frame size, and
-            // SurfaceScrollView handles the rest in response to that
+            // SwiftUI may defer frame updates under system load (e.g., memory
+            // pressure, heavy I/O) or when external window managers trigger rapid
+            // layout changes. When that happens, the scroll view's bounds can
+            // fall out of sync with the size reported by GeometryReader, causing
+            // the surface to render at stale dimensions.
+            guard scrollView.bounds.size != size else { return }
+            scrollView.needsLayout = true
         }
         #else
         func makeOSView(context: Context) -> SurfaceView {
@@ -662,8 +722,13 @@ extension Ghostty {
         /// Explicit font size to use in points
         var fontSize: Float32?
 
-        /// Explicit working directory to set
-        var workingDirectory: String?
+        /// Explicit working directory. This is normalized on assignment to
+        /// remove any redundant and trailing path separators.
+        var workingDirectory: String? {
+            get { normalizedWorkingDirectory }
+            set { normalizedWorkingDirectory = newValue.map { FilePath($0).string } }
+        }
+        private var normalizedWorkingDirectory: String?
 
         /// Explicit command to set
         var command: String?
@@ -1280,19 +1345,5 @@ extension FocusedValues {
 
     struct FocusedGhosttySurfaceCellSize: FocusedValueKey {
         typealias Value = OSSize
-    }
-}
-
-// MARK: Search State
-
-extension Ghostty.SurfaceView {
-    class SearchState: ObservableObject {
-        @Published var needle: String = ""
-        @Published var selected: UInt?
-        @Published var total: UInt?
-
-        init(from startSearch: Ghostty.Action.StartSearch) {
-            self.needle = startSearch.needle ?? ""
-        }
     }
 }

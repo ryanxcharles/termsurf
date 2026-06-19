@@ -45,6 +45,10 @@ extension Ghostty {
             self.init(config: ghostty_config_clone(config))
         }
 
+        func clone(config: ghostty_config_t) {
+            self.config = config
+        }
+
         deinit {
             self.config = nil
         }
@@ -91,13 +95,13 @@ extension Ghostty {
             // pop-up window too.
             let diagsCount = ghostty_config_diagnostics_count(cfg)
             if diagsCount > 0 {
-                logger.warning("config error: \(diagsCount) configuration errors on reload")
+                logger.warning("config error: \(diagsCount, privacy: .public) configuration errors on reload")
                 var diags: [String] = []
                 for i in 0..<diagsCount {
                     let diag = ghostty_config_get_diagnostic(cfg, UInt32(i))
                     let message = String(cString: diag.message)
                     diags.append(message)
-                    logger.warning("config error: \(message)")
+                    logger.warning("config error: \(message, privacy: .public)")
                 }
             }
 
@@ -439,7 +443,7 @@ extension Ghostty {
 
         var macosCustomIcon: String {
             #if os(macOS)
-            let defaultValue = NSString("~/.config/ghostty/Ghostty.icns").expandingTildeInPath
+            let defaultValue = NSString("~/.config/termsurf/TermSurf.icns").expandingTildeInPath
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?
             let key = "macos-custom-icon"
@@ -578,6 +582,50 @@ extension Ghostty {
                 green: Double(color.g) / 255,
                 blue: Double(color.b) / 255
             )
+        }
+
+        var focusedSplitBorderColor: Color? {
+            guard let config = self.config else { return nil }
+            var color: ghostty_config_color_s = .init()
+            let key = "focused-split-border-color"
+            if !ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) {
+                return nil
+            }
+            return .init(
+                red: Double(color.r) / 255,
+                green: Double(color.g) / 255,
+                blue: Double(color.b) / 255
+            )
+        }
+
+        var unfocusedSplitBorderColor: Color? {
+            guard let config = self.config else { return nil }
+            var color: ghostty_config_color_s = .init()
+            let key = "unfocused-split-border-color"
+            if !ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) {
+                return nil
+            }
+            return .init(
+                red: Double(color.r) / 255,
+                green: Double(color.g) / 255,
+                blue: Double(color.b) / 255
+            )
+        }
+
+        var splitBorderWidth: Double {
+            guard let config = self.config else { return 0 }
+            var value: Double = 0
+            let key = "split-border-width"
+            _ = ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return value
+        }
+
+        var unfocusedSplitSaturation: Double {
+            guard let config = self.config else { return 1.0 }
+            var value: Double = 1.0
+            let key = "unfocused-split-saturation"
+            _ = ghostty_config_get(config, &value, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return value
         }
 
         #if canImport(AppKit)
@@ -735,6 +783,16 @@ extension Ghostty {
             guard let ptr = v else { return defaultValue }
             let str = String(cString: ptr)
             return MacShortcuts(rawValue: str) ?? defaultValue
+        }
+
+        var abnormalCommandExitRuntime: Duration {
+            let defaultValue: Duration = .milliseconds(250)
+            guard let config = self.config else { return defaultValue }
+            var v: UInt32?
+            let key = "abnormal-command-exit-runtime"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else { return defaultValue }
+            guard let v else { return defaultValue }
+            return .milliseconds(v)
         }
 
         var scrollbar: Scrollbar {

@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A5B30530299BEAAA0047F10C"
-               BuildableName = "TermSurf Ghostboard.app"
+               BuildableName = "TermSurf.app"
                BlueprintName = "Ghostty"
                ReferencedContainer = "container:Ghostty.xcodeproj">
             </BuildableReference>
@@ -26,8 +26,13 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES"
-      shouldAutocreateTestPlan = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <TestPlans>
+         <TestPlanReference
+            reference = "container:Ghostty.xctestplan"
+            default = "YES">
+         </TestPlanReference>
+      </TestPlans>
       <Testables>
          <TestableReference
             skipped = "NO"
@@ -68,7 +73,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A5B30530299BEAAA0047F10C"
-            BuildableName = "TermSurf Ghostboard.app"
+            BuildableName = "TermSurf.app"
             BlueprintName = "Ghostty"
             ReferencedContainer = "container:Ghostty.xcodeproj">
          </BuildableReference>
@@ -98,7 +103,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A5B30530299BEAAA0047F10C"
-            BuildableName = "TermSurf Ghostboard.app"
+            BuildableName = "TermSurf.app"
             BlueprintName = "Ghostty"
             ReferencedContainer = "container:Ghostty.xcodeproj">
          </BuildableReference>

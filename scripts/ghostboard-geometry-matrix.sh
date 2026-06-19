@@ -6,17 +6,18 @@ SCENARIO="${1:-initial-open}"
 TS="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="$ROOT/logs"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/termsurf-ghostboard-geometry-${SCENARIO}.XXXXXX")"
-APP="${TERMSURF_GHOSTBOARD_APP:-$ROOT/ghostboard/macos/build/Debug/TermSurf Ghostboard.app}"
+APP="${TERMSURF_GHOSTBOARD_APP:-$ROOT/ghostboard/macos/build/Debug/TermSurf.app}"
 if [ "$SCENARIO" = "installed-roamium-release-launch" ] && [ -z "${TERMSURF_GHOSTBOARD_APP:-}" ]; then
-  APP="$ROOT/ghostboard/macos/build/Release/TermSurf Ghostboard.app"
+  APP="$ROOT/ghostboard/macos/build/Release/TermSurf.app"
 fi
-APP_BIN="$APP/Contents/MacOS/ghostboard"
+APP_BIN="$APP/Contents/MacOS/termsurf"
 WEB="${TERMSURF_WEB:-$ROOT/target/debug/web}"
 ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
 INSTALLED_ROAMIUM="${TERMSURF_INSTALLED_ROAMIUM:-$ROAMIUM}"
 ROAMIUM_PATH_FOR_APP="$ROAMIUM"
 POINTER_DRIVER="${TERMSURF_GEOMETRY_POINTER_DRIVER:-cgevent}"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
+BORDER_CONFIG_CASE="${TERMSURF_SPLIT_BORDER_CONFIG_CASE:-enabled}"
 HELLO_CONFIG_HOMEPAGE="${TERMSURF_HELLO_CONFIG_HOMEPAGE:-https://example.net/issue-815-homepage}"
 HELLO_CONFIG_SECOND_BROWSER="${TERMSURF_HELLO_CONFIG_SECOND_BROWSER:-debug-roamium}"
 URL_B="${TERMSURF_GEOMETRY_SECOND_URL:-https://example.org}"
@@ -510,6 +511,18 @@ wait_for_trace_line_after() {
     delay 1
   done
   fail "timed out waiting for $label"
+}
+
+optional_trace_line_after() {
+  local start_line="$1"
+  local pattern="$2"
+  tail -n +"$((start_line + 1))" "$ROAMIUM_TRACE" |
+    grep -E "$pattern" |
+    tail -1 || true
+}
+
+extract_app_tab_id() {
+  printf '%s\n' "$1" | sed -E 's/.*tab_id=([0-9]+).*/\1/'
 }
 
 wait_for_mouse_down_after() {
@@ -1052,11 +1065,12 @@ wait_for_split_right_frame_after() {
   local ref_frame="$4"
   local label="$5"
   local attempts="${6:-30}"
+  local tolerance="${7:-8}"
   local line frame_size
   for _ in $(seq 1 "$attempts"); do
     while IFS= read -r line; do
       frame_size="$(extract_frame_size "$line")"
-      if [ -n "$frame_size" ] && [ "$frame_size" != "$line" ] && compare_split_right_pair "$frame_size" "$ref_frame" 8; then
+      if [ -n "$frame_size" ] && [ "$frame_size" != "$line" ] && compare_split_right_pair "$frame_size" "$ref_frame" "$tolerance"; then
         printf '%s\n' "$line"
         return 0
       fi
@@ -1073,11 +1087,12 @@ wait_for_split_right_pixels_after() {
   local ref_pixel="$4"
   local label="$5"
   local attempts="${6:-30}"
+  local tolerance="${7:-16}"
   local line pixel
   for _ in $(seq 1 "$attempts"); do
     while IFS= read -r line; do
       pixel="$(extract_appkit_pixel "$line")"
-      if [ -n "$pixel" ] && compare_split_right_pair "$pixel" "$ref_pixel" 16; then
+      if [ -n "$pixel" ] && compare_split_right_pair "$pixel" "$ref_pixel" "$tolerance"; then
         printf '%s\n' "$line"
         return 0
       fi
@@ -1809,7 +1824,7 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|browser-command-navigation|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|browser-command-navigation|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|split-right-border-config|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
@@ -2783,6 +2798,52 @@ browser = $HELLO_CONFIG_SECOND_BROWSER
 EOF
 fi
 
+if [ "$SCENARIO" = "split-right-border-config" ]; then
+  case "$BORDER_CONFIG_CASE" in
+    enabled)
+      cat >>"$CONFIG" <<'EOF'
+focused-split-border-color = 7dcfff
+unfocused-split-border-color = 565f89
+split-border-width = 2
+unfocused-split-saturation = 0.5
+EOF
+      ;;
+    clamp)
+      cat >>"$CONFIG" <<'EOF'
+focused-split-border-color = 7dcfff
+unfocused-split-border-color = 565f89
+split-border-width = 99
+unfocused-split-saturation = 99
+EOF
+      ;;
+    disabled)
+      cat >>"$CONFIG" <<'EOF'
+focused-split-border-color = 7dcfff
+unfocused-split-border-color = 565f89
+split-border-width = 0
+unfocused-split-saturation = 0.5
+EOF
+      ;;
+    missing-focused)
+      cat >>"$CONFIG" <<'EOF'
+unfocused-split-border-color = 565f89
+split-border-width = 2
+unfocused-split-saturation = 0.5
+EOF
+      ;;
+    missing-unfocused)
+      cat >>"$CONFIG" <<'EOF'
+focused-split-border-color = 7dcfff
+split-border-width = 2
+unfocused-split-saturation = 0.5
+EOF
+      ;;
+    *)
+      fail "unsupported TERMSURF_SPLIT_BORDER_CONFIG_CASE: $BORDER_CONFIG_CASE"
+      ;;
+  esac
+fi
+
 if [ "$SCENARIO" = "hello-empty-browser-list" ]; then
   cat >>"$CONFIG" <<'EOF'
 browser = ""
@@ -2995,7 +3056,7 @@ keybind = ctrl+b=scroll_to_bottom
 EOF
 fi
 
-if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "split-right-zoom" ] || [ "$SCENARIO" = "split-right-focus-switch" ] || [ "$SCENARIO" = "two-browser-split-routing" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-border-config" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "split-right-zoom" ] || [ "$SCENARIO" = "split-right-close-sibling" ] || [ "$SCENARIO" = "split-right-focus-switch" ] || [ "$SCENARIO" = "two-browser-split-routing" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+d=new_split:right
 EOF
@@ -3753,8 +3814,11 @@ if [ "$SCENARIO" = "window-resize" ] || [ "$SCENARIO" = "performance-window-resi
   log "grow_screenshot=$SCREENSHOT_GROW"
   log "shrink_screenshot=$SCREENSHOT_SHRINK"
 fi
-if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-down" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-border-config" ] || [ "$SCENARIO" = "split-down" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ]; then
   log "split_screenshot=$SCREENSHOT_SPLIT"
+fi
+if [ "$SCENARIO" = "split-right-border-config" ]; then
+  log "split_border_config_case=$BORDER_CONFIG_CASE"
 fi
 if [ "$SCENARIO" = "split-right-zoom" ]; then
   log "zoom_screenshot=$SCREENSHOT_ZOOM"
@@ -5027,9 +5091,45 @@ EOF
 
     SINGLE_MODE_START_LINE="$(log_line_count)"
     SINGLE_MODE_TRACE_START_LINE="$(trace_line_count)"
+    SINGLE_MODE_PRE_TRACE_FOCUS_TRUE_COUNT="$(awk -v tab="$A_BROWSER_TAB_ID" -v pane="$A_PANE_ID" 'index($0, "focus-changed tab=" tab " pane=" pane " ffi=ts_set_focus focused=true") { count++ } END { print count + 0 }' "$ROAMIUM_TRACE")"
+    SINGLE_MODE_PRE_TRACE_FOCUS_FALSE_COUNT="$(awk -v tab="$A_BROWSER_TAB_ID" -v pane="$A_PANE_ID" 'index($0, "focus-changed tab=" tab " pane=" pane " ffi=ts_set_focus focused=false") { count++ } END { print count + 0 }' "$ROAMIUM_TRACE")"
+    SINGLE_MODE_PRE_TRACE_LAST_FOCUS="$(rg -n "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} .*focused=" "$ROAMIUM_TRACE" | tail -1 || true)"
+    log "single_display_trace_start_line=$SINGLE_MODE_TRACE_START_LINE"
+    log "single_display_pre_enter_focus_true_count=$SINGLE_MODE_PRE_TRACE_FOCUS_TRUE_COUNT"
+    log "single_display_pre_enter_focus_false_count=$SINGLE_MODE_PRE_TRACE_FOCUS_FALSE_COUNT"
+    if [ -n "$SINGLE_MODE_PRE_TRACE_LAST_FOCUS" ]; then
+      log "single_display_pre_enter_last_focus=$SINGLE_MODE_PRE_TRACE_LAST_FOCUS"
+    else
+      log "single_display_pre_enter_last_focus=<none>"
+    fi
     log "single_display_mode_key=enter=Mode::Browse"
     swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
-    wait_for_log_after "$SINGLE_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "single-display webtui entered browse mode"
+    SINGLE_MODE_CHANGED_APP_LINE="$(wait_for_line_after "$SINGLE_MODE_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "single-display webtui entered browse mode")"
+    log "PASS: single-display webtui entered browse mode"
+    SINGLE_MODE_FOCUS_APP_LINE="$(wait_for_line_after "$SINGLE_MODE_START_LINE" "FocusChanged: pane_id=${A_PANE_ID} tab_id=${A_BROWSER_TAB_ID} focused=true" "single-display Ghostboard emitted focus=true after browse mode")"
+    log "PASS: single-display Ghostboard emitted focus=true after browse mode"
+    SINGLE_MODE_KEY_APP_LINE="$(rg -n "key_down scenario=${SCENARIO} .*pane_id:${A_PANE_ID} .*note=key_code=36 " "$APP_LOG" | tail -1 || true)"
+    SINGLE_MODE_POST_TRACE_FOCUS_TRUE_COUNT="$(awk -v tab="$A_BROWSER_TAB_ID" -v pane="$A_PANE_ID" 'index($0, "focus-changed tab=" tab " pane=" pane " ffi=ts_set_focus focused=true") { count++ } END { print count + 0 }' "$ROAMIUM_TRACE")"
+    SINGLE_MODE_POST_TRACE_FOCUS_FALSE_COUNT="$(awk -v tab="$A_BROWSER_TAB_ID" -v pane="$A_PANE_ID" 'index($0, "focus-changed tab=" tab " pane=" pane " ffi=ts_set_focus focused=false") { count++ } END { print count + 0 }' "$ROAMIUM_TRACE")"
+    SINGLE_MODE_POST_TRACE_LAST_FOCUS="$(rg -n "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} .*focused=" "$ROAMIUM_TRACE" | tail -1 || true)"
+    SINGLE_MODE_TRACE_FOCUS_TRUE_DELTA="$((SINGLE_MODE_POST_TRACE_FOCUS_TRUE_COUNT - SINGLE_MODE_PRE_TRACE_FOCUS_TRUE_COUNT))"
+    SINGLE_MODE_TRACE_FOCUS_FALSE_DELTA="$((SINGLE_MODE_POST_TRACE_FOCUS_FALSE_COUNT - SINGLE_MODE_PRE_TRACE_FOCUS_FALSE_COUNT))"
+    log "single_display_mode_app_log_line=$SINGLE_MODE_CHANGED_APP_LINE"
+    log "single_display_focus_app_log_line=$SINGLE_MODE_FOCUS_APP_LINE"
+    if [ -n "$SINGLE_MODE_KEY_APP_LINE" ]; then
+      log "single_display_enter_key_appkit_log_line=$SINGLE_MODE_KEY_APP_LINE"
+    else
+      log "single_display_enter_key_appkit_log_line=<none>"
+    fi
+    log "single_display_post_enter_focus_true_count=$SINGLE_MODE_POST_TRACE_FOCUS_TRUE_COUNT"
+    log "single_display_post_enter_focus_false_count=$SINGLE_MODE_POST_TRACE_FOCUS_FALSE_COUNT"
+    log "single_display_focus_true_delta=$SINGLE_MODE_TRACE_FOCUS_TRUE_DELTA"
+    log "single_display_focus_false_delta=$SINGLE_MODE_TRACE_FOCUS_FALSE_DELTA"
+    if [ -n "$SINGLE_MODE_POST_TRACE_LAST_FOCUS" ]; then
+      log "single_display_post_enter_last_focus=$SINGLE_MODE_POST_TRACE_LAST_FOCUS"
+    else
+      log "single_display_post_enter_last_focus=<none>"
+    fi
     require_trace_after "$SINGLE_MODE_TRACE_START_LINE" "focus-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} ffi=ts_set_focus focused=true" "Roamium observed focus=true on single display"
 
     SINGLE_KEY_START_LINE="$(trace_line_count)"
@@ -7695,6 +7795,10 @@ if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
   log "navigation_append_command_text=$(cat "$NAVIGATION_APPEND_COMMAND")"
   NAV_START_LINE="$(log_line_count)"
   NAV_TRACE_START_LINE="$(trace_line_count)"
+  NAV_STATE_START_LINE="$(state_trace_line_count)"
+  log "navigation_app_start_line=$NAV_START_LINE"
+  log "navigation_trace_start_line=$NAV_TRACE_START_LINE"
+  log "navigation_state_start_line=$NAV_STATE_START_LINE"
   log "navigation_edit_key=shift+a=edit-url-end"
   swift "$ROOT/scripts/ghostty-app/inject.swift" key 0 shift >>"$HARNESS_LOG" 2>&1
   delay 0.5
@@ -7702,10 +7806,23 @@ if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
   swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
   delay 1
 
-  require_trace_after "$NAV_TRACE_START_LINE" "navigate tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" "Roamium received Navigate for browser tab"
-  require_trace_after "$NAV_TRACE_START_LINE" "$NAV_MARKER" "Roamium navigation/url trace contains marker"
-  require_trace_after "$NAV_TRACE_START_LINE" "url-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" "Roamium observed UrlChanged for browser tab"
-  wait_for_log_after "$NAV_START_LINE" "TermSurf message decoded type=UrlChanged" "Ghostboard decoded UrlChanged after browser navigation" 45
+  wait_for_state_trace_after "$NAV_STATE_START_LINE" "event=url_changed[[:space:]]+url=.*${NAV_MARKER}" "webtui URL state contains navigation marker" 45
+  NAV_STATE_MARKER_LINE="$(tail -n +"$((NAV_STATE_START_LINE + 1))" "$WEBTUI_STATE_TRACE" | grep -n -E "event=url_changed[[:space:]]+url=.*${NAV_MARKER}" | tail -1 || true)"
+  NAV_APP_URL_CHANGED_LINE="$(wait_for_line_after "$NAV_START_LINE" "TermSurf message decoded type=UrlChanged" "Ghostboard decoded UrlChanged after browser navigation" 45)"
+  NAV_APP_MARKER_LINE="$(wait_for_line_after "$NAV_START_LINE" "navigation-throttles .*url=.*${NAV_MARKER}" "app Chromium navigation log contains marker" 45)"
+  NAV_APP_NAVIGATE_LINE="$(tail -n +"$((NAV_START_LINE + 1))" "$APP_LOG" | grep -n "TermSurf message decoded type=Navigate" | head -1 || true)"
+  NAV_TRACE_NAVIGATE_LINE="$(tail -n +"$((NAV_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -n -F "navigate tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" | head -1 || true)"
+  NAV_TRACE_MARKER_LINE="$(tail -n +"$((NAV_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -n -F "$NAV_MARKER" | head -1 || true)"
+  NAV_TRACE_URL_CHANGED_LINE="$(tail -n +"$((NAV_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -n -F "url-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" | head -1 || true)"
+  log "navigation_state_marker_line=${NAV_STATE_MARKER_LINE:-<none>}"
+  log "navigation_app_url_changed_line=$NAV_APP_URL_CHANGED_LINE"
+  log "navigation_app_marker_line=$NAV_APP_MARKER_LINE"
+  log "navigation_app_decoded_navigate_line=${NAV_APP_NAVIGATE_LINE:-<none>}"
+  log "navigation_roamium_navigate_line=${NAV_TRACE_NAVIGATE_LINE:-<none>}"
+  log "navigation_roamium_marker_line=${NAV_TRACE_MARKER_LINE:-<none>}"
+  log "navigation_roamium_url_changed_line=${NAV_TRACE_URL_CHANGED_LINE:-<none>}"
+  require_text "$NAV_STATE_MARKER_LINE" "$NAV_MARKER" "webtui URL state includes navigation marker"
+  require_text "$NAV_APP_MARKER_LINE" "$NAV_MARKER" "app Chromium navigation log includes marker"
   wait_for_log_after "$NAV_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "webtui returned to browse mode after navigation" 45
   require_no_different_appkit_frame_after "$NAV_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "browser navigation AppKit frame stayed stable"
   require_no_different_appkit_pixels_after "$NAV_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "browser navigation AppKit pixels stayed stable"
@@ -7795,6 +7912,7 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
 
   DEVTOOLS_START_LINE="$(log_line_count)"
   DEVTOOLS_TRACE_START_LINE="$(trace_line_count)"
+  DEVTOOLS_STATE_START_LINE="$(state_trace_line_count)"
   printf ':devtools right' >"$DEVTOOLS_COMMAND"
   log "devtools_command_text=$(cat "$DEVTOOLS_COMMAND")"
   swift "$ROOT/scripts/ghostty-app/inject.swift" type "$DEVTOOLS_COMMAND" >>"$HARNESS_LOG" 2>&1
@@ -7827,13 +7945,18 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
   log "devtools_normal_split_appkit_pixel=$A_SPLIT_PIXEL"
   require_trace_after "$DEVTOOLS_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${A_SPLIT_PIXEL_WIDTH} pixel_height=${A_SPLIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium resized normal browser after DevTools split"
 
-  DT_CREATE_TRACE_LINE="$(wait_for_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "create-devtools-tab pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID} pixel_width=[0-9]+ pixel_height=[0-9]+" "Roamium received CreateDevtoolsTab" 60)"
-  DT_TAB_READY_LINE="$(wait_for_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported DevTools tab ready" 60)"
-  DT_BROWSER_TAB_ID="$(printf '%s\n' "$DT_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+  DT_CREATE_TRACE_LINE="$(optional_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "create-devtools-tab pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID} pixel_width=[0-9]+ pixel_height=[0-9]+")"
+  DT_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}")"
+  DT_TAB_READY_APP_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "TabReady: pane_id=${DT_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped DevTools TabReady" 60)"
+  DT_BROWSER_TAB_ID="$(extract_app_tab_id "$DT_TAB_READY_APP_LINE")"
   [ -n "$DT_BROWSER_TAB_ID" ] || fail "failed to extract DevTools browser tab id"
   [ "$DT_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "DevTools browser tab id reused normal browser tab id"
-  log "devtools_create_trace=$DT_CREATE_TRACE_LINE"
+  wait_for_state_trace_after "$DEVTOOLS_STATE_START_LINE" "event=render_state.*is_devtools=true.*current_tab_id=${DT_BROWSER_TAB_ID}.*inspected_tab_id=${A_BROWSER_TAB_ID}" "webtui mapped DevTools render state" 60
+  log "devtools_create_trace=${DT_CREATE_TRACE_LINE:-none}"
+  log "devtools_tab_ready_trace=${DT_TAB_READY_TRACE_LINE:-none}"
+  log "devtools_tab_ready_app=$DT_TAB_READY_APP_LINE"
   log "devtools_browser_tab_id=$DT_BROWSER_TAB_ID"
+  DT_CA_CONTEXT_APP_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "CaContext: tab_id=${DT_BROWSER_TAB_ID} pane_id=${DT_PANE_ID} context_id=[0-9]+" "Ghostboard received DevTools CA context" 60)"
 
   DT_PRESENT_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${DT_PANE_ID} .*overlay_frame=\\{\\{.*context_id=[1-9][0-9]*" "DevTools AppKit overlay frame" 60)"
   DT_CONTEXT_ID="$(printf '%s\n' "$DT_PRESENT_LINE" | sed -E 's/.*context_id=([0-9]+) .*/\1/')"
@@ -7860,7 +7983,7 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
   log "devtools_frame=$DT_FRAME"
   log "devtools_appkit_pixel=$DT_PIXEL"
   log "devtools_backing_scale=$DT_BACKING_SCALE"
-  require_trace_after "$DEVTOOLS_TRACE_START_LINE" "ca-context tab=${DT_BROWSER_TAB_ID} pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported DevTools CA context"
+  require_text "$DT_CA_CONTEXT_APP_LINE" "context_id=${DT_CONTEXT_ID}" "DevTools CA context matches AppKit context"
   require_trace_after "$DEVTOOLS_TRACE_START_LINE" "resize tab_id=${DT_BROWSER_TAB_ID} pane_id=${DT_PANE_ID} pixel_width=${DT_PIXEL_WIDTH} pixel_height=${DT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium resized DevTools to AppKit pixel size"
   screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_DEVTOOLS_SPLIT"
   log "devtools_split_screenshot_exit=$?"
@@ -7967,11 +8090,14 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
     [ "$DT2_PANE_ID" != "$DT_PANE_ID" ] || fail "reopened DevTools reused the closed DevTools pane id"
     log "devtools_reopened_pane_id=$DT2_PANE_ID"
     wait_for_log_after "$REOPEN_START_LINE" "CreateDevtoolsTab: pane_id=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for reopened DevTools pane" 60
-    DT2_TAB_READY_LINE="$(wait_for_trace_line_after "$REOPEN_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported reopened DevTools tab ready" 60)"
-    DT2_BROWSER_TAB_ID="$(printf '%s\n' "$DT2_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    DT2_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$REOPEN_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}")"
+    DT2_TAB_READY_APP_LINE="$(wait_for_line_after "$REOPEN_START_LINE" "TabReady: pane_id=${DT2_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped reopened DevTools TabReady" 60)"
+    DT2_BROWSER_TAB_ID="$(extract_app_tab_id "$DT2_TAB_READY_APP_LINE")"
     [ -n "$DT2_BROWSER_TAB_ID" ] || fail "failed to extract reopened DevTools browser tab id"
+    log "devtools_reopened_tab_ready_trace=${DT2_TAB_READY_TRACE_LINE:-none}"
+    log "devtools_reopened_tab_ready_app=$DT2_TAB_READY_APP_LINE"
     log "devtools_reopened_browser_tab_id=$DT2_BROWSER_TAB_ID"
-    require_trace_after "$REOPEN_TRACE_START_LINE" "ca-context tab=${DT2_BROWSER_TAB_ID} pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported reopened DevTools CA context"
+    wait_for_line_after "$REOPEN_START_LINE" "CaContext: tab_id=${DT2_BROWSER_TAB_ID} pane_id=${DT2_PANE_ID} context_id=[0-9]+" "Ghostboard received reopened DevTools CA context" 60
 
     B_TAB_START_LINE="$(log_line_count)"
     B_TAB_TRACE_START_LINE="$(trace_line_count)"
@@ -7989,10 +8115,13 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
     [ -n "$B_PANE_ID" ] || fail "failed to extract DevTools singleton browser B pane id"
     [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "DevTools singleton browser B reused browser A pane id"
     log "devtools_singleton_browser_b_pane_id=$B_PANE_ID"
-    B_TAB_READY_LINE="$(wait_for_trace_line_after "$B_TAB_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_PANE_ID} inspected_tab_id=0" "Roamium reported DevTools singleton browser B tab ready" 60)"
-    B_BROWSER_TAB_ID="$(printf '%s\n' "$B_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    B_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$B_TAB_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_PANE_ID} inspected_tab_id=0")"
+    B_TAB_READY_APP_LINE="$(wait_for_line_after "$B_TAB_START_LINE" "TabReady: pane_id=${B_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped DevTools singleton browser B TabReady" 60)"
+    B_BROWSER_TAB_ID="$(extract_app_tab_id "$B_TAB_READY_APP_LINE")"
     [ -n "$B_BROWSER_TAB_ID" ] || fail "failed to extract DevTools singleton browser B tab id"
     [ "$B_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "DevTools singleton browser B reused browser A tab id"
+    log "devtools_singleton_browser_b_tab_ready_trace=${B_TAB_READY_TRACE_LINE:-none}"
+    log "devtools_singleton_browser_b_tab_ready_app=$B_TAB_READY_APP_LINE"
     log "devtools_singleton_browser_b_tab_id=$B_BROWSER_TAB_ID"
     log "devtools_singleton_browser_b_before_devtools_control_key=escape"
     swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
@@ -8012,11 +8141,14 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
     [ -n "$B_DT_PANE_ID" ] || fail "failed to extract browser B DevTools pane id"
     log "devtools_singleton_browser_b_devtools_pane_id=$B_DT_PANE_ID"
     wait_for_log_after "$B_DEVTOOLS_START_LINE" "CreateDevtoolsTab: pane_id=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for browser B DevTools pane" 60
-    B_DT_TAB_READY_LINE="$(wait_for_trace_line_after "$B_DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported browser B DevTools tab ready" 60)"
-    B_DT_BROWSER_TAB_ID="$(printf '%s\n' "$B_DT_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    B_DT_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$B_DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}")"
+    B_DT_TAB_READY_APP_LINE="$(wait_for_line_after "$B_DEVTOOLS_START_LINE" "TabReady: pane_id=${B_DT_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped browser B DevTools TabReady" 60)"
+    B_DT_BROWSER_TAB_ID="$(extract_app_tab_id "$B_DT_TAB_READY_APP_LINE")"
     [ -n "$B_DT_BROWSER_TAB_ID" ] || fail "failed to extract browser B DevTools browser tab id"
+    log "devtools_singleton_browser_b_devtools_tab_ready_trace=${B_DT_TAB_READY_TRACE_LINE:-none}"
+    log "devtools_singleton_browser_b_devtools_tab_ready_app=$B_DT_TAB_READY_APP_LINE"
     log "devtools_singleton_browser_b_devtools_tab_id=$B_DT_BROWSER_TAB_ID"
-    require_trace_after "$B_DEVTOOLS_TRACE_START_LINE" "ca-context tab=${B_DT_BROWSER_TAB_ID} pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported browser B DevTools CA context"
+    wait_for_line_after "$B_DEVTOOLS_START_LINE" "CaContext: tab_id=${B_DT_BROWSER_TAB_ID} pane_id=${B_DT_PANE_ID} context_id=[0-9]+" "Ghostboard received browser B DevTools CA context" 60
   fi
 fi
 
@@ -8230,7 +8362,7 @@ if [ "$SCENARIO" = "two-browser-split-routing" ]; then
   require_no_log_after "$B_CLOSE_START_LINE" "SetOverlay: pane_id=${B_PANE_ID}" "closed browser B did not recreate a live overlay"
 fi
 
-if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "performance-split-right" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-border-config" ] || [ "$SCENARIO" = "performance-split-right" ]; then
   SPLIT_START_LINE="$(log_line_count)"
   SPLIT_TRACE_START_LINE="$(trace_line_count)"
   if [ "$SCENARIO" = "performance-split-right" ]; then
@@ -8247,8 +8379,21 @@ if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "performance-split-right" 
   fi
   delay 1
 
-  SPLIT_PRESENT_LINE="$(wait_for_split_right_frame_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$OVERLAY_FRAME_SIZE" "split-right AppKit overlay frame")"
-  SPLIT_PIXELS_LINE="$(wait_for_split_right_pixels_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$APPKIT_PIXEL" "split-right AppKit presented pixels")"
+  if [ "$SCENARIO" = "split-right-border-config" ]; then
+    if head -n "$SPLIT_START_LINE" "$APP_LOG" | grep -E "TermSurf geometry layer=appkit event=split_border_draw" >/dev/null 2>&1; then
+      fail "single-pane baseline drew a split pane border before split"
+    fi
+    log "PASS: single-pane baseline did not draw split pane border"
+  fi
+
+  SPLIT_FRAME_TOLERANCE=8
+  SPLIT_PIXEL_TOLERANCE=16
+  if [ "$SCENARIO" = "split-right-border-config" ]; then
+    SPLIT_FRAME_TOLERANCE=24
+    SPLIT_PIXEL_TOLERANCE=48
+  fi
+  SPLIT_PRESENT_LINE="$(wait_for_split_right_frame_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$OVERLAY_FRAME_SIZE" "split-right AppKit overlay frame" 30 "$SPLIT_FRAME_TOLERANCE")"
+  SPLIT_PIXELS_LINE="$(wait_for_split_right_pixels_after "$SPLIT_START_LINE" "$PANE_ID" "$CONTEXT_ID" "$APPKIT_PIXEL" "split-right AppKit presented pixels" 30 "$SPLIT_PIXEL_TOLERANCE")"
   SPLIT_FRAME_SIZE="$(extract_frame_size "$SPLIT_PRESENT_LINE")"
   SPLIT_FRAME_X="$(extract_frame_x "$SPLIT_PRESENT_LINE")"
   SPLIT_FRAME_WIDTH="$(pair_width "$SPLIT_FRAME_SIZE")"
@@ -8265,7 +8410,34 @@ if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "performance-split-right" 
   screencapture -x -o -l"$WID" "$SCREENSHOT_SPLIT"
   log "split_screenshot_exit=$?"
 
-  if [ "$SCENARIO" = "split-right" ]; then
+  if [ "$SCENARIO" = "split-right-border-config" ]; then
+    case "$BORDER_CONFIG_CASE" in
+      enabled)
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_config .*is_split=true .*focused=true .*border_width=2 .*focused_color_present=true .*unfocused_color_present=true .*saturation=0.5 .*border_drawn=true .*border_color_key=focused-split-border-color" "focused split border config bridged enabled values"
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_config .*is_split=true .*focused=false .*border_width=2 .*focused_color_present=true .*unfocused_color_present=true .*saturation=0.5 .*border_drawn=true .*border_color_key=unfocused-split-border-color" "unfocused split border config bridged enabled values"
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_draw .*focused=true .*border_width=2 .*border_color_key=focused-split-border-color .*hit_testing=false" "focused split border draw logged with hit testing disabled"
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_draw .*focused=false .*border_width=2 .*border_color_key=unfocused-split-border-color .*hit_testing=false" "unfocused split border draw logged with hit testing disabled"
+        ;;
+      clamp)
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_config .*is_split=true .*border_width=10 .*focused_color_present=true .*unfocused_color_present=true .*saturation=1 .*border_drawn=true" "split border config bridged clamped values"
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_draw .*border_width=10 .*hit_testing=false" "clamped split border draw logged with hit testing disabled"
+        ;;
+      disabled)
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_config .*is_split=true .*border_width=0 .*focused_color_present=true .*unfocused_color_present=true .*saturation=0.5 .*border_drawn=false" "disabled split border config bridged width zero"
+        require_no_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_draw" "disabled split border did not draw"
+        ;;
+      missing-focused)
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_config .*is_split=true .*focused=true .*border_width=2 .*focused_color_present=false .*unfocused_color_present=true .*saturation=0.5 .*border_drawn=false .*border_color_key=focused-split-border-color" "missing focused color prevents focused border draw"
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_draw .*focused=false .*border_width=2 .*border_color_key=unfocused-split-border-color .*hit_testing=false" "missing focused color still allows unfocused border draw"
+        ;;
+      missing-unfocused)
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_draw .*focused=true .*border_width=2 .*border_color_key=focused-split-border-color .*hit_testing=false" "missing unfocused color still allows focused border draw"
+        require_log_after "$SPLIT_START_LINE" "TermSurf geometry layer=appkit event=split_border_config .*is_split=true .*focused=false .*border_width=2 .*focused_color_present=true .*unfocused_color_present=false .*saturation=0.5 .*border_drawn=false .*border_color_key=unfocused-split-border-color" "missing unfocused color prevents unfocused border draw"
+        ;;
+    esac
+  fi
+
+  if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-border-config" ]; then
     SPLIT_WIN_LINE="$(window_bounds)" || fail "failed to resolve split window bounds for window id=$WID"
     IFS=$'\t' read -r _SPLIT_WID SPLIT_WX SPLIT_WY SPLIT_WW SPLIT_WH <<<"$SPLIT_WIN_LINE"
     SPLIT_FRAME_WIDTH="$(pair_width "$SPLIT_FRAME_SIZE")"
@@ -8279,10 +8451,14 @@ if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "performance-split-right" 
     require_text "$SPLIT_HIT_LINE" "overlay_frame=" "split-right hit-test includes current overlay frame"
     require_text "$SPLIT_HIT_LINE" "web_point={" "split-right hit-test includes webview-relative point"
 
-    SPLIT_NEGATIVE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" -v old_w="$INITIAL_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + frame_w + ((old_w - frame_w) / 2) + 0.5) }')"
-    SPLIT_NEGATIVE_Y="$SPLIT_INSIDE_Y"
-    click_negative_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
-    wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$CONTEXT_ID" "split-right sibling-pane negative hit-test" allow-absent
+    if [ "$SCENARIO" = "split-right-border-config" ] && [ "$BORDER_CONFIG_CASE" = "disabled" ]; then
+      log "PASS: disabled split border skipped moving sibling negative hit-test; no border was drawn to intercept input"
+    else
+      SPLIT_NEGATIVE_X="$(awk -v wx="$SPLIT_WX" -v frame_x="$SPLIT_FRAME_X" -v frame_w="$SPLIT_FRAME_WIDTH" -v old_w="$INITIAL_FRAME_WIDTH" 'BEGIN { print int(wx + frame_x + frame_w + ((old_w - frame_w) / 2) + 0.5) }')"
+      SPLIT_NEGATIVE_Y="$SPLIT_INSIDE_Y"
+      click_negative_global_point "$SPLIT_NEGATIVE_X" "$SPLIT_NEGATIVE_Y" "split_sibling_negative"
+      wait_for_negative_hit_after "$NEGATIVE_HIT_START_LINE" "$CONTEXT_ID" "split-right sibling-pane negative hit-test" allow-absent
+    fi
   else
     log "PASS: performance split skipped pointer hit-test assertions"
   fi
