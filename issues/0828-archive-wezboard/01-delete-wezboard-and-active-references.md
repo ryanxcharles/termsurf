@@ -231,3 +231,105 @@ Fixes:
   used only by those scripts.
 
 Re-review verdict: **Approved**.
+
+## Result
+
+**Result:** Pass
+
+Implemented the archive deletion and current-surface cleanup:
+
+- Deleted the tracked `wezboard/` tree and removed leftover ignored
+  `wezboard/target` artifacts from the worktree.
+- Removed stale Wezboard submodule entries from `.gitmodules`.
+- Removed `wezboard` from the root Cargo workspace exclusions.
+- Updated `scripts/build.sh`, `scripts/install.sh`, `scripts/uninstall.sh`, and
+  `scripts/release.sh` so current supported components are Ghostboard, Roamium,
+  Web TUI, Chromium, and `all`.
+- Updated the Homebrew cask in the `homebrew/` submodule to install
+  `TermSurf.app`, `web`, and Roamium, with no `wezboard` binary.
+- Deleted root-level Wezboard-only helper scripts and the old active Wezboard
+  component website page.
+- Updated active documentation, website prose, test labels, and comments so
+  Wezboard is no longer presented as the current frontend.
+
+Verification run:
+
+```bash
+test ! -d wezboard
+test "$(git ls-files wezboard | wc -l | tr -d ' ')" = "0"
+bash -n scripts/build.sh scripts/install.sh scripts/uninstall.sh scripts/release.sh
+cargo fmt
+prettier --write --prose-wrap always --print-width 80 \
+  README.md AGENTS.md scripts/ghostty-app/README.md issues/0828-archive-wezboard/*.md
+git diff --check
+```
+
+All of the above passed.
+
+Component dispatch verification:
+
+```bash
+./scripts/build.sh wezboard
+./scripts/install.sh wezboard
+./scripts/uninstall.sh wezboard
+```
+
+All three commands now reject `wezboard` with `Unknown component: wezboard`
+before doing any build, install, uninstall, or sudo work.
+
+Current script/cask reference checks passed:
+
+```bash
+rg -n "wezboard|Wezboard|TermSurf Wezboard" \
+  scripts/build.sh scripts/install.sh scripts/release.sh homebrew/Casks/termsurf.rb
+
+rg -n "TermSurf Wezboard\\.app|wezboard" \
+  scripts/release.sh homebrew/Casks/termsurf.rb
+
+rg -n "build_wezboard|install_wezboard|uninstall_wezboard|TermSurf Wezboard" \
+  scripts/build.sh scripts/install.sh scripts/uninstall.sh scripts/release.sh
+```
+
+Each of those commands produced no matches.
+
+The bounded active-reference audit still has intentional historical/archive
+matches only:
+
+- `AGENTS.md` and `website/src/pages/docs/architecture.astro` explicitly say
+  Wezboard is archived in git history.
+- `issues/README.md` contains historical closed issue titles and the open Issue
+  828 title.
+- `chromium/patches/**` contains old patch commit-message text from historical
+  Wezboard-era Chromium patch exports.
+
+The deletion commit hash cannot be embedded in the deletion commit itself. It
+will be recorded in a follow-up issue-document commit immediately after the
+result commit exists.
+
+## Conclusion
+
+Experiment 1 archived Wezboard from the active repo surface. The code directory
+is deleted, current scripts and package metadata no longer expose Wezboard as a
+component, and current docs point at Ghostboard/TermSurf as the frontend. The
+next required step is the result review, followed by the result commit; after
+that commit lands, record its exact hash in this experiment and the issue README
+conclusion.
+
+## Completion Review
+
+Reviewed by a fresh-context Codex adversarial subagent.
+
+Verdict: **Approved**.
+
+Findings: none.
+
+The reviewer independently confirmed:
+
+- `wezboard/` is absent and no tracked `wezboard` paths remain.
+- `bash -n` passed for build/install/uninstall/release scripts.
+- `build.sh`, `install.sh`, and `uninstall.sh` reject `wezboard` before sudo.
+- Script/cask Wezboard reference grep produced no matches.
+- `git diff --check`, `cargo fmt --check`, and `prettier --check` passed.
+- `HEAD` was still the plan commit before the result commit.
+- Recording the deletion commit hash in a follow-up documentation commit is
+  sound.

@@ -67,4 +67,4 @@ Do not create experiments upfront. Design Experiment 1 after this issue is open.
 ## Experiments
 
 - [Experiment 1: Delete Wezboard and remove active references](01-delete-wezboard-and-active-references.md)
-  — **Designed**
+  — **Pass**
