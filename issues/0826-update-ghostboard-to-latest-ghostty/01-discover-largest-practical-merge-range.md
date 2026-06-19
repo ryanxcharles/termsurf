@@ -151,3 +151,168 @@ The reviewer found no remaining findings. It confirmed the command shape,
 non-history-preserving mechanism ban, objective range selection rules, focused
 cleanup checks, issue README link, experiment structure, scope, and verification
 criteria.
+
+## Result
+
+**Result:** Pass
+
+The full upstream range from Ghostty `v1.3.1` to latest fetched Ghostty
+`origin/main` was attempted first in a disposable worktree, as required.
+
+Baseline and target:
+
+```text
+TermSurf HEAD before dry run: ab61b94fab49c9613eeb8c586ee2fac0ef8e2723
+Ghostboard subtree base:      332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28
+Latest Ghostty target:        5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff
+Upstream commit count:        1159
+```
+
+Fetch caveat:
+
+```text
+git fetch ghostty main --tags --prune
+```
+
+updated `ghostty/main` to `5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff`, but exited
+nonzero because the moving upstream `tip` tag would clobber the local `tip` tag.
+The branch target was updated and was usable for the dry run.
+
+Upstream build metadata at the target commit:
+
+```text
+build.zig.zon version:             1.3.2-dev
+build.zig.zon minimum_zig_version: 0.15.2
+local zig version:                 0.15.2
+local Xcode version:               26.6
+local macOS version:               26.5.1
+```
+
+A full clean upstream Ghostty build was deferred to the later build gate. This
+experiment's purpose was range discovery; the target build metadata and local
+toolchain compatibility were enough to proceed with the merge dry run.
+
+Dry-run worktree:
+
+```text
+/tmp/termsurf-issue826-dryrun-full
+```
+
+Dry-run command:
+
+```bash
+git subtree pull --prefix=ghostboard ghostty \
+  5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff \
+  -m "Merge upstream Ghostty into ghostboard"
+```
+
+The command exited with conflicts. It used the required history-preserving
+subtree mechanism. It did not use `git merge -X subtree`, copy-over replacement,
+or another non-history-preserving mechanism.
+
+Unresolved conflict count:
+
+```text
+17
+```
+
+Unmerged files:
+
+```text
+ghostboard/.agents/commands/gh-issue
+ghostboard/.github/VOUCHED.td
+ghostboard/.github/workflows/test.yml
+ghostboard/.github/workflows/vouch-check-issue.yml
+ghostboard/.github/workflows/vouch-check-pr.yml
+ghostboard/.github/workflows/vouch-manage-by-discussion.yml
+ghostboard/.github/workflows/vouch-manage-by-issue.yml
+ghostboard/.github/workflows/vouch-sync-codeowners.yml
+ghostboard/CONTRIBUTING.md
+ghostboard/HACKING.md
+ghostboard/README.md
+ghostboard/build.zig
+ghostboard/include/ghostty.h
+ghostboard/macos/Sources/Features/Terminal/TerminalController.swift
+ghostboard/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift
+ghostboard/src/build/SharedDeps.zig
+ghostboard/src/main_c.zig
+```
+
+Conflict classification:
+
+| Files                                             | Classification                         | Notes                                                                                                   |
+| ------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `.agents/commands/gh-issue`                       | TermSurf-specific / cleanup            | TermSurf modified a file upstream deleted.                                                              |
+| `.github/VOUCHED.td`, `.github/workflows/vouch-*` | poisoned-file / upstream workflow      | TermSurf deleted poisoned/vouch files that upstream later changed.                                      |
+| `.github/workflows/test.yml`                      | build/CI workflow                      | Single conflict between local workflow state and upstream path filter update.                           |
+| `CONTRIBUTING.md`, `HACKING.md`, `README.md`      | documentation / poisoned-file cleanup  | Documentation conflicts are expected and should be resolved according to TermSurf documentation policy. |
+| `build.zig`                                       | build-system-specific                  | Local emit/install behavior conflicts with upstream `emit_lib_vt` build changes.                        |
+| `include/ghostty.h`                               | semantic TermSurf API + upstream C API | TermSurf protocol exports conflict with upstream `GHOSTTY_API` and config API additions.                |
+| `TerminalController.swift`                        | semantic TermSurf lifecycle            | TermSurf pane cleanup conflicts with upstream pending-initial-presentation cleanup.                     |
+| `SurfaceView_AppKit.swift`                        | semantic TermSurf UI/input             | TermSurf copy-current-URL feedback and published state conflict with upstream copy/action changes.      |
+| `src/build/SharedDeps.zig`                        | build-system-specific                  | TermSurf protobuf C sources conflict with upstream MSVC sanitizer flags for `stb.c`.                    |
+| `src/main_c.zig`                                  | semantic TermSurf API + upstream C API | TermSurf exported protocol functions conflict with upstream Windows `DllMain` addition.                 |
+
+The full range is practical for the first real merge experiment. Although the
+update touches hundreds of files, the unresolved conflict set is bounded and
+inspectable file-by-file. The 17 conflicts are concentrated in predictable
+areas: poisoned/vouch cleanup, docs, build glue, C API exports, and macOS
+TermSurf lifecycle/UI integration. There is a credible path to a buildable tree
+in one follow-up implementation experiment if the merge resolves these files
+deliberately and keeps upstream behavior except where TermSurf-specific behavior
+is required.
+
+No smaller ranges were attempted because the full range met the experiment's
+practicality rule. There is therefore no larger attempted range to document as
+not practical; the full range is already the largest possible target for this
+issue's current upstream head.
+
+Cleanup verification after removing the disposable worktree and branch:
+
+```text
+git worktree remove --force /tmp/termsurf-issue826-dryrun-full
+git branch -D issue826-dryrun-full
+git status --short -- ghostboard
+test -z "$(git diff --name-only --diff-filter=U)"
+```
+
+`git status --short -- ghostboard` produced no output, and the unmerged-path
+check passed.
+
+## Conclusion
+
+Experiment 1 recommends using the full upstream Ghostty range as the first real
+merge range:
+
+```text
+332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28..5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff
+```
+
+The next experiment should perform the actual history-preserving subtree pull
+for that full range, resolve the 17 known conflicts, preserve TermSurf-specific
+behavior where required, and then move into build verification.
+
+## Result Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved.
+
+The reviewer found no required issues. It independently checked that:
+
+- the diff from the plan commit only updated the issue README status and
+  appended this experiment's result/conclusion;
+- `git status --short -- ghostboard` produced no output;
+- `git diff --name-only --diff-filter=U` produced no output;
+- `ghostty/main` resolved to `5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff`;
+- the upstream range contained 1159 commits;
+- the README recorded Experiment 1 as `Pass`;
+- the result and conclusion were present;
+- the result commit had not yet been made;
+- `git diff --check` passed.
+
+It agreed that the full range recommendation is supported by the 17-file
+conflict set, file-by-file classification, clean main `ghostboard/` state after
+cleanup, and the fact that the full range is the largest possible range for the
+current upstream target.

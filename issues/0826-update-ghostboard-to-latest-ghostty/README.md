@@ -184,4 +184,4 @@ previous experiment has produced a result.
 ## Experiments
 
 - [Experiment 1: Discover the largest practical merge range](01-discover-largest-practical-merge-range.md)
-  — **Designed**
+  — **Pass**
