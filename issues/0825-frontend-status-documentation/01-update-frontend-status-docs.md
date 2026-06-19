@@ -84,11 +84,11 @@ Pass criteria:
 
   ```bash
   git diff --name-only -- 'issues/[0-9][0-9][0-9][0-9]-*/**' |
-    while read -r path; do
-      rel="${path#issues/}"
+    while read -r changed_path; do
+      rel="${changed_path#issues/}"
       issue_dir="issues/${rel%%/*}"
       if rg -q '^status = "closed"$' "$issue_dir/README.md"; then
-        echo "$path"
+        echo "$changed_path"
       fi
     done
   ```
@@ -176,3 +176,162 @@ issues resolved but raised one new required finding:
 The formatting commands were changed to use `git diff --name-only -- '*.md'` so
 all edited markdown files are covered dynamically. Final re-review returned
 **APPROVED** with no required findings.
+
+## Result
+
+**Result:** Pass
+
+The current mutable documentation now describes Ghostboard as the primary
+TermSurf front-end, Wezboard as deprecated/reference code, and Roastty as a
+proof-of-concept.
+
+Files changed:
+
+- `AGENTS.md`
+  - updated Multiple GUIs so Ghostboard is the primary GUI;
+  - marked Ghostboard Legacy as archived reference, Wezboard as deprecated
+    reference, and Roastty as proof-of-concept reference;
+  - changed the topology diagram and socket example from Wezboard to Ghostboard;
+  - updated directory structure and frontend development guidance to center
+    Ghostboard;
+  - changed debug build/run guidance from Wezboard to
+    `cd ghostboard && zig build run`;
+  - labeled legacy `scripts/` helpers as deprecated Wezboard/Roamium flow.
+- `CLAUDE.md`
+  - no separate file content changed because `CLAUDE.md` is a symlink to
+    `AGENTS.md`; `cmp -s AGENTS.md CLAUDE.md` passed.
+- `README.md`
+  - replaced Wezboard terminal wording with Ghostboard/Ghostty-based wording;
+  - updated Homebrew description to identify the current cask as legacy Wezboard
+    packaging while Ghostboard packaging is pending;
+  - updated build prerequisites to include Zig;
+  - changed development run instructions to build Roamium/webtui and run
+    Ghostboard;
+  - replaced Wezboard install/run instructions with Ghostboard macOS app bundle
+    guidance.
+- `ghostboard/HACKING.md`
+  - corrected the current macOS app bundle path to `TermSurf Ghostboard.app`.
+- `ghostboard/macos/AGENTS.md`
+  - corrected macOS build and AppleScript test paths to
+    `TermSurf Ghostboard.app`.
+- `docs/early-prototypes.md`
+  - clarified that Ghostboard Legacy is historical reference and that current
+    `ghostboard/` has been recreated as the primary frontend;
+  - preserved prototype history.
+- `docs/vendor.md`
+  - renamed the Roastty dependency-source section as proof-of-concept material;
+  - stated Ghostboard is the production frontend direction.
+- `issues/0756-surfari/README.md`
+  - updated the open Surfari architecture issue from Wezboard GUI/compositor
+    wording to Ghostboard GUI/compositor wording.
+- `issues/0825-frontend-status-documentation/README.md`
+  - updated Experiment 1 status to `Pass`.
+- `issues/0825-frontend-status-documentation/01-update-frontend-status-docs.md`
+  - recorded this result.
+
+Audited and intentionally left unchanged:
+
+- Closed issue documents were not modified.
+- `docs/objc-to-objc2.md` still describes Wezboard because it is a historical
+  migration guide for the deprecated Wezboard codebase.
+- Other historical mentions of Wezboard, Roastty, and Ghostboard Legacy remain
+  where they are clearly historical/reference context rather than current
+  frontend direction.
+
+Verification:
+
+- Closed issue guard:
+
+  ```bash
+  git diff --name-only -- 'issues/[0-9][0-9][0-9][0-9]-*/**' |
+    while read -r changed_path; do
+      rel="${changed_path#issues/}"
+      issue_dir="issues/${rel%%/*}"
+      if rg -q '^status = "closed"$' "$issue_dir/README.md"; then
+        echo "$changed_path"
+      fi
+    done
+  ```
+
+  printed nothing.
+
+- Stale current-status grep:
+
+  ```bash
+  rg -n \
+    "Active GUI|Active Development|currently ships as a WezTerm fork|Ghostboard.*Archived|Will return|Wezboard.*Active|launch Wezboard|Build.*Wezboard|Roastty.*production|Roastty.*primary" \
+    AGENTS.md CLAUDE.md README.md docs
+  ```
+
+  returned no matches.
+
+- Open issue stale-status grep:
+
+  ```bash
+  for readme in issues/[0-9][0-9][0-9][0-9]-*/README.md; do
+    if rg -q '^status = "open"$' "$readme"; then
+      rg -n \
+        "Wezboard \\(GUI\\)|Wezboard.*creates|Wezboard.*composit|Wezboard.*code path|Ghostboard.*Archived|Will return|Active GUI|Active Development" \
+        "$readme" || true
+    fi
+  done
+  ```
+
+  returned no matches.
+
+- Markdown formatting:
+
+  ```bash
+  git diff --name-only -- '*.md' |
+    xargs prettier --write --prose-wrap always --print-width 80
+  git diff --name-only -- '*.md' |
+    xargs prettier --check
+  ```
+
+  `prettier --check` reported: `All matched files use Prettier code style!`
+
+- `cmp -s AGENTS.md CLAUDE.md` passed.
+- `git diff --check` passed.
+
+During verification, the closed-issue guard was corrected from `path` to
+`changed_path` because zsh ties the lowercase `path` parameter to `PATH`; using
+`path` in the loop broke command lookup for `rg`. The corrected guard was
+recorded above and verified.
+
+## Completion Review
+
+Fresh-context adversarial completion review initially returned **CHANGES
+REQUIRED** with four required findings:
+
+- `README.md` claimed Homebrew installs the current TermSurf app and `termsurf`
+  CLI, but the current cask still installs `TermSurf Wezboard.app`, `web`, and
+  `wezboard`;
+- `AGENTS.md` claimed the cask installs `/Applications/TermSurf.app` and
+  `termsurf`, which is not true for the current cask/release flow;
+- `README.md` documented the Ghostboard app output as `TermSurf.app`, but the
+  current artifact is `TermSurf Ghostboard.app`;
+- `AGENTS.md` documented the Ghostboard app output as `TermSurf.app`, also
+  contradicting current build metadata.
+
+The findings were accepted. The docs were updated to mark Homebrew packaging as
+legacy Wezboard packaging pending Ghostboard packaging, and Ghostboard app
+bundle paths were corrected to `TermSurf Ghostboard.app` in root docs and
+Ghostboard-local docs. Verification was rerun after the fixes:
+
+- stale current-status grep returned no matches;
+- open issue stale-status grep returned no matches;
+- closed issue guard printed nothing;
+- app-path grep for unsupported `TermSurf.app` / `termsurf` CLI claims returned
+  no matches;
+- `prettier --check`, `cmp -s AGENTS.md CLAUDE.md`, and `git diff --check`
+  passed.
+
+Re-review returned **APPROVED** with no required findings. It raised one
+optional consistency note about an outdated README/Homebrew summary bullet in
+this result record; that bullet was corrected before commit.
+
+## Conclusion
+
+The current mutable frontend-status documentation now matches the intended
+direction: Ghostboard is primary, Wezboard is deprecated/reference, Roastty is a
+proof-of-concept, and Ghostboard Legacy is historical reference.

@@ -106,9 +106,10 @@ indicators follow the LazyVim Tokyo Night palette.
 
 ### Terminal
 
-Based on [WezTerm](https://wezfurlong.org/wezterm/) (Wezboard). All native
-terminal features, configuration, and keybindings work out of the box. TermSurf
-adds browser integration on top.
+The primary TermSurf terminal frontend is Ghostboard, a
+[Ghostty](https://ghostty.org/) fork with TermSurf protocol support. Native
+terminal features, configuration, panes, tabs, and keybindings come from
+Ghostty; TermSurf adds browser integration on top.
 
 ## Profiles
 
@@ -128,22 +129,22 @@ logging into Google in one profile doesn't affect the others.
 
 ### Install with Homebrew
 
-The fastest way to install on macOS:
+The Homebrew cask currently packages the deprecated Wezboard frontend while
+Ghostboard packaging is being updated:
 
 ```bash
 brew tap termsurf/termsurf
 brew install --cask termsurf
 ```
 
-This installs the Wezboard app, the `web` and `wezboard` CLIs, and Roamium
-(Chromium engine). Launch Wezboard and type `web ryanxcharles.com`.
+Use the source build below for the current primary Ghostboard frontend.
 
 To upgrade: `brew update && brew upgrade --cask termsurf`
 
 ### Build from Source
 
-For development. Requires the Rust toolchain and a Chromium build. Plan for ~100
-GB of disk space (almost all of it is Chromium).
+For development. Requires Xcode, Zig, the Rust toolchain, and a Chromium build.
+Plan for ~100 GB of disk space (almost all of it is Chromium).
 
 #### 1. Install prerequisites
 
@@ -151,7 +152,10 @@ GB of disk space (almost all of it is Chromium).
 # macOS compiler toolchain
 xcode-select --install
 
-# Rust (GUI, TUI, engine binary)
+# Zig (Ghostboard)
+brew install zig
+
+# Rust (TUI, engine binary)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Chromium depot_tools (build system for Chromium)
@@ -204,27 +208,25 @@ management, patch workflow, and recovery from build issues.
 
 ```bash
 cd ../..
-./scripts/build.sh all
-./wezboard/target/debug/wezboard-gui
+./scripts/build.sh roamium
+./scripts/build.sh webtui
+cd ghostboard
+zig build run
 ```
 
-`scripts/build.sh all` builds Chromium, Roamium, the `web` TUI, and Wezboard.
-The Roamium build also copies the `roamium` binary into
-`chromium/src/out/Default/`, where Wezboard expects to launch it during
-development.
+`scripts/build.sh roamium` builds the Roamium engine binary and copies it into
+`chromium/src/out/Default/`. `scripts/build.sh webtui` builds the `web` TUI.
+`zig build run` launches Ghostboard, the primary TermSurf front-end.
 
-#### 4. Build and install (release)
+#### 4. Build the macOS app bundle
 
 ```bash
-./scripts/build.sh all --release
-sudo ./scripts/install.sh all
+cd ghostboard
+macos/build.nu --configuration Debug --action build
 ```
 
-`install.sh` copies the app bundle to `/Applications/`, installs Roamium and
-Chromium dylibs to `/usr/local/roamium/`, and symlinks `wezboard` and `web` to
-`/usr/local/bin/`. All binaries are ad-hoc code-signed after copying.
-
-After installing, launch Wezboard and run:
+The app output is `ghostboard/macos/build/Debug/TermSurf Ghostboard.app`. Launch
+that app and run:
 
 ```bash
 web google.com

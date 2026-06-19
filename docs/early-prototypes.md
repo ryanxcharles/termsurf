@@ -1,23 +1,25 @@
 # Early Prototypes
 
-Historical documentation for TermSurf's five prototype generations (ts1–ts5) and
-the cef-rs dependency. These prototypes are no longer in the working tree but
-are preserved in git history. See the [Archive Log](#archive-log) for recovery
+Historical documentation for TermSurf's five prototype generations (ts1–ts5),
+Ghostboard Legacy, and the cef-rs dependency. These prototypes are no longer the
+active frontend direction but are preserved in git history. The current primary
+frontend is the recreated `ghostboard/` tree documented in
+[CLAUDE.md](../CLAUDE.md). See the [Archive Log](#archive-log) for recovery
 instructions.
 
 For the active codebase, see [CLAUDE.md](../CLAUDE.md).
 
 ## Archive Log
 
-| What             | Commit          | Date       | Notes                                                                                                                                                                 |
-| ---------------- | --------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vendor/cef-rs/` | `2c7c5d7`       | 2026-02-21 | CEF Rust bindings (ts2, ts3)                                                                                                                                          |
-| `ts1/`           | `0bdf837`       | 2026-02-25 | Ghostty + WKWebView                                                                                                                                                   |
-| `ts2/`           | `0bdf837`       | 2026-02-25 | WezTerm + in-process CEF                                                                                                                                              |
-| `ts3/`           | `0bdf837`       | 2026-02-25 | WezTerm + out-of-process CEF                                                                                                                                          |
-| `ts4/`           | `0bdf837`       | 2026-02-25 | Chromium Content API PoC                                                                                                                                              |
-| `ts5/`           | `0bdf837`       | 2026-02-25 | Ghostty + out-of-process Chromium                                                                                                                                     |
-| `ghostboard/`    | `90b966458bd17` | 2026-03-11 | Ghostboard Legacy (Ghostty fork, Zig). Archived to focus on Wezboard during protocol iteration. Will be re-created from fresh Ghostty fork after protocol stabilizes. |
+| What             | Commit          | Date       | Notes                                                                                                                                                                                                                                |
+| ---------------- | --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `vendor/cef-rs/` | `2c7c5d7`       | 2026-02-21 | CEF Rust bindings (ts2, ts3)                                                                                                                                                                                                         |
+| `ts1/`           | `0bdf837`       | 2026-02-25 | Ghostty + WKWebView                                                                                                                                                                                                                  |
+| `ts2/`           | `0bdf837`       | 2026-02-25 | WezTerm + in-process CEF                                                                                                                                                                                                             |
+| `ts3/`           | `0bdf837`       | 2026-02-25 | WezTerm + out-of-process CEF                                                                                                                                                                                                         |
+| `ts4/`           | `0bdf837`       | 2026-02-25 | Chromium Content API PoC                                                                                                                                                                                                             |
+| `ts5/`           | `0bdf837`       | 2026-02-25 | Ghostty + out-of-process Chromium                                                                                                                                                                                                    |
+| `ghostboard/`    | `90b966458bd17` | 2026-03-11 | Ghostboard Legacy (Ghostty fork, Zig). Historical implementation archived after the earlier protocol-iteration phase. The current `ghostboard/` tree has since been recreated from a fresh Ghostty fork and is the primary frontend. |
 
 To recover a directory:
 
@@ -174,7 +176,7 @@ git fetch upstream
 git subtree pull --prefix=ts5 upstream main -m "Merge upstream Ghostty into ts5"
 ```
 
-## Ghostboard Legacy (ghostboard/) — Archived
+## Ghostboard Legacy (ghostboard/) — archived
 
 ### Architecture
 

@@ -14,8 +14,8 @@ Roastty is a proof-of-concept rather than the production direction.
 ## Background
 
 The repository documentation still contains older project-state language from
-the Wezboard-focused period and the Roastty proof-of-concept work. That creates
-confusion for future development because it can route new frontend work toward
+the Wezboard-focused period and the Roastty proof-of-concept work. That can
+confuse future development because it can route new frontend work toward
 deprecated or experimental implementations.
 
 The current intended status is:
@@ -65,4 +65,4 @@ referenced as history, but should not be rewritten.
 ## Experiments
 
 - [Experiment 1: Update frontend status docs](01-update-frontend-status-docs.md)
-  — **Designed**
+  — **Pass**

@@ -12,18 +12,18 @@ committed to the TermSurf repo.
 | `vendor/electron/`  | https://github.com/electron/electron   | Reference for Chromium embedding patterns, patch sets, and Content API usage.                                    |
 | `vendor/alacritty/` | https://github.com/alacritty/alacritty | Terminal emulator evaluated in ts4. Reference for Rust terminal architecture.                                    |
 
-## libghostty dependency sources (Issue 801)
+## libghostty dependency sources (Roastty proof-of-concept)
 
 Upstream sources for the third-party libraries Ghostty depends on, cloned for
-**reading and study only**. Per
-[Issue 801](../issues/0801-roastty-libghostty-rewrite/README.md), these are
-**reimplemented in Rust** — never vendored, linked, or built. They are gitignored
-(`vendor/.gitignore`) like the analysis repos above.
+**reading and study only**. They were gathered for the Roastty Rust rewrite
+proof-of-concept, not for the production frontend direction. Ghostboard is the
+primary TermSurf frontend.
 
 Pinned tags (`z2d`, `uucode`) are cloned at the exact version Roastty is
-reimplementing; the rest are the default branch. Ghostty's exact pins live in
+studying; the rest are the default branch. Ghostty's exact pins live in
 `vendor/ghostty/build.zig.zon` (Zig libs) and `vendor/ghostty/pkg/<name>/` (C
-libs).
+libs). These sources are never vendored, linked, or built in TermSurf; they are
+gitignored (`vendor/.gitignore`) like the analysis repos above.
 
 | Repo                    | Origin | URL                                              | Provides (reimplementation role)                                                      |
 | ----------------------- | ------ | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
@@ -57,8 +57,8 @@ and the font/theme/SDK asset packages.
 Chromium lives at `chromium/src/` (not in `vendor/`). The repo is too large to
 have two clones, so `chromium/src/` serves double duty: it is both the build
 workspace for TermSurf's Chromium fork and the source code reference. When
-studying Chromium internals (e.g., `WebContentsObserver`, Content API, compositor
-pipeline), read from `chromium/src/` directly.
+studying Chromium internals (e.g., `WebContentsObserver`, Content API,
+compositor pipeline), read from `chromium/src/` directly.
 
 | Path            | Upstream                                       |
 | --------------- | ---------------------------------------------- |
