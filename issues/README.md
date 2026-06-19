@@ -8,6 +8,7 @@
 | [0795](0795-pdf-native-print/README.md)           | PDF Native Print                     | 2026-05-30 |
 | [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage           | 2026-05-30 |
 | [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                | 2026-05-30 |
+| [0827](0827-ghostboard-termsurf-icon/README.md)   | Ghostboard TermSurf Icon             | 2026-06-19 |
 
 ## Closed
 
