@@ -22,8 +22,7 @@ Useful targets:
 | `zig build -Demit-macos-app=false`                    | Rebuild the Zig core without the macOS app |
 | `macos/build.nu --configuration Debug --action build` | Build the macOS app bundle                 |
 
-The macOS app output is under
-`macos/build/<configuration>/TermSurf Ghostboard.app`.
+The macOS app output is under `macos/build/<configuration>/TermSurf.app`.
 
 ## Agents
 

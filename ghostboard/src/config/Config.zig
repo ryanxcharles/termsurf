@@ -3974,7 +3974,7 @@ test "handle bom in config files" {
         try cfg.loadReader(
             alloc,
             &reader,
-            "/home/ghostty/.config/ghostty/config.ghostty",
+            "/home/termsurf/.config/termsurf/config",
         );
         try cfg.finalize();
 
@@ -3993,7 +3993,7 @@ test "handle bom in config files" {
         try cfg.loadReader(
             alloc,
             &reader,
-            "/home/ghostty/.config/ghostty/config.ghostty",
+            "/home/termsurf/.config/termsurf/config",
         );
         try cfg.finalize();
 

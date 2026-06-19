@@ -192,4 +192,4 @@ previous experiment has produced a result.
 - [Experiment 4: Launch the merged Ghostboard app](04-launch-merged-ghostboard-app.md)
   — **Pass**
 - [Experiment 5: Restore TermSurf identity surfaces](05-restore-termsurf-identity-surfaces.md)
-  — **Designed**
+  — **Partial**
