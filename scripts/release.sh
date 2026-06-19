@@ -67,12 +67,17 @@ cd "$REPO_DIR"
 gh release delete "v${VERSION}" --yes 2>/dev/null || true
 gh release create "v${VERSION}" "dist/${TARBALL_NAME}" --title "v${VERSION}" --notes "v${VERSION}"
 
+cd "$REPO_DIR/homebrew"
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+  echo "==> Checking out Homebrew tap main branch..."
+  git checkout main
+fi
+
 # Update Homebrew cask
 echo "==> Updating Homebrew cask..."
 sed -i '' "s/version \".*\"/version \"${VERSION}\"/" "$CASK_FILE"
 sed -i '' "s/sha256 \".*\"/sha256 \"${SHA}\"/" "$CASK_FILE"
 
-cd "$REPO_DIR/homebrew"
 git add -A
 git commit -m "v${VERSION}" || true
 git push origin main

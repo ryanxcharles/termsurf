@@ -236,3 +236,161 @@ The reviewer confirmed that the forced uninstall was replaced by a guard that
 exits if `termsurf` is already installed, and that the pass criteria require a
 clean VM or explicit approval before replacing an existing cask. No Required
 findings remain.
+
+## Result
+
+**Result:** Pass
+
+Implementation changed the packaging and release path only:
+
+- `homebrew/Casks/termsurf.rb` now installs `TermSurf.app`, `web`, and
+  `roamium`, with no archived `TermSurf Wezboard.app` or `wezboard` artifact.
+- `scripts/release.sh` now checks out the Homebrew tap's `main` branch before
+  editing, committing, and pushing the cask update, so a detached submodule
+  checkout does not silently break release publication.
+- `README.md` now documents the public tap install flow with
+  `brew trust termsurf/termsurf`, which Homebrew 6 requires for this third-party
+  cask.
+
+Static verification passed:
+
+```bash
+bash -n scripts/release.sh scripts/install.sh scripts/build.sh scripts/roamium-resources.sh
+brew style homebrew/Casks/termsurf.rb
+HOMEBREW_NO_AUTO_UPDATE=1 brew audit --cask --strict termsurf/termsurf/termsurf
+git diff --check
+```
+
+Homebrew 6 no longer allows `brew audit` directly on a cask file path, so the
+final strict audit was run against the public tap cask name after pushing the
+tap metadata fix.
+
+The required release inputs already existed and were confirmed:
+
+- `target/release/web`
+- `target/release/roamium`
+- `ghostboard/macos/build/Release/TermSurf.app/Contents/MacOS/termsurf`
+- the six generated Roamium resource packs under `chromium/src/out/Default`.
+
+Package-only verification created:
+
+```text
+dist/termsurf-0.1.6-issue829-aarch64-apple-darwin.tar.gz
+sha256: 3bac668afab56c9124db7e50438b782e51111100f2d0836ff8b8d80b63d4bb2f
+```
+
+The tarball contained the expected top-level layout:
+
+- `TermSurf.app/`
+- `web`
+- `roamium/`
+
+It did not contain `TermSurf Wezboard.app` or `wezboard`, and `roamium/`
+included the required generated resource packs.
+
+Local Homebrew contract verification passed through a temporary local tap. A
+direct cask-file install was not accepted by Homebrew 6 because Homebrew now
+requires casks to live inside taps. The temporary local tap installed the
+package-only tarball into:
+
+- `/tmp/termsurf-issue829-apps/TermSurf.app`
+- `/opt/homebrew/bin/web`
+- `/opt/homebrew/opt/termsurf-roamium`
+
+The local install had no Wezboard artifacts. Runtime smoke launched the
+temporary cask-installed `TermSurf.app`, ran:
+
+```bash
+/opt/homebrew/bin/web \
+  --browser /opt/homebrew/opt/termsurf-roamium/roamium \
+  https://example.com
+```
+
+from inside that app session, spawned Roamium from the installed opt path, and
+loaded `https://example.com`. Screenshot evidence is in
+`logs/issue829-installed-runtime-screen-2.png`.
+
+Public release verification passed with release `v0.1.6`:
+
+- URL: `https://github.com/termsurf/termsurf/releases/tag/v0.1.6`
+- artifact: `termsurf-0.1.6-aarch64-apple-darwin.tar.gz`
+- artifact sha256:
+  `2cecf0a518b087b6feb59f8d37203cde6b3d411b59e430234b21e7bad74e2016`
+- Homebrew tap commit: `09e61f8 Restrict TermSurf cask to Apple silicon`
+
+The public cask install command succeeded:
+
+```bash
+brew tap termsurf/termsurf
+brew trust termsurf/termsurf
+brew install --cask termsurf
+```
+
+The installed public layout was:
+
+- `/Applications/TermSurf.app`
+- `/opt/homebrew/bin/web -> /opt/homebrew/Caskroom/termsurf/0.1.6/web`
+- `/opt/homebrew/opt/termsurf-roamium`
+
+The public install had no `TermSurf Wezboard.app` or `wezboard` artifact.
+Runtime smoke launched `/Applications/TermSurf.app`, ran the installed
+`/opt/homebrew/bin/web`, spawned `/opt/homebrew/opt/termsurf-roamium/roamium`,
+and loaded `https://example.com`. Screenshot evidence is in
+`logs/issue829-public-runtime-screen-2.png`. Roamium's log at
+`~/.local/state/termsurf/chromium-server.log` showed all six generated resource
+packs as `found=1 loaded=1`.
+
+One final strict public cask audit finding appeared after publication: Homebrew
+required `verified: "github.com/termsurf/termsurf/"` because the release URL
+domain differs from the homepage domain. That metadata fix was committed and
+pushed to `termsurf/homebrew-termsurf` as `e2d2c40`, and the strict public cask
+audit then passed.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **CHANGES REQUIRED**.
+
+Required finding:
+
+- The public cask URL installs an `aarch64` artifact, but the cask did not
+  declare an Apple silicon architecture requirement. Intel macOS users could
+  therefore attempt to install an unsupported arm64 package.
+
+Fixes applied:
+
+- Added `depends_on arch: :arm64` to `homebrew/Casks/termsurf.rb`.
+- Updated `README.md` to state that the Homebrew cask currently supports Apple
+  silicon macOS.
+- Committed and pushed the tap metadata fix as
+  `09e61f8 Restrict TermSurf cask to Apple silicon`.
+
+Verification after the fix:
+
+```bash
+git -C "$(brew --repo termsurf/termsurf)" pull --ff-only
+HOMEBREW_NO_AUTO_UPDATE=1 brew audit --cask --strict termsurf/termsurf/termsurf
+brew info --cask termsurf/termsurf/termsurf
+```
+
+The public audit passed. `brew info` now reports:
+
+```text
+Required: arm64 architecture, macOS >= 15
+Artifacts: TermSurf.app, roamium -> /opt/homebrew/opt/termsurf-roamium, web
+```
+
+Re-review verdict: **APPROVED**.
+
+The reviewer confirmed that the prior Required finding is resolved:
+`homebrew/Casks/termsurf.rb` declares `depends_on arch: :arm64`, the README and
+issue conclusion explicitly state Apple silicon macOS support, the public tap
+HEAD is `09e61f8 Restrict TermSurf cask to Apple silicon`, the strict public
+cask audit exits successfully, and `brew info` reports
+`Required: arm64 architecture, macOS >= 15`. No new Required findings remain.
+
+## Conclusion
+
+Experiment 1 solved the issue. TermSurf can be installed on Apple silicon macOS
+from the public Homebrew cask using a prebuilt release tarball, without building
+Chromium, and the installed Ghostboard/Web/Roamium runtime works from the
+expected production locations on the arm64 Tahoe VM.

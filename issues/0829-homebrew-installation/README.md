@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-19"
+closed = "2026-06-19"
 +++
 
 # Issue 829: Homebrew Installation
@@ -93,4 +94,24 @@ Do not create experiments upfront. Design Experiment 1 after this issue is open.
 ## Experiments
 
 - [Experiment 1: Align Ghostboard cask packaging](01-align-ghostboard-cask-packaging.md)
-  — **Designed**
+  — **Pass**
+
+## Conclusion
+
+TermSurf is now installable on Apple silicon macOS from the public
+`termsurf/homebrew-termsurf` tap as the `termsurf` cask. The verified release is
+`v0.1.6`, published as `termsurf-0.1.6-aarch64-apple-darwin.tar.gz` with sha256
+`2cecf0a518b087b6feb59f8d37203cde6b3d411b59e430234b21e7bad74e2016`.
+
+The public cask installs the current Ghostboard product shape:
+
+- `TermSurf.app` to `/Applications/TermSurf.app`;
+- `web` to `/opt/homebrew/bin/web`;
+- Roamium and Chromium runtime resources to
+  `/opt/homebrew/opt/termsurf-roamium`.
+
+The installed package was verified on this arm64 Tahoe VM from the public tap.
+The install downloaded the prebuilt GitHub Release artifact, did not build
+Chromium, installed no stale Wezboard artifacts, and passed a runtime smoke test
+where `/Applications/TermSurf.app` launched `/opt/homebrew/bin/web`, spawned
+`/opt/homebrew/opt/termsurf-roamium/roamium`, and loaded `https://example.com`.

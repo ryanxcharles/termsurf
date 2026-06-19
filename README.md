@@ -129,10 +129,12 @@ logging into Google in one profile doesn't affect the others.
 
 ### Install with Homebrew
 
-The Homebrew cask installs the current TermSurf app, the `web` CLI, and Roamium:
+The Homebrew cask currently supports Apple silicon macOS and installs the
+current TermSurf app, the `web` CLI, and Roamium:
 
 ```bash
 brew tap termsurf/termsurf
+brew trust termsurf/termsurf
 brew install --cask termsurf
 ```
 
