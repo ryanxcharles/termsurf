@@ -128,7 +128,7 @@ Required findings were introduced.
 
 ## Result
 
-**Result:** Partial
+**Result:** Pass
 
 Implemented the normal browser-overlay part of the experiment. The existing-pane
 `handleSetOverlay` update path now updates Ghostboard state and calls
@@ -185,19 +185,17 @@ hit-test failures in the window-resize and split-right harnesses before those
 runs reached their resize assertions. Re-running the scenarios sequentially
 passed, so the recorded verification uses the sequential runs.
 
-Manual visual verification is still pending. The primary bug is a short-lived
-visual bounce, so this experiment should stay Partial until a human confirms
-that resizing an active browser pane no longer visibly shrinks the webview to a
-small/default size before returning to the pane size.
+Manual visual verification passed. The user built and ran the updated
+Ghostboard/web stack, resized an active browser pane, and confirmed that the
+webview no longer visibly shrinks to a small/default size before returning to
+the pane size.
 
 ## Conclusion
 
 The likely code-level cause has been removed from normal browser overlay
-updates, and the automated geometry matrix still proves AppKit pixel resize
-delivery for window, horizontal split, and vertical split changes. If manual
-testing still shows a visible bounce, the next experiment should capture a
-geometry trace from the manual reproduction and look for a remaining resize
-source outside the normal `handleSetOverlay` path.
+updates, the automated geometry matrix still proves AppKit pixel resize delivery
+for window, horizontal split, and vertical split changes, and manual testing
+confirmed the visible bounce is gone.
 
 ## Completion Review
 

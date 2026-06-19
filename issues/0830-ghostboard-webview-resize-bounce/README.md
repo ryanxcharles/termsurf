@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-19"
+closed = "2026-06-19"
 +++
 
 # Issue 830: Ghostboard Webview Resize Bounce
@@ -87,4 +88,15 @@ the final acceptance requires a human watching the installed or development app.
 ## Experiments
 
 - [Experiment 1: Remove fallback resize from active overlay updates](01-remove-fallback-resize-from-active-overlay-updates.md)
-  — **Partial** (automated checks pass; manual visual verification pending)
+  — **Pass**
+
+## Conclusion
+
+Experiment 1 fixed the visible webview resize bounce for normal browser overlay
+updates. Automated geometry checks confirmed that active pane resizes now flow
+through AppKit-presented pixel sizes instead of the old `10x20` fallback
+dimensions, and manual verification confirmed that resizing no longer visibly
+shrinks the webview to a small/default size before returning to the pane size.
+
+The issue is closed. Devtools fallback resize behavior was intentionally left
+unchanged by this issue.
