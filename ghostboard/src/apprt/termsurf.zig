@@ -3,6 +3,7 @@ const build_config = @import("../build_config.zig");
 const internal_os = @import("../os/main.zig");
 
 const c = @cImport({
+    @cInclude("sys/socket.h");
     @cInclude("unistd.h");
     @cInclude("termsurf.pb-c.h");
 });
@@ -563,6 +564,7 @@ fn handleClient(fd: std.posix.fd_t, slot_index: usize) void {
     var conn_type: ConnType = .unknown;
     defer {
         if (conn_type == .tui) cleanupTuiPanes(fd);
+        if (conn_type == .browser) cleanupBrowserConnection(fd);
         markClientDone(slot_index);
         std.posix.close(fd);
     }
@@ -2238,19 +2240,52 @@ fn sendCloseTab(snapshot: *const CloseTabSnapshot) !void {
     log.info("CloseTab: pane_id={s} tab_id={}", .{ snapshot.paneId(), snapshot.tab_id });
 }
 
+fn sendCloseTabForCleanup(snapshot: *const CloseTabSnapshot) bool {
+    sendCloseTab(snapshot) catch |err| {
+        log.info("CloseTab skipped: browser socket closed pane_id={s} err={}", .{ snapshot.paneId(), err });
+        return false;
+    };
+    return true;
+}
+
 fn shutdownServer(snapshot: *const ServerShutdownSnapshot) void {
-    std.posix.shutdown(snapshot.browser_fd, .both) catch |err| {
-        log.warn(
-            "Server shutdown failed profile={s} browser={s} err={}",
-            .{ snapshot.profileName(), snapshot.browserName(), err },
+    shutdownBrowserSocket(snapshot);
+    reapServerChild(snapshot);
+}
+
+fn shutdownBrowserSocket(snapshot: *const ServerShutdownSnapshot) void {
+    if (snapshot.browser_fd < 0) {
+        log.info(
+            "Server shutdown skipped: browser socket detached profile={s} browser={s}",
+            .{ snapshot.profileName(), snapshot.browserName() },
         );
         return;
-    };
-    log.info(
-        "Server shutdown: profile={s} browser={s}",
-        .{ snapshot.profileName(), snapshot.browserName() },
-    );
+    }
 
+    const rc = c.shutdown(snapshot.browser_fd, c.SHUT_RDWR);
+    switch (std.posix.errno(rc)) {
+        .SUCCESS => {
+            log.info(
+                "Server shutdown: profile={s} browser={s}",
+                .{ snapshot.profileName(), snapshot.browserName() },
+            );
+        },
+        .BADF, .INVAL, .NOTCONN, .NOTSOCK => |err| {
+            log.info(
+                "Server shutdown skipped: browser socket already closed profile={s} browser={s} err={}",
+                .{ snapshot.profileName(), snapshot.browserName(), err },
+            );
+        },
+        else => |err| {
+            log.warn(
+                "Server shutdown failed profile={s} browser={s} err={}",
+                .{ snapshot.profileName(), snapshot.browserName(), err },
+            );
+        },
+    }
+}
+
+fn reapServerChild(snapshot: *const ServerShutdownSnapshot) void {
     if (snapshot.child_pid == 0) return;
     for (0..50) |_| {
         const res = std.posix.waitpid(snapshot.child_pid, std.c.W.NOHANG);
@@ -2590,6 +2625,45 @@ fn recordServerChild(profile: []const u8, browser: []const u8, pid: std.process.
     }
 }
 
+fn cleanupBrowserConnection(fd: std.posix.fd_t) void {
+    var server_shutdown: ?ServerShutdownSnapshot = null;
+
+    state_mutex.lock();
+    if (findServerByFd(fd)) |server_index| {
+        const server = &servers[server_index];
+        var snapshot: ServerShutdownSnapshot = .{
+            .browser_fd = -1,
+            .child_pid = server.child_pid,
+        };
+        const copied =
+            copyText(&snapshot.profile, &snapshot.profile_len, server.profileName()) and
+            copyText(&snapshot.browser, &snapshot.browser_len, server.browserName());
+        if (copied) {
+            server_shutdown = snapshot;
+        }
+        server.attached_fd = -1;
+        server.child_pid = 0;
+    }
+    state_mutex.unlock();
+
+    if (server_shutdown) |*snapshot| {
+        log.info(
+            "Browser disconnect: detached browser server profile={s} browser={s} fd={}",
+            .{ snapshot.profileName(), snapshot.browserName(), fd },
+        );
+        reapServerChild(snapshot);
+    } else {
+        log.info("Browser disconnect: no attached server fd={}", .{fd});
+    }
+}
+
+fn containsFd(fds: []const std.posix.fd_t, fd: std.posix.fd_t) bool {
+    for (fds) |candidate| {
+        if (candidate == fd) return true;
+    }
+    return false;
+}
+
 fn cleanupTuiPanes(fd: std.posix.fd_t) void {
     var close_tabs: [max_panes]CloseTabSnapshot = undefined;
     var close_tab_count: usize = 0;
@@ -2660,13 +2734,19 @@ fn cleanupTuiPanes(fd: std.posix.fd_t) void {
         clearOverlay(snapshot);
     }
 
+    var detached_browser_fds: [max_panes]std.posix.fd_t = undefined;
+    var detached_browser_fd_count: usize = 0;
     for (close_tabs[0..close_tab_count]) |*snapshot| {
-        sendCloseTab(snapshot) catch |err| {
-            log.warn("CloseTab send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
-        };
+        if (!sendCloseTabForCleanup(snapshot)) {
+            detached_browser_fds[detached_browser_fd_count] = snapshot.browser_fd;
+            detached_browser_fd_count += 1;
+        }
     }
 
     for (server_shutdowns[0..server_shutdown_count]) |*snapshot| {
+        if (containsFd(detached_browser_fds[0..detached_browser_fd_count], snapshot.browser_fd)) {
+            snapshot.browser_fd = -1;
+        }
         shutdownServer(snapshot);
     }
 }
@@ -2735,9 +2815,13 @@ pub fn paneClosed(pane_id: []const u8) void {
     }
 
     if (close_tab) |*snapshot| {
-        sendCloseTab(snapshot) catch |err| {
-            log.warn("CloseTab send failed pane_id={s} err={}", .{ snapshot.paneId(), err });
-        };
+        if (!sendCloseTabForCleanup(snapshot)) {
+            if (server_shutdown) |*shutdown| {
+                if (shutdown.browser_fd == snapshot.browser_fd) {
+                    shutdown.browser_fd = -1;
+                }
+            }
+        }
     }
 
     if (server_shutdown) |*snapshot| {

@@ -359,3 +359,139 @@ Optional finding and fix:
   `test ! -s` checks for all three status/diff evidence files.
 
 The final re-review approved the design with no remaining required findings.
+
+## Result
+
+**Result:** Partial
+
+Ghostboard now tolerates browser sockets that are already closed or closing
+during TUI/pane cleanup. The cleanup-smoke rows no longer panic in
+`std.posix.shutdown`, no longer log `CloseTab send failed`, and no longer log
+`Server shutdown failed`.
+
+Implementation changes:
+
+- `ghostboard/src/apprt/termsurf.zig`
+  - Added `cleanupBrowserConnection(fd)` and call it for `.browser` connections
+    before `handleClient` closes the fd.
+  - `cleanupBrowserConnection(fd)` finds a matching `servers[].attached_fd`,
+    clears it to `-1`, clears the tracked child pid, logs the detach, and reaps
+    the child process outside `state_mutex` when possible.
+  - Replaced browser-server teardown's `std.posix.shutdown` call with raw
+    `shutdown(2)` handling so `BADF`, `INVAL`, `NOTCONN`, and `NOTSOCK` are
+    logged as already-closed/detached cleanup cases instead of becoming Zig
+    `unreachable` panics.
+  - Added `sendCloseTabForCleanup` so a close-tab send racing a browser EOF is
+    logged as `CloseTab skipped: browser socket closed`, and the paired server
+    shutdown snapshot is treated as detached.
+  - Shared child-process reaping through `reapServerChild`.
+
+Verification evidence:
+
+- Source-level checks passed:
+  - `logs/issue-0826-exp09-browser-cleanup-source-evidence.log`
+  - `logs/issue-0826-exp09-browser-detach-source-evidence.log`
+- The Zig core library was rebuilt before the macOS app per
+  `ghostboard/macos/AGENTS.md`:
+  - `logs/issue-0826-exp09-zig-core-build-2.log`
+  - `logs/issue-0826-exp09-macos-build-relinked-2.log`
+- `strings` on
+  `ghostboard/macos/build/Debug/TermSurf.app/Contents/MacOS/termsurf.debug.dylib`
+  confirmed the rebuilt app contained the new `Browser disconnect`,
+  `CloseTab skipped`, and `Server shutdown skipped` strings.
+- The cleanup-smoke matrix passed:
+  - `initial-open`
+  - `window-resize`
+  - `split-right`
+  - `split-right-close-sibling`
+- Latest cleanup-smoke app logs:
+  - `logs/ghostboard-geometry-initial-open-app-20260619-125034.log`
+  - `logs/ghostboard-geometry-window-resize-app-20260619-125041.log`
+  - `logs/ghostboard-geometry-split-right-app-20260619-125054.log`
+  - `logs/ghostboard-geometry-split-right-close-sibling-app-20260619-125136.log`
+- `logs/issue-0826-exp09-cleanup-log-evidence.log` shows browser detach,
+  `CloseTab skipped`, and detached server shutdown handling where applicable.
+- The hard log rejection passed: the cleanup-smoke logs do not contain
+  `CloseTab send failed`, `Server shutdown failed`,
+  `panic: reached unreachable code`, or `_posix.shutdown`.
+- Per-row browser-disconnect evidence was written to:
+  - `logs/issue-0826-exp09-initial-open-browser-detach.log`
+  - `logs/issue-0826-exp09-window-resize-browser-detach.log`
+  - `logs/issue-0826-exp09-split-right-browser-detach.log`
+  - `logs/issue-0826-exp09-split-right-close-sibling-browser-detach.log`
+
+Remaining matrix progress:
+
+- Passed:
+  - `split-right-close-browser-pane`
+  - `split-right-focus-switch`
+  - `new-terminal-tab-visibility`
+  - `open-browser-in-new-tab`
+  - `close-browser-tab`
+  - `open-browser-in-new-window`
+  - `multiple-windows-with-browsers`
+- First remaining failure:
+  - `display-move-backing-scale`
+
+`display-move-backing-scale` recorded that this VM only has one display, so the
+cross-display move part could not run. The single-display fallback then failed
+after entering browse mode:
+
+```text
+PARTIAL: only one display is available; cross-display move cannot run in this VM
+FAIL: missing Roamium observed focus=true on single display
+RESULT display-move-backing-scale FAIL exit=1
+```
+
+Failure evidence:
+
+- `logs/issue-0826-exp09-summary-status.log`
+- `logs/issue-0826-exp09-display-move-failure-evidence.log`
+- `logs/ghostboard-geometry-display-move-backing-scale-harness-20260619-125707.log`
+- `logs/ghostboard-geometry-display-move-backing-scale-app-20260619-125707.log`
+- `logs/ghostboard-geometry-display-move-backing-scale-roamium-20260619-125707.log`
+
+Final checks:
+
+- `zig fmt ghostboard/src/apprt/termsurf.zig` passed.
+- Prettier passed for the issue README and this experiment file.
+- `git diff --check` passed.
+- Cleanup left no stale matching app, web, or Roamium processes:
+  `logs/issue-0826-exp09-post-cleanup-processes.log` is empty.
+- Forbidden top-level paths are clean:
+  `logs/issue-0826-exp09-forbidden-top-status.log` is empty.
+- The nested Chromium checkout is clean:
+  - `logs/issue-0826-exp09-chromium-status.log` is empty.
+  - `logs/issue-0826-exp09-chromium-diff-name-only.log` is empty.
+
+## Conclusion
+
+Experiment 9 fixed the cleanup-time Ghostboard panic that had been masked by
+passing viewport rows. Browser disconnect cleanup now detaches server fds before
+close when that path wins the race; when TUI cleanup wins the race and a
+`CloseTab` send observes a closed peer, shutdown treats that server fd as
+detached instead of calling Zig's panic-prone `std.posix.shutdown` wrapper.
+
+The result is Partial because the inherited viewport matrix resumed and found
+the next failure at `display-move-backing-scale`: single-display browse-mode
+focus did not produce the expected Roamium `focus=true` evidence. The next
+experiment should localize that focus/trace failure before the remaining matrix
+rows are resumed.
+
+## Result Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved.
+
+Findings: none.
+
+The reviewer independently checked that browser cleanup runs before fd close,
+that matching `attached_fd` values are cleared, that cleanup still attempts
+`CloseTab` for live sockets, that failed cleanup sends detach the paired server
+shutdown, that browser-server teardown no longer uses `std.posix.shutdown`, that
+the cleanup-smoke logs contain no `CloseTab send failed`,
+`Server shutdown failed`, `_posix.shutdown`, or Zig panic, and that the first
+remaining matrix failure is documented as the `display-move-backing-scale`
+focus-evidence failure.
