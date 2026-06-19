@@ -187,3 +187,5 @@ previous experiment has produced a result.
   — **Pass**
 - [Experiment 2: Apply the full upstream subtree merge](02-apply-full-upstream-subtree-merge.md)
   — **Pass**
+- [Experiment 3: Build the merged Ghostboard tree](03-build-merged-ghostboard-tree.md)
+  — **Designed**
