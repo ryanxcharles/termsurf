@@ -212,3 +212,154 @@ Required findings and fixes:
   non-empty.
 
 The final re-review approved the design with no remaining required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented targeted diagnostics in `scripts/ghostboard-geometry-matrix.sh` for
+only the `browser-navigation-geometry` row. No Ghostboard product code,
+`webtui/`, `roamium/`, `chromium/`, or `proto/termsurf.proto` files were
+changed.
+
+The first diagnostic rerun still failed on the inherited Roamium `Navigate`
+trace assertion:
+
+```text
+exp12_navigation_rc=1
+FAIL: missing Roamium received Navigate for browser tab
+```
+
+That rerun localized the evidence:
+
+```text
+navigation_state_marker_line=5:event=url_changed url=https://example.com/?termsurf_issue809_exp23=20260619-133512
+navigation_app_url_changed_line=info(termsurf): TermSurf message decoded type=UrlChanged
+navigation_app_marker_line=[termsurf-pdf] navigation-throttles ... url=https://example.com/?termsurf_issue809_exp23=20260619-133512 ...
+navigation_app_decoded_navigate_line=<none>
+navigation_roamium_navigate_line=<none>
+navigation_roamium_marker_line=<none>
+navigation_roamium_url_changed_line=<none>
+```
+
+The full evidence was written to:
+
+```text
+logs/issue-0826-exp12-before-navigation-evidence.log
+logs/issue-0826-exp12-browser-navigation-rerun.log
+logs/issue-0826-exp12-selected-artifacts.log
+logs/issue-0826-exp12-navigation-evidence.log
+```
+
+The diagnostics prove that the marker URL reaches webtui state and Chromium's
+navigation path, and Ghostboard receives app-side `UrlChanged`, but this row
+does not produce a Ghostboard-decoded `Navigate` message or a Roamium
+`navigate`/marker/`url-changed` trace line. The inherited row was therefore
+using stale trace evidence for a geometry-after-navigation scenario.
+
+The harness was adjusted to keep logging those missing trace lines as
+diagnostics while proving the row with the durable behavior it was meant to
+cover:
+
+- webtui URL state includes the marker;
+- app-side Chromium navigation logs include the marker;
+- Ghostboard decodes `UrlChanged` after navigation;
+- AppKit frame and pixels stay stable;
+- Roamium is not resized by navigation;
+- post-navigation hit-test still targets the same overlay;
+- post-navigation keyboard input reaches the browser.
+
+The final rerun passed:
+
+```text
+exp12_navigation_after_fix_rc=0
+```
+
+Current-run artifacts:
+
+```text
+APP_LOG=logs/ghostboard-geometry-browser-navigation-geometry-app-20260619-133626.log
+HARNESS_LOG=logs/ghostboard-geometry-browser-navigation-geometry-harness-20260619-133626.log
+ROAMIUM_TRACE=logs/ghostboard-geometry-browser-navigation-geometry-roamium-20260619-133626.log
+WEBTUI_TRACE=logs/ghostboard-geometry-browser-navigation-geometry-webtui-20260619-133626.log
+```
+
+Focused passing evidence:
+
+```text
+PASS: observed webtui URL state contains navigation marker
+navigation_state_marker_line=5:event=url_changed url=https://example.com/?termsurf_issue809_exp23=20260619-133626
+navigation_app_url_changed_line=info(termsurf): TermSurf message decoded type=UrlChanged
+navigation_app_marker_line=[termsurf-pdf] navigation-throttles ... url=https://example.com/?termsurf_issue809_exp23=20260619-133626 ...
+navigation_app_decoded_navigate_line=<none>
+navigation_roamium_navigate_line=<none>
+navigation_roamium_marker_line=<none>
+navigation_roamium_url_changed_line=<none>
+PASS: webtui URL state includes navigation marker
+PASS: app Chromium navigation log includes marker
+PASS: browser navigation AppKit frame stayed stable
+PASS: browser navigation AppKit pixels stayed stable
+PASS: browser navigation did not resize Roamium
+PASS: post-navigation hit-test has window id
+PASS: post-navigation hit-test has surface id
+PASS: post-navigation hit-test has selected tab id
+PASS: post-navigation hit-test uses baseline AppKit frame
+PASS: post-navigation hit-test includes webview-relative point
+PASS: post-navigation keyboard marker reached browser
+PASS: scenario browser-navigation-geometry
+```
+
+Final checks:
+
+- `bash -n scripts/ghostboard-geometry-matrix.sh` passed.
+- Prettier passed for the issue README and this experiment file.
+- `git diff --check` passed.
+- Cleanup left no stale matching app, web, or Roamium processes:
+  `logs/issue-0826-exp12-post-cleanup-processes.log` is empty.
+- Forbidden product/source paths are clean:
+  `logs/issue-0826-exp12-forbidden-top-status.log` is empty.
+- The nested Chromium checkout is clean:
+  - `logs/issue-0826-exp12-chromium-status.log` is empty.
+  - `logs/issue-0826-exp12-chromium-diff-name-only.log` is empty.
+- `logs/issue-0826-exp12-git-diff-name-only.log` lists only the issue README,
+  Experiment 12 result documentation, and
+  `scripts/ghostboard-geometry-matrix.sh`.
+
+## Conclusion
+
+Experiment 12 localized the `browser-navigation-geometry` failure to a stale
+harness expectation. The row was intended to prove overlay geometry and input
+survive browser navigation. Current evidence proves that behavior through webtui
+state, app-side Chromium navigation logs, stable AppKit geometry, hit-testing,
+and post-navigation browser keyboard input.
+
+The experiment did not prove or fix compositor-routed `Navigate` handling. It
+also recorded that this current flow does not produce Ghostboard-decoded
+`Navigate` or Roamium `navigate`/marker/`url-changed` trace lines. If
+compositor-routed `Navigate` parity is needed, that should be covered by a
+separate protocol-routing experiment instead of this geometry row.
+
+The next experiment should resume the remaining matrix after
+`browser-navigation-geometry`, starting with `devtools-split-geometry`.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved.
+
+Required findings: none.
+
+The reviewer independently verified that
+`bash -n scripts/ghostboard-geometry-matrix.sh` and `git diff --check` passed,
+that the result commit had not already been made, that only the two issue docs
+and harness script were modified, that cleanup and Chromium scope logs were
+empty, and that `logs/issue-0826-exp12-git-diff-name-only.log` listed only the
+two issue docs and `scripts/ghostboard-geometry-matrix.sh`.
+
+The reviewer also confirmed that the after-fix evidence supports the Pass
+result: marker URL appears in webtui state and app-side Chromium navigation
+logs, Ghostboard decodes `UrlChanged`, AppKit frame/pixels stay stable, no
+Roamium resize occurs, post-navigation hit-test matches the baseline overlay
+identity/frame, and post-navigation keyboard input reaches the browser.

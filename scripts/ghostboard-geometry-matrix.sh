@@ -7783,6 +7783,10 @@ if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
   log "navigation_append_command_text=$(cat "$NAVIGATION_APPEND_COMMAND")"
   NAV_START_LINE="$(log_line_count)"
   NAV_TRACE_START_LINE="$(trace_line_count)"
+  NAV_STATE_START_LINE="$(state_trace_line_count)"
+  log "navigation_app_start_line=$NAV_START_LINE"
+  log "navigation_trace_start_line=$NAV_TRACE_START_LINE"
+  log "navigation_state_start_line=$NAV_STATE_START_LINE"
   log "navigation_edit_key=shift+a=edit-url-end"
   swift "$ROOT/scripts/ghostty-app/inject.swift" key 0 shift >>"$HARNESS_LOG" 2>&1
   delay 0.5
@@ -7790,10 +7794,23 @@ if [ "$SCENARIO" = "browser-navigation-geometry" ]; then
   swift "$ROOT/scripts/ghostty-app/inject.swift" key 36 >>"$HARNESS_LOG" 2>&1
   delay 1
 
-  require_trace_after "$NAV_TRACE_START_LINE" "navigate tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" "Roamium received Navigate for browser tab"
-  require_trace_after "$NAV_TRACE_START_LINE" "$NAV_MARKER" "Roamium navigation/url trace contains marker"
-  require_trace_after "$NAV_TRACE_START_LINE" "url-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" "Roamium observed UrlChanged for browser tab"
-  wait_for_log_after "$NAV_START_LINE" "TermSurf message decoded type=UrlChanged" "Ghostboard decoded UrlChanged after browser navigation" 45
+  wait_for_state_trace_after "$NAV_STATE_START_LINE" "event=url_changed[[:space:]]+url=.*${NAV_MARKER}" "webtui URL state contains navigation marker" 45
+  NAV_STATE_MARKER_LINE="$(tail -n +"$((NAV_STATE_START_LINE + 1))" "$WEBTUI_STATE_TRACE" | grep -n -E "event=url_changed[[:space:]]+url=.*${NAV_MARKER}" | tail -1 || true)"
+  NAV_APP_URL_CHANGED_LINE="$(wait_for_line_after "$NAV_START_LINE" "TermSurf message decoded type=UrlChanged" "Ghostboard decoded UrlChanged after browser navigation" 45)"
+  NAV_APP_MARKER_LINE="$(wait_for_line_after "$NAV_START_LINE" "navigation-throttles .*url=.*${NAV_MARKER}" "app Chromium navigation log contains marker" 45)"
+  NAV_APP_NAVIGATE_LINE="$(tail -n +"$((NAV_START_LINE + 1))" "$APP_LOG" | grep -n "TermSurf message decoded type=Navigate" | head -1 || true)"
+  NAV_TRACE_NAVIGATE_LINE="$(tail -n +"$((NAV_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -n -F "navigate tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" | head -1 || true)"
+  NAV_TRACE_MARKER_LINE="$(tail -n +"$((NAV_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -n -F "$NAV_MARKER" | head -1 || true)"
+  NAV_TRACE_URL_CHANGED_LINE="$(tail -n +"$((NAV_TRACE_START_LINE + 1))" "$ROAMIUM_TRACE" | grep -n -F "url-changed tab=${A_BROWSER_TAB_ID} pane=${A_PANE_ID} url=" | head -1 || true)"
+  log "navigation_state_marker_line=${NAV_STATE_MARKER_LINE:-<none>}"
+  log "navigation_app_url_changed_line=$NAV_APP_URL_CHANGED_LINE"
+  log "navigation_app_marker_line=$NAV_APP_MARKER_LINE"
+  log "navigation_app_decoded_navigate_line=${NAV_APP_NAVIGATE_LINE:-<none>}"
+  log "navigation_roamium_navigate_line=${NAV_TRACE_NAVIGATE_LINE:-<none>}"
+  log "navigation_roamium_marker_line=${NAV_TRACE_MARKER_LINE:-<none>}"
+  log "navigation_roamium_url_changed_line=${NAV_TRACE_URL_CHANGED_LINE:-<none>}"
+  require_text "$NAV_STATE_MARKER_LINE" "$NAV_MARKER" "webtui URL state includes navigation marker"
+  require_text "$NAV_APP_MARKER_LINE" "$NAV_MARKER" "app Chromium navigation log includes marker"
   wait_for_log_after "$NAV_START_LINE" "ModeChanged: pane_id=${A_PANE_ID} browsing=true" "webtui returned to browse mode after navigation" 45
   require_no_different_appkit_frame_after "$NAV_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_FRAME" "browser navigation AppKit frame stayed stable"
   require_no_different_appkit_pixels_after "$NAV_START_LINE" "$A_PANE_ID" "$A_CONTEXT_ID" "$A_PIXEL" "browser navigation AppKit pixels stayed stable"
