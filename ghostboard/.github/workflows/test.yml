@@ -18,8 +18,8 @@ jobs:
     if: github.repository == 'ghostty-org/ghostty'
     runs-on: namespace-profile-ghostty-xsm
     outputs:
-      # 'true' when all changed files are non-code (e.g. only VOUCHED.td),
-      # signaling that all other jobs can be skipped entirely.
+      # 'true' when all changed files are non-code, signaling that all other
+      # jobs can be skipped entirely.
       skip: ${{ steps.determine.outputs.skip }}
       # Path-based filters to gate specific linter/formatter jobs.
       actions_pins: ${{ steps.filter_any.outputs.actions_pins }}
@@ -39,7 +39,6 @@ jobs:
           filters: |
             code:
               - '**'
-              - '!.github/VOUCHED.td'
       - uses: dorny/paths-filter@9d7afb8d214ad99e78fbd4247752c4caed2b6e4c # v4.0.0
         id: filter_any
         with:

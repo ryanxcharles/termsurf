@@ -67,8 +67,7 @@ that is testable. If so, check if there are appropriate tests added or
 modified. Consider if the code itself should be modified to be more
 testable.
 
-Think deeply about the implications of the changes here and proposed.
-Consult the oracle if you have access to it.
+Think deeply about the implications of the changes here.
 
 **ONLY CREATE A SUMMARY. DO NOT WRITE ANY CODE.**
 " | str trim
