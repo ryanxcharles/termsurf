@@ -173,3 +173,8 @@ config and split-view structure before editing code.
 - The final result includes runtime evidence: screenshots or logs proving
   focused/unfocused color selection, disabled behavior, content inset, and at
   least one browser-overlay split scenario with borders enabled.
+
+## Experiments
+
+- [Experiment 1: Port split pane border config](01-port-split-pane-border-config.md)
+  — **Designed**
