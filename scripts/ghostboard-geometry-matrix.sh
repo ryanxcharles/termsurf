@@ -3044,7 +3044,7 @@ keybind = ctrl+b=scroll_to_bottom
 EOF
 fi
 
-if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-border-config" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "split-right-zoom" ] || [ "$SCENARIO" = "split-right-focus-switch" ] || [ "$SCENARIO" = "two-browser-split-routing" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
+if [ "$SCENARIO" = "split-right" ] || [ "$SCENARIO" = "split-right-border-config" ] || [ "$SCENARIO" = "split-right-resize" ] || [ "$SCENARIO" = "split-right-equalize" ] || [ "$SCENARIO" = "split-right-zoom" ] || [ "$SCENARIO" = "split-right-close-sibling" ] || [ "$SCENARIO" = "split-right-focus-switch" ] || [ "$SCENARIO" = "two-browser-split-routing" ] || [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   cat >>"$CONFIG" <<'EOF'
 keybind = ctrl+d=new_split:right
 EOF
