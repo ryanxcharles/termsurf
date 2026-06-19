@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-19"
+closed = "2026-06-19"
 +++
 
 # Issue 826: Update Ghostboard to Latest Ghostty
@@ -209,3 +210,44 @@ previous experiment has produced a result.
   — **Pass**
 - [Experiment 13: Run final viewport matrix rows](13-run-final-viewport-matrix-rows.md)
   — **Pass**
+
+## Conclusion
+
+Ghostboard has been updated from the Issue 808 Ghostty `v1.3.1` baseline to the
+latest upstream target recorded for this issue:
+
+```text
+5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff
+5d0a82ba3 Remove unintended reasoning for user 'qappell' in vouched list (#13050)
+```
+
+The update was performed as a history-preserving subtree merge, and the upstream
+target remains an ancestor of the current tree. The issue documents the dry-run
+strategy, the real full-range merge, the conflict resolutions, the upstream
+changes intentionally not adopted, and the follow-on repairs needed to restore
+TermSurf behavior after the merge.
+
+The updated Ghostboard builds and runs on macOS as `TermSurf.app` with
+`Contents/MacOS/termsurf`, bundle name `TermSurf`, display name `TermSurf`, and
+debug bundle identifier `com.termsurf.debug`. The active macOS config path is
+`~/.config/termsurf/config`. The macOS app executable is the CLI entrypoint
+verified by this issue; a standalone `ghostboard/zig-out/bin/termsurf` artifact
+was investigated in Experiment 5 and documented as outside the proven macOS app
+runtime path for this issue.
+
+The TermSurf protocol still works with the existing `webtui` and `roamium`
+binaries. The final geometry matrix proves browser overlay attach, resize, move,
+split, close, tab switch, window, DevTools, keyboard forwarding, mouse
+forwarding, and GUI-active behavior for the high-value rows that had regressed
+or needed confirmation. Earlier partial experiments remain in the issue history
+because they recorded real blockers; their blockers were superseded by the later
+passing experiments.
+
+Existing Ghostboard split-border configuration keys remain present in Zig config
+parsing, Swift config bridging, and runtime geometry logs. Important newly
+inherited Ghostty change clusters were identified during the upstream
+comparison; practical smoke testing focused on the macOS build/run path and the
+TermSurf browser-overlay surfaces that make Ghostboard the primary TermSurf
+front-end.
+
+Issue 826 is closed.
