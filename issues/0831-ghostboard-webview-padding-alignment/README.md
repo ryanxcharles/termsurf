@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-19"
+closed = "2026-06-19"
 +++
 
 # Issue 831: Ghostboard Webview Padding Alignment
@@ -102,3 +103,11 @@ from Issue 830 and only change overlay placement math.
 
 - [Experiment 1: Use renderer padding for AppKit overlay frames](01-use-renderer-padding-for-appkit-overlay-frames.md)
   — **Pass**
+
+## Conclusion
+
+Experiment 1 fixed the alignment regression by exposing renderer padding to
+Swift and applying it when AppKit converts terminal grid coordinates into the
+browser overlay frame. The automated geometry matrix passed for window resize,
+right split, and down split scenarios, and the logs proved each overlay frame
+used non-zero renderer padding.
