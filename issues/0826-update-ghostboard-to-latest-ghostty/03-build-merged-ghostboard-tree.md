@@ -140,3 +140,122 @@ every changed Zig file rather than only a fixed list.
 The re-review approved the design with no required findings. Its only nit was
 that the hygiene command working directory was implicit, so the plan now states
 that those commands run from the repository root.
+
+## Result
+
+**Result:** Pass
+
+Preflight:
+
+```text
+git status --short                                  # clean
+merge commit: 2c883d4b6c6c3aa275c01efc75033178a0549c8b
+merge parent: 5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff
+zig version: 0.15.2
+Xcode: 26.6 build 17F109
+macOS: 26.5.1 build 25F80
+```
+
+The direct `git rev-list --parents -n 1 HEAD | rg <upstream>` command from the
+initial plan failed because `HEAD` was the Experiment 3 plan commit, not the
+Experiment 2 merge commit. The intended invariant was verified against the
+actual merge commit:
+
+```text
+2c883d4b6c6c3aa275c01efc75033178a0549c8b \
+  593bb21084e502449275f5746d47457c54d9c903 \
+  5d0a82ba337368f5632ffa6ce4d7c558fa2de9ff
+```
+
+Build results:
+
+| Command                                               | Result | Log path                                |
+| ----------------------------------------------------- | ------ | --------------------------------------- |
+| `zig build -Demit-macos-app=false`                    | Pass   | `logs/issue-0826-exp03-zig-core.log`    |
+| `zig build`                                           | Pass   | `logs/issue-0826-exp03-zig-build.log`   |
+| `macos/build.nu --configuration Debug --action build` | Pass   | `logs/issue-0826-exp03-macos-build.log` |
+
+The two successful Zig commands produced no output, so their log files are
+empty. The macOS build log contains the full Xcode output and ends with:
+
+```text
+** BUILD SUCCEEDED **
+```
+
+The app bundle exists at:
+
+```text
+ghostboard/macos/build/Debug/TermSurf Ghostboard.app
+```
+
+Narrow build fix:
+
+The first plain `zig build` attempt failed inside Xcode with ambiguous Swift
+property lookup errors:
+
+```text
+ScriptTerminal.swift:55:29: error: ambiguous use of 'pwd'
+TerminalCommandPalette.swift:155:35: error: ambiguous use of 'pwd'
+```
+
+The conflict resolution from Experiment 2 had preserved `pwd`, `cellSize`,
+`healthy`, `error`, and `hoverUrl` declarations in `SurfaceView_AppKit.swift`,
+but upstream moved those shared properties into `OSSurfaceView`. The fix removed
+the duplicate subclass declarations while keeping the TermSurf-only
+`termsurfCopyUrlFeedback` property.
+
+After that narrow Swift fix:
+
+- `swiftlint lint --strict --fix` passed from `ghostboard/`;
+- plain `zig build` passed;
+- `macos/build.nu --configuration Debug --action build` passed.
+
+SwiftLint again printed:
+
+```text
+warning: The option --strict has no effect together with --fix.
+```
+
+This is the same option-combination warning observed in Experiment 2, and the
+command still completed successfully.
+
+Final verification:
+
+```text
+git diff --check                                      # pass
+ghostboard/macos/build/Debug/TermSurf Ghostboard.app  # exists
+```
+
+## Conclusion
+
+The merged Ghostboard tree builds successfully on this macOS VM. Experiment 3
+also fixed one narrow Swift merge issue caused by duplicate properties after the
+upstream `OSSurfaceView` split.
+
+The next experiment should move to the launch gate: run the built app, confirm
+it starts, and capture the first launch/runtime failure if one remains.
+
+## Result Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved.
+
+The reviewer found no findings. It independently checked that:
+
+- the scope was limited to the allowed Swift build fix plus issue docs;
+- `SurfaceView_AppKit.swift` subclasses `OSSurfaceView`;
+- `OSSurfaceView` owns `pwd`, `cellSize`, `healthy`, `error`, and `hoverUrl`, so
+  removing duplicate subclass declarations was correct;
+- this experiment and the issue README both recorded `Pass`;
+- `git diff --check` passed;
+- the app bundle existed at
+  `ghostboard/macos/build/Debug/TermSurf Ghostboard.app`;
+- `logs/issue-0826-exp03-macos-build.log` ended with `** BUILD SUCCEEDED **`;
+- the Zig logs were empty as documented;
+- the Experiment 2 merge commit had the upstream Ghostty target as a parent;
+- the result commit had not yet been made.
+
+The reviewer did not rerun the build commands because they would mutate build
+outputs; it verified the recorded logs and artifacts instead.
