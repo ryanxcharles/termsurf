@@ -203,3 +203,5 @@ previous experiment has produced a result.
   — **Partial**
 - [Experiment 10: Localize display-move single-display focus](10-localize-display-move-single-display-focus.md)
   — **Pass**
+- [Experiment 11: Resume remaining viewport matrix](11-resume-remaining-viewport-matrix.md)
+  — **Designed**
