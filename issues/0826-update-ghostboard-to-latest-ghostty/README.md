@@ -189,3 +189,5 @@ previous experiment has produced a result.
   — **Pass**
 - [Experiment 3: Build the merged Ghostboard tree](03-build-merged-ghostboard-tree.md)
   — **Pass**
+- [Experiment 4: Launch the merged Ghostboard app](04-launch-merged-ghostboard-app.md)
+  — **Designed**
