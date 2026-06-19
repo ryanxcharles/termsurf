@@ -216,3 +216,131 @@ command status outside `set -e`. Fixed by chaining the four required `rg`
 commands with `&&`.
 
 The final re-review approved the design with no findings.
+
+## Result
+
+**Result:** Pass
+
+The harness defaults were updated from the pre-rename app bundle and executable
+to the current Issue 826 identity:
+
+- default debug app: `ghostboard/macos/build/Debug/TermSurf.app`
+- default release app for the installed-Roamium scenario:
+  `ghostboard/macos/build/Release/TermSurf.app`
+- app executable: `Contents/MacOS/termsurf`
+
+The required builds passed:
+
+- `cargo build -p webtui`
+  - Log: `logs/issue-0826-exp06-webtui-build.log`
+- `cd ghostboard && macos/build.nu --configuration Debug --action build`
+  - Log: `logs/issue-0826-exp06-macos-build.log`
+
+The focused smoke run passed with overrides explicitly unset:
+
+```bash
+env -u TERMSURF_GHOSTBOARD_APP \
+  -u TERMSURF_WEB \
+  -u TERMSURF_ROAMIUM \
+  -u TERMSURF_INSTALLED_ROAMIUM \
+  scripts/ghostboard-geometry-matrix.sh initial-open
+```
+
+The harness resolved the expected default targets:
+
+```text
+app=/Users/astrohacker/dev/termsurf/ghostboard/macos/build/Debug/TermSurf.app
+web=/Users/astrohacker/dev/termsurf/target/debug/web
+roamium=/Users/astrohacker/dev/termsurf/chromium/src/out/Default/roamium
+url=https://example.com
+```
+
+The selected runtime artifacts were:
+
+```text
+APP_LOG=logs/ghostboard-geometry-initial-open-app-20260619-115431.log
+HARNESS_LOG=logs/ghostboard-geometry-initial-open-harness-20260619-115431.log
+ROAMIUM_TRACE=logs/ghostboard-geometry-initial-open-roamium-20260619-115431.log
+WEBTUI_TRACE=logs/ghostboard-geometry-initial-open-webtui-20260619-115431.log
+SCREENSHOT=/Users/astrohacker/dev/termsurf/logs/ghostboard-geometry-initial-open-screenshot-20260619-115431.png
+```
+
+The harness passed and correlated a concrete pane, browser tab, AppKit pixel
+size, and screenshot:
+
+```text
+correlation_pane_id=5FC0A48C-45C1-4862-BD30-11654AD2CE87
+correlation_browser_tab_id=1
+correlation_appkit_pixel=1888x986
+correlation_screenshot=/Users/astrohacker/dev/termsurf/logs/ghostboard-geometry-initial-open-screenshot-20260619-115431.png
+PASS: scenario initial-open
+```
+
+The app log proved the TermSurf protocol lifecycle:
+
+- `HelloRequest`
+- `SetOverlay` for pane `5FC0A48C-45C1-4862-BD30-11654AD2CE87`
+- absolute Roamium path
+  `/Users/astrohacker/dev/termsurf/chromium/src/out/Default/roamium`
+- `ServerRegister(profile=default)`
+- `CreateTab`
+- `TabReady(tab_id=1)`
+- `BrowserReady`
+- `CaContext(tab_id=1, context_id=3389912832)`
+- `PresentOverlay`
+- AppKit `event=presented`
+- `TitleChanged` with `Example Domain`
+
+The Roamium trace proved that AppKit pixel size was applied to the real browser
+through `ts_set_view_size`:
+
+```text
+roamium resize tab_id=1 pane_id=5FC0A48C-45C1-4862-BD30-11654AD2CE87 pixel_width=1888 pixel_height=986 screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size
+```
+
+The webtui trace proved that the page reached the expected state:
+
+```text
+event=url_changed url=https://example.com/
+event=title_changed title=Example Domain
+event=loading_state state=done progress=100
+```
+
+The screenshot was inspected and visibly showed the `Example Domain` page
+rendered inside the terminal pane, with the TermSurf TUI URL/status area still
+visible below the browser overlay.
+
+Cleanup and hygiene passed:
+
+- no stale matching `TermSurf.app/Contents/MacOS/termsurf`, `target/debug/web`,
+  or `chromium/src/out/Default/roamium` processes remained;
+- `git diff --check` passed;
+- top-level forbidden-path status for `webtui/`, `roamium/`,
+  `proto/termsurf.proto`, `chromium/README.md`, and `chromium/patches` was
+  empty;
+- nested `git -C chromium/src status --short` and
+  `git -C chromium/src diff --name-only` were empty;
+- `git diff --name-only` contained only `scripts/ghostboard-geometry-matrix.sh`
+  before result documentation was recorded.
+
+## Result Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved.
+
+Findings: none.
+
+## Conclusion
+
+The updated Ghostboard still performs the basic real-browser TermSurf overlay
+flow after the upstream merge and identity rename. The automation now defaults
+to `TermSurf.app/Contents/MacOS/termsurf`, and the smoke test proves the
+existing `webtui` plus Chromium-output Roamium path can create and visibly
+present a browser overlay without modifying `webtui`, Roamium, Chromium, or the
+protocol.
+
+The next experiment should broaden from this single-pane smoke proof to the
+geometry and routing acceptance criteria: overlay resize/move across window
+resize, splits, tab switches, pane close, and additional windows.
