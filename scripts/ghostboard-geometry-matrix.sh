@@ -513,6 +513,18 @@ wait_for_trace_line_after() {
   fail "timed out waiting for $label"
 }
 
+optional_trace_line_after() {
+  local start_line="$1"
+  local pattern="$2"
+  tail -n +"$((start_line + 1))" "$ROAMIUM_TRACE" |
+    grep -E "$pattern" |
+    tail -1 || true
+}
+
+extract_app_tab_id() {
+  printf '%s\n' "$1" | sed -E 's/.*tab_id=([0-9]+).*/\1/'
+}
+
 wait_for_mouse_down_after() {
   local start_line="$1"
   local tab_id="$2"
@@ -7900,6 +7912,7 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
 
   DEVTOOLS_START_LINE="$(log_line_count)"
   DEVTOOLS_TRACE_START_LINE="$(trace_line_count)"
+  DEVTOOLS_STATE_START_LINE="$(state_trace_line_count)"
   printf ':devtools right' >"$DEVTOOLS_COMMAND"
   log "devtools_command_text=$(cat "$DEVTOOLS_COMMAND")"
   swift "$ROOT/scripts/ghostty-app/inject.swift" type "$DEVTOOLS_COMMAND" >>"$HARNESS_LOG" 2>&1
@@ -7932,13 +7945,18 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
   log "devtools_normal_split_appkit_pixel=$A_SPLIT_PIXEL"
   require_trace_after "$DEVTOOLS_TRACE_START_LINE" "resize tab_id=${A_BROWSER_TAB_ID} pane_id=${A_PANE_ID} pixel_width=${A_SPLIT_PIXEL_WIDTH} pixel_height=${A_SPLIT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium resized normal browser after DevTools split"
 
-  DT_CREATE_TRACE_LINE="$(wait_for_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "create-devtools-tab pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID} pixel_width=[0-9]+ pixel_height=[0-9]+" "Roamium received CreateDevtoolsTab" 60)"
-  DT_TAB_READY_LINE="$(wait_for_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported DevTools tab ready" 60)"
-  DT_BROWSER_TAB_ID="$(printf '%s\n' "$DT_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+  DT_CREATE_TRACE_LINE="$(optional_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "create-devtools-tab pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID} pixel_width=[0-9]+ pixel_height=[0-9]+")"
+  DT_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}")"
+  DT_TAB_READY_APP_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "TabReady: pane_id=${DT_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped DevTools TabReady" 60)"
+  DT_BROWSER_TAB_ID="$(extract_app_tab_id "$DT_TAB_READY_APP_LINE")"
   [ -n "$DT_BROWSER_TAB_ID" ] || fail "failed to extract DevTools browser tab id"
   [ "$DT_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "DevTools browser tab id reused normal browser tab id"
-  log "devtools_create_trace=$DT_CREATE_TRACE_LINE"
+  wait_for_state_trace_after "$DEVTOOLS_STATE_START_LINE" "event=render_state.*is_devtools=true.*current_tab_id=${DT_BROWSER_TAB_ID}.*inspected_tab_id=${A_BROWSER_TAB_ID}" "webtui mapped DevTools render state" 60
+  log "devtools_create_trace=${DT_CREATE_TRACE_LINE:-none}"
+  log "devtools_tab_ready_trace=${DT_TAB_READY_TRACE_LINE:-none}"
+  log "devtools_tab_ready_app=$DT_TAB_READY_APP_LINE"
   log "devtools_browser_tab_id=$DT_BROWSER_TAB_ID"
+  DT_CA_CONTEXT_APP_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "CaContext: tab_id=${DT_BROWSER_TAB_ID} pane_id=${DT_PANE_ID} context_id=[0-9]+" "Ghostboard received DevTools CA context" 60)"
 
   DT_PRESENT_LINE="$(wait_for_line_after "$DEVTOOLS_START_LINE" "TermSurf geometry layer=appkit event=presented .*pane_id:${DT_PANE_ID} .*overlay_frame=\\{\\{.*context_id=[1-9][0-9]*" "DevTools AppKit overlay frame" 60)"
   DT_CONTEXT_ID="$(printf '%s\n' "$DT_PRESENT_LINE" | sed -E 's/.*context_id=([0-9]+) .*/\1/')"
@@ -7965,7 +7983,7 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
   log "devtools_frame=$DT_FRAME"
   log "devtools_appkit_pixel=$DT_PIXEL"
   log "devtools_backing_scale=$DT_BACKING_SCALE"
-  require_trace_after "$DEVTOOLS_TRACE_START_LINE" "ca-context tab=${DT_BROWSER_TAB_ID} pane=${DT_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported DevTools CA context"
+  require_text "$DT_CA_CONTEXT_APP_LINE" "context_id=${DT_CONTEXT_ID}" "DevTools CA context matches AppKit context"
   require_trace_after "$DEVTOOLS_TRACE_START_LINE" "resize tab_id=${DT_BROWSER_TAB_ID} pane_id=${DT_PANE_ID} pixel_width=${DT_PIXEL_WIDTH} pixel_height=${DT_PIXEL_HEIGHT} screen_x=0 screen_y=0 screen_width=0 screen_height=0 screen_scale=0 ffi=ts_set_view_size" "Roamium resized DevTools to AppKit pixel size"
   screencapture -x -o -l"$A_WINDOW_ID" "$SCREENSHOT_DEVTOOLS_SPLIT"
   log "devtools_split_screenshot_exit=$?"
@@ -8072,11 +8090,14 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
     [ "$DT2_PANE_ID" != "$DT_PANE_ID" ] || fail "reopened DevTools reused the closed DevTools pane id"
     log "devtools_reopened_pane_id=$DT2_PANE_ID"
     wait_for_log_after "$REOPEN_START_LINE" "CreateDevtoolsTab: pane_id=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for reopened DevTools pane" 60
-    DT2_TAB_READY_LINE="$(wait_for_trace_line_after "$REOPEN_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported reopened DevTools tab ready" 60)"
-    DT2_BROWSER_TAB_ID="$(printf '%s\n' "$DT2_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    DT2_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$REOPEN_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}")"
+    DT2_TAB_READY_APP_LINE="$(wait_for_line_after "$REOPEN_START_LINE" "TabReady: pane_id=${DT2_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped reopened DevTools TabReady" 60)"
+    DT2_BROWSER_TAB_ID="$(extract_app_tab_id "$DT2_TAB_READY_APP_LINE")"
     [ -n "$DT2_BROWSER_TAB_ID" ] || fail "failed to extract reopened DevTools browser tab id"
+    log "devtools_reopened_tab_ready_trace=${DT2_TAB_READY_TRACE_LINE:-none}"
+    log "devtools_reopened_tab_ready_app=$DT2_TAB_READY_APP_LINE"
     log "devtools_reopened_browser_tab_id=$DT2_BROWSER_TAB_ID"
-    require_trace_after "$REOPEN_TRACE_START_LINE" "ca-context tab=${DT2_BROWSER_TAB_ID} pane=${DT2_PANE_ID} inspected_tab_id=${A_BROWSER_TAB_ID}" "Roamium reported reopened DevTools CA context"
+    wait_for_line_after "$REOPEN_START_LINE" "CaContext: tab_id=${DT2_BROWSER_TAB_ID} pane_id=${DT2_PANE_ID} context_id=[0-9]+" "Ghostboard received reopened DevTools CA context" 60
 
     B_TAB_START_LINE="$(log_line_count)"
     B_TAB_TRACE_START_LINE="$(trace_line_count)"
@@ -8094,10 +8115,13 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
     [ -n "$B_PANE_ID" ] || fail "failed to extract DevTools singleton browser B pane id"
     [ "$B_PANE_ID" != "$A_PANE_ID" ] || fail "DevTools singleton browser B reused browser A pane id"
     log "devtools_singleton_browser_b_pane_id=$B_PANE_ID"
-    B_TAB_READY_LINE="$(wait_for_trace_line_after "$B_TAB_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_PANE_ID} inspected_tab_id=0" "Roamium reported DevTools singleton browser B tab ready" 60)"
-    B_BROWSER_TAB_ID="$(printf '%s\n' "$B_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    B_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$B_TAB_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_PANE_ID} inspected_tab_id=0")"
+    B_TAB_READY_APP_LINE="$(wait_for_line_after "$B_TAB_START_LINE" "TabReady: pane_id=${B_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped DevTools singleton browser B TabReady" 60)"
+    B_BROWSER_TAB_ID="$(extract_app_tab_id "$B_TAB_READY_APP_LINE")"
     [ -n "$B_BROWSER_TAB_ID" ] || fail "failed to extract DevTools singleton browser B tab id"
     [ "$B_BROWSER_TAB_ID" != "$A_BROWSER_TAB_ID" ] || fail "DevTools singleton browser B reused browser A tab id"
+    log "devtools_singleton_browser_b_tab_ready_trace=${B_TAB_READY_TRACE_LINE:-none}"
+    log "devtools_singleton_browser_b_tab_ready_app=$B_TAB_READY_APP_LINE"
     log "devtools_singleton_browser_b_tab_id=$B_BROWSER_TAB_ID"
     log "devtools_singleton_browser_b_before_devtools_control_key=escape"
     swift "$ROOT/scripts/ghostty-app/inject.swift" key 53 >>"$HARNESS_LOG" 2>&1
@@ -8117,11 +8141,14 @@ if [ "$SCENARIO" = "devtools-split-geometry" ] || [ "$SCENARIO" = "devtools-sing
     [ -n "$B_DT_PANE_ID" ] || fail "failed to extract browser B DevTools pane id"
     log "devtools_singleton_browser_b_devtools_pane_id=$B_DT_PANE_ID"
     wait_for_log_after "$B_DEVTOOLS_START_LINE" "CreateDevtoolsTab: pane_id=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Ghostboard sent CreateDevtoolsTab for browser B DevTools pane" 60
-    B_DT_TAB_READY_LINE="$(wait_for_trace_line_after "$B_DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported browser B DevTools tab ready" 60)"
-    B_DT_BROWSER_TAB_ID="$(printf '%s\n' "$B_DT_TAB_READY_LINE" | sed -E 's/.*tab-ready tab=([0-9]+) .*/\1/')"
+    B_DT_TAB_READY_TRACE_LINE="$(optional_trace_line_after "$B_DEVTOOLS_TRACE_START_LINE" "tab-ready tab=[0-9]+ pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}")"
+    B_DT_TAB_READY_APP_LINE="$(wait_for_line_after "$B_DEVTOOLS_START_LINE" "TabReady: pane_id=${B_DT_PANE_ID} tab_id=[0-9]+" "Ghostboard mapped browser B DevTools TabReady" 60)"
+    B_DT_BROWSER_TAB_ID="$(extract_app_tab_id "$B_DT_TAB_READY_APP_LINE")"
     [ -n "$B_DT_BROWSER_TAB_ID" ] || fail "failed to extract browser B DevTools browser tab id"
+    log "devtools_singleton_browser_b_devtools_tab_ready_trace=${B_DT_TAB_READY_TRACE_LINE:-none}"
+    log "devtools_singleton_browser_b_devtools_tab_ready_app=$B_DT_TAB_READY_APP_LINE"
     log "devtools_singleton_browser_b_devtools_tab_id=$B_DT_BROWSER_TAB_ID"
-    require_trace_after "$B_DEVTOOLS_TRACE_START_LINE" "ca-context tab=${B_DT_BROWSER_TAB_ID} pane=${B_DT_PANE_ID} inspected_tab_id=${B_BROWSER_TAB_ID}" "Roamium reported browser B DevTools CA context"
+    wait_for_line_after "$B_DEVTOOLS_START_LINE" "CaContext: tab_id=${B_DT_BROWSER_TAB_ID} pane_id=${B_DT_PANE_ID} context_id=[0-9]+" "Ghostboard received browser B DevTools CA context" 60
   fi
 fi
 

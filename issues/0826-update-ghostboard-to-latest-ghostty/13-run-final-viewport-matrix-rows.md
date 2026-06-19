@@ -208,3 +208,87 @@ experiment has the required sections, the scenario list resumes correctly after
 `find ... -newer`, the pipeline uses `set -o pipefail`, failed scenarios are
 recorded before validation exits with the failed status, and the scope excludes
 product changes except a narrow documented harness-only fix.
+
+## Result
+
+**Result:** Pass
+
+Static checks passed:
+
+```bash
+bash -n scripts/ghostboard-geometry-matrix.sh
+prettier --write --prose-wrap always --print-width 80 \
+  issues/0826-update-ghostboard-to-latest-ghostty/README.md \
+  issues/0826-update-ghostboard-to-latest-ghostty/13-run-final-viewport-matrix-rows.md
+git diff --check
+```
+
+The first `devtools-split-geometry` run failed because the row inherited strict
+Roamium trace assertions for DevTools creation and CA-context events. The app
+and webtui logs showed the DevTools pane was created, mapped to `TabReady`,
+presented with an AppKit CA context, resized to the AppKit pixel size, and
+accepted mouse and keyboard input. The harness was updated narrowly in
+`scripts/ghostboard-geometry-matrix.sh` to keep those Roamium trace lines as
+diagnostics while using Ghostboard `TabReady` / `CaContext` and webtui DevTools
+render state as authoritative DevTools identity evidence.
+
+After that harness fix, `devtools-split-geometry` passed. The first full final
+matrix rerun then failed only at `gui-active-multi-tab`: Ghostboard logged
+`SetGuiActive: tab_id=0 active=false reason=gui_deactivated`, but the deployed
+`chromium/src/out/Default/roamium` binary did not contain the current
+`set-gui-active` trace strings. Running `scripts/build.sh roamium` rebuilt and
+copied the current Rust Roamium wrapper into `chromium/src/out/Default/roamium`.
+The focused `gui-active-multi-tab` rerun then passed.
+
+The final full matrix rerun used explicitly unset overrides:
+`TERMSURF_GHOSTBOARD_APP`, `TERMSURF_WEB`, `TERMSURF_ROAMIUM`, and
+`TERMSURF_INSTALLED_ROAMIUM`. The summary was:
+
+```text
+RUN devtools-split-geometry
+RESULT devtools-split-geometry PASS
+RUN devtools-singleton-guard
+RESULT devtools-singleton-guard PASS
+RUN mouse-after-geometry-change
+RESULT mouse-after-geometry-change PASS
+RUN keyboard-after-tab-window-switch
+RESULT keyboard-after-tab-window-switch PASS
+RUN gui-active-multi-tab
+RESULT gui-active-multi-tab PASS
+FINAL MATRIX ROWS PASS
+```
+
+Artifact paths for the final passing run were recorded in
+`logs/issue-0826-exp13-artifacts.log`. The strict summary was recorded in
+`logs/issue-0826-exp13-summary-status.log`.
+
+Cleanup and scope checks passed:
+
+- `logs/issue-0826-exp13-post-cleanup-processes.log` was empty.
+- `logs/issue-0826-exp13-forbidden-top-status.log` was empty.
+- `logs/issue-0826-exp13-chromium-status.log` was empty.
+- `logs/issue-0826-exp13-chromium-diff-name-only.log` was empty.
+- `logs/issue-0826-exp13-git-diff-name-only.log` listed only
+  `scripts/ghostboard-geometry-matrix.sh`.
+
+## Conclusion
+
+The final inherited viewport/input rows pass together on the current rebuilt
+debug stack. The only source change in this experiment is a harness
+compatibility fix for DevTools identity proof; it does not change Ghostboard,
+webtui, Roamium, Chromium, or the protocol source.
+
+The stale deployed Roamium binary was an environment/build artifact issue:
+current source already contained `SetGuiActive` trace handling, but the copied
+`chromium/src/out/Default/roamium` binary had not been rebuilt. Rebuilding
+Roamium restored the expected `set-gui-active` trace evidence and allowed
+`gui-active-multi-tab` to pass.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved.
+
+Findings: none.
