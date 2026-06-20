@@ -165,6 +165,17 @@ function navLabelFor(id: string, title: string): string {
 
 const TOP_ORDER: Record<string, number> = { index: 1, reference: 2, external: 3 };
 
+// Pages hand-verified against the Ghostboard fork and rebranded to TermSurf
+// (issue 834, Experiment 5+). The importer no longer regenerates or --checks
+// these — they are hand-maintained. Skipped in BOTH the write loop and the
+// --check orphan scan (else --check would wrongly flag them as orphaned).
+const VERIFIED = new Set<string>([
+  "concepts/colors.mdx",
+  "concepts/cursor.mdx",
+  "concepts/screen.mdx",
+  "concepts/sequences.mdx",
+]);
+
 const ATTRIBUTION =
   "> The Terminal API documentation is adapted from " +
   "[Ghostty](https://ghostty.org)'s VT docs, used under the MIT license " +
@@ -191,6 +202,7 @@ for (const f of srcFiles) {
 const outputs: OutFile[] = [];
 for (const f of srcFiles) {
   const rel = path.relative(srcDir, f);
+  if (VERIFIED.has(rel)) continue; // hand-maintained; not regenerated.
   const id = rel.replace(/\.mdx$/, "");
   const baseName = path.basename(rel, ".mdx");
   const dir = rel.includes("/") ? rel.split("/")[0] : "";
@@ -249,9 +261,12 @@ if (checkMode) {
     }
   }
   // Flag committed VT files with no source counterpart (removed upstream).
+  // Verified (hand-maintained) pages are intentionally not in `outputs`, so
+  // skip them here or they would be misreported as orphaned.
   const expected = new Set(outputs.map((o) => o.rel));
   for (const f of fs.existsSync(outDir) ? listMdx(outDir) : []) {
     const rel = path.relative(outDir, f);
+    if (VERIFIED.has(rel)) continue;
     if (!expected.has(rel)) {
       console.error(`import-vt --check: orphaned ${rel}`);
       stale = true;

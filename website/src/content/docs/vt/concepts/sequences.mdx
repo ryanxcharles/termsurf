@@ -84,8 +84,8 @@ modern terminals.
 | `ESC ]`  | `0x9d` | OSC  | Operating System Command    | Often used in modern terminal extensions to transmit string data.                                        |
 | `ESC P`  | `0x90` | DCS  | Device Control Sequence     | Most often used when querying the terminal's capabilities (XTGETTCAP). Rare otherwise.                   |
 | `ESC _`  | `0x9f` | APC  | Application Program Command | Used in very complex protocols like the Kitty Graphics Protocol that require arbitrary payloads.         |
-| `ESC X`  | `0x98` | SOS  | Start of String             | Obsolete. Ignored by Ghostty.                                                                            |
-| `ESC ^`  | `0x9e` | PM   | Private Message             | Obsolete. Ignored by Ghostty.                                                                            |
+| `ESC X`  | `0x98` | SOS  | Start of String             | Obsolete. Ignored by TermSurf.                                                                           |
+| `ESC ^`  | `0x9e` | PM   | Private Message             | Obsolete. Ignored by TermSurf.                                                                           |
 
 ### CSI
 
@@ -120,24 +120,24 @@ As a result of its flexibility, OSC sequences are very often used by modern
 extensions to offer new functionality that older terminals can simply ignore.
 
 An OSC sequence begins with OSC (`ESC ]` or `0x9d`). Then, by convention, an
-integer is added to identify the operation 
+integer is added to identify the operation.
 
 The format of an OSC sequence is below. By convention, OSC sequences are
 identified by an integer identifier followed by a semicolon (`;`), although
 this is never required by the standard. Certain obsolete OSC sequences use
-non-numeric identifiers before the semicolon, but Ghostty does not support these.
+non-numeric identifiers before the semicolon, but TermSurf does not support these.
 
 > [!NOTE]
 > Due to yet more convoluted historical reasons, OSC sequences in xterm (and
-> by extension Ghostty) may be terminated with the Bell character (`BEL`,
+> by extension TermSurf) may be terminated with the Bell character (`BEL`,
 > `0x07`) instead of the standard String Terminator (`ST`, `ESC \` or `0x9c`).
 >
-> While they are in most cases interchangeable, Ghostty will try to echo back
+> While they are in most cases interchangeable, TermSurf will try to echo back
 > the terminator used in an OSC sequence when replying, to ensure maximum
 > compatibility with older programs and terminals. New code should always
 > prefer `ST` due to standards compliance.
 
-them. An example OSC sequence is `OSC 2 ; 👻  Ghostty 👻  ST` (where `ST` is
+An example OSC sequence is `OSC 2 ; 👻  TermSurf 👻  ST` (where `ST` is
 the String Terminator).
 
 ```
@@ -164,8 +164,8 @@ ST = "0x1B" "0x5C"
 
 ### APC
 
-Ghostty supports APC sequences. Currently there is only one supported APC
-sequence: the Kitty Graphics Protocol sequence. This is documented [here](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
+TermSurf supports APC sequences, most notably the Kitty Graphics Protocol
+sequence. This is documented [here](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 
 ```
 apc_sequence = "0x1B" "_" data ST
@@ -175,7 +175,7 @@ ST = "0x1B" "0x5C"
 
 ### SOS and PM
 
-SOS and PM sequences are entirely ignored by Ghostty.
+SOS and PM sequences are entirely ignored by TermSurf.
 
 ```
 sos_sequence = "0x1B" "X" data ST

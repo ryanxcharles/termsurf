@@ -130,3 +130,74 @@ The reviewer also pre-confirmed (to re-verify in implementation): 5 special
 colors confirmed; "3 dynamic / OSC 10-12" stale (→10/OSC 10-19); "16-bit not
 recognized" false (fork parses `#rrrrggggbbbb`); "APC only one" stale (kitty +
 glyph). These corroborate that the soften-on-mismatch policy is doing real work.
+
+## Result
+
+**Result:** Pass
+
+The Concepts subsection is now fork-verified and TermSurf-rebranded; all
+verification criteria pass.
+
+### Fork-verification findings (re-confirmed against `ghostboard/src/terminal/`)
+
+| Claim                                          | Fork evidence                                                                                               | Disposition                                                        |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 256-color palette + 5 special colors           | `color.zig` `Palette` len 256; `Special` enum = 5 (bold/underline/blink/reverse/italic → OSC 4 idx 256-260) | **Confirmed** → rebranded                                          |
+| dynamic colors (doc said "3", OSC 10-12)       | `color.zig` `Dynamic` enum = **10** entries, OSC 10-19 (fg/bg/cursor + pointer/Tektronix/highlight)         | **Stale → corrected** to 10 / OSC 10-19, rebranded                 |
+| own color parser; X11 color-name DB            | `x11_color.zig` embeds the X11 `rgb.txt` map                                                                | **Confirmed** → rebranded                                          |
+| "does not yet recognize 16-bit channels (`#`)" | `color.zig` `fromHex` handles 1-4 hex digits = 4/8/12/**16**-bit; `#rrrrggggbbbb` parses                    | **False → removed** the stale limitation note                      |
+| "only a single cursor" (cursor.mdx)            | generic terminal-model statement; fork uses one cursor (`Screen`)                                           | Kept (no product name); github URL kept                            |
+| SOS/PM "ignored"                               | `Parser.zig` shared `sos_pm_apc_string` state; `apc.zig` → `.ignore`                                        | **Confirmed** → rebranded                                          |
+| non-numeric OSC ids unsupported                | `osc.zig` keys on numeric command codes, `.invalid` otherwise                                               | **Confirmed** → rebranded                                          |
+| OSC BEL-termination + echo-back                | `osc.zig` terminator handling                                                                               | **Confirmed** → rebranded                                          |
+| APC "only one supported (Kitty)"               | `apc.zig` imports **both** `kitty` graphics and `glyph` protocols                                           | **Stale → softened** to "most notably the Kitty Graphics Protocol" |
+| example window-title text `👻 Ghostty 👻`      | illustrative, not an upstream reference                                                                     | Rebranded to TermSurf                                              |
+| `screen.mdx`                                   | stub (`# Screen` + "TODO"), no claims                                                                       | No change                                                          |
+
+### Verification results
+
+1. **Every claim fork-cited** — table above; nothing rebranded without a
+   citation. **Pass.**
+2. **No unverified TermSurf assertion** — a grep of `src/content/docs/vt/` shows
+   no product "Ghostty" left in the Concepts pages; the only Ghostty strings are
+   the upstream `github.com/ghostty-org` URL in `cursor` (and mentions in the
+   _other_, not-yet-verified subsections). Stale claims were corrected (dynamic
+   colors) or removed (16-bit), not asserted. **Pass.**
+3. **Importer coherence** — `import:vt --check` exits 0 (now skips the 4
+   verified Concepts pages in both the staleness and orphan loops); a full
+   `import:vt` re-run wrote 60 pages and left the Concepts edits intact.
+   **Pass.**
+4. **Builds + links** — `bun run build` 76 pages; `astro check` 0 errors; the
+   Concepts pages render (`<h1 id="colors">`, "10 dynamic", no 16-bit-limitation
+   note); a head+body crawl finds 0 dead links/fragments on them. **Pass.**
+5. **No regressions** — other VT pages, non-VT pages, `/`, `/welcome` unchanged.
+   **Pass.**
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate (the user-requested
+per-file accuracy pass). **Verdict: APPROVE** — no Required/Optional findings.
+It independently re-verified every rebranded claim against the fork with
+file:line evidence (Palette `[256]RGB`; `Special` 5 entries / OSC 4 256-260;
+`Dynamic` 10 entries / OSC 10-19; `x11_color` rgb.txt map; `fromHex` 1-4 digits
+incl. 16-bit, so the removed limitation was genuinely false; `parse_table.zig`
+routes SOS/PM to the ignored APC-string state; `osc.zig` accepts only numeric
+ids and echoes the request terminator; `apc.zig` has both kitty and glyph, so
+"most notably" is accurate), confirmed `import:vt --check` exits 0 and a re-run
+overwrites nothing, and the build is clean. One **Nit**: a dangling "them." on
+`sequences.mdx` left over from Exp 4's mechanical import — pre-existing and
+technically out of scope, but since this page is now hand-maintained I fixed it
+(completed the prior sentence, dropped the orphan); rebuild stays 76 pages / 0
+errors, `--check` still 0.
+
+## Conclusion
+
+The Concepts subsection is an accurate, fork-verified TermSurf reference, and
+the pattern is proven: read the cited fork source, confirm/correct/soften each
+claim, rebrand, exclude the page from the importer. The fork verification
+mattered — it corrected two genuinely stale upstream facts (3→10 dynamic colors;
+the false 16-bit limitation) and softened one (APC "only one"). Next
+per-subsection passes: Control → CSI → ESC → OSC → top-level
+(`index`/`reference`/`external`), after which the VT index framing note can be
+removed. Then the rest of Phase 1 (Pagefind search, versioning, IA/sitemap,
+deploy cleanup), and Phases 2–4.
