@@ -70,3 +70,30 @@ the claim-free docs the conservative choice; `Config.zig:9056-9060` 3/5 bell
 features off; `osc.zig:243-276` BEL echo-back); the `VERIFIED`-set mechanism is
 sound and battle-tested from Concepts. Two non-blocking items, both folded in:
 soften "most" → "several" (above); add the `osc.zig:243-276` line cite (above).
+
+## Result
+
+**Result:** Pass
+
+`bel.mdx`'s three fork-confirmed claims were rebranded to TermSurf (with "most"
+→ "several of these behaviors are disabled by default"); `bs`/`cr`/`lf`/`tab`
+were left unchanged (no product claims); all 5 `control/*` pages were added to
+the importer's `VERIFIED` set.
+
+- **Claims fork-cited** — all three per the table (BEL handled, 3/5 bell
+  features off, BEL echo-back), independently re-confirmed at the design gate.
+  **Pass.**
+- **No unverified TermSurf assertion** — grep of `control/` shows no product
+  "Ghostty" remaining (only spec text + the rebranded bel). **Pass.**
+- **Importer coherence** — `import:vt --check` exits 0; a re-run wrote 55 pages
+  (9 verified skipped) and left the rebranded `bel` intact. **Pass.**
+- **Builds + links** — `bun run build` 76 pages; `astro check` 0 errors; bel
+  renders "implemented in TermSurf" / "several of these behaviors". **Pass.**
+- **No regressions** — other pages unchanged. **Pass.**
+
+## Conclusion
+
+Control is fork-verified and TermSurf-branded — a small pass (only `bel` carried
+claims). The per-subsection pattern continues to flow: remaining VT passes are
+CSI (29 pages — the largest), ESC, OSC, then the top-level pages, after which
+the VT index framing note can drop. Then the rest of Phase 1 and Phases 2–4.

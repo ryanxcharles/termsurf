@@ -174,6 +174,11 @@ const VERIFIED = new Set<string>([
   "concepts/cursor.mdx",
   "concepts/screen.mdx",
   "concepts/sequences.mdx",
+  "control/bel.mdx",
+  "control/bs.mdx",
+  "control/cr.mdx",
+  "control/lf.mdx",
+  "control/tab.mdx",
 ]);
 
 const ATTRIBUTION =
