@@ -289,6 +289,11 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 - [Experiment 12: IA, sitemap & versioning posture](12-ia-sitemap-versioning.md)
   — **Pass** (closes Phase 1 — Architecture)
 
+### Phase 2 — Design
+
+- [Experiment 13: Design system foundation + callout primitive](13-design-system-and-callouts.md)
+  — **Designed**
+
 ## Process notes
 
 - Experiments are created one at a time inside their phase, each with its own
