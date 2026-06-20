@@ -33,10 +33,12 @@ Concrete gaps found by auditing the current build:
    `tabindex="-1"` (so focus actually moves to it for screen readers, not just
    the scroll position). Style `.skip-link` in `style.css` with the standard
    off-screen-until-`:focus` pattern (Tokyo Night accent box on focus). This
-   covers **every** page (home, docs, welcome) because they all use
-   `Base.astro`.
-   - The welcome page uses `Base` too, but the skip link is inert there (no long
-     nav to skip) and harmless — it only appears on keyboard focus.
+   covers **every `Base.astro` page** (home + all docs), which is everything
+   with site nav.
+   - `/welcome` is **not** a `Base.astro` page — it defines its own standalone
+     `<html>/<body>` shell (`welcome.astro`) with no header/footer/nav, so it
+     has no skip link and needs none (nothing to skip). It is out of scope ("Do
+     not modify when changing site-wide styles").
 2. **Label the nav landmarks.** `aria-label="Primary"` on the header `<nav>`
    (`Header.astro`); `aria-label="Documentation"` on the docs sidebar `<nav>`
    (`DocPage.astro`). Distinct accessible names for the two navigation regions.
@@ -134,8 +136,9 @@ modified.
    `bun run gen:references --check` + `bun run import:vt --check` exit 0;
    dead-link crawl over `dist/docs/**` clean.
 7. **No regressions.** `/`, `/welcome`, search, nav, callouts unchanged
-   visually; the skip link is invisible at rest on every page; no color tokens
-   change (so no visual delta from the audit).
+   visually; the skip link is invisible at rest on every `Base.astro` page;
+   `/welcome` (own shell, no nav) is untouched; no color tokens change (so no
+   visual delta from the audit).
 
 A full pass gives the site a documented accessibility baseline (skip link,
 labeled landmarks, visible focus, reduced-motion) and an honest contrast record
@@ -174,3 +177,105 @@ One **Required** finding, plus two **Optional** — all folded in:
 3. **(Optional) Pagefind controls** also receive the additive ring (light-DOM,
    `resetStyles:false`). **Noted:** harmless/additive; confirm no double-ring at
    implementation.
+
+## Result
+
+**Result:** Pass
+
+The site has a documented accessibility baseline; all criteria pass. No color
+tokens were changed — the contrast audit is recorded as debt for Exp 16.
+
+### What was built
+
+- `src/layouts/Base.astro` — `.skip-link` ("Skip to content") as the first
+  `<body>` child; `<main id="main-content" tabindex="-1">`.
+- `src/components/Header.astro` — `aria-label="Primary"` on the header `<nav>`.
+- `src/components/DocPage.astro` — `aria-label="Documentation"` on the sidebar
+  `<nav>`.
+- `src/styles/style.css` — `.skip-link` off-screen/`:focus` reveal;
+  `#main-content:focus { outline: none }` (skip target); additive
+  `:focus-visible` ring on
+  `a, summary, button, [tabindex]:not([tabindex="-1"])`; a
+  `@media (prefers-reduced-motion: reduce)` block.
+- `website/CLAUDE.md` — Accessibility baseline section + the full WCAG-AA
+  contrast table (every text token, light + dark), recording the systemic
+  light-mode debt deferred to Exp 16.
+
+### Verification results
+
+1. **Skip link** — built `Base.astro` pages (home + docs) emit
+   `<body …> <a href="#main-content" class="skip-link">Skip to content</a>` as
+   the first body child and `<main id="main-content" tabindex="-1">`; the built
+   CSS positions `.skip-link` at `left:-9999px` and `:focus{left:0}`. `/welcome`
+   has its own shell (no `Base.astro`, no nav) and correctly has no skip link.
+   **Pass.**
+2. **Labeled landmarks** — built home has `<nav … aria-label="Primary">`; built
+   doc pages have `<nav … aria-label="Documentation">` (1 each). **Pass.**
+3. **Reduced motion** — built CSS contains one
+   `@media (prefers-reduced-motion:reduce)` block zeroing animation/transition
+   durations + `scroll-behavior`. **Pass.**
+4. **Focus visible** — built CSS has
+   `a:focus-visible,summary:focus-visible,button:focus-visible,[tabindex]:not([tabindex="-1"]):focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}`;
+   the only `outline:none` in `src/` is the intentional `#main-content:focus`
+   skip-target rule. **Pass.**
+5. **Contrast audit recorded** — `website/CLAUDE.md` has the AA table:
+   light-mode AA-text PASS only for `foreground` (9.62); `foreground-dark` 3.57,
+   `primary` 3.11, `secondary` 3.33, `accent` 4.26, `success` 4.04, `warning`
+   4.29, `caution` 3.79 all FAIL; `muted` 2.54 fails the 3:1 floor. Dark mode
+   passes AA-text for all text tokens except `muted` (2.76). Remediation
+   deferred to Exp 16; no tokens changed here. **Pass.**
+6. **Build + checks** — `bun run build` 76 pages (`find dist -name '*.html'`);
+   `bunx astro check` 0 errors / 0 warnings / 3 pre-existing WelcomePage
+   Three.js hints; `gen:references --check` + `import:vt --check` exit 0;
+   cross-page link + path-qualified-anchor crawl over the 74 docs pages = 0
+   broken (asset URLs excluded). The completion review surfaced one
+   **pre-existing** bare same-page fragment (`#c1-sequences` in
+   `vt/concepts/sequences`) that a path-qualified crawl doesn't cover —
+   untouched VT content, not a regression of this experiment; logged for a
+   future VT pass. **Pass.**
+7. **No regressions** — no color tokens changed (zero visual delta from the
+   audit); the skip link is off-screen at rest on every `Base.astro` page; `/`
+   and `/welcome` (own shell, untouched) build; search and nav unchanged.
+   **Pass.**
+
+## Conclusion
+
+The structural accessibility baseline is in place site-wide (skip link, labeled
+nav landmarks, additive token-based focus ring, reduced-motion) with zero new
+JS, and an honest WCAG-AA contrast record now lives in the design system. The
+audit's key finding — the light "Tokyo Night Day" palette fails AA-text for
+nearly every accent/secondary token, and `muted` fails 3:1 in both modes — is
+documented as debt and becomes the next experiment. **Experiment 16: Tokyo Night
+contrast refinement** pays it down (refine, not repaint, per scope decision 4).
+Remaining Phase-2 after that: page templates (article/reference/section-index)
+and the home/marketing treatment.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE WITH
+CHANGES.** The reviewer built fresh (76 pages), ran `astro check` (0 errors, 3
+pre-existing hints), `gen:references`/`import:vt --check` (exit 0), and
+**independently recomputed all 18 token contrast ratios** — they matched the
+`website/CLAUDE.md` table to two decimals, including every PASS/FAIL and the
+muted <3:1 flags. Confirmed: skip link is the first body child + not clipped;
+labeled landmarks; one reduced-motion block (CSS-only, doesn't touch
+`<details>`/Pagefind/Three.js); the focus-visible selector matches exactly and
+the only `outline:none` in `src/` is the intentional `#main-content:focus` rule;
+no color tokens changed; scope limited to the five website files + two issue
+docs.
+
+One **Required** finding, fixed (docs-only, no code change):
+
+- **(Required) False "every page" coverage claim.** `/welcome` does **not** use
+  `Base.astro` — it has its own standalone shell with no nav — so it has no skip
+  link/landmarks, contrary to the design/result/`CLAUDE.md` wording. Corrected
+  all three to scope the coverage to `Base.astro` pages (home + docs) and note
+  `/welcome` is a standalone shell needing no skip link (out of scope, not
+  modified).
+
+One **Optional** finding, addressed:
+
+- **(Optional) Pre-existing VT anchor.** `vt/concepts/sequences` links to a bare
+  `#c1-sequences` fragment with no matching id. It is untouched VT content (not
+  a regression here) and was missed by the path-qualified crawl; the result's
+  build-checks note now records it as pre-existing debt for a future VT pass.

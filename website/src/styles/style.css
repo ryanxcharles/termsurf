@@ -54,6 +54,55 @@ body {
   min-height: 100vh;
 }
 
+/* Accessibility baseline (issue 834, Exp 15). */
+
+/* Skip-to-content link: off-screen until focused, then a Tokyo Night accent
+   box at the top-left. First focusable element on every page, jumps to
+   <main id="main-content">. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-accent);
+  color: var(--color-background);
+  font-weight: bold;
+  font-size: 0.8125rem;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+/* The skip target is a programmatic focus destination, not a control; don't
+   draw a ring around it (the focus-visible rule below excludes tabindex=-1). */
+#main-content:focus {
+  outline: none;
+}
+
+/* Visible focus: an additive, token-based ring on interactive elements. Never
+   removes the UA ring; excludes [tabindex="-1"] (the <main> skip target). */
+a:focus-visible,
+summary:focus-visible,
+button:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Respect reduced-motion: neutralize CSS transitions/animations and smooth
+   scrolling. The /welcome Three.js scene animates in JS and is unaffected. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .prose-termsurf {
   font-size: 0.875rem;
   line-height: 1.7;

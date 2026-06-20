@@ -32,7 +32,7 @@ const NAV_ITEMS = [
     ) : (
       <div></div>
     )}
-    <nav class="flex gap-3">
+    <nav class="flex gap-3" aria-label="Primary">
       {NAV_ITEMS.map((item) => {
         const active = pathname === item.to;
         return (

@@ -25,9 +25,10 @@ import Footer from "../components/Footer.astro";
     />
   </head>
   <body class="bg-background text-foreground min-h-screen font-sans">
+    <a href="#main-content" class="skip-link">Skip to content</a>
     <div class="max-w-3xl mx-auto px-4 py-6">
       <Header showBrand={showHeaderBrand} />
-      <main>
+      <main id="main-content" tabindex="-1">
         <slot />
       </main>
       <Footer />

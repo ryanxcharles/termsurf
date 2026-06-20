@@ -22,7 +22,7 @@ const currentPath = Astro.url.pathname.replace(/\/$/, "");
           Documentation
         </summary>
         <Search />
-        <nav class="space-y-1 text-xs">
+        <nav class="space-y-1 text-xs" aria-label="Documentation">
         {
           nav.map((group) => (
             <>
