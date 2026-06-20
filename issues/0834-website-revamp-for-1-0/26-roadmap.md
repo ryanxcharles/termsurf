@@ -104,3 +104,65 @@ no-timeline/no-overclaim framing is endorsed. Two **Optional** notes:
 2. **(deferred follow-up)** About's brief Planned summary duplicates the roadmap
    set (drift risk); adding an About→Roadmap backlink is a sensible later tweak,
    not required here.
+
+## Result
+
+**Result:** Pass
+
+The consolidated Roadmap is added and seeds the IA's TermSurf group; all
+criteria pass.
+
+### What was built
+
+`src/content/docs/roadmap.mdx` (`section: TermSurf`, `order: 1`) — raw-HTML MDX
+in `prose-termsurf`: an intro stating everything below is planned/not-in-1.0
+(linking About for what ships), then four `<h2>` groups — **Browser features**
+(bookmarks, multi-tab browsing, history, downloads, PDF), **Browser engines**
+(WebKit/Surfari planned; Gecko/Waterwolf + Ladybird/Girlbat researched; Roamium
+ships; links Architecture's engine table), **Terminal front-ends** (Kitty,
+Alacritty, iTerm2), **Platforms** (Linux/Windows; later iOS/Android). No dates.
+
+### Verification results
+
+1. **Builds + placed** — `bun run build` 83 pages; `/docs/roadmap` emitted; the
+   `/docs` index section order is Overview → Configuration → Features → Terminal
+   API → Components → Protocol → **TermSurf** → Help (the new TermSurf group
+   after Protocol, per `SECTION_ORDER`); `astro check` 0 errors. **Pass.**
+2. **Accuracy (clearly planned)** — the article contains **no** dates/version
+   commitments (the "2000"/"2026" matches are the SVG namespace + footer
+   copyright in the shared layout, not the content); "planned" framing
+   throughout (5×); the engine planned-vs-researched nuance preserved; nothing
+   shipped listed as planned; consistent with About/Architecture. **Pass.**
+3. **No duplication** — links About (shipped) + Architecture (engine table)
+   rather than restating the inventory or engine internals. **Pass.**
+4. **Design system, zero JS, links resolve** — `prose-termsurf`; no hardcoded
+   hex; 0 `astro-island`; dead-link crawl over `/docs/roadmap` = 0 broken.
+   **Pass.**
+5. **a11y** — one `<h1>` ("Roadmap") → four ordered `<h2>`s, no skipped levels;
+   descriptive link text. **Pass.**
+6. **No regressions** — `gen:references --check` + `import:vt --check` exit 0;
+   the new TermSurf group/entry is the only nav addition; search/`/`/`/welcome`/
+   other pages unchanged. **Pass.**
+
+## Conclusion
+
+Scope decision 6 is satisfied: a single, clearly-marked roadmap of
+planned-but-unshipped work (features, engines, front-ends, platforms) with no
+timelines and nothing read as shipped, cross-linking About and Architecture. It
+also seeds the IA's **TermSurf** nav group as its first occupant. Next Phase-4
+candidates: Browser Engines (Roamium rework + engine roadmap detail) and the
+protocol refresh. (Deferred follow-up: an About→Roadmap backlink to keep the two
+planned summaries in sync.)
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+findings). Against a fresh 83-page build the reviewer confirmed: every item is
+framed planned/not-in-1.0 with no shipped item mislabeled (Roamium "today's
+shipping engine," Ghostboard "current GUI"); no date/version commitment in the
+article body (the only "1.0" tokens describe the current release, as About
+does); the engine planned-vs-researched nuance matches `architecture.mdx`; the
+**TermSurf** group renders after Protocol/before Help containing only Roadmap;
+links to About + Architecture resolve and the page doesn't restate the
+inventory; one `<h1>` + four ordered `<h2>`; no hex; 0 `astro-island`;
+`astro check` 0 errors; drift checks exit 0; scope only the new file.
