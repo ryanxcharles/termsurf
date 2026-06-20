@@ -313,7 +313,7 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 
 ### Phase 4 — TermSurf-specific documentation
 
-- [Experiment 23: Web TUI reference](23-web-tui-reference.md) — **Designed**
+- [Experiment 23: Web TUI reference](23-web-tui-reference.md) — **Pass**
 
 ## Process notes
 

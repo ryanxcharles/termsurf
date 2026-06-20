@@ -152,3 +152,77 @@ CONTROL) and `:quit`/`:q` (`:1101`); Control keys `i`/`A`/`I`/`n`/`v`/`V`
    caveat.
 2. Edit-mode `Enter`-navigate is also `!is_devtools`-guarded (`main.rs:1050`) —
    noted.
+
+## Result
+
+**Result:** Pass
+
+The Web TUI page is reworked into an accurate, source-verified reference; all
+criteria pass.
+
+### What was built
+
+`src/content/docs/components/webtui.mdx` rewritten in `prose-termsurf`:
+**Command line** (subcommands `url`/`file`/`last`/`status`; flags
+`-p/--profile`, `--incognito`, `-b/--browser <name|path>`, `--primary-screen`;
+profile-name rule; incognito/profile exclusion; the dev `--browser <path>`
+form); **URL resolution** (the six ordered `resolve_input` rules + an examples
+table); **Modes** (all six); **Keybindings** (per-mode tables for Control incl.
+`Cmd+C`, Browse, Edit, Command, Dialog, Auth, and the global `Ctrl+C` quit);
+**Commands** (quit/dark/**viewport**/devtools with aliases and args); **DevTools
+and dark mode**. The stale `q`-quit row, the unverifiable loading-screen stages,
+and the "XPC" IPC claim are gone.
+
+### Verification results
+
+1. **Accuracy (source-verified)** — every claim maps to `webtui/src/main.rs`
+   (verified at the design gate line-by-line and re-confirmed in the built
+   page): six modes, the CLI surface, profile validation, the URL rules,
+   per-mode keys, and the four commands incl. `viewport`. The built page has
+   **no** Control-mode `q`-quit (the only "q…Quit" is the legitimate `:q`
+   command alias); `Cmd+C` copy-URL, the Dialog/Auth modes, `:viewport`, and URL
+   resolution are all present. **Pass.**
+2. **Builds + checks** — `bun run build` 80 pages (rework, count unchanged);
+   `bunx astro check` 0 errors; `gen:references --check` + `import:vt --check`
+   exit 0. **Pass.**
+3. **Design system, zero JS, links resolve** — `prose-termsurf`; no hardcoded
+   hex; 0 `astro-island`; dead-link crawl over `/docs/components/webtui` = 0
+   broken (links to roamium / keybindings / configuration / architecture all
+   resolve). **Pass.**
+4. **a11y** — one `<h1>` ("Web TUI") → ordered `<h2>`/`<h3>` (Command line, URL
+   resolution, Modes, Keybindings[Control/Browse/Edit/Command/Dialog/Auth/Any],
+   Commands, DevTools), no skipped levels. **Pass.**
+5. **No regressions** — only `webtui.mdx` changed; route/nav position unchanged;
+   sidebar/search/`/`/`/welcome`/other pages unaffected. **Pass.**
+
+## Conclusion
+
+The `web` TUI reference — the issue's center of gravity — is now accurate to the
+source: six modes, the real keybindings (no phantom `q`-quit, the previously
+missing `Cmd+C` and Dialog/Auth modes added), the full command set (the
+previously missing `:viewport` added), the CLI surface, and the smart
+URL-resolution rules. Next Phase-4 candidates: the end-to-end UX story ("How
+TermSurf Works"), the protocol refresh, Browser Engines (Roamium + roadmap),
+Ghostboard's pane-border additions, and the roadmap.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+Required findings). The reviewer independently re-derived every claim from
+`webtui/src/main.rs` with line cites — six modes (49-56), no phantom `q`-quit
+(Control 955-1042; the only "q…Quit" is the `:q` alias), `Cmd+C`/edit keys
+`!is_devtools`-guarded (957-1017), Browse forwards all but Esc (930-936), Edit
+`Enter` double-guarded (1048-1050), all four commands incl. `:viewport`
+(206-247), the CLI surface + profile rule + incognito/profile exclusion
+(298-358), the URL-resolution order matching `resolve_input` (1534-1569) incl.
+bare-file-after-host:port, and Dialog/Auth keys (760-876). Confirmed no XPC /
+loading-screen / "four modes" stale text remains; 80 pages; `astro check` 0
+errors; drift checks exit 0; all four links resolve; one `<h1>` + ordered h2/h3;
+no hex; 0 `astro-island`; scope only `webtui.mdx`. Two **Nits**, one folded in:
+
+- **(Nit, fixed)** URL rule 6 said "the URL bar shows an error," but on a failed
+  resolve the error renders in the command bar (Edit mode switches to Command)
+  or on stderr (CLI). Reworded to "nothing is navigated and an error is shown
+  (in the command bar when editing, or on stderr from the CLI)."
+- **(Nit, already covered)** the `./page.html → file://` example fires only if
+  the file exists — the caveat is stated in the rules list above the table.

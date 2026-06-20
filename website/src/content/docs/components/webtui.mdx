@@ -1,6 +1,6 @@
 ---
 title: Web TUI
-description: The web TUI — browser chrome in the terminal pane, with modes, keybindings, and commands.
+description: The web TUI — browser chrome in the terminal pane, with its CLI, smart URL resolution, six modes, per-mode keybindings, and commands.
 section: Components
 order: 1
 ---
@@ -8,242 +8,249 @@ order: 1
 <h1>Web TUI</h1>
 
 <p>
-  The <code>web</code> command is a TUI that provides browser chrome — URL bar,
-  navigation, modes — inside a terminal pane. It connects to the GUI
-  (Ghostboard) via the TermSurf protocol and controls browser engine processes
-  (Roamium) to render web pages.
+  The <code>web</code> command is a terminal UI that puts browser chrome — a URL
+  bar, navigation, and modes — inside a terminal pane. It connects to the GUI
+  (Ghostboard), which renders the actual web page as an overlay using a browser
+  engine (<a href="/docs/components/roamium">Roamium</a>). You drive the browser
+  from the keyboard without leaving the terminal.
 </p>
 
-<h2>Usage</h2>
-
-<p>Open a URL in the current pane:</p>
-
-<pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">web</span> ryanxcharles.com</code></pre>
+<pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">web</span> example.com</code></pre>
 
 <p>
-  The browser appears inline. You start in Control mode. Press
-  <code>Enter</code> to switch to Browse mode and interact with the page. Press
-  <code>Esc</code> to return to Control mode.
+  The browser appears inline. You start in <strong>Control</strong> mode; press
+  <code>Enter</code> to switch to <strong>Browse</strong> mode and interact with
+  the page, and <code>Esc</code> to return to Control.
 </p>
 
-<h2>Modes</h2>
+<h2>Command line</h2>
 
 <p>
-  The TUI has four modes. The GUI only tracks a boolean (<code>browsing</code>
-  or not) — it does not distinguish between Control, Edit, and Command.
+  Usage is <code>web [URL] [options]</code>, with optional subcommands:
 </p>
 
 <table>
   <thead>
-    <tr>
-      <th>Mode</th>
-      <th>Behavior</th>
-    </tr>
+    <tr><th>Subcommand</th><th>Action</th></tr>
   </thead>
   <tbody>
-    <tr>
-      <td><strong>Control</strong></td>
-      <td>Terminal keybindings active. Default on startup.</td>
-    </tr>
-    <tr>
-      <td><strong>Browse</strong></td>
-      <td>Keyboard and mouse go to the browser.</td>
-    </tr>
-    <tr>
-      <td><strong>Edit</strong></td>
-      <td>Vim-style URL editing with Normal/Insert/Visual submodes.</td>
-    </tr>
-    <tr>
-      <td><strong>Command</strong></td>
-      <td>Command entry prefixed with <code>:</code>.</td>
-    </tr>
+    <tr><td><code>web url &lt;url&gt;</code></td><td>Open a URL in the browser pane</td></tr>
+    <tr><td><code>web file &lt;path&gt;</code></td><td>Open a local file in the browser pane</td></tr>
+    <tr><td><code>web last</code></td><td>Print the last active browser pane/tab</td></tr>
+    <tr><td><code>web status</code></td><td>Print the Chromium tab inventory for the current profile</td></tr>
+  </tbody>
+</table>
+
+<p>Options (valid with any subcommand):</p>
+
+<table>
+  <thead>
+    <tr><th>Option</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>-p</code>, <code>--profile &lt;name&gt;</code></td><td>Browser profile to use (default <code>default</code>)</td></tr>
+    <tr><td><code>--incognito</code></td><td>Use an ephemeral private profile</td></tr>
+    <tr><td><code>-b</code>, <code>--browser &lt;name|path&gt;</code></td><td>Browser binary — a name or an absolute path</td></tr>
+    <tr><td><code>--primary-screen</code></td><td>Render in the primary terminal screen instead of the alternate screen</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Profile names must be <strong>lowercase alphanumeric and start with a
+  letter</strong>. <code>--incognito</code> cannot be combined with
+  <code>--profile</code> unless the profile is <code>incognito</code>. Each
+  profile keeps its own cookies, storage, and cache (see the{" "}
+  <a href="/docs/reference/configuration">configuration guide</a> for where
+  profiles are stored). The <code>--browser</code> flag is mainly for
+  development — pass an absolute path to test a specific engine build:
+</p>
+
+<pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">web</span> --browser /path/to/roamium example.com</code></pre>
+
+<h2>URL resolution</h2>
+
+<p>
+  Whatever you type — as an argument or in the URL bar — is resolved to a URL by
+  these rules, in order:
+</p>
+
+<ol>
+  <li>Already has a scheme (<code>https://…</code>, <code>file://…</code>) — used as-is.</li>
+  <li>Starts with <code>/</code>, <code>./</code>, or <code>../</code> and the file exists — opened as <code>file://</code>.</li>
+  <li>Contains <code>:</code> — treated as <code>host:port</code> (<code>http://</code> for localhost, otherwise <code>https://</code>).</li>
+  <li>Names an existing file — opened as <code>file://</code>.</li>
+  <li>Looks like a domain (contains a dot) — <code>https://</code> (localhost gets <code>http://</code>).</li>
+  <li>Otherwise it isn't treated as a URL or file: nothing is navigated and an error is shown (in the command bar when editing, or on stderr from the CLI).</li>
+</ol>
+
+<table>
+  <thead>
+    <tr><th>You type</th><th>You get</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>example.com</code></td><td><code>https://example.com</code></td></tr>
+    <tr><td><code>localhost:3000</code></td><td><code>http://localhost:3000</code></td></tr>
+    <tr><td><code>./page.html</code></td><td><code>file://…/page.html</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Modes</h2>
+
+<p>The TUI has six modes:</p>
+
+<table>
+  <thead>
+    <tr><th>Mode</th><th>Behavior</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Control</strong></td><td>Default. TUI keybindings active.</td></tr>
+    <tr><td><strong>Browse</strong></td><td>Keyboard and mouse go to the page.</td></tr>
+    <tr><td><strong>Edit</strong></td><td>Vim-style URL editing (Normal / Insert / Visual / Search submodes).</td></tr>
+    <tr><td><strong>Command</strong></td><td>Command entry prefixed with <code>:</code>.</td></tr>
+    <tr><td><strong>Dialog</strong></td><td>Answering a JavaScript dialog (alert / confirm / prompt / beforeunload).</td></tr>
+    <tr><td><strong>Auth</strong></td><td>Entering HTTP authentication credentials.</td></tr>
   </tbody>
 </table>
 
 <h2>Keybindings</h2>
 
-<h3>Control Mode</h3>
+<h3>Control mode</h3>
 
 <table>
   <thead>
-    <tr>
-      <th>Key</th>
-      <th>Action</th>
-    </tr>
+    <tr><th>Key</th><th>Action</th></tr>
   </thead>
   <tbody>
     <tr><td><code>Enter</code></td><td>Switch to Browse mode</td></tr>
-    <tr><td><code>i</code></td><td>Edit URL (insert at cursor)</td></tr>
-    <tr><td><code>A</code></td><td>Edit URL (insert at end)</td></tr>
-    <tr><td><code>I</code></td><td>Edit URL (insert at start)</td></tr>
-    <tr><td><code>n</code></td><td>Edit URL (normal mode)</td></tr>
-    <tr><td><code>v</code></td><td>Edit URL (visual mode)</td></tr>
-    <tr><td><code>V</code></td><td>Edit URL (visual line select)</td></tr>
+    <tr><td><code>i</code></td><td>Edit the URL (insert at cursor)</td></tr>
+    <tr><td><code>A</code></td><td>Edit the URL (insert at end)</td></tr>
+    <tr><td><code>I</code></td><td>Edit the URL (insert at start)</td></tr>
+    <tr><td><code>n</code></td><td>Edit the URL (Normal submode)</td></tr>
+    <tr><td><code>v</code></td><td>Edit the URL (Visual submode)</td></tr>
+    <tr><td><code>V</code></td><td>Edit the URL (Visual line select)</td></tr>
     <tr><td><code>:</code></td><td>Enter Command mode</td></tr>
-    <tr><td><code>q</code></td><td>Quit</td></tr>
-  </tbody>
-</table>
-
-<h3>Browse Mode</h3>
-
-<table>
-  <thead>
-    <tr>
-      <th>Key</th>
-      <th>Action</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr><td><code>Esc</code></td><td>Switch to Control mode</td></tr>
-    <tr><td><code>Cmd+[</code></td><td>Back</td></tr>
-    <tr><td><code>Cmd+]</code></td><td>Forward</td></tr>
-    <tr><td><code>Cmd+R</code></td><td>Reload</td></tr>
+    <tr><td><code>Cmd+C</code></td><td>Copy the current URL</td></tr>
   </tbody>
 </table>
 
 <p>
-  All other keys in Browse mode go directly to the browser — typing, scrolling,
-  clicking, and standard web shortcuts all work as expected.
+  The URL-edit keys and <code>Cmd+C</code> are disabled when the pane is a
+  DevTools split.
 </p>
 
-<h3>Edit Mode</h3>
+<h3>Browse mode</h3>
 
 <table>
   <thead>
-    <tr>
-      <th>Key</th>
-      <th>Action</th>
-    </tr>
+    <tr><th>Key</th><th>Action</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>Enter</code></td><td>Navigate to URL, switch to Browse mode</td></tr>
-    <tr><td><code>Esc</code></td><td>Exit to Control mode (from Normal submode)</td></tr>
+    <tr><td><code>Esc</code></td><td>Return to Control mode</td></tr>
   </tbody>
 </table>
 
 <p>
-  The URL editor uses vim-style keybindings (via edtui): <code>h</code>,
-  <code>l</code>, <code>w</code>, <code>b</code>, <code>x</code>,
-  <code>d</code>, <code>y</code>, <code>p</code>, etc. System clipboard
-  integration is built in.
+  Every other key (and the mouse) goes straight to the page, so standard browser
+  shortcuts like <code>Cmd+[</code> / <code>Cmd+]</code> (back / forward) and
+  <code>Cmd+R</code> (reload) work because Chromium handles them — they are not
+  TUI bindings.
 </p>
 
-<h3>Any Mode</h3>
+<h3>Edit mode</h3>
 
 <table>
   <thead>
-    <tr>
-      <th>Key</th>
-      <th>Action</th>
-    </tr>
+    <tr><th>Key</th><th>Action</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>Ctrl+C</code></td><td>Force quit</td></tr>
+    <tr><td><code>Enter</code></td><td>Resolve and navigate to the URL, then switch to Browse mode</td></tr>
+    <tr><td><code>Esc</code></td><td>From the Normal submode, return to Control mode</td></tr>
+  </tbody>
+</table>
+
+<p>
+  The URL editor uses vim-style editing (<code>h</code>/<code>l</code>,
+  <code>w</code>/<code>b</code>, <code>x</code>, <code>d</code>, <code>y</code>,
+  <code>p</code>, …) with system-clipboard integration. <code>Enter</code> does
+  not navigate from the Search submode or in a DevTools split.
+</p>
+
+<h3>Command mode</h3>
+
+<p>
+  Type a command (see below) and press <code>Enter</code> to run it;
+  <code>Esc</code> from the Normal submode returns to Control mode.
+</p>
+
+<h3>Dialog mode</h3>
+
+<p>
+  When a page opens a JavaScript dialog, <code>Enter</code> accepts it (and
+  submits the typed text for a <code>prompt</code>) and <code>Esc</code> cancels;
+  for <code>confirm</code> / <code>beforeunload</code>, <code>y</code> and
+  <code>n</code> also work.
+</p>
+
+<h3>Auth mode</h3>
+
+<p>
+  For an HTTP authentication challenge, <code>Tab</code> switches between the
+  username and password fields, typing fills the active field, <code>Enter</code>
+  advances from username to password and then submits, and <code>Esc</code>
+  cancels.
+</p>
+
+<h3>Any mode</h3>
+
+<table>
+  <thead>
+    <tr><th>Key</th><th>Action</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>Ctrl+C</code></td><td>Quit</td></tr>
   </tbody>
 </table>
 
 <h2>Commands</h2>
 
 <p>
-  Enter Command mode by pressing <code>:</code> in Control mode. Commands use
-  exact matching — no subsequence shortcuts.
+  Enter Command mode with <code>:</code>. Commands match by exact name or alias.
 </p>
 
 <table>
   <thead>
-    <tr>
-      <th>Command</th>
-      <th>Shortcut</th>
-      <th>Action</th>
-    </tr>
+    <tr><th>Command</th><th>Alias</th><th>Action</th></tr>
   </thead>
   <tbody>
-    <tr>
-      <td><code>:quit</code></td>
-      <td><code>:q</code></td>
-      <td>Quit</td>
-    </tr>
-    <tr>
-      <td><code>:dark</code></td>
-      <td><code>:da</code></td>
-      <td>Toggle dark mode</td>
-    </tr>
-    <tr>
-      <td><code>:dark on|off|s</code></td>
-      <td><code>:da on</code></td>
-      <td>Force dark on, off, or system</td>
-    </tr>
-    <tr>
-      <td><code>:devtools [dir]</code></td>
-      <td><code>:de</code></td>
-      <td>Open DevTools in a split pane</td>
-    </tr>
+    <tr><td><code>:quit</code></td><td><code>:q</code></td><td>Quit</td></tr>
+    <tr><td><code>:dark [on|off|system]</code></td><td><code>:da</code></td><td>Force page dark mode on, off, or follow the system; no argument toggles</td></tr>
+    <tr><td><code>:viewport height &lt;rows&gt;</code></td><td><code>:vp</code></td><td>Set the browser viewport height in terminal rows</td></tr>
+    <tr><td><code>:viewport reset</code></td><td><code>:vp r</code></td><td>Reset the viewport height</td></tr>
+    <tr><td><code>:devtools [right|down|left|up]</code></td><td><code>:de</code></td><td>Open DevTools in a split pane (default <code>right</code>)</td></tr>
   </tbody>
 </table>
 
-<h3>DevTools Directions</h3>
-
 <p>
-  The <code>:devtools</code> command accepts a direction for the split:
-  <code>right</code> (default), <code>down</code>, <code>left</code>, or
-  <code>up</code>. Shortcuts: <code>r</code>, <code>d</code>, <code>l</code>,
-  <code>u</code>.
+  <code>:dark</code> also accepts <code>yes</code>/<code>y</code> and
+  <code>no</code>/<code>n</code> for on/off, and <code>s</code> for system.
+  <code>:devtools</code> direction shortcuts are <code>r</code>, <code>d</code>,
+  <code>l</code>, <code>u</code>.
 </p>
 
-<h2>Mode Synchronization</h2>
+<h2>DevTools and dark mode</h2>
 
 <p>
-  Mode state is shared between the TUI and GUI via <code>mode_changed</code>
-  protobuf messages. Both sides send and receive:
-</p>
-
-<ul>
-  <li>
-    <strong>TUI changes mode</strong> (Esc, Enter) &rarr; sends
-    <code>mode_changed</code> to GUI
-  </li>
-  <li>
-    <strong>GUI changes mode</strong> (Esc in Browse mode) &rarr; sends
-    <code>mode_changed</code> to TUI
-  </li>
-  <li>
-    <strong>Initial mode</strong> is set via the <code>browsing</code> field in
-    the <code>SetOverlay</code> message
-  </li>
-</ul>
-
-<h2>Loading Screen</h2>
-
-<p>
-  When a browser is first launched, the TUI displays a loading log in the
-  viewport showing each startup stage:
-</p>
-
-<ul>
-  <li><strong>✓ Connected to GUI</strong></li>
-  <li><strong>✓ Starting browser engine</strong></li>
-  <li><strong>⠋ Waiting for Chromium (12s)</strong> — animated spinner with elapsed time</li>
-  <li><strong>✓ Loading page</strong></li>
-  <li><strong>✓ Ready</strong></li>
-</ul>
-
-<p>
-  On first launch, Chromium takes ~60 seconds to initialize (GPU process, shader
-  compilation, browser context creation). Subsequent launches are much faster.
-  If Chromium takes longer than 30 seconds, a note appears: "First launch is
-  slow — Chromium is initializing." If it exceeds 120 seconds, the stage shows an
-  error suggesting Roamium may not be installed.
+  <code>:devtools</code> opens Chromium DevTools for the current tab in an
+  adjacent split. The URL-edit and copy keys are disabled in a DevTools pane, and
+  it does not navigate. <code>:dark</code> forwards a preferred color scheme to
+  the page (independent of the terminal theme set in your{" "}
+  <a href="/docs/reference/configuration">config</a>).
 </p>
 
 <p>
-  The loading screen disappears automatically when the browser overlay appears.
-</p>
-
-<h2>Direct Browser Connection</h2>
-
-<p>
-  After the browser engine starts, the GUI sends a <code>BrowserReady</code>
-  message to the TUI containing the browser's listen socket path. The TUI
-  connects directly to the browser for navigation and color scheme commands,
-  bypassing the GUI for content messages.
+  How the TUI, the GUI, and the engine processes fit together — and how browser
+  content is composited into the terminal — is covered in{" "}
+  <a href="/docs/architecture">Architecture</a>. For terminal-level key bindings
+  (a separate system from the TUI modes above), see{" "}
+  <a href="/docs/reference/keybindings">Keybindings</a>.
 </p>
