@@ -259,12 +259,18 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 - **Roadmap**: bookmarks, tabs, history, downloads, PDF, additional
   engines/frontends — clearly marked as planned, not shipped.
 
+## Experiments
+
+### Phase 1 — Architecture
+
+- [Experiment 1: Content model & generated navigation](01-content-build-architecture.md)
+  — **Designed**
+
 ## Process notes
 
-- This README intentionally lists **no experiments yet.** Per the project
-  process, experiments are created one at a time inside their phase, each with
-  its own `NN-{slug}.md` file, design review, plan commit, implementation,
-  result, and result commit before the next is designed.
+- Experiments are created one at a time inside their phase, each with its own
+  `NN-{slug}.md` file, design review, plan commit, implementation, result, and
+  result commit before the next is designed.
 - This issue is documentation/website work. It modifies `website/**` and may add
   a reference-generation build step that **reads** Ghostboard fork artifacts; it
   does not modify the Chromium fork, the protocol, the engines, or the release
