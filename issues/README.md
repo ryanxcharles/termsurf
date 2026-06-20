@@ -8,12 +8,12 @@
 | [0795](0795-pdf-native-print/README.md)           | PDF Native Print                     | 2026-05-30 |
 | [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage           | 2026-05-30 |
 | [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                | 2026-05-30 |
-| [0832](0832-publish-1-0-0-to-homebrew/README.md)  | Publish 1.0.0 to Homebrew            | 2026-06-19 |
 
 ## Closed
 
 | #                                                               | Title                                                                         | Opened     | Closed     |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0832](0832-publish-1-0-0-to-homebrew/README.md)                | Publish 1.0.0 to Homebrew                                                     | 2026-06-19 | 2026-06-19 |
 | [0831](0831-ghostboard-webview-padding-alignment/README.md)     | Ghostboard Webview Padding Alignment                                          | 2026-06-19 | 2026-06-19 |
 | [0830](0830-ghostboard-webview-resize-bounce/README.md)         | Ghostboard Webview Resize Bounce                                              | 2026-06-19 | 2026-06-19 |
 | [0829](0829-homebrew-installation/README.md)                    | Homebrew Installation                                                         | 2026-06-19 | 2026-06-19 |

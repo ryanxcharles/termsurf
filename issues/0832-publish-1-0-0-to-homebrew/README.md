@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-19"
+closed = "2026-06-19"
 +++
 
 # Issue 832: Publish 1.0.0 to Homebrew
@@ -65,3 +66,11 @@ Expected release artifacts:
 
 - [Experiment 1: Build, publish, and verify 1.0.0](01-build-publish-and-verify-1-0-0.md)
   — **Pass**
+
+## Conclusion
+
+TermSurf `1.0.0` was published to GitHub and the `termsurf/homebrew-termsurf`
+tap. Homebrew installs `/Applications/TermSurf.app`, `/opt/homebrew/bin/web`,
+and Roamium under `/opt/homebrew/opt/termsurf-roamium`, and the installed app
+successfully loaded `https://example.com/` through the installed Homebrew
+Roamium path.
