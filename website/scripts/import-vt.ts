@@ -235,14 +235,20 @@ const VERIFIED = new Set<string>([
   "osc/8.mdx",
   "osc/9.mdx",
   "osc/conemu.mdx",
+  "index.mdx",
+  "reference.mdx",
+  "external.mdx",
 ]);
 
+// VT index attribution. NOTE: the VT pages are now all in VERIFIED
+// (hand-maintained), so the importer no longer injects this — the live
+// index.mdx carries the (finalized) attribution itself. Kept coherent in case a
+// page ever returns to mechanical import.
 const ATTRIBUTION =
   "> The Terminal API documentation is adapted from " +
   "[Ghostty](https://ghostty.org)'s VT docs, used under the MIT license " +
   "(see the repo `NOTICE`). TermSurf's terminal (Ghostboard) is a Ghostty " +
-  "fork and inherits its VT engine; product-specific details that still name " +
-  "Ghostty are being verified against TermSurf.\n";
+  "fork and inherits its VT engine.\n";
 
 interface OutFile {
   rel: string;

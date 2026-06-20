@@ -281,7 +281,8 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 - [Experiment 8: VT OSC — TermSurf rebrand + fork verification](08-vt-osc-rebrand-verify.md)
   — **Pass**
 - [Experiment 9: VT top-level pages — TermSurf rebrand + finalize](09-vt-toplevel-rebrand-verify.md)
-  — **Designed**
+  — **Pass** (completes scope decision 1 — entire VT reference fork-verified +
+  TermSurf-branded)
 
 ## Process notes
 

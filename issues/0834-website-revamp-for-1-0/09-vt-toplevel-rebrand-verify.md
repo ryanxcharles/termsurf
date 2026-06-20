@@ -80,3 +80,54 @@ partial reference); the voice rebrands and framing-note update are sound. One
 `ATTRIBUTION` constant still says "being verified" and becomes **dead** once
 `index.mdx` joins `VERIFIED` (never injected) — update its text to the finalized
 wording so the importer stays coherent.
+
+## Result
+
+**Result:** Pass
+
+The 3 top-level pages were rebranded to TermSurf, the index framing note
+finalized (MIT attribution kept, "being verified" dropped), the importer's dead
+`ATTRIBUTION` constant updated to match, and all 3 added to `VERIFIED` (now
+**64/64**). This **completes scope decision 1** — the entire VT/Terminal API
+reference is fork-verified and TermSurf-branded.
+
+### Dispositions
+
+- `index` — description "…run in TermSurf"; "TermSurf's control sequence
+  support"; framing note keeps the `[Ghostty](https://ghostty.org)` MIT credit,
+  drops the interim "being verified" clause.
+- `reference` — description + "VT sequences that TermSurf supports" + "TermSurf
+  supports many more sequences than listed" (true — partial reference, full
+  inherited engine).
+- `external` — all 5 mentions rebranded; the supported-protocols table intro now
+  "protocols that TermSurf supports", with OSC 8 (`osc.zig:785`→hyperlink) and
+  OSC 21 (`:789`→kitty_color) fork-confirmed.
+
+### Verification results
+
+1. **Claims dispositioned** — OSC 8/21 fork-confirmed; descriptive/voice
+   rebranded; framing note finalized. **Pass.**
+2. **No product "Ghostty" left** — a grep of `src/content/docs/vt/` returns only
+   the upstream attribution (`ghostty.org` link / "Ghostty fork" credit on the
+   index note) and the `ghostty-org` issue URL in `concepts/cursor`. **Pass.**
+3. **Importer coherence** — `import:vt --check` exits 0; a re-run wrote **0**
+   pages (all 64 verified) and changed nothing. **Pass.**
+4. **Builds + links** — `bun run build` 76 pages; `astro check` 0 errors; a
+   head+body crawl of all VT pages finds **zero** dead links/fragments.
+   **Pass.**
+5. **No regressions** — other pages unchanged. **Pass.**
+
+## Conclusion
+
+**Scope decision 1 is complete.** All 64 VT / Terminal API pages are imported
+from Ghostty's MIT docs, **fork-verified** claim-by-claim, and TermSurf-branded;
+the only Ghostty references remaining are upstream attribution. The five-pass
+verification (Concepts → Control → CSI+ESC → OSC → top-level) corrected several
+genuinely stale/false upstream claims along the way (dynamic-color count, ConEmu
+timeout platform, version cells) — the per-claim fork tracing earned its cost.
+The VT reference is the largest single body of the new docs.
+
+Phase 1's remaining pieces: **search** (Pagefind), **versioning** posture, the
+full **IA/sitemap**, and the **deploy/`deploy.sh`** cleanup. Then Phase 2
+(design system), Phase 3 (Ghostty-parity About/Install/Features/Help/Sponsor),
+and Phase 4 (TermSurf-specific UX/web-TUI/protocol/engines/roadmap).
