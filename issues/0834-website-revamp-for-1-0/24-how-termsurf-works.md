@@ -113,3 +113,75 @@ JS, and that not wiring the home hero is no dangling promise (home links
 `/docs`, which auto-lists the page). One **Nit** (no change needed): the fork's
 reuse key is actually profile+browser, but "one engine process per profile" is
 the faithful simplification every page uses — the page keeps that wording.
+
+## Result
+
+**Result:** Pass
+
+The How TermSurf Works narrative is added as a top-level intro page; all
+criteria pass.
+
+### What was built
+
+`src/content/docs/how-termsurf-works.mdx` (`order: 1.6`) — raw-HTML MDX in
+`prose-termsurf`: the pitch (a real browser in a terminal pane, no alt+tab); a
+four-step **What happens when you run `web example.com`** flow (TUI connects to
+the GUI over a Unix socket via `TERMSURF_SOCKET` → GUI launches/reuses an engine
+process per profile → engine renders + GUI composites a zero-copy GPU overlay,
+`CALayerHost` on macOS → TUI draws chrome + Control/Browse modes); and a **Why
+it's built this way** section that links Architecture (topology/IPC/GPU), the
+protocol overview, Roamium, and Getting Started — summarize-and-link, no
+duplication.
+
+### Verification results
+
+1. **Builds + placed** — `bun run build` 81 pages; `/docs/how-termsurf-works`
+   emitted; the `/docs` Overview cluster reads **Getting Started → About → How
+   TermSurf Works → Architecture** (orders 1 / 1.5 / 1.6 / 2); `astro check` 0
+   errors. **Pass.**
+2. **Accuracy / consistency** — flow matches `architecture.mdx` + the
+   source-verified Web TUI page (socket via `TERMSURF_SOCKET`, one engine per
+   profile, `CALayerHost` zero-copy on macOS, Control/Browse modes);
+   macOS/CALayerHost present; no Linux/Windows-platform or non-Chromium-shipped
+   or superlative claim (the lone narrative "windows" was reworded to "apps" to
+   keep the sweep unambiguous). **Pass.**
+3. **No duplication** — summarizes and links; does not restate the wire format,
+   topology diagram, `CALayerHost` internals, or the per-mode key tables.
+   **Pass.**
+4. **Design system, zero JS, links resolve** — `prose-termsurf`; no hardcoded
+   hex; 0 `astro-island`; dead-link crawl over the page = 0 broken (all five
+   cross-links resolve). **Pass.**
+5. **a11y** — one `<h1>` ("How TermSurf Works") → two ordered `<h2>`s, no
+   skipped levels; descriptive link text. **Pass.**
+6. **No regressions** — `gen:references --check` + `import:vt --check` exit 0;
+   only the new page added; search/`/`/`/welcome`/other pages unchanged.
+   **Pass.**
+
+(Implementation note: the first build failed because MDX can't parse a
+multi-line `<a>` inside an `<li>`; fixed by keeping every anchor on a single
+line — a reusable lesson for narrative MDX with lists.)
+
+## Conclusion
+
+The issue's other center-of-gravity deliverable — "the basic UX of how TermSurf
+works" — now has a dedicated narrative page that tells the request-to-overlay
+story and routes into the Web TUI, Architecture, and protocol docs. Combined
+with the source-verified Web TUI reference (Exp 23), the UX emphasis is covered.
+Next Phase-4 candidates: the protocol refresh, Browser Engines (Roamium +
+roadmap), Ghostboard's pane-border additions, and the roadmap.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+findings). Against a fresh 81-page build the reviewer confirmed all four flow
+steps match `architecture.mdx` (socket via `TERMSURF_SOCKET` :73; one engine per
+profile :17-22; `CALayerHost` zero-copy macOS :94-99) and `webtui.mdx`
+(Control/Browse); the page mentions only the two primary modes and links webtui
+for the rest (no overclaim); engine framed as Roamium/Chromium on macOS with
+others planned (linking the Architecture table); no superlative, no
+Linux/Windows platform claim, and the word "window" does not appear (reworded to
+"apps"). No duplication (zero code-block diagrams; no
+`4-byte`/`CAContext`/`ipc-socket` strings; no key tables). Placement Getting
+Started → About → How TermSurf Works → Architecture; one `<h1>` + ordered
+`<h2>`s; all five cross-links resolve; no hex; 0 `astro-island`; `astro check` 0
+errors; drift checks exit 0; scope only the new file.
