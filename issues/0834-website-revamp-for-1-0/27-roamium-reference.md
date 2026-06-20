@@ -118,3 +118,73 @@ install-path claims match root `CLAUDE.md`; the kept startup-sequence names
 (`ServerRegister`, `CreateTab`) exist in the proto; scope is one reworked MDX
 file with unchanged route/links. One **Optional**: the "83 pages" count is a
 build-time check, confirmed at the result gate.
+
+## Result
+
+**Result:** Pass
+
+The Roamium reference is reworked to a complete, source-verified surface; all
+criteria pass.
+
+### What was built
+
+`src/content/docs/components/roamium.mdx` rewritten in `prose-termsurf`: How it
+works; the two-layer Architecture; a corrected **Source layout** (`main.rs`,
+`dispatch.rs`, `ipc.rs`, `ffi.rs`, `proto.rs` — no `build.rs`); the complete **C
+API** grouped into Lifecycle / Profiles (incl. incognito + destroy) / Tabs /
+Navigation & input / State (incl. `ts_set_gui_active`) / Dialog & auth replies
+(`ts_reply_javascript_dialog`, `ts_reply_http_auth`); the complete **Callbacks**
+table (11 `on_*` → proto messages, adding console/renderer-crash/http-auth/JS-
+dialog) with a request/reply round-trip note; Multi-engine pattern (linking the
+roadmap); and Installation.
+
+### Verification results
+
+1. **Accuracy (source-verified)** — every `ts_*` in the tables is in `ffi.rs`
+   (the only non-table token is the prose glob `ts_set_on_*`); the 21
+   direct-call functions + 11 `ts_set_on_*` registrations cover all 32 `ffi.rs`
+   functions; all 11 callback protobuf messages exist in `proto/termsurf.proto`;
+   the source-layout table matches `roamium/src/`. **Pass.**
+2. **Builds + checks** — `bun run build` 83 pages (rework, unchanged);
+   `bunx astro check` 0 errors; `gen:references --check` + `import:vt --check`
+   exit 0. **Pass.**
+3. **Design system, zero JS, links resolve** — `prose-termsurf`; no hardcoded
+   hex; 0 `astro-island`; dead-link crawl over `/docs/components/roamium` = 0
+   broken (architecture / webtui / protocol-messages / getting-started / roadmap
+   all resolve). **Pass.**
+4. **a11y** — one `<h1>` ("Roamium") → ordered `<h2>`/`<h3>` (How it works …
+   Installation), no skipped levels. **Pass.**
+5. **No regressions** — only `roamium.mdx` changed; route/nav position
+   unchanged; sidebar/search/`/`/`/welcome`/other pages unaffected. **Pass.**
+
+(Implementation note: the first build failed on a multi-line `<a>` inside a
+`<p>` — the same MDX-in-prose constraint as Exp 24 — fixed by keeping the anchor
+on one line.)
+
+## Conclusion
+
+The Roamium reference is now complete and source-accurate: the full 32-function
+C API (incognito/destroy contexts, dialog/auth replies, gui-active) and all 11
+callbacks with verified protobuf messages, plus a corrected source layout. The
+HTTP-auth / JS-dialog / console / renderer-crash surface that backs the Web
+TUI's Auth/Dialog modes and crash recovery is now documented on the engine side
+too. Last Phase-4 item: the protocol refresh (overview + the 41-message
+reference, verified against `proto/termsurf.proto`).
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE WITH
+CHANGES.** The page itself verified fully clean: the C API is a 1:1 cover of
+`ffi.rs` (21 direct `ts_*` rows + 11 `on_*` callbacks = 32, none invented, all
+nine previously-omitted present); all 11 callback protobuf messages exist in
+`proto/termsurf.proto`; the source-layout table matches `roamium/src/` (no
+`build.rs`); retained architecture/binary/multi-engine/install claims match root
+`CLAUDE.md` and the "How it works" prose names no fabricated messages; 83 pages,
+`astro check` 0 errors, drift checks exit 0, all five links resolve, one
+`<h1>` + ordered h2/h3, no hex, 0 `astro-island`, scope only `roamium.mdx`. One
+**Required** finding, fixed:
+
+- **(Required) Doubled status line.** A `sed` slip when flipping the README
+  index left the Exp 27 entry with a stray second `  **Pass**` line (rendering
+  "Pass Pass"). **Resolved** by deleting the stray line so the entry is a single
+  line ending `— **Pass**`.
