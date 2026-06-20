@@ -295,6 +295,8 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
   — **Pass**
 - [Experiment 14: Responsive mobile docs nav](14-responsive-mobile-nav.md) —
   **Pass**
+- [Experiment 15: Accessibility baseline](15-accessibility-baseline.md) —
+  **Designed**
 
 ## Process notes
 
