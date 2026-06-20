@@ -143,3 +143,76 @@ folded in:
    `/docs` until that page is built.
 3. **(Optional) Home-specific a11y.** Added verification 6: single `<h1>`,
    ordered `<h2>`s (no skipped levels), descriptive `alt` on every image.
+
+## Result
+
+**Result:** Pass
+
+The homepage is rebuilt as an accurate, design-system marketing landing; all
+seven criteria pass.
+
+### What was built
+
+`src/pages/index.astro` — a sectioned landing on the existing `Base.astro`
+shell: hero (logo + "Terminal + Browser" tagline, the `ROOT ACCESS TO THE 'NET.`
+headline as the single `<h1>`, the no-alt+tab pitch with an inline
+`web example.com`, and Install / Read the docs / GitHub CTAs); the
+`screenshot3.webp` showcase with a caption; a six-card "What ships in 1.0"
+capability grid (`md:grid-cols-2`); a "How it works" protocol blurb linking to
+`/docs`; and a clearly-labeled **Planned** roadmap list. All copy is macOS- and
+Chromium-accurate; the WebKit / "multiple engines … at the same time" / "the
+only browser" overclaims are gone.
+
+### Verification results
+
+1. **Accuracy** — built `/` has **no** "the only" / "only browser" / "first"
+   superlative, **no** "multiple engines" present-tense claim, **no**
+   Linux/Windows claim; the single "WebKit" occurrence is inside the **Planned**
+   roadmap list ("More browser engines — WebKit (Surfari), …"); engine copy is
+   Chromium/Roamium; every capability-grid item is from the shipped inventory.
+   **Pass.**
+2. **Design system, zero new JS** — `grep` finds **no** hardcoded hex in
+   `index.astro` (semantic `text-*`/`bg-*`/`border-*` only); built `/` emits
+   **0** `<script>`/`astro-island`. **Pass.**
+3. **Responsive** — capability grid is one column on mobile, `md:grid-cols-2` at
+   `md`+; CTAs `flex-wrap`; screenshot `w-full`. **Pass.**
+4. **CTAs resolve** — home-link crawl: `/docs`, `/docs/getting-started`, and the
+   GitHub URL all resolve; 0 broken internal links. **Pass.**
+5. **Build + checks** — `bun run build` 76 pages; `bunx astro check` 0 errors /
+   0 warnings / 3 pre-existing hints; `gen:references --check` +
+   `import:vt --check` exit 0. **Pass.**
+6. **Accessibility** — built `/` has exactly one `<h1>`
+   (`ROOT ACCESS TO THE 'NET.`) → `<h2>`s (What ships / How it works / Planned)
+   → `<h3>` card titles, no skipped levels; all three `<img>`s have descriptive
+   `alt`; skip link + `<main id="main-content">` inherited from `Base.astro`.
+   **Pass.**
+7. **No regressions** — diff is `index.astro` only; `/welcome`, docs, search,
+   nav, header, footer unchanged. **Pass.**
+
+## Conclusion
+
+The home/marketing Phase-2 deliverable is done: 1.0 has an accurate, on-brand
+landing page that leads with the headline UX story (a real browser in your
+terminal, no alt+tab), features only shipped macOS/Chromium capabilities, marks
+the roadmap clearly as Planned, and routes visitors into the docs — with zero
+new JS and AA-compliant Tokyo Night tokens. The live accuracy bug (WebKit /
+"multiple engines" / "only browser") is fixed. Remaining Phase-2: the
+docs-landing / section-index page template. (Deep feature/UX content is Phase 4;
+the `/welcome` on-black contrast fix remains a logged follow-up.)
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+Required/Optional/Nit findings). The reviewer rebuilt the site and independently
+verified: the accuracy constraint holds (greps for "the only"/"only
+browser"/"first"/"multiple engines"/"linux"/"windows"/"cross-platform" all
+empty; the sole "WebKit"/engine-name mentions sit inside the **Planned** list;
+every capability card maps to a README shipped-inventory line; risky shipped
+features like HTTP auth / crash recovery correctly omitted); roadmap correctly
+labeled; no hex / zero client JS / uses `Base.astro`; one `<h1>` with heading
+sequence `[1,2,3,3,3,3,3,3,2,2]` (no skips) and descriptive `alt` on all three
+images; CTAs resolve with `rel="noopener noreferrer"` on GitHub; 76 pages,
+`astro check` 0 errors, drift checks exit 0; diff is `index.astro` only with
+`showHeaderBrand={false}` intentional. One out-of-scope note (not a finding):
+the footer `astrohacker.com` link lacks `rel="noopener"`, but that lives in the
+untouched `Footer.astro`.

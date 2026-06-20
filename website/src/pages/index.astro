@@ -1,9 +1,44 @@
 ---
 import Base from "../layouts/Base.astro";
+
+// Shipped 1.0 capabilities only (macOS, Chromium/Roamium). Roadmap items are
+// listed separately and explicitly labeled "Planned". See issue 834.
+const capabilities = [
+  {
+    title: "A browser in a pane",
+    body: "Type web <url> and a real Chromium page renders as a zero-copy GPU (Metal) overlay inside a terminal pane.",
+  },
+  {
+    title: "No alt+tab",
+    body: "The browser lives where you work. Navigate the web without ever leaving the terminal or switching apps.",
+  },
+  {
+    title: "Modal, keyboard-driven",
+    body: "The web TUI draws a URL bar and status line, with vim-inspired modes for navigating and editing — hands on the keyboard.",
+  },
+  {
+    title: "Isolated profiles",
+    body: "Run multiple profiles side by side in one window, each with its own cookies and storage — plus incognito.",
+  },
+  {
+    title: "Split pane borders",
+    body: "Ghostboard adds focused/unfocused split borders and shows the page title in the viewport border, so you always know the active pane.",
+  },
+  {
+    title: "DevTools & dark mode",
+    body: "Open Chromium DevTools in an adjacent split, and toggle page dark mode straight from the terminal.",
+  },
+];
+
+const planned = [
+  "Bookmarks, tabs, history, downloads, and PDF viewing",
+  "More browser engines — WebKit (Surfari), Gecko (Waterwolf), Ladybird (Girlbat)",
+  "More terminal front-ends — Kitty, Alacritty, iTerm2",
+];
 ---
 
 <Base title="TermSurf" showHeaderBrand={false}>
-  <section class="mb-8">
+  <section class="mb-10">
     <div class="mb-6 flex items-center gap-4">
       <picture>
         <source
@@ -17,40 +52,88 @@ import Base from "../layouts/Base.astro";
         />
       </picture>
       <div>
-        <h1 class="text-foreground text-xl font-bold">TermSurf</h1>
-        <p class="text-primary text-sm font-bold">Terminal + Browser</p>
+        <span class="text-foreground block text-xl font-bold">TermSurf</span>
+        <span class="text-primary text-sm font-bold">Terminal + Browser</span>
       </div>
     </div>
 
-    <h2 class="font-heading text-3xl font-bold tracking-tight sm:text-4xl mb-4">
+    <h1 class="font-heading mb-4 text-3xl font-bold tracking-tight sm:text-4xl">
       ROOT ACCESS TO THE 'NET.
-    </h2>
-    <p class="text-foreground-dark text-sm">
-      TermSurf is a protocol that overlays web browser engines, like
-      Chromium and WebKit, in your terminal emulator.{" "}
-      <a href="/docs" class="text-primary hover:text-accent">
-        Read the docs &rarr;
-      </a>
+    </h1>
+    <p class="text-foreground-dark mb-6 text-sm">
+      A real browser, in your terminal. Type <code
+        class="text-secondary">web example.com</code
+      > and a Chromium page renders as a GPU overlay right in your pane — no
+      alt+tab, no context switch. macOS, today.
     </p>
-    <div class="mt-6 border-t border-border"></div>
+
+    <div class="flex flex-wrap gap-3 text-sm font-bold">
+      <a
+        href="/docs/getting-started"
+        class="bg-primary text-background px-4 py-2">Install</a
+      >
+      <a
+        href="/docs"
+        class="border-border text-foreground hover:text-accent border px-4 py-2"
+        >Read the docs</a
+      >
+      <a
+        href="https://github.com/termsurf/termsurf"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="border-border text-foreground hover:text-accent border px-4 py-2"
+        >GitHub</a
+      >
+    </div>
+    <div class="border-border mt-8 border-t"></div>
   </section>
-  <section class="mb-8">
+
+  <section class="mb-10">
     <img
       src="/images/screenshot3.webp"
-      alt="TermSurf — a browser pane alongside terminal panes"
+      alt="A Chromium browser pane rendered as a GPU overlay alongside terminal panes inside TermSurf"
       class="w-full"
     />
-    <h2 class="text-sm font-bold text-foreground mt-3">
-      TermSurf: A browser-native terminal workflow
-    </h2>
-    <p class="text-sm text-muted mt-2">
-      TermSurf supports GPU-rendered web pages using real browser
-      engines like Chromium and WebKit. <em>In your terminal</em>.
-      Furthermore, TermSurf is the only browser that supports multiple
-      profiles and multiple engines in the same window at the same time.{" "}
-      <a href="/docs" class="text-primary hover:text-accent">
-        Learn more in the docs &rarr;
-      </a>
+    <p class="text-muted mt-3 text-sm">
+      A Chromium browser pane, composited into the terminal alongside your
+      shells — one window, no app-switching.
     </p>
+  </section>
+
+  <section class="mb-10">
+    <h2 class="text-foreground mb-4 text-lg font-bold">What ships in 1.0</h2>
+    <div class="grid gap-4 md:grid-cols-2">
+      {
+        capabilities.map((c) => (
+          <div class="bg-background-dark border-border border-l-2 p-4">
+            <h3 class="text-foreground mb-1 text-sm font-bold">{c.title}</h3>
+            <p class="text-muted text-sm">{c.body}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="mb-10">
+    <h2 class="text-foreground mb-2 text-lg font-bold">How it works</h2>
+    <p class="text-foreground-dark text-sm">
+      TermSurf is a protocol, not just an app. The terminal (Ghostboard, a
+      Ghostty fork), the <code class="text-secondary">web</code> TUI, and each
+      browser engine are separate processes speaking a protobuf/Unix-socket
+      protocol — so one window can host browser overlays composited on the GPU.
+      <a href="/docs" class="text-accent hover:text-primary"
+        >Read the docs &rarr;</a
+      >
+    </p>
+  </section>
+
+  <section class="mb-4">
+    <h2 class="text-foreground mb-2 text-lg font-bold">Planned</h2>
+    <p class="text-muted mb-3 text-sm">
+      Not in 1.0 yet — on the roadmap:
+    </p>
+    <ul class="text-muted list-disc space-y-1 pl-5 text-sm">
+      {planned.map((p) => <li>{p}</li>)}
+    </ul>
   </section>
 </Base>
