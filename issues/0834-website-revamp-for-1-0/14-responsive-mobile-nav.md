@@ -114,3 +114,46 @@ minor edge** — if a user manually collapses on mobile then live-resizes across
 the `md` breakpoint without navigating, the summary becomes `display:none` while
 closed → content hidden until any navigation (self-healing; acceptable for a
 docs site).
+
+## Result
+
+**Result:** Pass
+
+The sidebar is now a `<details open>` with a mobile "Documentation" summary
+toggle; desktop is unchanged. All criteria pass.
+
+### What was built
+
+- `src/components/DocPage.astro` — `<div class="md:flex md:gap-8">`,
+  `<aside class="mb-6 block md:mb-0 md:w-48 md:shrink-0">`, sidebar content
+  wrapped in
+  `<details class="docs-sidebar" open><summary>Documentation</summary><Search/> +
+  <nav>…</nav></details>`.
+- `src/styles/style.css` — `.docs-sidebar > summary` marker reset (`list-style`
+  - `::-webkit-details-marker`) with a `☰` glyph; `@media (min-width:768px)`
+    hides the summary (child-combinator scoped, so `.docs-nav-sub` is
+    untouched).
+
+### Verification results
+
+1. **Markup** — built pages emit `<details class="docs-sidebar" open>` with the
+   "Documentation" summary wrapping the `#docs-search` box + the generated
+   `<nav>`; `open` attribute present (content visible at all widths). **Pass.**
+2. **Zero JS** — the only scripts on a doc page are the pre-existing Pagefind
+   ones; no `<astro-island>`; the disclosure is native `<details>`. **Pass.**
+3. **Desktop unchanged** — built CSS has `.docs-sidebar>summary{display:none}`
+   under `@media (min-width:768px)`; nav section order is intact (Configuration
+   → Terminal API → Components → Protocol); the nested `.docs-nav-sub` summaries
+   are not hidden (still present on `vt/csi/cup`). **Pass.**
+4. **Build + checks** — `bun run build` 76 pages; `astro check` 0 errors;
+   `gen:references --check` + `import:vt --check` exit 0. **Pass.**
+5. **No regressions** — `/`, `/welcome` (no DocPage) unaffected; search builds.
+   **Pass.**
+
+## Conclusion
+
+The docs are navigable and searchable on mobile with **zero JS** — the
+twice-flagged Exp-11/13 limitation is cleared via an always-`open` `<details>`
+whose summary is hidden on `md`+. Remaining Phase-2: other page templates
+(home/article/reference/section-index treatments), the home/marketing page, and
+an accessibility baseline. Then Phases 3–4 build the content into the IA.

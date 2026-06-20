@@ -163,6 +163,25 @@ body {
   margin: 1.5rem 0;
 }
 
+/* Responsive docs sidebar: a `<details open>` whose summary is a mobile menu
+   toggle. The details is always `open`, so content shows at every width; on
+   md+ the summary is hidden and it reads as the static left column. */
+.docs-sidebar > summary {
+  list-style: none;
+}
+.docs-sidebar > summary::-webkit-details-marker {
+  display: none;
+}
+.docs-sidebar > summary::before {
+  content: "☰ ";
+  color: var(--color-muted);
+}
+@media (min-width: 768px) {
+  .docs-sidebar > summary {
+    display: none;
+  }
+}
+
 /* Nested docs sidebar disclosures (Terminal API subsections). */
 .docs-nav-sub > summary {
   list-style: none;

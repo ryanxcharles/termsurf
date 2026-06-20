@@ -15,10 +15,14 @@ const currentPath = Astro.url.pathname.replace(/\/$/, "");
 ---
 
 <Base title={`${title} — TermSurf`} description={description}>
-  <div class="flex gap-8">
-    <aside class="hidden w-48 shrink-0 md:block">
-      <Search />
-      <nav class="space-y-1 text-xs">
+  <div class="md:flex md:gap-8">
+    <aside class="mb-6 block md:mb-0 md:w-48 md:shrink-0">
+      <details class="docs-sidebar" open>
+        <summary class="text-foreground-dark mb-2 cursor-pointer font-bold">
+          Documentation
+        </summary>
+        <Search />
+        <nav class="space-y-1 text-xs">
         {
           nav.map((group) => (
             <>
@@ -68,7 +72,8 @@ const currentPath = Astro.url.pathname.replace(/\/$/, "");
             </>
           ))
         }
-      </nav>
+        </nav>
+      </details>
     </aside>
     <article class="prose-termsurf min-w-0 flex-1" data-pagefind-body>
       <slot />
