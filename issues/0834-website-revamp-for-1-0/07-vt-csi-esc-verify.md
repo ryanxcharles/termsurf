@@ -80,3 +80,32 @@ confirmed. Two **optional** notes, folded into implementation:
    it from re-import. It has no product claim, so the premise holds; the freeze
    is the accepted tradeoff for all verified pages (a future re-import of an
    updated upstream stub would need it temporarily removed from `VERIFIED`).
+
+## Result
+
+**Result:** Pass
+
+The 29 CSI + 8 ESC pages were added to the importer's `VERIFIED` set (now 46)
+and left byte-identical; the comment was updated to document the two categories
+(rebranded vs claim-free). No content/fork/nav/schema changes.
+
+- **Claim-free confirmed** — independently verified across all 37 pages at the
+  design gate (no product "Ghostty", no Status section, no `unimplemented`, no
+  version/first-person assertions; comparatives are about _other_ terminals).
+  **Pass.**
+- **No content change** — `git status` shows only `scripts/import-vt.ts`
+  modified; all 37 CSI/ESC pages byte-identical. **Pass.**
+- **Importer coherence** — `import:vt --check` exits 0; a re-run wrote 18 pages
+  (64 − 46 verified) and left CSI/ESC intact. **Pass.**
+- **Builds** — `bun run build` 76 pages; `astro check` 0 errors. **Pass.**
+- **No regressions** — other pages unchanged. **Pass.**
+
+## Conclusion
+
+CSI and ESC are verified claim-free and frozen from re-import — two whole
+subsections cleared in one pass because they carry no product claims. 46 of 64
+VT pages are now verified. Remaining VT: **OSC** (Exp 8 — the substantive pass
+with version/compat tables and the ConEmu timeout needing platform-aware fork
+verification) and the **top-level** pages (Exp 9: index/reference/external),
+after which the VT index framing note can be removed. Then Phase 1's remaining
+pieces (search, versioning, IA, deploy) and Phases 2–4.

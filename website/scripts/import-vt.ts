@@ -165,10 +165,14 @@ function navLabelFor(id: string, title: string): string {
 
 const TOP_ORDER: Record<string, number> = { index: 1, reference: 2, external: 3 };
 
-// Pages hand-verified against the Ghostboard fork and rebranded to TermSurf
-// (issue 834, Experiment 5+). The importer no longer regenerates or --checks
-// these — they are hand-maintained. Skipped in BOTH the write loop and the
-// --check orphan scan (else --check would wrongly flag them as orphaned).
+// Pages verified against the Ghostboard fork (issue 834, Experiment 5+). The
+// importer no longer regenerates or --checks these — they are hand-maintained.
+// Skipped in BOTH the write loop and the --check orphan scan (else --check would
+// wrongly flag them as orphaned). Two categories:
+//   - Rebranded: had product claims, fork-verified and rewritten to TermSurf
+//     (concepts/*, control/bel).
+//   - Claim-free: pure VT-spec with no product claims, verified by absence and
+//     left byte-identical (control/{bs,cr,lf,tab}, all csi/*, all esc/*).
 const VERIFIED = new Set<string>([
   "concepts/colors.mdx",
   "concepts/cursor.mdx",
@@ -179,6 +183,43 @@ const VERIFIED = new Set<string>([
   "control/cr.mdx",
   "control/lf.mdx",
   "control/tab.mdx",
+  "csi/cbt.mdx",
+  "csi/cht.mdx",
+  "csi/cnl.mdx",
+  "csi/cpl.mdx",
+  "csi/cub.mdx",
+  "csi/cud.mdx",
+  "csi/cuf.mdx",
+  "csi/cup.mdx",
+  "csi/cuu.mdx",
+  "csi/dch.mdx",
+  "csi/decscusr.mdx",
+  "csi/decslrm.mdx",
+  "csi/decstbm.mdx",
+  "csi/dl.mdx",
+  "csi/dsr.mdx",
+  "csi/ech.mdx",
+  "csi/ed.mdx",
+  "csi/el.mdx",
+  "csi/hpa.mdx",
+  "csi/hpr.mdx",
+  "csi/ich.mdx",
+  "csi/il.mdx",
+  "csi/rep.mdx",
+  "csi/sd.mdx",
+  "csi/su.mdx",
+  "csi/tbc.mdx",
+  "csi/vpa.mdx",
+  "csi/vpr.mdx",
+  "csi/xtshiftescape.mdx",
+  "esc/decaln.mdx",
+  "esc/deckpam.mdx",
+  "esc/deckpnm.mdx",
+  "esc/decrc.mdx",
+  "esc/decsc.mdx",
+  "esc/ind.mdx",
+  "esc/ri.mdx",
+  "esc/ris.mdx",
 ]);
 
 const ATTRIBUTION =
