@@ -12,7 +12,7 @@ order: 15
 [ConEmu], an older terminal emulator for Windows, pioneered several [custom
 protocols] using OSC 9. Unfortunately, this conflicts with iTerm2's
 [Show Desktop Notification][OSC 9] protocol, which also uses OSC 9.
-Ghostty attempts to differentiate between the two by trying to find the
+TermSurf attempts to differentiate between the two by trying to find the
 *sub-ID* that each ConEmu sequence has, which determines its actual function.
 When one is not found, a Show Desktop Notification sequence is assumed instead.
 
@@ -21,9 +21,9 @@ When one is not found, a Show Desktop Notification sequence is assumed instead.
 [OSC 9]: /docs/vt/osc/9
 
 Because the following protocols are often underspecified at best and highly
-questionable security-wise at worst, Ghostty only *implements* the extensions
-that are listed below. There are many more that Ghostty does parse, but either
-due to security reasons or the fact that Ghostty does not try to be a ConEmu
+questionable security-wise at worst, TermSurf only *implements* the extensions
+that are listed below. There are many more that TermSurf does parse, but either
+due to security reasons or the fact that TermSurf does not try to be a ConEmu
 clone, they are either ignored or converted into [OSC 9] sequences.
 
 ### Change Progress State (OSC 9;4)
@@ -34,7 +34,7 @@ clone, they are either ignored or converted into [OSC 9] sequences.
 Change the current progress state based on the value of `s` and `v`.
 
 The current progress can be in various states: inactive (default), in progress,
-error, or indeterminate, which is represented visually in Ghostty as a progress
+error, or indeterminate, which is represented visually in TermSurf as a progress
 bar on top of each split. Its value is represented as an integer between 0 and
 100 inclusive, corresponding to the percentage level of the progress bar.
 
@@ -52,7 +52,7 @@ The new state and value chiefly depends on the value of `s`:
 >
 > Note that the terminal cannot determine when a progress state becomes
 > *stale* with this protocol, e.g. when a program is terminated without
-> cleaning up its progress state. This is why Ghostty has a **hardcoded
+> cleaning up its progress state. This is why TermSurf has a **hardcoded
 > timeout** of around 15 seconds, after which the current progress state
 > is reset.
 >

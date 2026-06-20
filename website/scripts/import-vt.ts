@@ -220,6 +220,21 @@ const VERIFIED = new Set<string>([
   "esc/ind.mdx",
   "esc/ri.mdx",
   "esc/ris.mdx",
+  "osc/0.mdx",
+  "osc/1.mdx",
+  "osc/104.mdx",
+  "osc/105.mdx",
+  "osc/11x.mdx",
+  "osc/1x.mdx",
+  "osc/2.mdx",
+  "osc/22.mdx",
+  "osc/4.mdx",
+  "osc/5.mdx",
+  "osc/52.mdx",
+  "osc/7.mdx",
+  "osc/8.mdx",
+  "osc/9.mdx",
+  "osc/conemu.mdx",
 ]);
 
 const ATTRIBUTION =

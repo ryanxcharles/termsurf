@@ -20,7 +20,7 @@ others."[^xterm]
 
 [^xterm]: https://invisible-island.net/xterm/manpage/xterm.html#VT100-Widget-Resources:pointerShape
 
-Ghostty, like some other terminals like [Kitty] and Foot, uses CSS's list of
+TermSurf, like some other terminals like [Kitty] and Foot, uses CSS's list of
 standardized cursor shapes, used in the [`cursor`] property. This is by no
 means perfect, but it at least is an international standard that is unambiguous
 and platform-independent.
@@ -34,10 +34,10 @@ terminal.
 
 ## Terminal Compatibility
 
-|               | Ghostty | Kitty  | VTE     | Alacritty | Foot       | iTerm2 | xterm |
-|---------------|---------|--------|---------|-----------|------------|--------|-------|
-| OSC 22        | 1.0.0   | 0.31.0 | No      | No        | 1.12.0     | 3.5.0  | 367   |
-| Cursor styles | CSS     | CSS    | -       | -         | CSS + X11 subset[^foot] | [Custom X11 subset] | X11 |
+|               | TermSurf | Kitty  | VTE     | Alacritty | Foot       | iTerm2 | xterm |
+|---------------|----------|--------|---------|-----------|------------|--------|-------|
+| OSC 22        | Yes      | 0.31.0 | No      | No        | 1.12.0     | 3.5.0  | 367   |
+| Cursor styles | CSS      | CSS    | -       | -         | CSS + X11 subset[^foot] | [Custom X11 subset] | X11 |
 
 [Custom X11 subset]: https://github.com/gnachman/iTerm2/blob/v3.6.6/sources/PTYSession.m#L15324-L15342
 [^foot]: Foot maps [both CSS and X11 names](https://codeberg.org/dnkl/foot/src/tag/1.25.0/cursor-shape.c#L62-L102)

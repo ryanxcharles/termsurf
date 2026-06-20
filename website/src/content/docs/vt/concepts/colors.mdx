@@ -10,7 +10,7 @@ order: 1
 # Colors
 
 TermSurf emulates a full 256-color palette, as well as 5 **special colors**
-and 10 **dynamic colors**.
+and 3 **dynamic colors**.
 
 ## Special Colors
 
@@ -28,12 +28,11 @@ palette colors are used instead of special colors when not specified.
 The dynamic colors are used by the terminal to color cells independent of
 their own styles, when they are selected, highlighted, etc. They are also
 supposed to be *dynamically updated* by programs after the terminal has been
-initialized, hence their name. TermSurf supports ten of these colors — the
-foreground, background, and cursor colors, along with pointer, Tektronix, and
-highlight colors — which are queried or modified with [OSCs 10 to 19]
-respectively.
+initialized, hence their name. TermSurf supports three of these colors: the
+foreground color, the background color and the cursor color, which are queried
+or modified with [OSCs 10 to 12] respectively.
 
-[OSCs 10 to 19]: /docs/vt/osc/1x
+[OSCs 10 to 12]: /docs/vt/osc/1x
 
 ## Color Specifications
 

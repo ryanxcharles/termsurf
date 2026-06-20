@@ -136,3 +136,65 @@ timer at `SurfaceView_AppKit.swift:46`), confirmed osc/8's claims are
 fork-backed (`hyperlink.zig:40`), the osc/52 cites, and the 10+5=15 page split,
 with no new errors. One trivial fix (applied): the inventory header said "(9
 pages)" → now "(10 pages)". Approved to implement.
+
+## Result
+
+**Result:** Pass
+
+All 10 OSC claim pages were fork-verified and rebranded/corrected per the
+inventory; the 5 claim-free OSC pages and `colors.mdx` correction were applied;
+all 15 OSC pages joined `VERIFIED` (now 61, leaving only the 3 top-level pages
+mechanical).
+
+### Dispositions applied
+
+- **osc/1x, osc/11x** — kept the "only 10-12 / 110-112" caveats (fork-accurate),
+  rebranded `Ghostty`→`TermSurf`.
+- **colors.mdx** — corrected the Exp-5 over-claim back to **three** dynamic
+  colors (foreground/background/cursor), OSC 10-12; now consistent with osc/1x.
+- **osc/0** (icon unsupported → title alias), **osc/2** (UTF-8), **osc/9**
+  (invalid ConEmu → OSC 9), **osc/22** (CSS cursor shapes) — confirmed,
+  rebranded.
+- **osc/1** — rebranded prose; compat-table column `Ghostty`→`TermSurf`, value
+  "No" (fork: icon ignored, `stream.zig:1988`); other-terminal columns kept.
+- **osc/22 table** — column `Ghostty`→`TermSurf`; the `1.0.0` _version_ cell →
+  `Yes` (support confirmed, but TermSurf's version isn't; rule 1 forbids copying
+  Ghostty's number); `Cursor styles` `CSS` kept.
+- **osc/52** — rebranded; corrected "primary clipboard (equivalent to `c`)" →
+  "standard clipboard (`c`)" (fork default is `c`); softened "limitation on our
+  end" → "current limitation".
+- **osc/conemu** — all six mentions rebranded, **including the "hardcoded ~15s
+  timeout"** (macOS-confirmed, `SurfaceView_AppKit.swift:46`).
+- **osc/8** — its behavioral statements ("only `id` recognized"; `file://`
+  hostname requirement) name no product and were left as generic spec (no false
+  TermSurf claim introduced); the `id`-only claim is fork-backed
+  (`hyperlink.zig:40`).
+
+### Verification results
+
+1. **Claims fork-cited** — table + the consumer-traced dispositions above; the
+   per-claim accuracy was independently confirmed across two design-review
+   passes. **Pass.**
+2. **No unverified TermSurf assertion** — grep shows no product "Ghostty" left
+   in `osc/`; no `1.0.0` version copied into a TermSurf cell (escaped-dot grep:
+   zero literal `1.0.0` in `osc/22`). **Pass.**
+3. **Cross-page consistency** — `colors.mdx` and `osc/1x` agree (three dynamic
+   colors, OSC 10-12). **Pass.**
+4. **Importer coherence** — `import:vt --check` exits 0; a re-run wrote 3 pages
+   (only top-level mechanical) and left all 61 verified pages intact. **Pass.**
+5. **Builds + links** — `bun run build` 76 pages; `astro check` 0 errors; a
+   head+body crawl of all VT pages finds **zero** dead links/fragments.
+   **Pass.**
+6. **No regressions** — other pages unchanged. **Pass.**
+
+## Conclusion
+
+OSC — the heaviest VT pass — is fork-verified and TermSurf-branded, and the
+verification corrected real errors: it kept two accurate range caveats the first
+draft would have wrongly widened, **fixed the Exp-5 dynamic-colors over-claim**
+(ten→three), preserved the macOS-confirmed ConEmu timeout the first draft would
+have deleted, and replaced Ghostty's `1.0.0` version cell with a verified `Yes`.
+61 of 64 VT pages are now verified. Only the **3 top-level pages**
+(index/reference/external — Exp 9) remain; after that the VT index framing note
+can be removed, completing scope decision 1. Then Phase 1's remaining pieces
+(search, versioning, IA, deploy) and Phases 2–4.
