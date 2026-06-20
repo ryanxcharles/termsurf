@@ -311,6 +311,10 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 - [Experiment 21: Features overview](21-features-overview.md) — **Pass**
 - [Experiment 22: Help section](22-help-section.md) — **Pass**
 
+### Phase 4 — TermSurf-specific documentation
+
+- [Experiment 23: Web TUI reference](23-web-tui-reference.md) — **Designed**
+
 ## Process notes
 
 - Experiments are created one at a time inside their phase, each with its own
