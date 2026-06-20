@@ -129,3 +129,63 @@ correct. One **Required** + two **Optional**, folded in:
    and named X11 colors (matches `ghostty.5.md`).
 3. **(Optional) Page count.** "81 → 82" is a build-time check, confirmed at the
    result gate, not a stated fact.
+
+## Result
+
+**Result:** Pass
+
+The user-requested split-pane-border feature is documented; all criteria pass.
+
+### What was built
+
+`src/content/docs/split-pane-borders.mdx` (`section: Features`, `order: 2`) —
+raw-HTML MDX in `prose-termsurf`: an intro framing the options as the Ghostboard
+fork's addition over Ghostty (no "per the project's docs" attribution); an
+**Options** table for the four options with effects + accepted values + clamped
+ranges; a usage sentence; a config example (`<pre>`); and links to the config
+reference (incl. the `#split-border-width` anchor), the configuration guide, and
+the Features overview.
+
+### Verification results
+
+1. **Builds + placed** — `bun run build` 82 pages; `/docs/split-pane-borders`
+   emitted; the `/docs` Features group reads **Features → Split Pane Borders**
+   (orders 1, 2); `astro check` 0 errors. **Pass.**
+2. **Accuracy (fork-verified)** — the four options/effects/ranges match
+   `Config.zig` + the generated reference (verified at the design gate); the
+   built page contains **no** "per the project"/"CLAUDE.md"/"Available since"
+   attribution, and no invented options. **Pass.**
+3. **macOS-accurate** — no Linux/GTK text; no overclaimed rendering specifics.
+   **Pass.**
+4. **Design system, zero JS, links resolve** — `prose-termsurf`; the only hex
+   literals are the two sample colors inside the config `<pre>` (`#7aa2f7`,
+   `#3b4261` — content, not styling); 0 `astro-island`; dead-link + anchor crawl
+   = 0 broken (`#split-border-width` resolves). **Pass.**
+5. **a11y** — one `<h1>` ("Split Pane Borders") → `<h2>` (Options), no skipped
+   levels; descriptive link text. **Pass.**
+6. **No regressions** — `gen:references --check` + `import:vt --check` exit 0;
+   only the new page added; search/`/`/`/welcome`/other pages unchanged.
+   **Pass.**
+
+## Conclusion
+
+The split pane border feature the user specifically asked for is now documented
+— the four fork-added options (focused/unfocused border colors, width, unfocused
+saturation) with their ranges, a config example, and links to the generated
+reference — framed accurately as Ghostboard's addition over Ghostty on real fork
+evidence. Next Phase-4 candidates: Browser Engines (Roamium + the engine
+roadmap), the protocol refresh, and the consolidated roadmap.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+findings). Against a fresh 82-page build the reviewer confirmed all four options
+and their ranges/semantics match `Config.zig` (1089-1102, clamps 4638/4641) and
+`config.md`; the built page has **no** "CLAUDE"/"per the project"/"Available
+since" citation (grep clean) and the fork-addition claim is independently true
+(the four carry no version tag, unlike upstream `split-divider-color` @1.1.0);
+no Linux/GTK or rendering overclaim; Features → Split Pane Borders placement;
+all links resolve incl. `#split-border-width` (id exists in the built config
+page); one `<h1>` + ordered headings; the only hex literals are the two sample
+colors inside the `<pre>`; 0 `astro-island`; `astro check` 0 errors; drift
+checks exit 0; scope only the new file.
