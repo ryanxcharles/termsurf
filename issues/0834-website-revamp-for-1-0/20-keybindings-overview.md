@@ -129,3 +129,78 @@ completeness notes, folded in:
    overwrite each other) — man page 1986.
 2. Mention the `physical:` trigger prefix exists (man page 1901), alongside the
    `KeyA`/`key_a` physical-key treatment.
+
+## Result
+
+**Result:** Pass
+
+The Keybindings overview is added and the Configuration section reaches Ghostty
+parity; all criteria pass.
+
+### What was built
+
+`src/content/docs/reference/keybindings.mdx` (`section: Configuration`,
+`order: 2.5`) — raw-HTML MDX in `prose-termsurf`: a framing note (terminal
+bindings, not the `web` TUI, with a link to the Web TUI page); **Format**
+(`keybind = trigger=action`, overwrite + not-unique-per-prefix); **Triggers**
+(`+`-separated; the modifier set + aliases; no-repeat/one-key); **Unicode vs.
+physical keys** (layout-dependent codepoints, `KeyA`/`key_a` priority, the
+`physical:` prefix, `catch_all`); **Sequences** (`>` leader keys, indefinite
+wait, shell-quoting, prefix override); **Actions** (`action:param`,
+`ignore`/`unbind`/`csi:`/`esc:`/`text:`, `keybind = clear`, link to the action
+reference); **Prefixes** (`all:`/`global:`/`unconsumed:`/`performable:`, macOS
+`global:`, sequences disallowed for `global:`/`all:`).
+
+### Verification results
+
+1. **Builds + placed** — `bun run build` 78 pages; `/docs/reference/keybindings`
+   emitted; the `/docs` Configuration group reads **Configuration → Config
+   Options → Keybindings → Keybind Actions** (orders 1 / 2 / 2.5 / 3);
+   `astro check` 0 errors. **Pass.**
+2. **Accuracy** — every syntax claim matches the fork man page (`keybind`
+   section); no invented options (verified at design gate per-line +
+   spot-checked in the built page). **Pass.**
+3. **macOS-accurate** — built page has zero "gtk"/"linux" text; `global:` is
+   described for macOS only. **Pass.**
+4. **No TUI conflation** — the page declares it covers the terminal `keybind`
+   config and links the Web TUI page for the TUI's modal keys; no TUI keys
+   restated. **Pass.**
+5. **Design system, zero JS, links resolve** — `prose-termsurf`; no hardcoded
+   hex; 0 `astro-island`; dead-link crawl over the page = 0 broken (all
+   cross-links resolve). **Pass.**
+6. **a11y** — one `<h1>` ("Keybindings") → ordered `<h2>`/`<h3>` (Format,
+   Triggers[Modifiers, Unicode vs. physical], Sequences, Actions, Prefixes), no
+   skipped levels; descriptive link text. **Pass.**
+7. **No regressions** — `gen:references --check` + `import:vt --check` exit 0
+   (generated pages untouched); only `keybindings.mdx` added; search/`/`/
+   `/welcome`/other pages unchanged. **Pass.**
+
+## Conclusion
+
+The Configuration section now matches Ghostty's structure: a configuration
+overview, the generated option reference, this keybindings overview, and the
+generated action reference — with the binding grammar fully and accurately
+documented from the fork's own man page, macOS-scoped, and cleanly separated
+from the `web` TUI's modal keys. Next Phase-3 candidates: Features
+(macOS-applicable — theme, shell integration, SSH, AppleScript — each
+fork-verified), Help (terminfo, macOS notes, synchronized output), and Sponsor.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE WITH
+CHANGES.** The reviewer independently cross-checked all 21 syntax claims against
+the man page keybind section (1778–1993) and found every one supported with no
+invented/misstated options; confirmed macOS accuracy (zero "gtk"/"linux" text,
+`global:` macOS-only), no `web`-TUI conflation, the Configuration order
+(Configuration → Config Options → Keybindings → Keybind Actions),
+`id="prefixes"`
+
+- all cross-links resolve, one `<h1>` with ordered h2/h3, no hardcoded hex, 0
+  `astro-island`, 78 pages, `astro check` 0 errors, drift checks exit 0, and
+  scope limited to the new file. One **Required** finding, fixed:
+
+* **(Required) Record/artifact mismatch.** The design review committed to
+  mentioning the `physical:` trigger prefix and the Result listed it as
+  documented, but the MDX omitted it. **Resolved** by adding the `physical:`
+  clause to the Unicode-vs-physical paragraph (man page ~1901); rebuilt — the
+  prefix now appears on the page, matching the record.

@@ -307,8 +307,7 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 ### Phase 3 — Ghostty-parity terminal docs & pages
 
 - [Experiment 19: About page](19-about-page.md) — **Pass**
-- [Experiment 20: Keybindings overview](20-keybindings-overview.md) —
-  **Designed**
+- [Experiment 20: Keybindings overview](20-keybindings-overview.md) — **Pass**
 
 ## Process notes
 
