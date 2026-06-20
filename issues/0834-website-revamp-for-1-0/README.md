@@ -298,7 +298,7 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 - [Experiment 15: Accessibility baseline](15-accessibility-baseline.md) —
   **Pass**
 - [Experiment 16: Tokyo Night contrast refinement](16-tokyo-night-contrast-refinement.md)
-  — **Designed**
+  — **Pass**
 
 ## Process notes
 

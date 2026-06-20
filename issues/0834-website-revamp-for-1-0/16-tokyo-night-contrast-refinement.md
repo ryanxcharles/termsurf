@@ -175,3 +175,71 @@ One **Optional** finding, folded in:
 
 - **(Optional)** Added `VTSequence.astro` to the covered-surfaces note (its text
   is covered; the unimplemented badge actually improves).
+
+## Result
+
+**Result:** Pass
+
+The nine failing tokens are refined; the Tokyo Night palette is AA-compliant in
+both modes across all docs + home content. All criteria pass; the only contrast
+regression is the documented, deferred `/welcome` modal.
+
+### What was built
+
+- `src/styles/style.css` — replaced eight light `@theme` token values
+  (`foreground-dark` `#6172b0`→`#495993`, `primary` `#2e7de9`→`#1359b8`,
+  `secondary` `#9854f1`→`#761bec`, `accent` `#007197`→`#006385`, `success`
+  `#587539`→`#4b6330`, `warning` `#8f5e15`→`#7f5313`, `caution`
+  `#c64343`→`#a73333`, `muted` `#848cb5`→`#525a88`) and the dark `--color-muted`
+  (`#565f89`→`#7982ab`). Values only.
+- `website/CLAUDE.md` — contrast table updated to the post-refinement ratios
+  (all text tokens PASS), with the bg-dark note and the `/welcome` exception.
+
+### Verification results
+
+1. **AA pass, recomputed** — an independent sRGB/WCAG recompute on the
+   **shipped** values: every light text token clears AA vs both backgrounds
+   (5.11–5.20 vs `#e1e2e7`; 4.56–4.63 vs `#d5d6db`) and dark `muted` 4.55 vs
+   `#1a1b26` / 4.79 vs `#16161e`; non-text accent 5.20/4.63 (focus ring ≥ 3) and
+   skip-link text 5.20 (≥ 4.5). `ALL AA: True`. **Pass.**
+2. **Only values changed** — `git diff HEAD` on `style.css` is exactly nine
+   custom-property value lines (8 light + 1 dark); no selectors/rules/markup;
+   the rest is the `CLAUDE.md` doc update. **Pass.**
+3. **Hue preserved** — per-token HSL hue drift ≤ 0.9° (max `muted`-light 0.9°),
+   saturation within ≤ 0.5pp (max `warning` 0.42pp) — a refine, not a repaint.
+   **Pass.**
+4. **Build + checks** — `bun run build` 76 pages; `bunx astro check` 0 errors /
+   0 warnings / 3 pre-existing hints (2 `THREE.Clock` deprecations in
+   `WelcomePage.tsx` + 1 unused-var in `gen-references.ts`, all unrelated to
+   this CSS-only change); `gen:references --check` + `import:vt --check` exit 0;
+   docs link/anchor crawl 0 broken. The new values appear in the built CSS
+   (`dist/_astro/*.css`). **Pass.**
+5. **No content regressions** — only colors deepen; dark mode unchanged except
+   `muted`; the `/welcome` modal regression is documented + deferred (decision
+   5). **Pass.**
+
+## Conclusion
+
+The accessibility-baseline loop is closed for all site content: every text token
+now meets WCAG AA in both light and dark, achieved by refining (not repainting)
+the nine failing Tokyo Night values — hue and saturation held, lightness
+deepened. The one residual is the `/welcome` modal, whose pre-existing
+light-tokens-on-black defect (inert `class="dark"`) this change marginally
+worsens; it's out of scope here and deferred to a follow-up that must edit the
+welcome page itself. Remaining Phase-2: page templates
+(article/reference/section-index) and the home/marketing treatment.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+Required findings). The reviewer independently recomputed all nine shipped
+values (matching the ratio table to the hundredth, including the thin
+dark-`muted` 4.55 vs `#1a1b26`), confirmed hue drift ≤ 0.91° / saturation ≤
+0.42pp (genuine refine), confirmed the new hexes ship in `dist/_astro/*.css`
+(and zero occurrences of the old hexes), confirmed scope is exactly nine value
+lines + docs (no passing token needlessly altered), confirmed build/checks, and
+verified the `/welcome` caveat is honest (WelcomePage.tsx really uses
+`text-foreground-dark`/`text-accent`; the 4.54→3.13 and 3.81→3.12 vs-black
+figures reproduce, accent already sub-AA pre-change). Two **nits**, folded into
+the result above: the three `astro check` hints are 2 `THREE.Clock` + 1
+unused-var (not "3 Three.js"); saturation drift max is 0.42pp (stated ≤ 0.5pp).

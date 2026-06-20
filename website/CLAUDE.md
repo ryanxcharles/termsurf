@@ -201,24 +201,36 @@ margin.
 **Contrast audit (WCAG AA, vs `--color-background`).** Ratios for the text
 tokens; AA normal text needs 4.5:1, AA large/non-text 3:1.
 
-| Token             | Light ratio | Light AA-text         | Dark ratio | Dark AA-text          |
-| ----------------- | ----------- | --------------------- | ---------- | --------------------- |
-| `foreground`      | 9.62        | PASS                  | 10.59      | PASS                  |
-| `foreground-dark` | 3.57        | **FAIL**              | 8.10       | PASS                  |
-| `primary`         | 3.11        | **FAIL**              | 6.79       | PASS                  |
-| `secondary`       | 3.33        | **FAIL**              | 7.39       | PASS                  |
-| `accent`          | 4.26        | **FAIL**              | 9.96       | PASS                  |
-| `success`         | 4.04        | **FAIL**              | 9.35       | PASS                  |
-| `warning`         | 4.29        | **FAIL**              | 8.55       | PASS                  |
-| `caution`         | 3.79        | **FAIL**              | 6.46       | PASS                  |
-| `muted`           | 2.54        | **FAIL** (also < 3:1) | 2.76       | **FAIL** (also < 3:1) |
+Post-refinement (Exp 16) ratios — **all text tokens now PASS AA**:
 
-**Dark mode passes AA-text for all text tokens except `muted`. The light "Tokyo
-Night Day" palette fails AA-text for every accent/secondary token** (and the
-prose body color `foreground-dark`), and `muted` fails the 3:1 floor in both
-modes. This is systemic light-mode contrast debt, not a one-token tweak —
-**remediation is Experiment 16** (Tokyo Night contrast refinement). Exp 15 only
-records it; no tokens changed.
+| Token             | Light ratio | Light AA-text | Dark ratio | Dark AA-text |
+| ----------------- | ----------- | ------------- | ---------- | ------------ |
+| `foreground`      | 9.62        | PASS          | 10.59      | PASS         |
+| `foreground-dark` | 5.18        | PASS          | 8.10       | PASS         |
+| `primary`         | 5.16        | PASS          | 6.79       | PASS         |
+| `secondary`       | 5.17        | PASS          | 7.39       | PASS         |
+| `accent`          | 5.20        | PASS          | 9.96       | PASS         |
+| `success`         | 5.19        | PASS          | 9.35       | PASS         |
+| `warning`         | 5.16        | PASS          | 8.55       | PASS         |
+| `caution`         | 5.13        | PASS          | 6.46       | PASS         |
+| `muted`           | 5.11        | PASS          | 4.55       | PASS         |
 
-Pending Phase-2 work: Exp 16 contrast refinement, page templates
-(article/reference/section-index), and the home/marketing treatment.
+Ratios are vs the page background; every light token also clears AA (≥ 4.56:1)
+vs the darker `--color-background-dark` (#d5d6db), where it appears in code
+blocks and callout titles. **Experiment 15** audited and recorded the original
+debt (the light "Tokyo Night Day" palette failed AA-text for every
+accent/secondary token, and `muted` failed 3:1 in both modes); **Experiment 16**
+refined the nine failing tokens (hue + saturation held, lightness deepened —
+"refine, not repaint" per scope decision 4) so the palette is AA-compliant in
+both modes across all docs + home content.
+
+**Known exception:** the `/welcome` modal (`bg-black/85`) renders light tokens
+on black because its `class="dark"` is inert (no `.dark` selector; theme is
+`prefers-color-scheme` only). Exp 16's deepening reduces contrast there
+(`foreground-dark` heading 4.54 → 3.13, accent links 3.81 → 3.12 vs black) — a
+pre-existing on-black defect on the carved-out "do-not-modify" scene, excluded
+from the AA scope and deferred to a follow-up that fixes the welcome page
+itself.
+
+Pending Phase-2 work: page templates (article/reference/section-index), the
+home/marketing treatment, and the `/welcome` on-black contrast follow-up.

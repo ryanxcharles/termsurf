@@ -11,14 +11,14 @@
   --color-background-dark: #d5d6db;
   --color-background-highlight: #c4c8da;
   --color-foreground: #2b3254;
-  --color-foreground-dark: #6172b0;
-  --color-primary: #2e7de9;
-  --color-secondary: #9854f1;
-  --color-accent: #007197;
-  --color-success: #587539;
-  --color-warning: #8f5e15;
-  --color-caution: #c64343;
-  --color-muted: #848cb5;
+  --color-foreground-dark: #495993;
+  --color-primary: #1359b8;
+  --color-secondary: #761bec;
+  --color-accent: #006385;
+  --color-success: #4b6330;
+  --color-warning: #7f5313;
+  --color-caution: #a73333;
+  --color-muted: #525a88;
   --color-border: #a8aecb;
 
   /* Font families */
@@ -40,7 +40,7 @@
     --color-success: #9ece6a;
     --color-warning: #e0af68;
     --color-caution: #f7768e;
-    --color-muted: #565f89;
+    --color-muted: #7982ab;
     --color-border: #3b4261;
   }
 }
