@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-20"
+closed = "2026-06-20"
 +++
 
 # Issue 833: Update Website and Docs for 1.0.0
@@ -82,3 +83,15 @@ Closed issues are historical records and must not be edited.
 
 - [Experiment 1: Audit and refresh public docs](01-audit-and-refresh-public-docs.md)
   — **Pass**
+
+## Conclusion
+
+Experiment 1 updated the active website and repo docs for the TermSurf `1.0.0`
+release. The docs now include the trusted Homebrew install flow, current app and
+binary install paths, the current Roamium resource layout, the current debug app
+bundle/executable name, and unambiguous `TermSurf/Ghostboard` config wording.
+
+Verification passed with `git diff --check`, a successful website build, and
+stale-reference audits. Remaining `/usr/local/roamium` and
+`/usr/local/bin/roamium` matches are explicit negative debug no-fallback
+examples, and Wezboard is documented as archived in git history.
