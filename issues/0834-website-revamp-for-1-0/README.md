@@ -274,6 +274,8 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
   verification decomposed into Experiment 5+)
 - [Experiment 5: VT Concepts — TermSurf rebrand + fork verification](05-vt-concepts-rebrand-verify.md)
   — **Pass**
+- [Experiment 6: VT Control — TermSurf rebrand + fork verification](06-vt-control-rebrand-verify.md)
+  — **Designed**
 
 ## Process notes
 
