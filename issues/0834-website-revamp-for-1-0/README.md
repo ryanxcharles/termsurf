@@ -299,6 +299,8 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
   **Pass**
 - [Experiment 16: Tokyo Night contrast refinement](16-tokyo-night-contrast-refinement.md)
   — **Pass**
+- [Experiment 17: Home / marketing page treatment](17-home-marketing-treatment.md)
+  — **Designed**
 
 ## Process notes
 
