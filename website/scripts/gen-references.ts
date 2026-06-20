@@ -182,7 +182,7 @@ const configPage = renderPage(
     navLabel: "Config Options",
     description:
       "Complete reference for every Ghostboard configuration option, generated from the TermSurf fork.",
-    section: "Reference",
+    section: "Configuration",
     order: "2",
   },
   "Every configuration option, generated from the TermSurf Ghostboard fork's " +
@@ -197,7 +197,7 @@ const keybindPage = renderPage(
     navLabel: "Keybind Actions",
     description:
       "Every keybind action available to the keybind configuration option, generated from the TermSurf fork.",
-    section: "Reference",
+    section: "Configuration",
     order: "3",
   },
   "Every action that can be bound with the `keybind` configuration option, " +

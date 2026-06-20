@@ -21,7 +21,21 @@ export interface DocsNavGroup {
 
 // Explicit section order (replaces the old alphabetical reliance). Ungrouped
 // entries always lead; unknown sections sort after these, alphabetically.
-const SECTION_ORDER = ["Components", "Protocol", "Reference", "Terminal API"];
+// Target IA order (issue 834, Exp 12). New Ghostty-parity / TermSurf sections
+// (Install, Features, TermSurf, Help, Sponsor) are pre-placed for Phases 3-4;
+// the transitional `Components`/`Protocol` keep explicit ranks until they fold
+// into the `TermSurf` group (Phase 4).
+const SECTION_ORDER = [
+  "Install",
+  "Configuration",
+  "Features",
+  "Terminal API",
+  "Components",
+  "Protocol",
+  "TermSurf",
+  "Help",
+  "Sponsor",
+];
 // Explicit subsection order within "Terminal API".
 const SUBSECTION_ORDER = ["Concepts", "Control", "CSI", "ESC", "OSC"];
 

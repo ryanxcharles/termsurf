@@ -287,7 +287,7 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
   — **Pass**
 - [Experiment 11: Docs search with Pagefind](11-pagefind-search.md) — **Pass**
 - [Experiment 12: IA, sitemap & versioning posture](12-ia-sitemap-versioning.md)
-  — **Designed**
+  — **Pass** (closes Phase 1 — Architecture)
 
 ## Process notes
 

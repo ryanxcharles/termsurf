@@ -2,7 +2,7 @@
 title: Keybind Actions
 navLabel: Keybind Actions
 description: Every keybind action available to the keybind configuration option, generated from the TermSurf fork.
-section: Reference
+section: Configuration
 order: 3
 ---
 

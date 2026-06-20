@@ -128,3 +128,55 @@ Optional/nit folded in: a concrete rendered-nav-order assertion (Verification
 drop the version-switcher component (per the posture). Components/Protocol fold
 into the TermSurf group is correctly **deferred** to Phase 4 (no landing page
 yet).
+
+## Result
+
+**Result:** Pass
+
+The IA/sitemap spec (above) and versioning posture are recorded; the
+`Reference`→`Configuration` regroup and target `SECTION_ORDER` are implemented,
+URL-preserving.
+
+### What was built
+
+- `website/scripts/gen-references.ts` — both generated pages now emit
+  `section: Configuration`; regenerated (`--check` exits 0).
+- `website/src/content/docs/reference/configuration.mdx` — `section` →
+  `Configuration`.
+- `website/src/lib/docs-nav.ts` — `SECTION_ORDER` set to the target IA order
+  with transitional `Components`/`Protocol` ranks retained.
+- `website/CLAUDE.md` — IA/sitemap + versioning posture recorded as the
+  canonical structure reference; notes Phase 2 to drop the version-switcher
+  component.
+
+### Verification results
+
+1. **Sitemap complete & coherent** — the spec covers Ghostty-parity (macOS) +
+   TermSurf sections, folds in existing pages and the done VT/reference work,
+   and names the planned keybindings-overview page. **Pass.**
+2. **Versioning posture documented** — single-version / no-switcher +
+   rationale + future path, in this file and `website/CLAUDE.md`. **Pass.**
+3. **Nav ordering ready** — rendered sidebar section order is exactly
+   `Configuration → Terminal API → Components → Protocol` (after ungrouped),
+   matching the target; future sections pre-ranked. **Pass.**
+4. **Build clean** — `bun run build` 76 pages; `astro check` 0 errors;
+   `gen:references --check` and `import:vt --check` exit 0; dead-link crawl over
+   all docs = 0. **Pass.**
+5. **No regressions** — config pages keep their URLs
+   (`/docs/reference/{configuration,config,keybind-actions}`); `/`, `/welcome`,
+   and search unaffected. **Pass.**
+
+## Conclusion
+
+**Phase 1 (Architecture) is complete.** Across Experiments 1–12 it delivered:
+the MDX content model + generated navigation, the auto-generated config +
+keybind references, the full fork-verified 64-page VT/Terminal API reference,
+the deploy-script cleanup, Pagefind docs search, and now the IA/sitemap +
+versioning posture. The site builds 76 pages on a clean, documented
+architecture.
+
+Next: **Phase 2 (design system)** — systematize Tokyo Night into documented
+tokens + a component inventory (no version switcher) and page templates; then
+**Phase 3** (Ghostty-parity About/Install/Features/Help/Sponsor) and **Phase 4**
+(TermSurf-specific UX story, Web TUI, protocol, engines, roadmap), both building
+into this IA.

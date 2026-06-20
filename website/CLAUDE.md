@@ -22,6 +22,23 @@ deployed to Cloudflare Pages.
 - **Hosting:** Cloudflare Pages via `wrangler pages deploy dist`
 - **Package manager:** Bun
 
+## Information architecture & versioning (issue 834)
+
+**Target sitemap** (sidebar section order in `src/lib/docs-nav.ts`
+`SECTION_ORDER`): ungrouped (Getting Started, About), then Install,
+Configuration (overview + generated Config Options + Keybind Actions + planned
+keybindings overview), Features, Terminal API (the VT reference), TermSurf (How
+TermSurf Works, Web TUI, Architecture, Protocol, Browser Engines, Roadmap),
+Help, Sponsor. Ghostty-parity sections are
+macOS-accurate (no Linux/GTK). Sections marked elsewhere as "Phase 3/4" are not
+built yet; `Components`/`Protocol` are transitional and fold into the `TermSurf`
+group when its landing page exists.
+
+**Versioning:** single-version, **no version switcher** for 1.0 (one current
+version; Cloudflare keeps prior deploys for rollback). If multiple supported
+versions ever exist: snapshot under a version prefix + add a switcher. (So
+Phase 2's design system should **not** include a version-switcher component.)
+
 ## Docs content
 
 Doc pages are MDX entries in the `docs` content collection

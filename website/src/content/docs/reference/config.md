@@ -2,7 +2,7 @@
 title: Configuration Options
 navLabel: Config Options
 description: Complete reference for every Ghostboard configuration option, generated from the TermSurf fork.
-section: Reference
+section: Configuration
 order: 2
 ---
 
