@@ -146,3 +146,74 @@ in:
    path/command matches the installed `TermSurf.app`/`termsurf`.
 3. **(Nit) Provenance.** The intro now notes `termsurf +list-themes` + themes
    dir were confirmed against the running binary, not just the man page.
+
+## Result
+
+**Result:** Pass
+
+The Features section is added at Ghostty parity (four fork-verified,
+macOS-applicable features); all criteria pass.
+
+### What was built
+
+`src/content/docs/features.mdx` (`section: Features`, `order: 1`) — raw-HTML MDX
+in `prose-termsurf` with four `<h2>` subsections: **Color themes** (`theme`,
+`termsurf +list-themes`, `~/.config/termsurf/themes`, light/dark — no app-bundle
+path hardcoded; links to the config reference); **Shell integration**
+(auto-injection + working-dir inheritance, prompt marking, the `cursor`/`title`/
+`sudo`/`path` features; links to config + Keybindings); **SSH integration**
+(`ssh-env`/`ssh-terminfo`, generic terminfo/TERM behavior,
+`termsurf +ssh-cache`; links to config); **AppleScript automation (macOS)** (the
+bundled scripting dictionary — `application`/`window`/`tab`/`terminal` +
+`new window`/`new tab`/ `split`/`focus`/`close`,
+`input text`/`send key`/mouse/`perform action` — with an `osascript` example;
+links to Keybind Actions).
+
+### Verification results
+
+1. **Builds + placed** — `bun run build` 79 pages; `/docs/features` emitted; the
+   `/docs` index section order is Overview → Configuration → **Features** →
+   Terminal API → Components → Protocol (per `SECTION_ORDER`); `astro check` 0
+   errors. **Pass.**
+2. **Accuracy (fork-verified)** — all four features confirmed in the fork at the
+   design gate against the installed app; the built page hardcodes **no**
+   divergent man-page string: greps for `ghostty.app`, `gtk`, `linux`,
+   `xterm-ghostty` are all empty; exact option syntax is linked to
+   `/docs/reference/config`. **Pass.**
+3. **macOS-accurate** — no Linux/GTK text; AppleScript framed as macOS
+   automation. **Pass.**
+4. **Design system, zero JS, links resolve** — `prose-termsurf`; no hardcoded
+   hex; 0 `astro-island`; dead-link crawl over `/docs/features` = 0 broken (all
+   cross-links resolve). **Pass.**
+5. **a11y** — one `<h1>` ("Features") → four ordered `<h2>`s, no skipped levels;
+   descriptive link text. **Pass.**
+6. **No regressions** — `gen:references --check` + `import:vt --check` exit 0;
+   only `features.mdx` added (a new "Features" nav group is the sole nav
+   addition); search/`/`/`/welcome`/other pages unchanged. **Pass.**
+
+## Conclusion
+
+The Features section now exists at Ghostty parity — color themes, shell
+integration, SSH integration, and AppleScript automation — documented at
+overview depth, every feature confirmed present in the actual fork,
+macOS-scoped, with exact option syntax deferred to the fork-sourced generated
+config reference and no stale `Ghostty.app`/TERM strings carried over. Next
+Phase-3 candidates: Help (terminfo, macOS platform notes, synchronized output)
+and Sponsor.
+
+## Completion Review
+
+Independent `adversarial-reviewer` at the result gate. **Verdict: APPROVE** (no
+findings). Against a fresh 79-page build the reviewer verified every claim with
+man-page/sdef line cites: themes (`theme` 630, light/dark 633, `+list-themes`
+657, user dir 647 — no app-bundle path, never "Ghostty.app"); shell integration
+(shells 3155; working-dir 3137, prompt marking + `jump_to_prompt` 3140,
+no-confirm 3142, resize 3145; features cursor/title/sudo/path; default
+`detect`); SSH (`ssh-env` 3180, `ssh-terminfo` 3187, `+ssh-cache` 3192; TERM
+described generically — `xterm-ghostty` absent from the page); AppleScript (sdef
+classes application/window/tab/terminal + the named commands; `perform action`
+runs a keybind action; `osascript` example targets "TermSurf"). Confirmed: zero
+`ghostty.app`/`gtk`/`linux`/`xterm-ghostty` on the page; Features group placed
+between Configuration and Terminal API; all four links resolve; one `<h1>` +
+four ordered `<h2>`; no hex; 0 `astro-island`; `astro check` 0 errors; drift
+checks exit 0; scope only `features.mdx`.
