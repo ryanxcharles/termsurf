@@ -63,11 +63,26 @@ fork's config options or keybind actions change; `bun run gen:references --check
 fails if the committed pages are stale. The fork man-page path can be overridden
 with `--in <path>` or `GHOSTTY_DOC`.
 
+## Terminal API (VT) docs
+
+The `/docs/vt/**` pages are **adapted from Ghostty's MIT-licensed VT
+documentation** (`ghostty-org/website`); see the repo `NOTICE`.
+`src/components/VTSequence.astro` is a static (zero-JS) port of Ghostty's
+`VTSequence` component, provided to MDX via `components={{ VTSequence }}` in
+`src/pages/docs/[...slug].astro`. When importing VT pages, adapt: rewrite
+Ghostty product references to TermSurf (keep "Ghostty" only for upstream
+attribution); rename `## Ghostty Status` → `## Implementation Status`; and
+rewrite/inline every internal link so none points at a page the site does not
+build (`#TODO` → text; Ghostty's `/docs/config/reference` → `/docs/reference/config`).
+Only a proof slice is imported so far; the full ~64-file import and nested VT
+navigation are pending (issue 834, Experiment 4).
+
 ## Components
 
 | File | Purpose |
 |------|---------|
 | `src/layouts/Base.astro` | HTML shell, fonts, header, footer |
+| `src/components/VTSequence.astro` | VT escape-sequence diagram (static port of Ghostty's component) |
 | `src/components/Header.astro` | Logo + nav links |
 | `src/components/Footer.astro` | Astrohacker branding + copyright |
 | `src/components/DocPage.astro` | Docs layout shell (sidebar from `docs-nav.ts` + prose article) |

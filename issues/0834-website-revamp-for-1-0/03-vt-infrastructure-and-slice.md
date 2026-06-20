@@ -229,3 +229,94 @@ frontmatter** (it renders into `<meta>`) and records the **bulk rule for
 Experiment 4** (Ghostty version-numbered compatibility tables — an accuracy
 issue a word-swap can't fix —, "Ghostty does not support…", first-person
 phrasings); change item 3 adapts the description.
+
+## Result
+
+**Result:** Pass
+
+The VT hosting infrastructure works end-to-end; all eight verification criteria
+pass. Slice files imported: `vt/index.mdx`, `vt/csi/cup.mdx`,
+`vt/control/bel.mdx`, `vt/osc/7.mdx` (osc/7 chosen as a cross-link-free,
+Ghostty-mention-free OSC page).
+
+### What was built
+
+- `website/src/components/VTSequence.astro` — static (zero-JS) port; pure
+  `parseSequence` logic, Tokyo Night styling, optional `unimplemented` banner
+  via `lucide-astro`'s `OctagonAlert`.
+- `website/src/pages/docs/[...slug].astro` — renders MDX with
+  `components={{ VTSequence }}`.
+- `website/src/content/docs/vt/{index.mdx, csi/cup.mdx, control/bel.mdx, osc/7.mdx}`
+  — imported + adapted (links + Ghostty prose per decisions 3–4).
+- `NOTICE` — appended a Ghostty-website MIT attribution section.
+- `website/src/styles/style.css` — `.prose-termsurf .footnotes` styling.
+- `website/CLAUDE.md` — VT origin, `VTSequence`, adaptation rules, pending bulk
+  import.
+
+### Notes on the implementation
+
+- **Index URL.** Astro's `glob()` loader strips `/index`, so `vt/index.mdx` → id
+  `vt` → URL `/docs/vt` (and `docs-nav.ts`'s `/docs/${id}` matches). No special
+  handling was needed — confirmed by the emitted `dist/docs/vt/index.html`.
+- **`VTSequence` output verified.** On `/docs/vt/csi/cup`, the rendered cells
+  are `ESC` (0x1B), `[` (0x5B), `y` (param, `____`), `;` (0x3B), `x` (param),
+  `H` (0x48) — exactly Ghostty's `parseSequence` semantics.
+
+### Verification results
+
+1. **VTSequence renders** — cells match the expected hex/value expansion
+   (above). **Pass.**
+2. **Builds + nav** — 16 pages (12 prior + 4 VT); `astro check` 0 errors; VT
+   pages appear under a "Terminal API" sidebar group (Overview, CUP, BEL, OSC
+   7). **Pass.**
+3. **Zero dead internal links** — a head+body crawl of all VT pages against the
+   built page set reports **none** (no `#TODO`, no `/docs/vt/reference`,
+   `/docs/vt/concepts/...`, or `/docs/config/reference`; `bel.mdx`'s
+   `bell-features` link remapped to `/docs/reference/config`, which builds).
+   **Pass.**
+4. **No Ghostty product claims** — the only two "Ghostty" mentions across the
+   slice are the upstream attribution on the index page; `bel.mdx`'s section is
+   "Implementation Status" and its prose says TermSurf. **Pass.**
+5. **Zero client JS** — no `<astro-island>` on any VT page (structural, from the
+   `.astro` choice). **Pass.**
+6. **Footnotes** — `bel.mdx`'s `[^1]` renders into a `class="footnotes"`
+   section, now styled by the added `.prose-termsurf .footnotes` rule. **Pass.**
+7. **Attribution** — `NOTICE` carries the Ghostty-website MIT notice; the VT
+   index page shows an attribution blockquote. **Pass.**
+8. **No regressions** — the 11 prior doc pages, `/`, and `/welcome` still build
+   at their URLs (16 = 12 + 4). **Pass.**
+
+## Completion Review
+
+Independent `adversarial-reviewer` agent at the result gate. **Verdict:
+APPROVE** (no blocking findings, no action required). The reviewer reproduced
+every claim against a fresh build and the real Ghostty sources: 16 pages build,
+`astro check` 0 errors (the only hints are pre-existing and unrelated — an
+unused `SECTION_RE` in `gen-references.ts` and the `THREE.Clock` deprecation);
+the four VT pages emit at the expected URLs under a "Terminal API" group; the
+`VTSequence` port matches Ghostty's `parseSequence` exactly (cup/bel/osc-7 cells
+verified, including the OSC→`ESC ]` and ST→`ESC \` expansions) and ships zero
+JS; an independent head+body crawl found **zero** dead internal links and no
+`#TODO`; all four files diff clean against the originals apart from the intended
+link/Ghostty→TermSurf/heading adaptations; the only "Ghostty" strings in built
+VT HTML are the index attribution; `NOTICE` appends the Ghostty-website MIT
+notice without clobbering existing entries; footnotes render styled; and no fork
+files or schema were touched. One non-blocking note: the index overview
+paragraph was rewritten (not literally inlined) to avoid referencing the
+not-yet-built reference/concepts pages — accurate and consistent with
+decision 3.
+
+(Pre-existing lint hint noted: the unused `SECTION_RE` constant in
+`scripts/gen-references.ts` from Experiment 2 — a hint, not an error; left for a
+future tidy rather than touching a committed file in this experiment's result.)
+
+## Conclusion
+
+The VT hosting infrastructure — the static `VTSequence` port, the MDX
+`components` wiring, the link/prose adaptation rules, footnote styling, and MIT
+attribution — works end-to-end against real Ghostty content. Experiment 4 can
+now bulk-import the remaining ~60 VT files (applying the recorded link/prose
+bulk rules) and build the **nested** "Terminal API" navigation (which also
+resolves the section-ordering limitation deferred from Experiment 1). After
+that, Phase 1's remaining pieces are search (Pagefind), versioning posture, the
+full IA/sitemap, and the deploy/`deploy.sh` cleanup.
