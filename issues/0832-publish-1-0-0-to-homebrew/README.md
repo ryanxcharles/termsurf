@@ -64,4 +64,4 @@ Expected release artifacts:
 ## Experiments
 
 - [Experiment 1: Build, publish, and verify 1.0.0](01-build-publish-and-verify-1-0-0.md)
-  — **Designed**
+  — **Pass**

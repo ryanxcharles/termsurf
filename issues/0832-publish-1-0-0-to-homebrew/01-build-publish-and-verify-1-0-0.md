@@ -233,3 +233,198 @@ Re-review result:
 
 - Fresh-context adversarial re-review returned **APPROVED** with no remaining
   Required findings.
+
+## Result
+
+**Result:** Pass
+
+TermSurf `1.0.0` was built, packaged, published to GitHub, pushed to the
+Homebrew tap, installed with Homebrew, and smoke-tested with the installed app,
+installed `web`, and installed Roamium path.
+
+Release preflight:
+
+- `git status --short` was clean before release execution.
+- `git -C homebrew status --short --branch` reported `## main...origin/main`.
+- `git -C homebrew rev-list --left-right --count HEAD...origin/main` reported
+  `0 0`.
+- `gh auth status` showed authenticated access for `ryanxcharles` with `repo`
+  scope.
+- `gh release view v1.0.0 --repo termsurf/termsurf` reported
+  `release not found`.
+
+Release build:
+
+```bash
+scripts/build.sh all --release
+```
+
+The release build succeeded. Chromium, `webtui`, Roamium, and Ghostboard all
+built. The Xcode step emitted existing ImGui dSYM warnings from
+`ghostty-internal.a(ext.o)`, but ended with `** BUILD SUCCEEDED **`.
+
+Package-only preflight:
+
+```bash
+TERMSURF_RELEASE_PACKAGE_ONLY=1 scripts/release.sh 1.0.0
+```
+
+The package-only preflight succeeded and created
+`dist/termsurf-1.0.0-aarch64-apple-darwin.tar.gz`.
+
+Tarball verification:
+
+- The final published tarball SHA was
+  `bb6a781cc43aca779b11d2df3c68d2294e02b85c2269f37877c8cacf9ae6411d`.
+- The tarball contained:
+  - `./TermSurf.app/`
+  - `./web`
+  - `./roamium/roamium`
+  - `./roamium/icudtl.dat`
+  - `./roamium/gen/chrome/pdf_resources.pak`
+  - `./roamium/gen/chrome/generated_resources_en-US.pak`
+  - `./roamium/gen/chrome/common_resources.pak`
+  - `./roamium/gen/components/components_resources.pak`
+  - `./roamium/gen/components/strings/components_strings_en-US.pak`
+  - `./roamium/gen/extensions/extensions_renderer_resources.pak`
+- The tarball contained `492` top-level dylibs, `8` top-level pak files during
+  tarball inspection, and `1` V8 snapshot.
+- Stale Wezboard names were absent from the tarball.
+
+Publish execution:
+
+The first `scripts/release.sh 1.0.0` attempt stopped before publishing because a
+local-only stale `v1.0.0` tag already existed and pointed at old commit
+`4b4d4062d` (`build.zig: v1.0.0`). There was no remote `v1.0.0` release or tag.
+
+Recovery:
+
+```bash
+git push upstream main
+git tag -d v1.0.0
+scripts/release.sh 1.0.0
+```
+
+This pushed the current release commits to `termsurf/termsurf`, removed only the
+stale local tag, and then published successfully.
+
+Published GitHub release:
+
+- URL: `https://github.com/termsurf/termsurf/releases/tag/v1.0.0`
+- Asset: `termsurf-1.0.0-aarch64-apple-darwin.tar.gz`
+- Asset digest:
+  `sha256:bb6a781cc43aca779b11d2df3c68d2294e02b85c2269f37877c8cacf9ae6411d`
+- Asset size: `242693015`
+- Remote tag `refs/tags/v1.0.0` points at
+  `fcfeade1542e54840341b077f8587c70a41f816a`.
+- `upstream/main` also points at `fcfeade1542e54840341b077f8587c70a41f816a`.
+
+Homebrew tap:
+
+- `homebrew/Casks/termsurf.rb` now has `version "1.0.0"`.
+- The cask SHA is
+  `bb6a781cc43aca779b11d2df3c68d2294e02b85c2269f37877c8cacf9ae6411d`.
+- Tap commit `a59df29` (`v1.0.0`) was pushed to `termsurf/homebrew-termsurf`.
+
+Homebrew install verification:
+
+```bash
+brew update
+brew uninstall --cask termsurf || true
+brew install --cask termsurf
+command -v web
+test "$(command -v web)" = "/opt/homebrew/bin/web"
+```
+
+Homebrew installed cask `1.0.0` successfully:
+
+- `/Applications/TermSurf.app`
+- `/opt/homebrew/bin/web`
+- `/opt/homebrew/opt/termsurf-roamium/roamium`
+
+Explicit installed resource checks passed for:
+
+- `/opt/homebrew/opt/termsurf-roamium/roamium`
+- `/opt/homebrew/opt/termsurf-roamium/icudtl.dat`
+- `/opt/homebrew/opt/termsurf-roamium/gen/chrome/pdf_resources.pak`
+- `/opt/homebrew/opt/termsurf-roamium/gen/chrome/generated_resources_en-US.pak`
+- `/opt/homebrew/opt/termsurf-roamium/gen/chrome/common_resources.pak`
+- `/opt/homebrew/opt/termsurf-roamium/gen/components/components_resources.pak`
+- `/opt/homebrew/opt/termsurf-roamium/gen/components/strings/components_strings_en-US.pak`
+- `/opt/homebrew/opt/termsurf-roamium/gen/extensions/extensions_renderer_resources.pak`
+- at least one top-level dylib, pak file, and V8 snapshot.
+
+Installed-file stale-name check:
+
+- No `Wezboard` or `TermSurf Wezboard` references were found in:
+  - `/opt/homebrew/Caskroom/termsurf/1.0.0`
+  - `/Applications/TermSurf.app`
+  - `/opt/homebrew/opt/termsurf-roamium`
+  - `homebrew/Casks/termsurf.rb`
+
+Second clean install cycle:
+
+```bash
+brew uninstall --cask termsurf
+brew install --cask termsurf
+```
+
+The second uninstall/install cycle also passed for cask `1.0.0`.
+
+Installed runtime smoke test:
+
+```bash
+TERMSURF_GHOSTBOARD_APP=/Applications/TermSurf.app \
+  TERMSURF_WEB=/opt/homebrew/bin/web \
+  TERMSURF_INSTALLED_ROAMIUM=/opt/homebrew/opt/termsurf-roamium/roamium \
+  scripts/ghostboard-geometry-matrix.sh installed-roamium-release-launch
+```
+
+The first corrected installed-path run spawned the installed Roamium path but
+timed out before AppKit overlay presentation. The app log proved the installed
+path was used:
+
+```text
+SetOverlay: named browser resolved browser=roamium env=TERMSURF_INSTALLED_ROAMIUM_PATH path=/opt/homebrew/opt/termsurf-roamium/roamium
+spawned browser path=/opt/homebrew/opt/termsurf-roamium/roamium
+```
+
+A second corrected installed-path run passed:
+
+- Harness log:
+  `logs/ghostboard-geometry-installed-roamium-release-launch-harness-20260619-191053.log`
+- App log:
+  `logs/ghostboard-geometry-installed-roamium-release-launch-app-20260619-191053.log`
+- Roamium trace:
+  `logs/ghostboard-geometry-installed-roamium-release-launch-roamium-20260619-191053.log`
+- Screenshot:
+  `logs/ghostboard-geometry-installed-roamium-release-launch-screenshot-20260619-191053.png`
+
+The passing run recorded:
+
+```text
+web=/opt/homebrew/bin/web
+SetOverlay: named browser resolved browser=roamium env=TERMSURF_INSTALLED_ROAMIUM_PATH path=/opt/homebrew/opt/termsurf-roamium/roamium
+spawned browser path=/opt/homebrew/opt/termsurf-roamium/roamium
+PASS: scenario installed-roamium-release-launch
+```
+
+Manual screenshot inspection confirmed `https://example.com/` loaded in the
+installed TermSurf app.
+
+## Conclusion
+
+TermSurf `1.0.0` is published to GitHub and Homebrew. The final Homebrew cask
+installs the expected app, `web` binary, and Roamium resource root, and the
+installed release can launch a browser page through the installed app and
+installed Roamium path.
+
+The only notable issue was a stale local-only `v1.0.0` tag from older history.
+Removing that local tag after confirming no remote `v1.0.0` tag or release
+existed allowed the release script to create the correct tag at current
+`upstream/main`.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **APPROVED** with no
+findings.
