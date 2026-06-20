@@ -318,6 +318,8 @@ Document everything TermSurf adds on top of a terminal. Deliverables:
 - [Experiment 25: Split pane borders](25-split-pane-borders.md) — **Pass**
 - [Experiment 26: Roadmap](26-roadmap.md) — **Pass**
 - [Experiment 27: Roamium reference rework](27-roamium-reference.md) — **Pass**
+- [Experiment 28: Protocol message reference completion](28-protocol-message-completion.md)
+  — **Designed**
 
 ## Process notes
 
