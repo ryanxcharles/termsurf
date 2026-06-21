@@ -406,10 +406,11 @@ struct  Termsurf__ServerRegister
 {
   ProtobufCMessage base;
   char *profile;
+  char *browser;
 };
 #define TERMSURF__SERVER_REGISTER__INIT \
  { PROTOBUF_C_MESSAGE_INIT (&termsurf__server_register__descriptor) \
-, (char *)protobuf_c_empty_string }
+, (char *)protobuf_c_empty_string, (char *)protobuf_c_empty_string }
 
 
 struct  Termsurf__TabReady

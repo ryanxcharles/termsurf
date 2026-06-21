@@ -166,10 +166,11 @@ surrounding issue text.
 - [x] Audit Surfari against Roamium and the existing TermSurf protobuf messages;
       mark every message supported, unsupported, or requiring a protocol
       extension (Experiment 17).
-- [x] Modify `termsurf.proto` only where WebKit exposes a real browser
-      capability that the current protocol cannot express; Experiments 17-18
-      found no required protocol changes.
-- [ ] Integrate Surfari with Ghostboard engine launching, profile selection,
+- [x] Modify `termsurf.proto` only where the current protocol cannot express the
+      required engine behavior; Experiments 17-18 found no WebKit browser
+      capability gaps, and Experiment 19 added `ServerRegister.browser` so
+      Ghostboard can deterministically route same-profile engines.
+- [x] Integrate Surfari with Ghostboard engine launching, profile selection,
       socket routing, and overlay hosting.
 - [ ] Test Surfari inside the real TermSurf app with navigation, keyboard input,
       click, drag, scroll, resize, pane resize, split panes, tab switching,
@@ -301,4 +302,4 @@ recovery. Much of this code can inform Surfari's implementation.
 - [Experiment 18: Implement Surfari DevTools Path](18-surfari-devtools-path.md)
   — **Pass**
 - [Experiment 19: Add Ghostboard Surfari Launch Path](19-ghostboard-surfari-launch.md)
-  — **Designed**
+  — **Pass**

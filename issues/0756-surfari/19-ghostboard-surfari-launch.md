@@ -110,3 +110,92 @@ cross-attach risk: `ServerRegister` only carries `profile`, but pending servers
 are keyed by `profile + browser`. The design now requires browser identity in
 registration or an equivalent deterministic attach proof, and explicitly allows
 the narrow protocol/Roamium/Surfari updates needed to make that correct.
+
+## Result
+
+**Result:** Pass
+
+Implemented the Ghostboard Surfari launch path and the browser identity
+registration fix.
+
+Code changes:
+
+- `proto/termsurf.proto` adds `browser = 2` to `ServerRegister`.
+- `ghostboard/src/protobuf/termsurf.pb-c.{c,h}` were regenerated with
+  `proto/generate.sh`.
+- `surfari/src/main.rs` sends `ServerRegister { profile, browser }`, defaulting
+  to `surfari` and honoring `--browser-name=...`.
+- `roamium/src/main.rs` sends the same browser identity, defaulting to `roamium`
+  and honoring `--browser-name=...`.
+- `ghostboard/src/apprt/termsurf.zig` resolves named `surfari` only through
+  `TERMSURF_SURFARI_PATH`, keeps Roamium's resolver behavior intact, separates
+  logical browser name from executable path when spawning engines, passes
+  `--browser-name=...` to child browser processes, stores Surfari profiles under
+  `webkit-profiles`, and attaches `ServerRegister` only when both profile and
+  browser match the pending server.
+- `ghostboard/src/apprt/termsurf.zig` also adds a focused in-process socketpair
+  regression test proving same-profile Roamium/Surfari registration cannot
+  cross-attach, matched registration sends `CreateTab`, Surfari `TabReady` emits
+  `BrowserReady`, `CaContext` routes to the Surfari pane,
+  `TERMSURF_SURFARI_PATH` resolution works, and Surfari profile storage avoids
+  `chromium-profiles`.
+- `scripts/test-issue-756-surfari-fake-gui.py` now validates
+  `ServerRegister.browser == "surfari"` in addition to the existing Surfari
+  fake-GUI IPC checks.
+
+Verification run:
+
+```bash
+proto/generate.sh
+zig fmt ghostboard/src/apprt/termsurf.zig
+cargo fmt -- surfari/src/main.rs roamium/src/main.rs
+cd ghostboard && zig build test -Dtest-filter='termsurf server register matches profile and browser'
+cd ghostboard && zig build
+cargo build -p surfari
+cargo check -p roamium
+cargo fmt -p surfari -- --check
+cargo fmt -p roamium -- --check
+python3 -m py_compile scripts/test-issue-756-surfari-fake-gui.py
+DYLD_FRAMEWORK_PATH="$PWD/webkit/src/WebKitBuild/Debug" \
+  python3 scripts/test-issue-756-surfari-fake-gui.py \
+  --log-dir logs/issue-756-exp19-surfari-fake-gui \
+  "file://$PWD/surfari/libtermsurf_webkit/test-content/navigation.html"
+git diff --check
+```
+
+The focused Ghostboard test passed. The Surfari fake-GUI harness passed with:
+
+```text
+SMOKE_PASS profile=profile tab_id=1 devtools_supported=1 devtools_tab_id=2 ca_context_id=1970370549 title='Surfari ABI Navigation Page' loading_states=loading,done clean_exit=1
+```
+
+One initial fake-GUI run failed because I passed `index.html`; the harness
+expects the deterministic `navigation.html` URL/title. Rerunning with
+`navigation.html` passed.
+
+## Conclusion
+
+Ghostboard can now resolve and launch Surfari by name, keep Surfari's profile
+storage separate from Roamium's Chromium profile storage, and route Surfari IPC
+by `profile + browser` instead of profile alone. The narrow
+`ServerRegister.browser` protocol extension was necessary because same-profile
+Roamium and Surfari processes are otherwise ambiguous at registration time.
+
+This completes the first Ghostboard integration step for Surfari. The next
+experiment should move from launch/routing proof to running Surfari inside the
+real TermSurf app and testing user-visible browser behavior across navigation,
+input, resize, panes, tabs, windows, focus, shutdown, restart, profile
+isolation, and crash handling.
+
+## Completion Review
+
+Adversarial completion review ran with a fresh-context Codex subagent. Verdict:
+`APPROVED`.
+
+Findings: none.
+
+The reviewer independently verified `cargo check -p roamium`,
+`cargo build -p surfari`, Rust formatting checks, Markdown prettier check,
+`python3 -m py_compile`, and `git diff --check`. It did not run mutating
+commands such as `proto/generate.sh`, `zig fmt`, or `cargo fmt -- ...`, and
+confirmed the result was not committed before review.

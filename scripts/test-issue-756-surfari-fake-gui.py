@@ -190,6 +190,7 @@ class State:
     def __init__(self) -> None:
         self.server_register = False
         self.profile = ""
+        self.browser = ""
         self.sent_create = False
         self.sent_resize = False
         self.tab_id = 0
@@ -370,7 +371,10 @@ def main() -> int:
                     if top == 12:
                         state.server_register = True
                         state.profile = parse_string(body, 1)
-                        messages.write(f"server_register profile={state.profile}\n")
+                        state.browser = parse_string(body, 2)
+                        messages.write(
+                            f"server_register profile={state.profile} browser={state.browser}\n"
+                        )
                         if not state.sent_create:
                             send_message(
                                 conn,
@@ -524,6 +528,8 @@ def main() -> int:
         fail("ServerRegister missing", log_dir)
     if state.profile != "profile":
         fail(f"unexpected profile {state.profile!r}", log_dir)
+    if state.browser != "surfari":
+        fail(f"unexpected browser {state.browser!r}", log_dir)
     if not state.sent_create:
         fail("CreateTab not sent", log_dir)
     if state.tab_id <= 0:

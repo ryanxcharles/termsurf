@@ -14,6 +14,7 @@ use proto::{Msg, TermSurfMessage};
 static SOCKET_PATH: OnceLock<String> = OnceLock::new();
 static LISTEN_PATH: OnceLock<String> = OnceLock::new();
 static PROFILE_NAME: OnceLock<String> = OnceLock::new();
+static BROWSER_NAME: OnceLock<String> = OnceLock::new();
 static INCOGNITO: OnceLock<bool> = OnceLock::new();
 
 static mut BROWSER_CONTEXT: ffi::TsBrowserContext = ptr::null_mut();
@@ -46,9 +47,14 @@ unsafe extern "C" fn on_initialized(_user_data: *mut c_void) {
 
     // Send ServerRegister.
     let profile = PROFILE_NAME.get().cloned().unwrap_or_default();
+    let browser = BROWSER_NAME
+        .get()
+        .cloned()
+        .unwrap_or_else(|| "roamium".to_string());
     let msg = TermSurfMessage {
         msg: Some(Msg::ServerRegister(proto::termsurf::ServerRegister {
             profile,
+            browser,
         })),
     };
     ipc::send(&msg);
@@ -78,6 +84,8 @@ fn main() {
         } else if let Some(val) = arg.strip_prefix("--user-data-dir=") {
             let name = val.rsplit('/').next().unwrap_or(val);
             let _ = PROFILE_NAME.set(name.to_string());
+        } else if let Some(val) = arg.strip_prefix("--browser-name=") {
+            let _ = BROWSER_NAME.set(val.to_string());
         } else if arg == "--incognito" {
             let _ = INCOGNITO.set(true);
         }
