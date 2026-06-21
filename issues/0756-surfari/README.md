@@ -263,3 +263,5 @@ recovery. Much of this code can inform Surfari's implementation.
 
 - [Experiment 1: Shallow clone and build WebKit](01-shallow-clone-and-build-webkit.md)
   — **Pass**
+- [Experiment 2: Prove WebKit hosting context export](02-webkit-hosting-context-proof.md)
+  — **Designed**
