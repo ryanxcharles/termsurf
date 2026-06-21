@@ -114,6 +114,14 @@
       matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
         window.__surfariState.colorScheme = event.matches ? "dark" : "light";
       });
+
+      window.__surfariEmitConsoleMessages = () => {
+        console.log("surfari-log", 42, true);
+        console.info("surfari-info", ["alpha", 7]);
+        console.warn("surfari-warn", { kind: "object", count: 2 });
+        console.error("surfari-error", null);
+        return "console-started";
+      };
     </script>
   </body>
 </html>

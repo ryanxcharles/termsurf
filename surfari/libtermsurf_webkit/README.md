@@ -63,6 +63,8 @@ Implemented:
 - pointer, hand, and i-beam cursor updates through the TermSurf WebKit cursor
   hook;
 - target URL updates through WebKit hover hit testing;
+- console message callbacks through a document-start WebKit script-message
+  bridge;
 - JavaScript alert, confirm, and prompt requests through `WKUIDelegate`, with
   pending request IDs and `ts_reply_javascript_dialog`;
 - HTTP Basic auth requests through `WKNavigationDelegate`, with
@@ -72,4 +74,3 @@ Still unsupported:
 
 - DevTools;
 - renderer crash reporting;
-- console messages.

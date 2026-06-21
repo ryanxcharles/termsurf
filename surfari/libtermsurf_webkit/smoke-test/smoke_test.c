@@ -34,6 +34,12 @@ struct State {
     int cursor_checked;
     int cursor_events;
     int cursor_sequence[3];
+    int console_checked;
+    int console_events;
+    char console_levels[4][16];
+    char console_messages[4][256];
+    char console_sources[4][512];
+    int console_lines[4];
     int javascript_dialog_requests;
     int javascript_dialog_checked;
     int stale_javascript_dialog_replies;
@@ -57,10 +63,20 @@ static void capture_cursor_sequence(void *user_data);
 static void move_cursor_to_hand(void *user_data);
 static void move_cursor_to_ibeam(void *user_data);
 static void check_cursor_sequence(void *user_data);
+static void run_console_sequence(void *user_data);
+static void console_sequence_started(const char *result, void *user_data);
+static void check_console_sequence(void *user_data);
 static void run_javascript_dialog_sequence(void *user_data);
 static void run_http_auth_sequence(void *user_data);
 static void query_http_auth_accept_state(void *user_data);
 static void on_cursor_changed(ts_web_contents_t wc, int cursor_type, void *user_data);
+static void on_console_message(
+    ts_web_contents_t wc,
+    const char *level,
+    const char *message,
+    int line_number,
+    const char *source,
+    void *user_data);
 
 static void fail(const char *message)
 {
@@ -205,6 +221,8 @@ static void finish(void *user_data)
         fail("target URL check missing");
     if (!state->cursor_checked)
         fail("cursor check missing");
+    if (!state->console_checked)
+        fail("console check missing");
     if (state->javascript_dialog_requests != 3)
         fail("javascript dialog request count mismatch");
     if (!state->javascript_dialog_checked)
@@ -224,7 +242,7 @@ static void finish(void *user_data)
     ts_destroy_browser_context(state->persistent_context);
     ts_destroy_browser_context(state->incognito_context);
     stop_auth_server(state);
-    printf("SMOKE_PASS initialized=%d tab_ready=%d ca_context=%d url=%d loading_started=%d loading_finished=%d title=%d navigations=%d resized=%d focus=%d input=%d target_url=%d cursor=%d js_dialogs=%d http_auth=%d\n",
+    printf("SMOKE_PASS initialized=%d tab_ready=%d ca_context=%d url=%d loading_started=%d loading_finished=%d title=%d navigations=%d resized=%d focus=%d input=%d target_url=%d cursor=%d console=%d js_dialogs=%d http_auth=%d\n",
         state->initialized,
         state->tab_ready,
         state->context_id_count,
@@ -238,6 +256,7 @@ static void finish(void *user_data)
         state->input_checked,
         state->target_url_checked,
         state->cursor_checked,
+        state->console_checked,
         state->javascript_dialog_checked,
         state->http_auth_accept_checked && state->http_auth_reject_checked);
     fflush(stdout);
@@ -284,7 +303,7 @@ static void check_target_url_sequence(void *user_data)
     if (strcmp(state->target_url_sequence[1], "") != 0)
         fail("target URL clear callback mismatch");
     state->target_url_checked = 1;
-    ts_post_task(run_javascript_dialog_sequence, state);
+    ts_post_task(run_console_sequence, state);
 }
 
 static void check_cursor_sequence(void *user_data)
@@ -341,6 +360,53 @@ static void run_cursor_sequence(void *user_data)
 {
     struct State *state = (struct State *)user_data;
     ts_webkit_test_post_delayed_task(0.2, capture_cursor_sequence, state);
+}
+
+static void check_console_sequence(void *user_data)
+{
+    struct State *state = (struct State *)user_data;
+    const char *expected_levels[] = { "log", "info", "warn", "error" };
+    const char *expected_messages[] = {
+        "surfari-log 42 true",
+        "surfari-info [\"alpha\",7]",
+        "surfari-warn {\"kind\":\"object\",\"count\":2}",
+        "surfari-error null",
+    };
+
+    if (state->console_events != 4)
+        fail("console callback count mismatch");
+    for (int i = 0; i < 4; i++) {
+        if (strcmp(state->console_levels[i], expected_levels[i]) != 0)
+            fail("console level mismatch");
+        if (strcmp(state->console_messages[i], expected_messages[i]) != 0)
+            fail("console message mismatch");
+        if (!strstr(state->console_sources[i], "navigation.html"))
+            fail("console source mismatch");
+        if (state->console_lines[i] <= 0)
+            fail("console line number missing");
+    }
+
+    state->console_checked = 1;
+    ts_set_on_console_message(NULL, NULL);
+    ts_post_task(run_javascript_dialog_sequence, state);
+}
+
+static void console_sequence_started(const char *result, void *user_data)
+{
+    if (!result || !strstr(result, "console-started"))
+        fail("console sequence did not start");
+    ts_webkit_test_post_delayed_task(0.5, check_console_sequence, user_data);
+}
+
+static void run_console_sequence(void *user_data)
+{
+    struct State *state = (struct State *)user_data;
+    ts_set_on_console_message(on_console_message, state);
+    ts_webkit_test_evaluate_javascript(
+        state->web_contents,
+        "window.__surfariEmitConsoleMessages();",
+        console_sequence_started,
+        state);
 }
 
 static void query_input_state(void *user_data)
@@ -553,6 +619,43 @@ static void on_cursor_changed(ts_web_contents_t wc, int cursor_type, void *user_
     if (state->cursor_events < 3)
         state->cursor_sequence[state->cursor_events] = cursor_type;
     state->cursor_events++;
+}
+
+static void on_console_message(
+    ts_web_contents_t wc,
+    const char *level,
+    const char *message,
+    int line_number,
+    const char *source,
+    void *user_data)
+{
+    (void)wc;
+    struct State *state = (struct State *)user_data;
+    printf("CALLBACK console level=%s line=%d source=%s message=%s\n",
+        level ? level : "",
+        line_number,
+        source ? source : "",
+        message ? message : "");
+
+    if (state->console_events < 4) {
+        snprintf(
+            state->console_levels[state->console_events],
+            sizeof(state->console_levels[state->console_events]),
+            "%s",
+            level ? level : "");
+        snprintf(
+            state->console_messages[state->console_events],
+            sizeof(state->console_messages[state->console_events]),
+            "%s",
+            message ? message : "");
+        snprintf(
+            state->console_sources[state->console_events],
+            sizeof(state->console_sources[state->console_events]),
+            "%s",
+            source ? source : "");
+        state->console_lines[state->console_events] = line_number;
+    }
+    state->console_events++;
 }
 
 static void on_javascript_dialog_request(

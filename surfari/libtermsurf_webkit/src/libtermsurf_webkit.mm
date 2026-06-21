@@ -86,6 +86,10 @@ struct WebContents;
 @property(nonatomic) WebContents *owner;
 @end
 
+@interface TSConsoleMessageHandler : NSObject <WKScriptMessageHandler>
+@property(nonatomic) WebContents *owner;
+@end
+
 @interface TSPendingJavaScriptDialog : NSObject
 @property(nonatomic, copy) NSString *type;
 @property(nonatomic, copy) void (^alertCompletion)(void);
@@ -103,6 +107,7 @@ struct WebContents {
     WKWebView *web_view;
     TSNavigationDelegate *navigation_delegate;
     TSUIDelegate *ui_delegate;
+    TSConsoleMessageHandler *console_message_handler;
     NSMutableDictionary<NSNumber *, TSPendingJavaScriptDialog *> *pending_javascript_dialogs;
     NSMutableDictionary<NSNumber *, TSPendingHttpAuthRequest *> *pending_http_auth_requests;
     NSString *last_target_url;
@@ -301,6 +306,89 @@ static void fireCursorChanged(WebContents *contents, int cursor_type)
 
     contents->last_cursor_type = cursor_type;
     g_callbacks.on_cursor_changed(contents, cursor_type, g_callbacks.on_cursor_changed_data);
+}
+
+static NSString *consoleBridgeScriptSource(void)
+{
+    return @"(() => {"
+            "if (window.__termsurfConsoleInstalled) return;"
+            "window.__termsurfConsoleInstalled = true;"
+            "const original = {};"
+            "const levels = ['log', 'info', 'warn', 'error'];"
+            "function serialize(value) {"
+            "  if (typeof value === 'string') return value;"
+            "  if (value === undefined) return 'undefined';"
+            "  if (typeof value === 'number' || typeof value === 'boolean' || value === null) return String(value);"
+            "  try {"
+            "    const json = JSON.stringify(value);"
+            "    return json === undefined ? String(value) : json;"
+            "  } catch (error) {"
+            "    try { return String(value); } catch (stringError) { return '[unserializable]'; }"
+            "  }"
+            "}"
+            "function locationFromStack() {"
+            "  const stack = String((new Error()).stack || '');"
+            "  const lines = stack.split('\\n');"
+            "  for (let i = 0; i < lines.length; i++) {"
+            "    const line = lines[i].trim();"
+            "    if (!line || line.indexOf('__termsurf') !== -1 || line.indexOf('termsurfConsoleWrapper') !== -1 || line.indexOf('locationFromStack') !== -1 || line.indexOf('reportConsole') !== -1) continue;"
+            "    const match = line.match(/^(.*):(\\d+):(\\d+)$/);"
+            "    if (match) return { source: match[1], lineNumber: Number(match[2]) || 0 };"
+            "  }"
+            "  return { source: String(location.href || document.URL || ''), lineNumber: 0 };"
+            "}"
+            "function reportConsole(level, args) {"
+            "  try {"
+            "    const locationInfo = locationFromStack();"
+            "    window.webkit.messageHandlers.termsurfConsole.postMessage({"
+            "      level,"
+            "      message: Array.prototype.map.call(args, serialize).join(' '),"
+            "      lineNumber: locationInfo.lineNumber,"
+            "      source: locationInfo.source"
+            "    });"
+            "  } catch (error) { }"
+            "}"
+            "levels.forEach((level) => {"
+            "  original[level] = console[level];"
+            "  console[level] = function termsurfConsoleWrapper() {"
+            "    reportConsole(level, arguments);"
+            "    if (typeof original[level] === 'function') return original[level].apply(console, arguments);"
+            "  };"
+            "});"
+            "})();";
+}
+
+static void fireConsoleMessage(WebContents *contents, NSDictionary *body)
+{
+    if (!contents || !g_callbacks.on_console_message)
+        return;
+    if (![body isKindOfClass:NSDictionary.class])
+        return;
+
+    NSString *level = body[@"level"];
+    NSString *message = body[@"message"];
+    NSString *source = body[@"source"];
+    NSNumber *line_number = body[@"lineNumber"];
+    if (![level isKindOfClass:NSString.class] || ![message isKindOfClass:NSString.class])
+        return;
+    if (![source isKindOfClass:NSString.class])
+        source = @"";
+    if (![line_number isKindOfClass:NSNumber.class])
+        line_number = @0;
+
+    withCString(level, ^(const char *c_level) {
+        withCString(message, ^(const char *c_message) {
+            withCString(source, ^(const char *c_source) {
+                g_callbacks.on_console_message(
+                    contents,
+                    c_level,
+                    c_message,
+                    line_number.intValue,
+                    c_source,
+                    g_callbacks.on_console_message_data);
+            });
+        });
+    });
 }
 
 static void installCursorObserver(WebContents *contents)
@@ -508,6 +596,14 @@ static void exportContext(WebContents *contents)
 @implementation TSPendingHttpAuthRequest
 @end
 
+@implementation TSConsoleMessageHandler
+- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message
+{
+    (void)userContentController;
+    fireConsoleMessage(self.owner, [message.body isKindOfClass:NSDictionary.class] ? message.body : nil);
+}
+@end
+
 @implementation TSUIDelegate
 - (void)_webView:(WKWebView *)webView mouseDidMoveOverElement:(_WKHitTestResult *)hitTestResult withFlags:(NSEventModifierFlags)flags userInfo:(id<NSSecureCoding>)userInfo
 {
@@ -658,6 +754,15 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
     configuration.websiteDataStore = context->data_store;
+    WKUserContentController *user_content_controller = [[WKUserContentController alloc] init];
+    contents->console_message_handler = [[TSConsoleMessageHandler alloc] init];
+    contents->console_message_handler.owner = contents;
+    [user_content_controller addScriptMessageHandler:contents->console_message_handler name:@"termsurfConsole"];
+    WKUserScript *console_script = [[WKUserScript alloc] initWithSource:consoleBridgeScriptSource()
+                                                          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+                                                       forMainFrameOnly:NO];
+    [user_content_controller addUserScript:console_script];
+    configuration.userContentController = user_content_controller;
     contents->web_view = [[WKWebView alloc] initWithFrame:contents->window.contentView.bounds configuration:configuration];
     contents->web_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     contents->web_view.wantsLayer = YES;
@@ -708,6 +813,8 @@ void ts_destroy_web_contents(ts_web_contents_t wc)
         [[NSNotificationCenter defaultCenter] removeObserver:contents->cursor_observer];
     contents->web_view.navigationDelegate = nil;
     contents->web_view.UIDelegate = nil;
+    [contents->web_view.configuration.userContentController removeScriptMessageHandlerForName:@"termsurfConsole"];
+    contents->console_message_handler.owner = nullptr;
     [contents->pending_javascript_dialogs removeAllObjects];
     [contents->pending_http_auth_requests removeAllObjects];
     [contents->web_view removeFromSuperview];

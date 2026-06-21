@@ -150,3 +150,82 @@ criteria, the scope stays within Surfari console callbacks, the plan uses a
 WKWebView-compatible `WKUserScript` plus `WKScriptMessageHandler` bridge without
 requiring WebKit source patches, verification is concrete and non-vacuous, and
 `git diff --check` plus Prettier checks pass for the issue docs.
+
+## Result
+
+**Result:** Pass
+
+`libtermsurf_webkit` now captures page console messages through a document-start
+`WKUserScript` installed on each `WKWebViewConfiguration`. The script wraps
+`console.log`, `console.info`, `console.warn`, and `console.error`, serializes
+arguments into deterministic strings, posts a message through the
+TermSurf-specific `termsurfConsole` script-message handler, and then calls the
+original console method.
+
+The native `TSConsoleMessageHandler` validates the script message body and
+forwards level, serialized message, source, and line number through the existing
+`ts_console_message_cb` ABI. Malformed script messages are ignored, and the
+handler is removed during `ts_destroy_web_contents`.
+
+The smoke harness now registers `ts_set_on_console_message` only for the console
+sequence, calls a deterministic page function, and fails unless it receives
+exactly this ordered sequence:
+
+1. `log` — `surfari-log 42 true`
+2. `info` — `surfari-info ["alpha",7]`
+3. `warn` — `surfari-warn {"kind":"object","count":2}`
+4. `error` — `surfari-error null`
+
+Key evidence from `logs/issue756-exp13-console-messages.log`:
+
+```text
+CALLBACK console level=log line=119 source=@file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-log 42 true
+CALLBACK console level=info line=120 source=@file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-info ["alpha",7]
+CALLBACK console level=warn line=121 source=@file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-warn {"kind":"object","count":2}
+CALLBACK console level=error line=122 source=@file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-error null
+SMOKE_PASS initialized=1 tab_ready=1 ca_context=5 url=6 loading_started=4 loading_finished=4 title=3 navigations=4 resized=1 focus=1 input=1 target_url=1 cursor=1 console=1 js_dialogs=1 http_auth=1
+SMOKE_EXIT_STATUS=0
+```
+
+Additional verification passed:
+
+```text
+surfari/libtermsurf_webkit/build.sh
+nm -gU surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib | rg ' _ts_|_ts_webkit_test' | sort
+otool -L surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib | rg 'WebKit|JavaScriptCore|libtermsurf'
+otool -L surfari/libtermsurf_webkit/build/smoke-test | rg 'WebKit|JavaScriptCore|libtermsurf'
+git diff --check
+prettier --check --prose-wrap always --print-width 80 issues/0756-surfari/README.md issues/0756-surfari/13-webkit-console-messages.md
+git -C webkit/src status --short
+git -C webkit/src rev-parse HEAD
+git -C webkit/src rev-parse --abbrev-ref HEAD
+git -C webkit/src rev-parse --is-shallow-repository
+```
+
+`webkit/src` remained unchanged and clean on `webkit-1452a439-issue-756-exp12`
+at `cdfb8cbf86f7c5e52cef0b2f14e8ab30ceeea91c`, with shallow repository state
+`true`.
+
+## Conclusion
+
+Surfari now supports the existing console-message callback ABI without WebKit
+source changes. The source and line-number metadata are derived from WebKit's
+JavaScript stack format and were strong enough for the deterministic smoke page:
+the source contains `navigation.html`, and all four messages reported positive
+line numbers.
+
+The remaining unsupported `libtermsurf_webkit` callback gap is renderer crash
+reporting. DevTools also remains unsupported at the WebKit embedding level.
+
+## Completion Review
+
+Adversarial subagent review, fresh context, read-only.
+
+Verdict: **Approved**. No findings.
+
+The reviewer checked that the result commit had not yet been made, only the
+expected files were modified, `webkit/src` remained clean on
+`webkit-1452a439-issue-756-exp12`, the smoke log contained the four ordered
+console callbacks with `navigation.html` sources and positive line numbers, and
+`SMOKE_EXIT_STATUS=0`. Repeated read-only checks for whitespace, Markdown
+formatting, exported symbols, and linkage passed.
