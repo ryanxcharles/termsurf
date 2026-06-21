@@ -488,4 +488,4 @@ send_browser_close "$BROWSER_SOCKET" "$BROWSER_TAB_ID"
 wait_for_file_pattern "$SURFARI_TRACE" "close-tab tab_id=${BROWSER_TAB_ID} result=removed" "Surfari accepted CloseTab"
 wait_for_file_pattern "$SURFARI_TRACE" "close-tab result=no-tabs-remaining" "Surfari began clean shutdown"
 
-log "PASS: issue 756 experiment 21 real-app Surfari input routing"
+log "PASS: issue 756 real-app Surfari input routing"

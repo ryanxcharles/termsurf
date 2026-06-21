@@ -38,12 +38,12 @@
 @implementation TSHostWindow
 - (BOOL)canBecomeKeyWindow
 {
-    return YES;
+    return NO;
 }
 
 - (BOOL)canBecomeMainWindow
 {
-    return YES;
+    return NO;
 }
 @end
 
@@ -226,8 +226,7 @@ static NSEventType mouseEventType(int type, int button)
 
 static void deliverMouseEvent(WebContents *contents, NSEvent *event)
 {
-    NSPoint localPoint = [contents->web_view convertPoint:event.locationInWindow fromView:nil];
-    NSView *target = [contents->web_view hitTest:localPoint] ?: contents->web_view;
+    NSView *target = [contents->web_view hitTest:event.locationInWindow] ?: contents->web_view;
     switch (event.type) {
     case NSEventTypeLeftMouseDown:
         [NSApp _setCurrentEvent:event];
@@ -843,12 +842,13 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
-    NSRect frame = NSMakeRect(-10000, -10000, MAX(width, 64), MAX(height, 64));
+    NSRect frame = NSMakeRect(80, 80, MAX(width, 64), MAX(height, 64));
     contents->window = [[TSHostWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
     contents->window.releasedWhenClosed = NO;
     contents->window.title = @"libtermsurf_webkit";
     contents->window.acceptsMouseMovedEvents = YES;
     contents->window.ignoresMouseEvents = YES;
+    contents->window.alphaValue = 0.0;
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
     configuration.websiteDataStore = context->data_store;
@@ -930,12 +930,13 @@ ts_web_contents_t ts_create_devtools_web_contents(
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
-    NSRect frame = NSMakeRect(-10000, -10000, MAX(width, 64), MAX(height, 64));
+    NSRect frame = NSMakeRect(120, 120, MAX(width, 64), MAX(height, 64));
     contents->window = [[TSHostWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
     contents->window.releasedWhenClosed = NO;
     contents->window.title = @"libtermsurf_webkit_devtools";
     contents->window.acceptsMouseMovedEvents = YES;
     contents->window.ignoresMouseEvents = YES;
+    contents->window.alphaValue = 0.0;
 
     contents->web_view = inspector_web_view;
     [contents->web_view removeFromSuperview];
@@ -1116,7 +1117,7 @@ void ts_forward_scroll_event(
     CGEventSetIntegerValueField(cg_event, kCGScrollWheelEventIsContinuous, precise ? 1 : 0);
     NSEvent *event = [NSEvent eventWithCGEvent:cg_event];
     CFRelease(cg_event);
-    NSView *target = [contents->web_view hitTest:event.locationInWindow] ?: targetViewForPoint(contents, x, y);
+    NSView *target = [contents->web_view hitTest:event.locationInWindow] ?: contents->web_view;
     [NSApp _setCurrentEvent:event];
     [target scrollWheel:event];
     [NSApp _setCurrentEvent:nil];

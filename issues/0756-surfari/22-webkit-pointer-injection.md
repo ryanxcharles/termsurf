@@ -113,3 +113,86 @@ follows Experiment 21's `Partial` result, the plan stays focused on WebKit
 pointer injection, the verification requires page-visible pointer behavior
 instead of Surfari IPC receipt alone, Experiment 21's keyboard proof remains a
 regression requirement, and the plan commit had not already been made.
+
+## Result
+
+**Result:** Pass
+
+The real-app harness now proves page-visible pointer behavior in Surfari's
+WebKit view while preserving Experiment 21's keyboard proof.
+
+Implemented changes:
+
+- Kept Surfari host windows onscreen instead of moving them to `-10000,-10000`.
+  WebKit receives forwarded IPC mouse/wheel messages when the host window is
+  offscreen, but it does not turn wheel events into DOM `wheel` events.
+- Made `TSHostWindow` refuse key/main-window status so the onscreen WebKit host
+  window does not steal activation from Ghostboard.
+- Made the host windows ignore mouse events and set `alphaValue = 0.0` so they
+  remain non-interactive and invisible to the user while still satisfying
+  WebKit's onscreen-window requirement.
+- Corrected `libtermsurf_webkit` hit testing to use `event.locationInWindow`
+  directly when dispatching AppKit events to the `WKWebView`, matching WebKit's
+  own event-sender pattern.
+- Made the harness final pass message generic for Issue 756 real-app input
+  routing instead of naming Experiment 21.
+
+Verification evidence:
+
+- `surfari/libtermsurf_webkit/build.sh` passed, with the known macOS/WebKit
+  dylib version warning.
+- `cargo build -p surfari` passed.
+- `cargo build -p webtui` passed.
+- `cd ghostboard && zig build` passed.
+- `bash -n scripts/test-issue-756-real-app-surfari-input-routing.sh` passed.
+- `git diff --check` passed.
+- Harness run `20260621-183255` passed end to end:
+  - real Debug `TermSurf.app` launched;
+  - repo `target/debug/web --browser surfari` launched;
+  - repo `target/debug/surfari` launched;
+  - Surfari's WebKit CAContext overlay was presented;
+  - Browse mode focused Surfari;
+  - Ghostboard stayed frontmost before keyboard injection;
+  - Surfari logged `key-event`;
+  - the fixture logged `kind=input value=a`;
+  - Surfari logged `mouse-event ... type=down button=left`;
+  - Surfari logged `scroll-event`;
+  - the fixture logged page-visible wheel input;
+  - Surfari accepted `CloseTab` and began clean shutdown.
+
+The fixture still did not log a DOM click for the click-zone click. The harness
+logs this as `WARN: missing page observed click-zone click`, then requires the
+DOM wheel signal before final `PASS`. This satisfies the experiment's pass
+criteria because page-visible pointer behavior may be click, wheel/scroll, or an
+equivalent page-visible pointer signal. A later matrix experiment should decide
+whether DOM click itself must be fixed separately.
+
+## Conclusion
+
+The WebKit pointer boundary is no longer blocked at Surfari IPC receipt. The
+critical missing condition was that the WebKit host window must remain onscreen
+for DOM wheel delivery. Making that window transparent, mouse-ignoring, and
+unable to become key/main preserves Ghostboard's ownership of real OS input
+while allowing WebKit to process forwarded wheel events into page-visible DOM
+behavior.
+
+Experiment 22 does not complete the full Issue 756 real-app matrix. It proves
+the single-pane keyboard and wheel paths are now working and gives the next
+experiments a stronger base for focused regression guards and then the pane,
+tab, window, resize, restart, profile, and crash matrix.
+
+## Completion Review
+
+Adversarial completion review returned `APPROVED` with no Required findings. The
+reviewer confirmed that the result commit had not already been made, the README
+marks Experiment 22 as `Pass`, the experiment stays within the pointer-injection
+scope, the docs honestly state that DOM click still warns/misses, the harness
+requires page-visible wheel evidence before final `PASS`, and the keyboard proof
+remains fatal and preserved.
+
+The reviewer noted one optional caveat: the final run proves page-visible wheel
+delivery, not wheel-coordinate fidelity. The harness computed a distinct scroll
+point, but the Surfari trace logged the wheel at the prior click coordinate
+while the page still logged `kind=wheel`. A later coordinate/regression
+experiment should assert forwarded wheel coordinates if coordinate fidelity is
+part of that experiment's goal.

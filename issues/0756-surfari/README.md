@@ -308,4 +308,4 @@ recovery. Much of this code can inform Surfari's implementation.
 - [Experiment 21: Prove real-app Surfari input routing](21-real-app-surfari-input-routing.md)
   — **Partial**
 - [Experiment 22: Prove WebKit pointer injection](22-webkit-pointer-injection.md)
-  — **Designed**
+  — **Pass**
