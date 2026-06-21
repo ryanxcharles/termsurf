@@ -279,3 +279,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Partial**
 - [Experiment 9: Implement WebKit HTTP auth callbacks](09-webkit-http-auth.md) —
   **Pass**
+- [Experiment 10: Implement WebKit target URL hover callbacks](10-webkit-target-url-hover.md)
+  — **Designed**
