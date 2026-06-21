@@ -281,3 +281,5 @@ recovery. Much of this code can inform Surfari's implementation.
   **Pass**
 - [Experiment 10: Implement WebKit target URL hover callbacks](10-webkit-target-url-hover.md)
   — **Pass**
+- [Experiment 11: Implement WebKit cursor callbacks](11-webkit-cursor-callbacks.md)
+  — **Designed**
