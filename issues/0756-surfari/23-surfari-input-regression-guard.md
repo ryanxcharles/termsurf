@@ -95,3 +95,58 @@ permission/slow-test concerns, it preserves the Experiment 22 click limitation
 as warning-only while requiring wheel evidence, the verification includes
 pass/fail criteria and hygiene checks, and the plan commit had not already been
 made.
+
+## Result
+
+**Result:** Pass
+
+Added `scripts/test-issue-756-surfari-input-regression.sh` as the focused guard
+for the proven single-pane Surfari keyboard and wheel path. The wrapper checks
+for the required debug app, `web`, `surfari`, WebKit framework, and
+`libtermsurf_webkit` artifacts. If any are missing, it prints the exact build
+commands to run. If all prerequisites exist, it delegates to
+`scripts/test-issue-756-real-app-surfari-input-routing.sh`.
+
+The guard intentionally does not join a fast default test suite. It launches the
+real macOS app, depends on GUI automation permissions, and takes longer than a
+normal unit/integration test. It is a focused, opt-in regression command for the
+Surfari real-app input path.
+
+Verification:
+
+- `bash -n scripts/test-issue-756-surfari-input-regression.sh` passed.
+- `bash -n scripts/test-issue-756-real-app-surfari-input-routing.sh` passed.
+- `git diff --check` passed.
+- Guard run `20260621-183959` passed end to end:
+  - real Debug `TermSurf.app` launched;
+  - repo `target/debug/web --browser surfari` launched;
+  - repo `target/debug/surfari` launched;
+  - Surfari's WebKit CAContext overlay was presented;
+  - Browse mode focused Surfari;
+  - Ghostboard stayed frontmost before keyboard injection;
+  - Surfari logged keyboard input;
+  - the fixture page logged `kind=input value=a`;
+  - Surfari logged mouse and wheel input;
+  - DOM click remained warning-only;
+  - the fixture page logged `kind=wheel`;
+  - Surfari accepted `CloseTab` and began clean shutdown;
+  - the harness printed final `PASS: issue 756 real-app Surfari input routing`.
+
+## Conclusion
+
+Issue 756 now has a durable focused regression guard for the Surfari behavior
+that has actually been proven: real-app single-pane launch, overlay
+presentation, Browse-mode focus, keyboard input to the page, wheel input to the
+page, and clean shutdown. The next experiments can use this guard to protect the
+baseline while expanding into the remaining pane, tab, window, resize, restart,
+profile, crash, and Ghostboard/Roamium comparison matrix.
+
+## Completion Review
+
+Adversarial completion review returned `APPROVED` with no findings. The reviewer
+confirmed that the result commit had not already been made, the new guard is
+opt-in only and delegates to the proven real-app harness, missing-prerequisite
+simulation exits nonzero and prints build instructions, the final
+`20260621-183959` logs contain the claimed keyboard, page input, wheel, page
+wheel, `CloseTab`, clean shutdown, and final `PASS` evidence, the README marks
+Experiment 23 as `Pass`, and the documented read-only checks pass.

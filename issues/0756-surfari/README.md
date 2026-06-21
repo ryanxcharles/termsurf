@@ -310,4 +310,4 @@ recovery. Much of this code can inform Surfari's implementation.
 - [Experiment 22: Prove WebKit pointer injection](22-webkit-pointer-injection.md)
   — **Pass**
 - [Experiment 23: Add focused Surfari input regression guard](23-surfari-input-regression-guard.md)
-  — **Designed**
+  — **Pass**
