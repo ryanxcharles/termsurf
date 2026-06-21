@@ -275,3 +275,5 @@ recovery. Much of this code can inform Surfari's implementation.
   **Partial**
 - [Experiment 7: Resolve WebKit focus semantics](07-webkit-focus-semantics.md) —
   **Pass**
+- [Experiment 8: Implement WebKit browser state callbacks](08-webkit-browser-state-callbacks.md)
+  — **Designed**
