@@ -265,3 +265,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Pass**
 - [Experiment 2: Prove WebKit hosting context export](02-webkit-hosting-context-proof.md)
   — **Pass**
+- [Experiment 3: Stress hosted WebKit surface lifecycle](03-hosted-surface-lifecycle.md)
+  — **Designed**
