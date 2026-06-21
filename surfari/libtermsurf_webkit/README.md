@@ -59,13 +59,16 @@ Implemented:
 - mouse move, mouse click, wheel scroll, and keyboard forwarding through Cocoa
   events;
 - dark/light appearance assignment through `NSAppearance`;
-- tab ready, CA context ID, URL, loading, and title callbacks.
+- tab ready, CA context ID, URL, loading, and title callbacks;
+- JavaScript alert, confirm, and prompt requests through `WKUIDelegate`, with
+  pending request IDs and `ts_reply_javascript_dialog`;
+- Roamium/Chromium-compatible HTTP auth callback typedef ordering.
 
 Still unsupported:
 
 - DevTools;
-- JavaScript dialogs;
-- HTTP auth;
+- HTTP auth request handling and replies;
 - renderer crash reporting;
 - cursor updates;
-- target URL updates.
+- target URL updates;
+- console messages.

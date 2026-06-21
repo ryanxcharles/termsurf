@@ -5,6 +5,7 @@
 #import <WebKit/WebKit.h>
 
 #include <atomic>
+#include <cstdint>
 
 @interface CAContext : NSObject
 + (instancetype)remoteContextWithOptions:(NSDictionary *)options;
@@ -65,6 +66,7 @@ struct CallbackState {
 
 static CallbackState g_callbacks;
 static std::atomic<int> g_next_tab_id{1};
+static std::atomic<uint64_t> g_next_request_id{1};
 
 struct BrowserContext {
     WKWebsiteDataStore *data_store;
@@ -76,11 +78,24 @@ struct WebContents;
 @property(nonatomic) WebContents *owner;
 @end
 
+@interface TSUIDelegate : NSObject <WKUIDelegate>
+@property(nonatomic) WebContents *owner;
+@end
+
+@interface TSPendingJavaScriptDialog : NSObject
+@property(nonatomic, copy) NSString *type;
+@property(nonatomic, copy) void (^alertCompletion)(void);
+@property(nonatomic, copy) void (^confirmCompletion)(BOOL);
+@property(nonatomic, copy) void (^promptCompletion)(NSString *);
+@end
+
 struct WebContents {
     int tab_id;
     NSWindow *window;
     WKWebView *web_view;
     TSNavigationDelegate *navigation_delegate;
+    TSUIDelegate *ui_delegate;
+    NSMutableDictionary<NSNumber *, TSPendingJavaScriptDialog *> *pending_javascript_dialogs;
     CAContext *remote_context;
     int width;
     int height;
@@ -232,6 +247,35 @@ static void fireTitle(WebContents *contents, NSString *title)
     });
 }
 
+static void fireJavaScriptDialog(
+    WebContents *contents,
+    uint64_t request_id,
+    NSString *dialog_type,
+    NSString *origin_url,
+    NSString *message,
+    NSString *default_prompt_text)
+{
+    if (!g_callbacks.on_javascript_dialog_request)
+        return;
+
+    withCString(dialog_type, ^(const char *c_dialog_type) {
+        withCString(origin_url, ^(const char *c_origin_url) {
+            withCString(message, ^(const char *c_message) {
+                withCString(default_prompt_text, ^(const char *c_default_prompt_text) {
+                    g_callbacks.on_javascript_dialog_request(
+                        contents,
+                        request_id,
+                        c_dialog_type,
+                        c_origin_url,
+                        c_message,
+                        c_default_prompt_text,
+                        g_callbacks.on_javascript_dialog_request_data);
+                });
+            });
+        });
+    });
+}
+
 static void exportContext(WebContents *contents)
 {
     if (!contents || !contents->web_view)
@@ -294,6 +338,62 @@ static void exportContext(WebContents *contents)
     (void)navigation;
     NSLog(@"[libtermsurf_webkit] provisional navigation failed: %@", error);
     fireLoading(self.owner, webView.URL.absoluteString, 0);
+}
+@end
+
+@implementation TSPendingJavaScriptDialog
+@end
+
+@implementation TSUIDelegate
+- (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(void))completionHandler
+{
+    (void)webView;
+    WebContents *contents = self.owner;
+    if (!contents || !g_callbacks.on_javascript_dialog_request) {
+        completionHandler();
+        return;
+    }
+
+    uint64_t request_id = g_next_request_id.fetch_add(1);
+    TSPendingJavaScriptDialog *pending = [[TSPendingJavaScriptDialog alloc] init];
+    pending.type = @"alert";
+    pending.alertCompletion = completionHandler;
+    contents->pending_javascript_dialogs[@(request_id)] = pending;
+    fireJavaScriptDialog(contents, request_id, @"alert", frame.request.URL.absoluteString, message, @"");
+}
+
+- (void)webView:(WKWebView *)webView runJavaScriptConfirmPanelWithMessage:(NSString *)message initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(BOOL))completionHandler
+{
+    (void)webView;
+    WebContents *contents = self.owner;
+    if (!contents || !g_callbacks.on_javascript_dialog_request) {
+        completionHandler(NO);
+        return;
+    }
+
+    uint64_t request_id = g_next_request_id.fetch_add(1);
+    TSPendingJavaScriptDialog *pending = [[TSPendingJavaScriptDialog alloc] init];
+    pending.type = @"confirm";
+    pending.confirmCompletion = completionHandler;
+    contents->pending_javascript_dialogs[@(request_id)] = pending;
+    fireJavaScriptDialog(contents, request_id, @"confirm", frame.request.URL.absoluteString, message, @"");
+}
+
+- (void)webView:(WKWebView *)webView runJavaScriptTextInputPanelWithPrompt:(NSString *)prompt defaultText:(NSString *)defaultText initiatedByFrame:(WKFrameInfo *)frame completionHandler:(void (^)(NSString *))completionHandler
+{
+    (void)webView;
+    WebContents *contents = self.owner;
+    if (!contents || !g_callbacks.on_javascript_dialog_request) {
+        completionHandler(nil);
+        return;
+    }
+
+    uint64_t request_id = g_next_request_id.fetch_add(1);
+    TSPendingJavaScriptDialog *pending = [[TSPendingJavaScriptDialog alloc] init];
+    pending.type = @"prompt";
+    pending.promptCompletion = completionHandler;
+    contents->pending_javascript_dialogs[@(request_id)] = pending;
+    fireJavaScriptDialog(contents, request_id, @"prompt", frame.request.URL.absoluteString, prompt, defaultText ?: @"");
 }
 @end
 
@@ -373,6 +473,7 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->gui_active = true;
     contents->focused = false;
     contents->dark = dark;
+    contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
 
     NSRect frame = NSMakeRect(80, 80, MAX(width, 64), MAX(height, 64));
     contents->window = [[TSHostWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
@@ -390,6 +491,9 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->navigation_delegate = [[TSNavigationDelegate alloc] init];
     contents->navigation_delegate.owner = contents;
     contents->web_view.navigationDelegate = contents->navigation_delegate;
+    contents->ui_delegate = [[TSUIDelegate alloc] init];
+    contents->ui_delegate.owner = contents;
+    contents->web_view.UIDelegate = contents->ui_delegate;
 
     [contents->window.contentView addSubview:contents->web_view];
     [contents->window orderFront:nil];
@@ -425,6 +529,8 @@ void ts_destroy_web_contents(ts_web_contents_t wc)
 
     [contents->remote_context invalidate];
     contents->web_view.navigationDelegate = nil;
+    contents->web_view.UIDelegate = nil;
+    [contents->pending_javascript_dialogs removeAllObjects];
     [contents->web_view removeFromSuperview];
     [contents->window close];
     delete contents;
@@ -651,10 +757,28 @@ void ts_set_color_scheme(ts_web_contents_t wc, bool dark)
 
 bool ts_reply_javascript_dialog(ts_web_contents_t wc, uint64_t request_id, bool accepted, const char *prompt_text)
 {
-    (void)wc;
-    (void)request_id;
-    (void)accepted;
-    (void)prompt_text;
+    WebContents *contents = static_cast<WebContents *>(wc);
+    if (!contents)
+        return false;
+
+    NSNumber *key = @(request_id);
+    TSPendingJavaScriptDialog *pending = contents->pending_javascript_dialogs[key];
+    if (!pending)
+        return false;
+
+    [contents->pending_javascript_dialogs removeObjectForKey:key];
+    if ([pending.type isEqualToString:@"alert"]) {
+        pending.alertCompletion();
+        return true;
+    }
+    if ([pending.type isEqualToString:@"confirm"]) {
+        pending.confirmCompletion(accepted);
+        return true;
+    }
+    if ([pending.type isEqualToString:@"prompt"]) {
+        pending.promptCompletion(accepted ? stringFromCString(prompt_text) : nil);
+        return true;
+    }
     return false;
 }
 

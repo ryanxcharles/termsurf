@@ -24,9 +24,9 @@ typedef void (*ts_javascript_dialog_request_cb)(
     ts_web_contents_t wc,
     uint64_t request_id,
     const char *dialog_type,
-    const char *message_text,
+    const char *origin_url,
+    const char *message,
     const char *default_prompt_text,
-    const char *url,
     void *user_data);
 typedef void (*ts_console_message_cb)(
     ts_web_contents_t wc,
@@ -38,14 +38,14 @@ typedef void (*ts_console_message_cb)(
 typedef void (*ts_http_auth_request_cb)(
     ts_web_contents_t wc,
     uint64_t request_id,
-    const char *host,
-    const char *realm,
-    const char *scheme,
     const char *url,
+    const char *auth_scheme,
+    const char *challenger,
+    const char *realm,
     bool is_proxy,
-    bool is_cross_origin,
-    bool is_favicon,
-    bool is_main_frame,
+    bool first_auth_attempt,
+    bool is_primary_main_frame_navigation,
+    bool is_navigation,
     void *user_data);
 typedef void (*ts_renderer_crashed_cb)(
     ts_web_contents_t wc,

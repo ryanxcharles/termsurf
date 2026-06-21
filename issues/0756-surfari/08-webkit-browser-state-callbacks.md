@@ -141,3 +141,92 @@ Fix applied:
 
 The reviewer re-reviewed the fix and approved it with no remaining required
 findings.
+
+## Result
+
+**Result:** Partial
+
+This experiment implemented the first browser-state callback slice: JavaScript
+alert, confirm, and prompt requests now flow through public `WKUIDelegate`
+methods in `surfari/libtermsurf_webkit/src/libtermsurf_webkit.mm`. Each request
+gets a monotonically increasing request ID and is stored until
+`ts_reply_javascript_dialog` resolves it. Valid replies return `true`; stale or
+unknown request IDs return `false`.
+
+The experiment also fixed the Surfari HTTP auth callback typedef in
+`surfari/libtermsurf_webkit/include/libtermsurf_webkit.h` so the field order now
+matches Roamium, Chromium, and `proto/termsurf.proto`:
+
+```text
+url, auth_scheme, challenger, realm, is_proxy, first_auth_attempt,
+is_primary_main_frame_navigation, is_navigation
+```
+
+The smoke harness now registers `ts_set_on_javascript_dialog_request`, evaluates
+a deterministic script that calls `alert`, `confirm`, and `prompt`, replies
+through `ts_reply_javascript_dialog`, and checks both the JavaScript-visible
+results and stale-reply rejection.
+
+The passing smoke log recorded:
+
+```text
+CALLBACK focus_state {"focus":true,"focusIn":false,"hasFocus":true,"activeElement":""}
+CALLBACK input_state {"focus":true,"focusIn":false,"blur":true,"move":"120,130","click":"140,150,0","scroll":-120,"key":"a","colorScheme":"dark"}
+CALLBACK javascript_dialog request_id=1 type=alert origin=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-alert default=
+CALLBACK javascript_dialog request_id=2 type=confirm origin=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-confirm default=
+CALLBACK javascript_dialog request_id=3 type=prompt origin=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html message=surfari-prompt default=default-prompt
+CALLBACK javascript_dialog_state {"alert":"done","confirm":true,"prompt":"surfari-prompt-reply"}
+SMOKE_PASS initialized=1 tab_ready=1 ca_context=4 url=4 loading_started=2 loading_finished=2 title=2 navigations=2 resized=1 focus=1 input=1 js_dialogs=1
+SMOKE_EXIT_STATUS=0
+```
+
+Additional verification passed:
+
+```text
+surfari/libtermsurf_webkit/build.sh
+nm -gU surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib | rg ' _ts_|_ts_webkit_test' | sort
+otool -L surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib | rg 'WebKit|JavaScriptCore|libtermsurf'
+otool -L surfari/libtermsurf_webkit/build/smoke-test | rg 'WebKit|JavaScriptCore|libtermsurf'
+git diff --check
+git -C webkit/src status --short
+git -C webkit/src rev-parse HEAD
+git -C webkit/src rev-parse --abbrev-ref HEAD
+git -C webkit/src rev-parse --is-shallow-repository
+```
+
+`webkit/src` remained unchanged at `1452a43959523449099b2616793fd2c5b6a6487e` on
+branch `webkit-1452a439-issue-756`, and the checkout is still shallow.
+
+## Conclusion
+
+The browser-state callback work is only partially complete. JavaScript dialogs
+are now implemented and proven through real WebKit delegate callbacks, and the
+HTTP auth ABI mismatch is fixed before any auth requests can be emitted.
+
+HTTP auth request/reply handling, renderer crash reporting, target URL changes,
+cursor updates, and console messages remain unsupported. The next experiment
+should implement HTTP auth using `WKNavigationDelegate` now that the C ABI field
+order matches Roamium and the protocol.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Verdict:** Approved after two required fixes.
+
+Required findings fixed:
+
+- The public JavaScript dialog callback typedef in
+  `surfari/libtermsurf_webkit/include/libtermsurf_webkit.h` used misleading
+  string argument names/order. It now matches the implementation, Roamium,
+  Chromium, and `proto/termsurf.proto`: `dialog_type`, `origin_url`, `message`,
+  `default_prompt_text`.
+- `surfari/libtermsurf_webkit/README.md` did not list console messages as
+  unsupported even though the public callback setter exists and the experiment
+  leaves console capture for later. The README now lists console messages under
+  unsupported callbacks.
+
+The reviewer re-reviewed both fixes, confirmed the refreshed smoke log still
+ends with `SMOKE_EXIT_STATUS=0`, and approved the result with no remaining
+required findings.

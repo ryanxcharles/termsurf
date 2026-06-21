@@ -23,11 +23,15 @@ struct State {
     int resized;
     int focus_checked;
     int input_checked;
+    int javascript_dialog_requests;
+    int javascript_dialog_checked;
+    int stale_javascript_dialog_replies;
 };
 
 static void run_input_sequence(void *user_data);
 static void query_focus_state(void *user_data);
 static void run_pointer_key_sequence(void *user_data);
+static void run_javascript_dialog_sequence(void *user_data);
 
 static void fail(const char *message)
 {
@@ -63,11 +67,17 @@ static void finish(void *user_data)
         fail("focus check missing");
     if (!state->input_checked)
         fail("input check missing");
+    if (state->javascript_dialog_requests != 3)
+        fail("javascript dialog request count mismatch");
+    if (!state->javascript_dialog_checked)
+        fail("javascript dialog check missing");
+    if (state->stale_javascript_dialog_replies != 3)
+        fail("stale javascript dialog replies were not rejected");
 
     ts_destroy_web_contents(state->web_contents);
     ts_destroy_browser_context(state->persistent_context);
     ts_destroy_browser_context(state->incognito_context);
-    printf("SMOKE_PASS initialized=%d tab_ready=%d ca_context=%d url=%d loading_started=%d loading_finished=%d title=%d navigations=%d resized=%d focus=%d input=%d\n",
+    printf("SMOKE_PASS initialized=%d tab_ready=%d ca_context=%d url=%d loading_started=%d loading_finished=%d title=%d navigations=%d resized=%d focus=%d input=%d js_dialogs=%d\n",
         state->initialized,
         state->tab_ready,
         state->context_id_count,
@@ -78,7 +88,8 @@ static void finish(void *user_data)
         state->navigations_finished,
         state->resized,
         state->focus_checked,
-        state->input_checked);
+        state->input_checked,
+        state->javascript_dialog_checked);
     fflush(stdout);
     ts_quit();
 }
@@ -110,7 +121,7 @@ static void check_input_result(const char *result, void *user_data)
     if (!strstr(result, "\"colorScheme\":\"dark\""))
         fail("dark color scheme was not observed");
     state->input_checked = 1;
-    ts_post_task(finish, state);
+    ts_post_task(run_javascript_dialog_sequence, state);
 }
 
 static void query_input_state(void *user_data)
@@ -166,6 +177,34 @@ static void run_pointer_key_sequence(void *user_data)
     ts_set_gui_active(state->web_contents, false, "smoke-test-inactive");
     ts_set_focus(state->web_contents, false);
     ts_webkit_test_post_delayed_task(0.5, query_input_state, state);
+}
+
+static void check_javascript_dialog_result(const char *result, void *user_data)
+{
+    struct State *state = (struct State *)user_data;
+    printf("CALLBACK javascript_dialog_state %s\n", result ? result : "");
+    if (!result)
+        fail("javascript dialog state result missing");
+    if (!strstr(result, "\"alert\":\"done\""))
+        fail("javascript alert did not complete");
+    if (!strstr(result, "\"confirm\":true"))
+        fail("javascript confirm did not receive accepted reply");
+    if (!strstr(result, "\"prompt\":\"surfari-prompt-reply\""))
+        fail("javascript prompt did not receive prompt reply");
+    state->javascript_dialog_checked = 1;
+    ts_post_task(finish, state);
+}
+
+static void run_javascript_dialog_sequence(void *user_data)
+{
+    struct State *state = (struct State *)user_data;
+    if (ts_reply_javascript_dialog(state->web_contents, 999999, true, "stale"))
+        fail("stale javascript dialog reply unexpectedly succeeded");
+    ts_webkit_test_evaluate_javascript(
+        state->web_contents,
+        "JSON.stringify({ alert: (alert('surfari-alert'), 'done'), confirm: confirm('surfari-confirm'), prompt: prompt('surfari-prompt', 'default-prompt') })",
+        check_javascript_dialog_result,
+        state);
 }
 
 static void on_initialized(void *user_data)
@@ -235,6 +274,34 @@ static void on_title_changed(ts_web_contents_t wc, const char *title, void *user
     printf("CALLBACK title_changed title=%s\n", title ? title : "");
 }
 
+static void on_javascript_dialog_request(
+    ts_web_contents_t wc,
+    uint64_t request_id,
+    const char *dialog_type,
+    const char *origin_url,
+    const char *message,
+    const char *default_prompt_text,
+    void *user_data)
+{
+    struct State *state = (struct State *)user_data;
+    state->javascript_dialog_requests++;
+    printf("CALLBACK javascript_dialog request_id=%llu type=%s origin=%s message=%s default=%s\n",
+        (unsigned long long)request_id,
+        dialog_type ? dialog_type : "",
+        origin_url ? origin_url : "",
+        message ? message : "",
+        default_prompt_text ? default_prompt_text : "");
+
+    bool accepted = true;
+    const char *prompt_text = "";
+    if (dialog_type && strcmp(dialog_type, "prompt") == 0)
+        prompt_text = "surfari-prompt-reply";
+    if (!ts_reply_javascript_dialog(wc, request_id, accepted, prompt_text))
+        fail("javascript dialog reply failed");
+    if (!ts_reply_javascript_dialog(wc, request_id, accepted, prompt_text))
+        state->stale_javascript_dialog_replies++;
+}
+
 int main(int argc, const char **argv)
 {
     if (argc != 3) {
@@ -253,6 +320,7 @@ int main(int argc, const char **argv)
     ts_set_on_url_changed(on_url_changed, &state);
     ts_set_on_loading_state(on_loading_state, &state);
     ts_set_on_title_changed(on_title_changed, &state);
+    ts_set_on_javascript_dialog_request(on_javascript_dialog_request, &state);
 
     return ts_content_main(argc, argv);
 }
