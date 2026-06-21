@@ -271,3 +271,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Pass**
 - [Experiment 5: Create initial libtermsurf_webkit ABI](05-initial-libtermsurf-webkit-abi.md)
   — **Pass**
+- [Experiment 6: Implement core WebKit input API](06-core-webkit-input-api.md) —
+  **Designed**
