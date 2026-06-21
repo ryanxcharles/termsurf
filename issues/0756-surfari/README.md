@@ -289,3 +289,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Pass**
 - [Experiment 14: Implement WebKit renderer crash callbacks](14-webkit-renderer-crash.md)
   — **Pass**
+- [Experiment 15: Stand up the Surfari Rust binary](15-surfari-rust-binary.md) —
+  **Designed**
