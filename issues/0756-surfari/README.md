@@ -293,3 +293,5 @@ recovery. Much of this code can inform Surfari's implementation.
   **Pass**
 - [Experiment 16: Prove Surfari fake-GUI IPC](16-surfari-fake-gui-ipc.md) —
   **Pass**
+- [Experiment 17: Audit Surfari protocol parity](17-surfari-protocol-parity-audit.md)
+  — **Designed**
