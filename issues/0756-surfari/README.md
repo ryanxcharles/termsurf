@@ -176,8 +176,9 @@ surrounding issue text.
       click, drag, scroll, resize, pane resize, split panes, tab switching,
       window switching, focus changes, shutdown, restart, profile isolation, and
       crash handling.
-- [ ] Add focused regression guards for behavior that is proven to work, keeping
-      the tests small enough that the suite remains practical to run.
+- [x] Add focused regression guards for behavior that is proven to work, keeping
+      the tests small enough that the suite remains practical to run (Experiment
+      23).
 - [ ] Re-run the full Ghostboard/Roamium feature matrix against
       Ghostboard/Surfari and document any engine-specific differences.
 
