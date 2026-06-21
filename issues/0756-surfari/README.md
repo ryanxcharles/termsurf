@@ -303,3 +303,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Pass**
 - [Experiment 19: Add Ghostboard Surfari Launch Path](19-ghostboard-surfari-launch.md)
   — **Pass**
+- [Experiment 20: Run Surfari in the real TermSurf app](20-real-app-surfari-smoke.md)
+  — **Designed**
