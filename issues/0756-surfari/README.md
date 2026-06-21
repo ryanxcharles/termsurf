@@ -306,4 +306,4 @@ recovery. Much of this code can inform Surfari's implementation.
 - [Experiment 20: Run Surfari in the real TermSurf app](20-real-app-surfari-smoke.md)
   — **Pass**
 - [Experiment 21: Prove real-app Surfari input routing](21-real-app-surfari-input-routing.md)
-  — **Designed**
+  — **Partial**

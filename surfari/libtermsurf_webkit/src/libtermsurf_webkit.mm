@@ -195,7 +195,8 @@ static NSEventModifierFlags cocoaModifiers(int modifiers)
 
 static NSPoint eventLocationInWindow(WebContents *contents, int x, int y)
 {
-    NSPoint localPoint = NSMakePoint(x, y);
+    NSRect bounds = contents->web_view.bounds;
+    NSPoint localPoint = NSMakePoint(x, NSHeight(bounds) - y);
     return [contents->web_view convertPoint:localPoint toView:nil];
 }
 
@@ -209,7 +210,8 @@ static CGPoint eventLocationInGlobalScreen(WebContents *contents, int x, int y)
 
 static NSView *targetViewForPoint(WebContents *contents, int x, int y)
 {
-    NSPoint localPoint = NSMakePoint(x, y);
+    NSRect bounds = contents->web_view.bounds;
+    NSPoint localPoint = NSMakePoint(x, NSHeight(bounds) - y);
     return [contents->web_view hitTest:localPoint] ?: contents->web_view;
 }
 
@@ -841,11 +843,12 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
-    NSRect frame = NSMakeRect(80, 80, MAX(width, 64), MAX(height, 64));
+    NSRect frame = NSMakeRect(-10000, -10000, MAX(width, 64), MAX(height, 64));
     contents->window = [[TSHostWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
     contents->window.releasedWhenClosed = NO;
     contents->window.title = @"libtermsurf_webkit";
     contents->window.acceptsMouseMovedEvents = YES;
+    contents->window.ignoresMouseEvents = YES;
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
     configuration.websiteDataStore = context->data_store;
@@ -927,11 +930,12 @@ ts_web_contents_t ts_create_devtools_web_contents(
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
-    NSRect frame = NSMakeRect(120, 120, MAX(width, 64), MAX(height, 64));
+    NSRect frame = NSMakeRect(-10000, -10000, MAX(width, 64), MAX(height, 64));
     contents->window = [[TSHostWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
     contents->window.releasedWhenClosed = NO;
     contents->window.title = @"libtermsurf_webkit_devtools";
     contents->window.acceptsMouseMovedEvents = YES;
+    contents->window.ignoresMouseEvents = YES;
 
     contents->web_view = inspector_web_view;
     [contents->web_view removeFromSuperview];
@@ -1156,13 +1160,7 @@ void ts_set_focus(ts_web_contents_t wc, bool focused)
         return;
 
     contents->focused = focused;
-    if (focused) {
-        [NSApp activateIgnoringOtherApps:YES];
-        [contents->window makeKeyAndOrderFront:nil];
-        [contents->window makeKeyWindow];
-        if ([contents->window makeFirstResponder:contents->web_view])
-            [contents->web_view becomeFirstResponder];
-    } else {
+    if (!focused) {
         [contents->window makeFirstResponder:nil];
         [contents->window resignKeyWindow];
     }
@@ -1176,13 +1174,7 @@ void ts_set_gui_active(ts_web_contents_t wc, bool active, const char *reason)
         return;
 
     contents->gui_active = active;
-    if (active) {
-        [NSApp activateIgnoringOtherApps:YES];
-        [contents->window makeKeyAndOrderFront:nil];
-        [contents->window makeKeyWindow];
-        if (contents->focused && [contents->window makeFirstResponder:contents->web_view])
-            [contents->web_view becomeFirstResponder];
-    } else {
+    if (!active) {
         [contents->window makeFirstResponder:nil];
         [contents->window resignKeyWindow];
     }
