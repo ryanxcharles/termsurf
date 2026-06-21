@@ -162,3 +162,230 @@ Optional findings accepted and fixed:
   compatibility.
 - The local WebKit linkage check originally showed only the dylib; it now also
   checks the smoke-test binary.
+
+## Result
+
+**Result:** Pass
+
+Experiment 5 created the first production-shaped `libtermsurf_webkit` C ABI
+scaffold under `surfari/libtermsurf_webkit/`.
+
+Implemented files:
+
+- `surfari/libtermsurf_webkit/include/libtermsurf_webkit.h`
+- `surfari/libtermsurf_webkit/src/libtermsurf_webkit.mm`
+- `surfari/libtermsurf_webkit/smoke-test/smoke_test.c`
+- `surfari/libtermsurf_webkit/build.sh`
+- `surfari/libtermsurf_webkit/README.md`
+- `surfari/libtermsurf_webkit/test-content/index.html`
+- `surfari/libtermsurf_webkit/test-content/navigation.html`
+- `surfari/libtermsurf_webkit/.gitignore`
+
+The library is backed by Objective-C++/Cocoa and uses the same Core Animation
+export mechanism proven in Experiments 2 and 3:
+
+- create a `WKWebView`;
+- create a `CAContext`;
+- assign the `WKWebView` layer to the context;
+- fire `ts_set_on_ca_context_id` with the context ID and current size.
+
+Implemented behavior:
+
+- exact `ts_content_main` export;
+- `ts_set_on_initialized`;
+- `ts_post_task`;
+- `ts_quit`;
+- persistent and incognito browser context creation/destruction;
+- `ts_create_web_contents`;
+- `ts_destroy_web_contents`;
+- `ts_load_url`;
+- `ts_set_view_size`;
+- callback registration and firing for tab ready, CA context ID, URL changes,
+  loading state, and title changes.
+
+Exported but unsupported stubs:
+
+- `ts_create_devtools_web_contents`;
+- mouse, scroll, and keyboard forwarding;
+- focus, GUI-active, and color-scheme state;
+- JavaScript dialog replies;
+- HTTP auth replies;
+- cursor, target URL, JavaScript dialog request, console message, HTTP auth
+  request, and renderer crash callback registration.
+
+These stubs exist so a future Surfari binary can link against the
+Roamium-compatible ABI shape, but they are not claimed as implemented behavior
+in this experiment.
+
+Build command:
+
+```bash
+surfari/libtermsurf_webkit/build.sh
+```
+
+Output:
+
+```text
+ld: warning: building for macOS-26.0, but linking with dylib '/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit' which was built for newer version 26.5
+built surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib
+built surfari/libtermsurf_webkit/build/smoke-test
+```
+
+The warning is emitted before `install_name_tool` rewrites the produced
+`libtermsurf_webkit.dylib` dependency from WebKit's absolute framework install
+name to an `@rpath` dependency. The produced dylib is what matters for runtime
+verification.
+
+Smoke-test command:
+
+```bash
+DYLD_FRAMEWORK_PATH="$PWD/webkit/src/WebKitBuild/Debug" \
+surfari/libtermsurf_webkit/build/smoke-test \
+  "$PWD/surfari/libtermsurf_webkit/test-content/index.html" \
+  "$PWD/surfari/libtermsurf_webkit/test-content/navigation.html" \
+  > logs/issue756-exp5-smoke.log 2>&1
+rc=$?
+echo "SMOKE_EXIT_STATUS=$rc" >> logs/issue756-exp5-smoke.log
+```
+
+`DYLD_FRAMEWORK_PATH` is required because the local debug `WebKit.framework`
+depends on source-built transitive frameworks such as `JavaScriptCore`.
+
+Smoke-test evidence from `logs/issue756-exp5-smoke.log`:
+
+```text
+CALLBACK initialized
+CALLBACK tab_ready tab_id=1
+CALLBACK ca_context_id context_id=2228940916 width=320 height=240
+CALLBACK loading_state loading=1 url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/index.html
+CALLBACK url_changed url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/index.html
+CALLBACK url_changed url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/index.html
+CALLBACK title_changed title=Surfari ABI First Page
+CALLBACK loading_state loading=0 url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/index.html
+CALLBACK ca_context_id context_id=2228940916 width=320 height=240
+CALLBACK loading_state loading=1 url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html
+CALLBACK url_changed url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html
+CALLBACK url_changed url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html
+CALLBACK title_changed title=Surfari ABI Navigation Page
+CALLBACK loading_state loading=0 url=file:///Users/astrohacker/dev/termsurf/surfari/libtermsurf_webkit/test-content/navigation.html
+CALLBACK ca_context_id context_id=2228940916 width=320 height=240
+CALLBACK ca_context_id context_id=2228940916 width=640 height=480
+SMOKE_PASS initialized=1 tab_ready=1 ca_context=4 url=4 loading_started=2 loading_finished=2 title=2 navigations=2 resized=1
+SMOKE_EXIT_STATUS=0
+```
+
+Exported symbol check:
+
+```bash
+nm -gU surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib | rg ' _ts_' | sort
+```
+
+Output included every Roamium-compatible `ts_*` symbol declared in
+`roamium/src/ffi.rs`, including:
+
+```text
+_ts_content_main
+_ts_create_browser_context
+_ts_create_devtools_web_contents
+_ts_create_incognito_browser_context
+_ts_create_web_contents
+_ts_destroy_browser_context
+_ts_destroy_web_contents
+_ts_forward_key_event
+_ts_forward_mouse_event
+_ts_forward_mouse_move
+_ts_forward_scroll_event
+_ts_load_url
+_ts_post_task
+_ts_quit
+_ts_reply_http_auth
+_ts_reply_javascript_dialog
+_ts_set_color_scheme
+_ts_set_focus
+_ts_set_gui_active
+_ts_set_on_ca_context_id
+_ts_set_on_console_message
+_ts_set_on_cursor_changed
+_ts_set_on_http_auth_request
+_ts_set_on_initialized
+_ts_set_on_javascript_dialog_request
+_ts_set_on_loading_state
+_ts_set_on_renderer_crashed
+_ts_set_on_tab_ready
+_ts_set_on_target_url_changed
+_ts_set_on_title_changed
+_ts_set_on_url_changed
+_ts_set_view_size
+```
+
+Linkage check:
+
+```bash
+otool -L surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib | rg 'WebKit|JavaScriptCore|libtermsurf'
+otool -L surfari/libtermsurf_webkit/build/smoke-test | rg 'WebKit|JavaScriptCore|libtermsurf'
+```
+
+Output:
+
+```text
+surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib:
+  @rpath/libtermsurf_webkit.dylib (compatibility version 0.0.0, current version 0.0.0)
+  @rpath/WebKit.framework/Versions/A/WebKit (compatibility version 1.0.0, current version 625.1.21)
+surfari/libtermsurf_webkit/build/smoke-test:
+  @rpath/libtermsurf_webkit.dylib (compatibility version 0.0.0, current version 0.0.0)
+```
+
+Final checks:
+
+```text
+$ git diff --check
+<no output>
+
+$ git -C webkit/src status --short
+<clean>
+
+$ git -C webkit/src rev-parse HEAD
+1452a43959523449099b2616793fd2c5b6a6487e
+
+$ git -C webkit/src rev-parse --abbrev-ref HEAD
+webkit-1452a439-issue-756
+
+$ git -C webkit/src rev-parse --is-shallow-repository
+true
+```
+
+## Conclusion
+
+`libtermsurf_webkit` now exists as a buildable macOS C ABI scaffold backed by
+Objective-C++/Cocoa and the local source-built WebKit products. The smoke test
+proves the first browser-view lifecycle through the C ABI: initialize, create
+contexts, create WebKit-backed web contents, export a CA context ID, navigate,
+report URL/loading/title state, resize, destroy, and quit.
+
+The next experiment should build the first Surfari Rust binary around this
+library, reusing Roamium's socket/protobuf lifecycle where possible while
+keeping unsupported browser features explicit.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+**Initial verdict:** Changes required.
+
+Required finding:
+
+- `surfari/libtermsurf_webkit/build.sh` should compute the repo root robustly
+  before deriving `webkit/src/WebKitBuild/Debug`.
+
+Fix:
+
+- Updated the build script to use `git rev-parse --show-toplevel`, then derive
+  `webkit_build="$repo_root/webkit/src/WebKitBuild/Debug"`.
+- Reran the build and smoke test successfully.
+
+**Re-review verdict:** Approved.
+
+The reviewer confirmed the build script now targets the repo-root WebKit build
+directory, `git diff --check` is clean, and the smoke log records
+`SMOKE_PASS ... resized=1` plus `SMOKE_EXIT_STATUS=0`.
