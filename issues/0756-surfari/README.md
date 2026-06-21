@@ -297,3 +297,5 @@ recovery. Much of this code can inform Surfari's implementation.
   **Pass**
 - [Experiment 17: Audit Surfari protocol parity](17-surfari-protocol-parity-audit.md)
   — **Pass**
+- [Experiment 18: Implement Surfari DevTools Path](18-surfari-devtools-path.md)
+  — **Designed**
