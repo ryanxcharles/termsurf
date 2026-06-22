@@ -8,7 +8,7 @@
 | [0795](0795-pdf-native-print/README.md)            | PDF Native Print                     | 2026-05-30 |
 | [0797](0797-pdf-core-workflow-coverage/README.md)  | PDF Core Workflow Coverage           | 2026-05-30 |
 | [0798](0798-pdf-advanced-features/README.md)       | PDF Advanced Features                | 2026-05-30 |
-| [0835](0835-webtui-top-browser-controls/README.md) | WebTUI Top Browser Controls          | 2026-06-22 |
+| [0836](0836-webtui-top-browser-controls/README.md) | WebTUI Top Browser Controls          | 2026-06-22 |
 
 ## Closed
 

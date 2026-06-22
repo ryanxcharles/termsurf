@@ -3,7 +3,7 @@ status = "open"
 opened = "2026-06-22"
 +++
 
-# Issue 835: WebTUI Top Browser Controls
+# Issue 836: WebTUI Top Browser Controls
 
 ## Goal
 
