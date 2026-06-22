@@ -325,4 +325,4 @@ recovery. Much of this code can inform Surfari's implementation.
 - [Experiment 29: Prove Surfari profile isolation](29-surfari-profile-isolation.md)
   — **Pass**
 - [Experiment 30: Prove Surfari crash handling](30-surfari-crash-handling.md) —
-  **Designed**
+  **Pass**

@@ -297,6 +297,16 @@ pub fn handle_message(msg: &TermSurfMessage) {
         }
         Msg::Navigate(m) => {
             if let Some(t) = find_by_tab_id(m.tab_id) {
+                if let Ok(crash_url) = std::env::var("TERMSURF_SURFARI_TEST_RENDERER_CRASH_URL") {
+                    if !crash_url.is_empty() && m.url == crash_url {
+                        trace_pdf_input(format!(
+                            "test-renderer-crash tab={} pane={} url={} ffi=ts_webkit_test_kill_web_content_process",
+                            m.tab_id, t.pane_id, m.url
+                        ));
+                        unsafe { ffi::ts_webkit_test_kill_web_content_process(t.handle) };
+                        return;
+                    }
+                }
                 let url = CString::new(m.url.as_str()).unwrap();
                 trace_pdf_input(format!(
                     "navigate tab={} pane={} url={} ffi=ts_load_url",
@@ -705,13 +715,15 @@ pub unsafe extern "C" fn on_renderer_crashed(
     let url = unsafe { std::ffi::CStr::from_ptr(url) }
         .to_string_lossy()
         .into_owned();
+    let visible = can_reload;
+    let can_reload = true;
     eprintln!(
-        "[termsurf-renderer-crash] tab_id={} status={} code={} url={} can_reload={}",
-        t.tab_id, termination_status, termination_status_code, url, can_reload
+        "[termsurf-renderer-crash] tab_id={} status={} code={} url={} visible={} can_reload={}",
+        t.tab_id, termination_status, termination_status_code, url, visible, can_reload
     );
     trace_pdf_input(format!(
-        "renderer-crashed tab={} pane={} status={} code={} url={} can_reload={}",
-        t.tab_id, t.pane_id, termination_status, termination_status_code, url, can_reload
+        "renderer-crashed tab={} pane={} status={} code={} url={} visible={} can_reload={}",
+        t.tab_id, t.pane_id, termination_status, termination_status_code, url, visible, can_reload
     ));
     let msg = TermSurfMessage {
         msg: Some(Msg::RendererCrashed(proto::termsurf::RendererCrashed {

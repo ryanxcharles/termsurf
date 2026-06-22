@@ -48,6 +48,8 @@ extern "C" {
 
     pub fn ts_load_url(wc: TsWebContents, url: *const c_char);
 
+    pub fn ts_webkit_test_kill_web_content_process(wc: TsWebContents);
+
     // --- Input ---
 
     pub fn ts_forward_mouse_event(
