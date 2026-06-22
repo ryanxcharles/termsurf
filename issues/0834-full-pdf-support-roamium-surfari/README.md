@@ -168,6 +168,8 @@ Each feature row should ultimately record:
   — **Partial**
 - [Experiment 24: Bridge GUI active state into Roamium app activation](24-bridge-gui-active-app-activation.md)
   — **Partial**
+- [Experiment 25: Promote Roamium AppKit activation policy](25-promote-roamium-appkit-activation-policy.md)
+  — **Designed**
 
 ## Roamium Phase
 
