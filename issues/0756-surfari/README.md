@@ -318,3 +318,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Pass**
 - [Experiment 26: Run Surfari pane and split geometry](26-surfari-pane-split-geometry.md)
   — **Pass**
+- [Experiment 27: Run Surfari tab, window, and focus geometry](27-surfari-tab-window-focus-geometry.md)
+  — **Designed**
