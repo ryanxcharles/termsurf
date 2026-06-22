@@ -320,3 +320,5 @@ recovery. Much of this code can inform Surfari's implementation.
   — **Pass**
 - [Experiment 27: Run Surfari tab, window, and focus geometry](27-surfari-tab-window-focus-geometry.md)
   — **Pass**
+- [Experiment 28: Prove Surfari click and drag input details](28-surfari-click-drag-input-details.md)
+  — **Designed**
