@@ -240,3 +240,105 @@ Required findings:
   evidence if a menu is opened.
 
 Re-review verdict: **Approved**.
+
+## Result
+
+**Result:** Pass
+
+The advanced-surface inventory ran through the real TermSurf/Roamium PDF path
+for all four target surfaces without modifying product source. The experiment
+added:
+
+- `scripts/test-issue-834-pdf-advanced.py` — Roamium launcher, local fixture
+  server, TermSurf protocol driver, source-audit collector, and per-surface
+  classifier.
+- `scripts/probe-pdf-advanced.mjs` — DevTools-side PDF viewer/plugin state
+  collector and screenshot helper.
+
+Verification commands:
+
+```bash
+node --check scripts/probe-pdf-advanced.mjs
+
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-pdf-advanced.py
+
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp11-advanced-forms-final-v2 \
+  --probe forms
+
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp11-advanced-annotations-final \
+  --probe annotations
+
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp11-advanced-context-menu-final \
+  --probe context-menu
+
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp11-advanced-accessibility-searchify-final \
+  --probe accessibility-searchify
+
+git diff --check
+```
+
+The source audit found the current Chromium integration points:
+
+- forms: `pdf_internal_plugin_wrapper.ts` form-focus events, `pdf_viewer.ts`
+  form-field focus handling, toolbar form-focus handling, and `pdfium_page.cc`
+  text-field metadata;
+- annotations: `pdf_viewer.ts` annotation/Ink state, `viewer_toolbar.html`,
+  `ink2_manager.ts`, and `pdf_ink_module.cc`;
+- context menus: `components/pdf/browser/pdf_document_helper.h` native context
+  menu plumbing and `gesture_detector.ts`;
+- accessibility/searchify: `pdf_view_web_plugin.h`, `pdf_viewer.ts`
+  searchify-progress state, `pdf_document_helper.h`, and `pdfium_page.cc`.
+
+The probes classified the first missing layer for each advanced surface:
+
+- forms:
+  `logs/issue-834-exp11-advanced-forms-final-v2/pdf-advanced-summary.json`
+  classified `form-value-observable-missing`. The deterministic AcroForm fixture
+  loaded through the PDF plugin, mouse and keyboard protocol messages were sent,
+  Roamium trace lines saw both input classes, but the probe did not find a
+  stable form-value observable through DevTools/plugin state.
+- annotations:
+  `logs/issue-834-exp11-advanced-annotations-final/pdf-advanced-summary.json`
+  classified `annotation-state-observable-missing`. The PDF plugin loaded, and a
+  `show-annotations-button` control existed, but it had a zero-size rect and no
+  stable actionable annotation state was observable.
+- context menus:
+  `logs/issue-834-exp11-advanced-context-menu-final/pdf-advanced-summary.json`
+  classified `context-menu-native-watcher-missing`. The PDF plugin loaded, but
+  the native-menu watcher was not available in this VM session, so the harness
+  correctly skipped the right-click and did not leave a native menu open.
+- accessibility/searchify:
+  `logs/issue-834-exp11-advanced-accessibility-searchify-final/pdf-advanced-summary.json`
+  classified `accessibility-searchify-source-only`. The PDF plugin loaded and
+  the searchify progress toast was present but hidden; no runtime state proved
+  active accessibility/searchify behavior.
+
+The context-menu result is intentionally a safe automation classification, not a
+product-support claim. It proves that the experiment did not right-click into
+native UI without a watcher, and it identifies the missing layer needed before
+context-menu behavior can be proven.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed result with fresh context.
+
+Verdict: **Approved**.
+
+The reviewer found no required changes. It verified that the four summaries
+support the recorded classifications, that the worktree contains no product
+source changes, that the context-menu probe records watcher absence without
+sending a right-click, and that syntax/hygiene checks pass.
+
+## Conclusion
+
+Experiment 11 converts the remaining Roamium advanced PDF surfaces from broad
+unknowns into named, actionable gaps. The next implementation experiment should
+target one gap at a time. The best next slice is forms, because the harness now
+has a deterministic AcroForm fixture and proves TermSurf mouse and keyboard
+input reach Roamium; the missing piece is a stable form focus/value observable
+or the product integration needed to expose one.
