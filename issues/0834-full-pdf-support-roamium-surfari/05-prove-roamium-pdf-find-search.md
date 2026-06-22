@@ -148,3 +148,166 @@ works only through DevTools or another non-user path.
 This experiment fails if PDF find/search cannot be probed at all, if the probe
 claims success without stable PDF find evidence, or if it bypasses the TermSurf
 keyboard path for the primary pass condition.
+
+## Result
+
+**Result:** Pass
+
+This experiment added a focused Roamium PDF find/search harness and used it to
+prove PDF find/search through TermSurf protocol keyboard input.
+
+Added:
+
+- `scripts/test-issue-834-pdf-find.py`
+- `scripts/probe-pdf-find.mjs`
+
+The harness launches `chromium/src/out/Default/roamium`, serves a deterministic
+PDF at `/pdf-find-fixture.pdf`, creates a Roamium tab through the TermSurf
+socket protocol, focuses the PDF plugin through TermSurf protocol mouse input,
+sends Command-F and the search query through TermSurf protocol key events, and
+writes `pdf-find-summary.json`.
+
+The first implementation generated a tiny two-page PDF with a unique target on
+page 2. That was useful for plumbing but did not produce reliable searchable
+text evidence in Chromium's PDF viewer. The passing probe uses the checked in
+`test-html/public/bitcoin.pdf` fixture, which previous PDF workflow tests
+already proved has selectable/copyable text. The harness searches for `Bitcoin`
+and passes on protocol-driven find-command evidence plus a localized pixel
+change inside the PDF plugin rectangle.
+
+Syntax and hygiene checks:
+
+```bash
+python3 -m py_compile scripts/test-issue-834-pdf-find.py
+node --check scripts/probe-pdf-find.mjs
+git diff --check
+git -C chromium/src diff --check
+```
+
+All exited 0. The Python cache created by `py_compile` was removed before
+committing.
+
+Initial probe before the product fix:
+
+```bash
+python3 scripts/test-issue-834-pdf-find.py \
+  --log-dir logs/issue-834-exp5-find-positive \
+  --probe positive-search
+```
+
+Exit status: 1. Summary:
+`logs/issue-834-exp5-find-positive/pdf-find-summary.json`.
+
+The first failing hop was `pdf-find-search-no-match-observed`. Protocol mouse
+input focused the PDF plugin, protocol key input reached Roamium and Chromium,
+and Chromium classified the key target as `pdf-plugin`, but no PDF find command
+or viewer state change occurred. This showed that Roamium forwarded Command-F as
+a raw key but did not enter Chromium/PDF find mode.
+
+Product fix:
+
+- created Chromium branch `148.0.7778.97-issue-834-exp5`;
+- committed Chromium change `0a2f0364c5` (`Teach Roamium to find in PDFs`);
+- added minimal per-tab find state in
+  `content/libtermsurf_chromium/ts_browser_main_parts.h`;
+- taught `TsBrowserMainParts::ForwardKeyEvent()` to start a TermSurf find
+  session on Command-F, accumulate typed UTF-8 search text, call
+  `WebContents::Find()`, advance on Enter, edit on Backspace, and clear on
+  Escape;
+- added trace lines for `find-session` and `find-command`.
+
+Chromium rebuild:
+
+```bash
+cd /Users/astrohacker/dev/termsurf/chromium/src
+PATH="/Users/astrohacker/dev/termsurf/chromium/depot_tools:$PATH" \
+  autoninja -C out/Default libtermsurf_chromium
+```
+
+Exit status: 0. The build finished successfully in 45.90 seconds.
+
+The Chromium patch archive was extended with:
+
+- `chromium/patches/issue-834/0075-Teach-Roamium-to-find-in-PDFs.patch`
+
+`chromium/README.md` and `chromium/AGENTS.md` now document
+`148.0.7778.97-issue-834-exp5` as the latest Chromium branch for this issue.
+
+Passing rerun:
+
+```bash
+python3 scripts/test-issue-834-pdf-find.py \
+  --log-dir logs/issue-834-exp5-find-positive-rerun5 \
+  --probe positive-search
+```
+
+Exit status: 0. Summary:
+`logs/issue-834-exp5-find-positive-rerun5/pdf-find-summary.json`.
+
+Passing evidence:
+
+- `first_failing_hop = "no-failure-observed"`;
+- fixture: `test-html/public/bitcoin.pdf`;
+- target term: `Bitcoin`;
+- two protocol mouse messages clicked the PDF plugin;
+- 18 protocol key messages sent Command-F, `Bitcoin`, and Enter;
+- Roamium key receive and FFI trace lines were present;
+- Chromium key routing trace lines were present;
+- Chromium classified the key target as `pdf-plugin`;
+- TermSurf find-command trace lines were present;
+- before and after DevTools snapshots both succeeded;
+- before and after screenshots changed;
+- localized image diff inside the PDF plugin rectangle changed 471 pixels
+  (`changed_ratio = 0.0009995246422083764`).
+
+## Completion Review
+
+Fresh-context adversarial review by Codex subagent `Hubble`: **Approved**.
+
+Required findings: none.
+
+Optional finding:
+
+- The first pass classifier accepted any screenshot hash change plus a
+  `find-command` trace, which was weaker than the saved evidence.
+
+Fix:
+
+- Tightened the harness to parse the before/after PNG screenshots with Python's
+  standard library and require a localized pixel delta inside the PDF plugin
+  rectangle for the visual-delta pass path.
+- Reran the positive-search probe in `logs/issue-834-exp5-find-positive-rerun5`,
+  which passed with 471 changed pixels inside the plugin rectangle.
+- Fresh-context re-review by Codex subagent `Godel`: **Approved**. The reviewer
+  confirmed the classifier concern was adequately resolved and no new required
+  finding was introduced.
+
+Nit:
+
+- The result history mentions the discarded generated fixture before explaining
+  the final checked-in fixture. Kept that history because it explains why the
+  experiment moved from a tiny generated PDF to the existing Bitcoin PDF
+  fixture.
+
+Current matrix delta from this experiment:
+
+| Feature     | Roamium status after Experiment 5 | Evidence                                                                                                              |
+| ----------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Find/search | Proven                            | Passing rerun drove Command-F and query text through TermSurf protocol keyboard input and observed find visual delta. |
+
+Rows still not proven current after this experiment include copy/save
+restrictions and disabled toolbar states, password-protected PDFs,
+malformed/error PDFs, forms, annotations, context menus,
+accessibility/searchify, real native print UI behavior, split/tab/window
+geometry with PDFs open, durable Roamium regression guard aggregation, and all
+Surfari PDF rows.
+
+## Conclusion
+
+Roamium did not have a usable browser/PDF find entry point before this
+experiment because Command-F was forwarded as a raw key into the PDF plugin. A
+minimal TermSurf find session in the Chromium bridge fixes that gap and proves
+the PDF find/search row through protocol keyboard input. The next experiment
+should continue the Roamium phase with another unproven PDF workflow or begin
+consolidating durable regression guards once the remaining core rows are
+covered.
