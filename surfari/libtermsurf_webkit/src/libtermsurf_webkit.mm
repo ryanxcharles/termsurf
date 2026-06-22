@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include <objc/runtime.h>
 
 @interface CAContext : NSObject
 + (instancetype)remoteContextWithOptions:(NSDictionary *)options;
@@ -80,6 +81,9 @@ static std::atomic<uint64_t> g_next_request_id{1};
 static std::atomic<int> g_test_renderer_crash_delegate_count{0};
 static NSString *const TermSurfCursorChangedNotification = @"TermSurfWebKitCursorChangedNotification";
 static NSString *const TermSurfCursorTypeKey = @"cursorType";
+static struct WebContents *g_dispatching_mouse_contents = nullptr;
+static IMP g_original_pressed_mouse_buttons = nullptr;
+static IMP g_original_button_number = nullptr;
 
 struct BrowserContext {
     WKWebsiteDataStore *data_store;
@@ -133,6 +137,13 @@ struct WebContents {
     bool gui_active;
     bool focused;
     bool dark;
+    NSInteger mouse_event_number = 0;
+    NSInteger mouse_click_count = 0;
+    NSTimeInterval mouse_click_time = 0;
+    NSPoint mouse_click_position = NSZeroPoint;
+    int mouse_click_button = 0;
+    int mouse_last_button = 0;
+    NSUInteger mouse_buttons_down = 0;
 };
 
 static std::vector<WebContents *> g_web_contents;
@@ -195,8 +206,7 @@ static NSEventModifierFlags cocoaModifiers(int modifiers)
 
 static NSPoint eventLocationInWindow(WebContents *contents, int x, int y)
 {
-    NSRect bounds = contents->web_view.bounds;
-    NSPoint localPoint = NSMakePoint(x, NSHeight(bounds) - y);
+    NSPoint localPoint = NSMakePoint(x, y);
     return [contents->web_view convertPoint:localPoint toView:nil];
 }
 
@@ -208,13 +218,6 @@ static CGPoint eventLocationInGlobalScreen(WebContents *contents, int x, int y)
     return CGPointMake(screenPoint.x, screenHeight - screenPoint.y);
 }
 
-static NSView *targetViewForPoint(WebContents *contents, int x, int y)
-{
-    NSRect bounds = contents->web_view.bounds;
-    NSPoint localPoint = NSMakePoint(x, NSHeight(bounds) - y);
-    return [contents->web_view hitTest:localPoint] ?: contents->web_view;
-}
-
 static NSEventType mouseEventType(int type, int button)
 {
     if (button == 1)
@@ -224,9 +227,101 @@ static NSEventType mouseEventType(int type, int button)
     return type == 1 ? NSEventTypeLeftMouseUp : NSEventTypeLeftMouseDown;
 }
 
+static NSUInteger mouseButtonMask(int button)
+{
+    if (button == 1)
+        return 1 << 1;
+    if (button == 2)
+        return 1 << 2;
+    return 1 << 0;
+}
+
+static NSInteger cocoaMouseButtonNumber(int button)
+{
+    if (button == 1)
+        return 1;
+    if (button == 2)
+        return 2;
+    return 0;
+}
+
+static NSUInteger swizzledPressedMouseButtons(id self, SEL selector)
+{
+    if (g_dispatching_mouse_contents)
+        return g_dispatching_mouse_contents->mouse_buttons_down;
+    if (g_original_pressed_mouse_buttons) {
+        auto original = reinterpret_cast<NSUInteger (*)(id, SEL)>(g_original_pressed_mouse_buttons);
+        return original(self, selector);
+    }
+    return 0;
+}
+
+static NSInteger swizzledButtonNumber(id self, SEL selector)
+{
+    if (g_dispatching_mouse_contents)
+        return cocoaMouseButtonNumber(g_dispatching_mouse_contents->mouse_last_button);
+    if (g_original_button_number) {
+        auto original = reinterpret_cast<NSInteger (*)(id, SEL)>(g_original_button_number);
+        return original(self, selector);
+    }
+    return 0;
+}
+
+static void installMouseEventSwizzles(WebContents *contents)
+{
+    g_dispatching_mouse_contents = contents;
+
+    Method pressed_method = class_getClassMethod([NSEvent class], @selector(pressedMouseButtons));
+    if (pressed_method) {
+        IMP replacement = reinterpret_cast<IMP>(swizzledPressedMouseButtons);
+        if (!g_original_pressed_mouse_buttons)
+            g_original_pressed_mouse_buttons = method_setImplementation(pressed_method, replacement);
+        else
+            method_setImplementation(pressed_method, replacement);
+    }
+
+    Method button_method = class_getInstanceMethod([NSEvent class], @selector(buttonNumber));
+    if (button_method) {
+        IMP replacement = reinterpret_cast<IMP>(swizzledButtonNumber);
+        if (!g_original_button_number)
+            g_original_button_number = method_setImplementation(button_method, replacement);
+        else
+            method_setImplementation(button_method, replacement);
+    }
+}
+
+static void restoreMouseEventSwizzles()
+{
+    Method pressed_method = class_getClassMethod([NSEvent class], @selector(pressedMouseButtons));
+    if (pressed_method && g_original_pressed_mouse_buttons)
+        method_setImplementation(pressed_method, g_original_pressed_mouse_buttons);
+
+    Method button_method = class_getInstanceMethod([NSEvent class], @selector(buttonNumber));
+    if (button_method && g_original_button_number)
+        method_setImplementation(button_method, g_original_button_number);
+
+    g_dispatching_mouse_contents = nullptr;
+}
+
+static void updateClickCount(WebContents *contents, int button, NSPoint position)
+{
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - contents->mouse_click_time < 1.0
+        && NSEqualPoints(contents->mouse_click_position, position)
+        && contents->mouse_click_button == button) {
+        contents->mouse_click_count++;
+    } else {
+        contents->mouse_click_count = 1;
+    }
+    contents->mouse_click_time = now;
+    contents->mouse_click_position = position;
+    contents->mouse_click_button = button;
+}
+
 static void deliverMouseEvent(WebContents *contents, NSEvent *event)
 {
     NSView *target = [contents->web_view hitTest:event.locationInWindow] ?: contents->web_view;
+    installMouseEventSwizzles(contents);
     switch (event.type) {
     case NSEventTypeLeftMouseDown:
         [NSApp _setCurrentEvent:event];
@@ -266,6 +361,7 @@ static void deliverMouseEvent(WebContents *contents, NSEvent *event)
     default:
         break;
     }
+    restoreMouseEventSwizzles();
 }
 
 static void withCString(NSString *value, void (^block)(const char *))
@@ -1034,14 +1130,24 @@ void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, i
     if (!contents)
         return;
 
+    NSPoint location = eventLocationInWindow(contents, x, y);
+    bool is_up = type == 1;
+    if (!is_up) {
+        updateClickCount(contents, button, location);
+        contents->mouse_buttons_down |= mouseButtonMask(button);
+    } else {
+        contents->mouse_buttons_down &= ~mouseButtonMask(button);
+    }
+    contents->mouse_last_button = button;
+
     NSEvent *event = [NSEvent mouseEventWithType:mouseEventType(type, button)
-        location:eventLocationInWindow(contents, x, y)
+        location:location
         modifierFlags:cocoaModifiers(modifiers)
         timestamp:[[NSDate date] timeIntervalSince1970]
         windowNumber:contents->window.windowNumber
-        context:nil
-        eventNumber:0
-        clickCount:MAX(click_count, 1)
+        context:[NSGraphicsContext currentContext]
+        eventNumber:++contents->mouse_event_number
+        clickCount:MAX(click_count, (int)contents->mouse_click_count)
         pressure:type == 0 ? 1.0 : 0.0];
     deliverMouseEvent(contents, event);
 }
@@ -1052,40 +1158,22 @@ void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
     if (!contents)
         return;
 
-    NSEvent *event = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+    bool is_drag = contents->mouse_buttons_down & mouseButtonMask(0);
+    NSEvent *event = [NSEvent mouseEventWithType:is_drag ? NSEventTypeLeftMouseDragged : NSEventTypeMouseMoved
         location:eventLocationInWindow(contents, x, y)
         modifierFlags:cocoaModifiers(modifiers)
         timestamp:[[NSDate date] timeIntervalSince1970]
         windowNumber:contents->window.windowNumber
-        context:nil
-        eventNumber:0
-        clickCount:0
+        context:[NSGraphicsContext currentContext]
+        eventNumber:++contents->mouse_event_number
+        clickCount:is_drag ? contents->mouse_click_count : 0
         pressure:0.0];
-    NSEvent *enter = [NSEvent enterExitEventWithType:NSEventTypeMouseEntered
-        location:eventLocationInWindow(contents, x, y)
-        modifierFlags:cocoaModifiers(modifiers)
-        timestamp:[[NSDate date] timeIntervalSince1970]
-        windowNumber:contents->window.windowNumber
-        context:nil
-        eventNumber:0
-        trackingNumber:1
-        userData:nil];
-    [targetViewForPoint(contents, x, y) mouseEntered:enter];
-    deliverMouseEvent(contents, event);
-
-    NSEvent *drag_event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged
-        location:eventLocationInWindow(contents, x, y)
-        modifierFlags:cocoaModifiers(modifiers)
-        timestamp:[[NSDate date] timeIntervalSince1970]
-        windowNumber:contents->window.windowNumber
-        context:nil
-        eventNumber:0
-        clickCount:0
-        pressure:0.0];
-    NSView *target = targetViewForPoint(contents, x, y);
-    [NSApp _setCurrentEvent:drag_event];
+    [NSApp _setCurrentEvent:event];
     contents->suppress_cursor_notifications = true;
-    [target mouseDragged:drag_event];
+    if (is_drag)
+        [contents->web_view mouseDragged:event];
+    else
+        [contents->web_view _simulateMouseMove:event];
     contents->suppress_cursor_notifications = false;
     [NSApp _setCurrentEvent:nil];
 }

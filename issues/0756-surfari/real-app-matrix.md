@@ -16,8 +16,8 @@ values are deliberately conservative:
 | ------------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | Navigation         | Proven  | Experiment 25 run `20260621-190346` loaded fixture A, sent explicit `Navigate` to fixture B, and observed URL/title updates in Surfari and WebTUI traces.                                                             | Already proven for single-pane explicit navigation after initial load; pane/tab/window navigation remains part of later matrix rows.  | `scripts/test-issue-756-surfari-lifecycle-tranche.sh`.          |
 | Keyboard input     | Proven  | Experiments 21 and 23 proved Surfari `key-event` and fixture `kind=input value=a` in the real app.                                                                                                                    | Already proven for single-pane real app; future matrix rows must ensure it survives tabs/windows/focus changes.                       | `scripts/test-issue-756-surfari-input-regression.sh`.           |
-| Click              | Partial | Experiments 21-23 proved Surfari receives `mouse-event`; DOM click remains warning-only and absent.                                                                                                                   | Prove DOM `click` or intentionally document that click is unsupported/handled differently, with a follow-up issue if needed.          | Input-detail tranche using the existing fixture click zone.     |
-| Drag               | Missing | No real-app Surfari drag evidence yet.                                                                                                                                                                                | Prove drag reaches Surfari and produces page-visible behavior, such as text selection, drag-scroll, or pointer-move state.            | Input-detail tranche with a drag/selection fixture.             |
+| Click              | Proven  | Experiment 28 run `20260621-201208` proved Surfari receives click-zone mouse events and the fixture observes DOM `click detail=1` in the real app.                                                                    | Already proven for single-click DOM delivery in a single-pane real-app Surfari fixture; broader click-count parity remains separate.  | `scripts/test-issue-756-surfari-click-drag-input-details.sh`.   |
+| Drag               | Proven  | Experiment 28 run `20260621-201208` proved Surfari receives drag down/move/up input and the fixture observes browser text selection `ISSUE756_EXP28_BROWSER_DRAG_TEXT`.                                               | Already proven for page-visible browser text selection from a real-app Surfari drag.                                                  | `scripts/test-issue-756-surfari-click-drag-input-details.sh`.   |
 | Scroll / wheel     | Proven  | Experiment 22 and guard run `20260621-183959` proved Surfari `scroll-event` and fixture `kind=wheel`.                                                                                                                 | Already proven for page-visible wheel delivery; coordinate fidelity still needs a later assertion if required.                        | `scripts/test-issue-756-surfari-input-regression.sh`.           |
 | Resize             | Proven  | Experiments 20 and 25 proved real-app window resize produced Surfari resize to the new pixel size.                                                                                                                    | Already proven for a single-window app resize; pane-specific resize remains separate.                                                 | `scripts/test-issue-756-surfari-lifecycle-tranche.sh`.          |
 | Pane resize        | Proven  | Experiment 26 run `20260621-191750` proved right-split divider resize changed the Surfari overlay frame/pixels, sent Surfari `resize`, preserved inside hit testing, and rejected sibling-pane hit testing.           | Already proven for right-split divider resize; tab/window/focus interactions remain separate.                                         | `scripts/test-issue-756-surfari-pane-split-geometry.sh`.        |
@@ -66,8 +66,9 @@ WebKit-specific callbacks.
    window attachment, and active/inactive focus routing. Experiments 26 and 27
    completed this tranche.
 3. **Input details.** Keep the existing keyboard/wheel guard as baseline, then
-   add click, drag, and coordinate-fidelity checks. DOM click is currently
-   partial and should not be treated as passing without new evidence.
+   add click, drag, and coordinate-fidelity checks. Experiment 28 proved DOM
+   single click and browser text drag selection. Broader click-count parity and
+   selection copy parity remain separate from the matrix rows proven here.
 4. **Profile isolation and crash handling.** Prove profile storage separation
    and Surfari crash/restart behavior after the normal lifecycle and geometry
    rows are stable.
@@ -77,7 +78,7 @@ WebKit-specific callbacks.
 
 ## Next Experiment Recommendation
 
-Experiment 27 completed the tab/window/focus portion of the geometry tranche.
-The next experiment should move to input details or lifecycle hardening without
-mixing in profile isolation, crash handling, or the final Roamium comparison
-unless the previous result specifically calls for it.
+Experiment 28 completed the click/drag portion of the input-details tranche. The
+next experiment should move to profile isolation or crash handling without
+mixing in the final Roamium comparison unless the previous result specifically
+calls for it.
