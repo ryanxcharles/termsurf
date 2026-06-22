@@ -127,7 +127,7 @@ Each feature row should ultimately record:
 - [Experiment 3: Prove Roamium keyboard and page navigation](03-prove-roamium-keyboard-page-navigation.md)
   — **Pass**
 - [Experiment 4: Prove Roamium PDF links](04-prove-roamium-pdf-links.md) —
-  **Designed**
+  **Pass**
 
 ## Roamium Phase
 
