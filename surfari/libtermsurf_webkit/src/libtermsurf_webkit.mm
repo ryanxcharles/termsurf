@@ -7,9 +7,11 @@
 #import <WebKit/WKPreferencesPrivate.h>
 #import <WebKit/WKUIDelegatePrivate.h>
 #import <WebKit/WKWebViewPrivate.h>
+#import <WebKit/WKWebsiteDataStorePrivate.h>
 #import <WebKit/_WKHitTestResult.h>
 #import <WebKit/_WKInspector.h>
 #import <WebKit/_WKInspectorPrivateForTesting.h>
+#import <WebKit/_WKWebsiteDataStoreConfiguration.h>
 
 #include <atomic>
 #include <algorithm>
@@ -84,6 +86,58 @@ static NSString *const TermSurfCursorTypeKey = @"cursorType";
 static struct WebContents *g_dispatching_mouse_contents = nullptr;
 static IMP g_original_pressed_mouse_buttons = nullptr;
 static IMP g_original_button_number = nullptr;
+
+static NSURL *profileURL(NSString *basePath, NSString *component, bool directory)
+{
+    NSURL *baseURL = [NSURL fileURLWithPath:basePath isDirectory:YES];
+    return [baseURL URLByAppendingPathComponent:component isDirectory:directory];
+}
+
+static void createProfileDirectory(NSURL *url)
+{
+    [[NSFileManager defaultManager] createDirectoryAtURL:url withIntermediateDirectories:YES attributes:nil error:nil];
+}
+
+static WKWebsiteDataStore *createProfileDataStore(const char *path)
+{
+    if (!path || !*path)
+        return [WKWebsiteDataStore defaultDataStore];
+
+    NSString *basePath = [NSString stringWithUTF8String:path];
+    if (!basePath.length)
+        return [WKWebsiteDataStore defaultDataStore];
+
+    NSURL *baseURL = [NSURL fileURLWithPath:basePath isDirectory:YES];
+    createProfileDirectory(baseURL);
+
+    NSURL *cacheURL = profileURL(basePath, @"Cache", true);
+    NSURL *websiteDataURL = profileURL(basePath, @"WebsiteData", true);
+    NSURL *cookiesURL = profileURL(basePath, @"Cookies", true);
+    NSURL *cookiesFileURL = [cookiesURL URLByAppendingPathComponent:@"Cookies.binarycookies" isDirectory:NO];
+
+    createProfileDirectory(cacheURL);
+    createProfileDirectory(websiteDataURL);
+    createProfileDirectory(cookiesURL);
+
+    _WKWebsiteDataStoreConfiguration *configuration = [[_WKWebsiteDataStoreConfiguration alloc] init];
+    configuration.networkCacheSpeculativeValidationEnabled = YES;
+    configuration.networkCacheDirectory = profileURL(basePath, @"Cache/NetworkCache", true);
+    configuration.generalStorageDirectory = profileURL(basePath, @"WebsiteData/GeneralStorage", true);
+    configuration._webStorageDirectory = profileURL(basePath, @"WebsiteData/LocalStorage", true);
+    configuration._indexedDBDatabaseDirectory = profileURL(basePath, @"WebsiteData/IndexedDB", true);
+    configuration._cacheStorageDirectory = profileURL(basePath, @"WebsiteData/CacheStorage", true);
+    configuration._serviceWorkerRegistrationDirectory = profileURL(basePath, @"WebsiteData/ServiceWorkers", true);
+    configuration._cookieStorageFile = cookiesFileURL;
+
+    createProfileDirectory(configuration.networkCacheDirectory);
+    createProfileDirectory(configuration.generalStorageDirectory);
+    createProfileDirectory(configuration._webStorageDirectory);
+    createProfileDirectory(configuration._indexedDBDatabaseDirectory);
+    createProfileDirectory(configuration._cacheStorageDirectory);
+    createProfileDirectory(configuration._serviceWorkerRegistrationDirectory);
+
+    return [[WKWebsiteDataStore alloc] _initWithConfiguration:configuration];
+}
 
 struct BrowserContext {
     WKWebsiteDataStore *data_store;
@@ -898,9 +952,8 @@ void ts_quit(void)
 
 ts_browser_context_t ts_create_browser_context(const char *path)
 {
-    (void)path;
     BrowserContext *context = new BrowserContext;
-    context->data_store = [WKWebsiteDataStore defaultDataStore];
+    context->data_store = createProfileDataStore(path);
     return context;
 }
 

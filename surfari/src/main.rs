@@ -15,6 +15,7 @@ static SOCKET_PATH: OnceLock<String> = OnceLock::new();
 static LISTEN_PATH: OnceLock<String> = OnceLock::new();
 static PROFILE_NAME: OnceLock<String> = OnceLock::new();
 static BROWSER_NAME: OnceLock<String> = OnceLock::new();
+static USER_DATA_DIR: OnceLock<String> = OnceLock::new();
 static INCOGNITO: OnceLock<bool> = OnceLock::new();
 
 static mut BROWSER_CONTEXT: ffi::TsBrowserContext = ptr::null_mut();
@@ -31,7 +32,14 @@ unsafe extern "C" fn on_initialized(_user_data: *mut c_void) {
         BROWSER_CONTEXT = if *INCOGNITO.get().unwrap_or(&false) {
             ffi::ts_create_incognito_browser_context()
         } else {
-            ffi::ts_create_browser_context(ptr::null())
+            let user_data_dir = USER_DATA_DIR
+                .get()
+                .and_then(|path| CString::new(path.as_str()).ok());
+            ffi::ts_create_browser_context(
+                user_data_dir
+                    .as_ref()
+                    .map_or(ptr::null(), |path| path.as_ptr()),
+            )
         };
     }
 
@@ -82,6 +90,7 @@ fn main() {
         } else if let Some(val) = arg.strip_prefix("--listen-socket=") {
             let _ = LISTEN_PATH.set(val.to_string());
         } else if let Some(val) = arg.strip_prefix("--user-data-dir=") {
+            let _ = USER_DATA_DIR.set(val.to_string());
             let name = val.rsplit('/').next().unwrap_or(val);
             let _ = PROFILE_NAME.set(name.to_string());
         } else if let Some(val) = arg.strip_prefix("--browser-name=") {

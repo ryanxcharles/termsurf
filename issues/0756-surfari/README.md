@@ -323,4 +323,4 @@ recovery. Much of this code can inform Surfari's implementation.
 - [Experiment 28: Prove Surfari click and drag input details](28-surfari-click-drag-input-details.md)
   — **Pass**
 - [Experiment 29: Prove Surfari profile isolation](29-surfari-profile-isolation.md)
-  — **Designed**
+  — **Pass**

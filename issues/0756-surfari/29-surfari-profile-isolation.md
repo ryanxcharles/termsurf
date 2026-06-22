@@ -158,3 +158,89 @@ spawn uses another binary path.
 Focused re-review returned `APPROVED` with no Required findings. The reviewer
 confirmed both prior findings were resolved and no new Required finding was
 introduced.
+
+## Result
+
+**Result:** Pass
+
+Run `20260621-203102` passed with the new real-app profile-isolation harness:
+
+```bash
+bash -n scripts/test-issue-756-surfari-profile-isolation.sh
+scripts/test-issue-756-surfari-profile-isolation.sh
+```
+
+Logs:
+
+- `logs/issue-756-exp29-surfari-profile-isolation/harness-20260621-203102.log`
+- `logs/issue-756-exp29-surfari-profile-isolation/app-20260621-203102.log`
+- `logs/issue-756-exp29-surfari-profile-isolation/surfari-trace-20260621-203102.log`
+- `logs/issue-756-exp29-surfari-profile-isolation/webtui-20260621-203102.log`
+
+The harness launched the real Debug `TermSurf.app` with repo-built
+`web --browser surfari` and repo-built `surfari`, explicitly pinning Ghostboard
+with `TERMSURF_SURFARI_PATH=$ROOT/target/debug/surfari`. It also set temporary
+`XDG_DATA_HOME` and `XDG_STATE_HOME` paths so stale user profile data could not
+make the storage assertions pass accidentally.
+
+The passing run proved:
+
+- profile A created Ghostboard server key `profilea/surfari`;
+- profile A spawned `/Users/astrohacker/dev/termsurf/target/debug/surfari` with
+  `--user-data-dir=.../webkit-profiles/profilea`;
+- profile A registered as `profile=profilea browser=surfari`;
+- profile A initially logged same-origin
+  `localStorage_before=none localStorage_after=profilea` and
+  `cookie_before=none cookie_after=profilea`;
+- profile B created Ghostboard server key `profileb/surfari`;
+- profile B spawned the same repo Surfari binary with
+  `--user-data-dir=.../webkit-profiles/profileb`;
+- profile B used a different Surfari PID and CA context from profile A;
+- profile B registered as `profile=profileb browser=surfari`;
+- profile B initially logged same-origin
+  `localStorage_before=none localStorage_after=profileb` and
+  `cookie_before=none cookie_after=profileb`;
+- profile B hit testing and keyboard input routed to profile B and not profile
+  A;
+- after switching back to profile A and explicitly navigating profile A to the
+  same URL, the page logged
+  `localStorage_before=profilea localStorage_after=profilea` and
+  `cookie_before=profilea cookie_after=profilea`;
+- profile A return hit testing and keyboard input routed to profile A and not
+  profile B;
+- both temporary `webkit-profiles/profilea` and `webkit-profiles/profileb`
+  directories existed under the run's `XDG_DATA_HOME`.
+
+Implementation changes:
+
+- Added `scripts/test-issue-756-surfari-profile-isolation.sh`.
+- Updated `surfari/src/main.rs` to retain `--user-data-dir` and pass it to
+  `ts_create_browser_context`.
+- Updated `surfari/libtermsurf_webkit/src/libtermsurf_webkit.mm` so normal
+  browser contexts create a WebKit data store with profile-specific storage,
+  cache, localStorage, IndexedDB, cache storage, service worker, and cookie
+  paths instead of always using `[WKWebsiteDataStore defaultDataStore]`.
+
+The first harness run, `20260621-202814`, failed on the return-to-profile-A
+proof because Browse-mode `cmd+r` was forwarded as a key event but did not
+produce a reload/navigation. That failure did not show storage loss. The harness
+was changed to use the direct `BrowserNavigate` protobuf path already used by
+Experiment 25's lifecycle tranche, which re-runs the same profile A page script
+without depending on the separate reload shortcut.
+
+## Conclusion
+
+Surfari now has real-app evidence for named profile isolation. The real-app
+matrix marks `Profile isolation` `Proven`. Remaining Issue 756 matrix gaps are
+crash handling and the final Ghostboard/Roamium comparison.
+
+## Completion Review
+
+Adversarial completion review returned `APPROVED` with no findings. The reviewer
+inspected the uncommitted result diff, the new profile-isolation harness, the
+passing `20260621-203102` run logs, the issue README, and the real-app matrix.
+The reviewer confirmed that the result stayed within the approved Experiment 29
+scope, proved localStorage and cookie isolation with separate Surfari processes
+and profile-specific user-data directories, pinned Ghostboard to the repo-built
+Surfari binary, updated the matrix without overclaiming, and had not been
+committed before review.
