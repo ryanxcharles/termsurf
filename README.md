@@ -129,8 +129,8 @@ logging into Google in one profile doesn't affect the others.
 
 ### Install with Homebrew
 
-The Homebrew cask currently supports Apple silicon macOS and installs the
-current TermSurf app, the `web` CLI, and Roamium:
+The Homebrew cask currently supports Apple silicon macOS and installs TermSurf
+1.4.0: the current app, the `web` CLI, Roamium (Chromium), and Surfari (WebKit):
 
 ```bash
 brew tap termsurf/termsurf
@@ -142,8 +142,9 @@ To upgrade: `brew update && brew upgrade --cask termsurf`
 
 ### Build from Source
 
-For development. Requires Xcode, Zig, the Rust toolchain, and a Chromium build.
-Plan for ~100 GB of disk space (almost all of it is Chromium).
+For development. Requires Xcode, Zig, the Rust toolchain, a Chromium build, and
+a WebKit build if you are building Surfari. Plan for ~100 GB of disk space
+before WebKit (almost all of it is Chromium).
 
 #### 1. Install prerequisites
 
@@ -208,14 +209,17 @@ management, patch workflow, and recovery from build issues.
 ```bash
 cd ../..
 ./scripts/build.sh roamium
+./scripts/build.sh surfari
 ./scripts/build.sh webtui
 cd ghostboard
 zig build run
 ```
 
 `scripts/build.sh roamium` builds the Roamium engine binary and copies it into
-`chromium/src/out/Default/`. `scripts/build.sh webtui` builds the `web` TUI.
-`zig build run` launches Ghostboard, the primary TermSurf front-end.
+`chromium/src/out/Default/`. `scripts/build.sh surfari` builds Surfari and
+`libtermsurf_webkit` from the local WebKit workspace. `scripts/build.sh webtui`
+builds the `web` TUI. `zig build run` launches Ghostboard, the primary TermSurf
+front-end.
 
 #### 4. Build the macOS app bundle
 

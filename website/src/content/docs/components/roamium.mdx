@@ -1,6 +1,8 @@
 ---
 title: Roamium
-description: Roamium — TermSurf's Chromium browser engine binary, its C API, callbacks, source layout, and install paths.
+description:
+  Roamium — TermSurf's Chromium browser engine binary, its C API, callbacks,
+  source layout, and install paths.
 section: Components
 order: 2
 ---
@@ -24,8 +26,8 @@ order: 2
   user-data directory, and the engine's own listen socket on launch; Roamium
   enters Chromium's message loop, creates the profile's context, registers with
   the GUI, and then creates tabs and streams GPU layers on demand. For the wire
-  format and topology, see <a href="/docs/architecture">Architecture</a>; for the
-  message types, see the{" "}
+  format and topology, see <a href="/docs/architecture">Architecture</a>; for
+  the message types, see the{" "}
   <a href="/docs/protocol/messages">protocol message reference</a>.
 </p>
 
@@ -38,10 +40,12 @@ order: 2
 
 <ul>
   <li>
-    <strong><code>libtermsurf_chromium</code></strong> — a C shared library that
-    wraps Chromium's embedding API. Exports the <code>ts_*</code> functions
-    below for lifecycle, profiles, tabs, navigation, input, and state. Built from
-    the Chromium fork.
+    <strong>
+      <code>libtermsurf_chromium</code>
+    </strong>{" "}
+    — a C shared library that wraps Chromium's embedding API. Exports the{" "}
+    <code>ts_*</code> functions below for lifecycle, profiles, tabs, navigation,
+    input, and state. Built from the Chromium fork.
   </li>
   <li>
     <strong>Roamium</strong> — a Rust binary that links the C library, connects
@@ -55,14 +59,51 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>File</th><th>Purpose</th></tr>
+    <tr>
+      <th>File</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>main.rs</code></td><td>Entry point, arg parsing, callback registration, Chromium message loop</td></tr>
-    <tr><td><code>dispatch.rs</code></td><td>Message dispatch — routes protobuf messages to FFI calls, relays callbacks</td></tr>
-    <tr><td><code>ipc.rs</code></td><td>Unix socket connection, length-prefixed protobuf framing, reader loop</td></tr>
-    <tr><td><code>ffi.rs</code></td><td>FFI bindings to the <code>libtermsurf_chromium</code> C functions</td></tr>
-    <tr><td><code>proto.rs</code></td><td>Generated protobuf types (prost)</td></tr>
+    <tr>
+      <td>
+        <code>main.rs</code>
+      </td>
+      <td>
+        Entry point, arg parsing, callback registration, Chromium message loop
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <code>dispatch.rs</code>
+      </td>
+      <td>
+        Message dispatch — routes protobuf messages to FFI calls, relays
+        callbacks
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <code>ipc.rs</code>
+      </td>
+      <td>
+        Unix socket connection, length-prefixed protobuf framing, reader loop
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <code>ffi.rs</code>
+      </td>
+      <td>
+        FFI bindings to the <code>libtermsurf_chromium</code> C functions
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <code>proto.rs</code>
+      </td>
+      <td>Generated protobuf types (prost)</td>
+    </tr>
   </tbody>
 </table>
 
@@ -77,13 +118,36 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Function</th><th>Purpose</th></tr>
+    <tr>
+      <th>Function</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>ts_content_main</code></td><td>Enter Chromium's message loop (blocks)</td></tr>
-    <tr><td><code>ts_set_on_initialized</code></td><td>Register the initialization callback</td></tr>
-    <tr><td><code>ts_post_task</code></td><td>Post a task to the UI thread</td></tr>
-    <tr><td><code>ts_quit</code></td><td>Shut down Chromium</td></tr>
+    <tr>
+      <td>
+        <code>ts_content_main</code>
+      </td>
+      <td>Enter Chromium's message loop (blocks)</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_set_on_initialized</code>
+      </td>
+      <td>Register the initialization callback</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_post_task</code>
+      </td>
+      <td>Post a task to the UI thread</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_quit</code>
+      </td>
+      <td>Shut down Chromium</td>
+    </tr>
   </tbody>
 </table>
 
@@ -91,12 +155,30 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Function</th><th>Purpose</th></tr>
+    <tr>
+      <th>Function</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>ts_create_browser_context</code></td><td>Create a profile (BrowserContext)</td></tr>
-    <tr><td><code>ts_create_incognito_browser_context</code></td><td>Create an ephemeral incognito profile</td></tr>
-    <tr><td><code>ts_destroy_browser_context</code></td><td>Destroy a profile</td></tr>
+    <tr>
+      <td>
+        <code>ts_create_browser_context</code>
+      </td>
+      <td>Create a profile (BrowserContext)</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_create_incognito_browser_context</code>
+      </td>
+      <td>Create an ephemeral incognito profile</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_destroy_browser_context</code>
+      </td>
+      <td>Destroy a profile</td>
+    </tr>
   </tbody>
 </table>
 
@@ -104,12 +186,30 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Function</th><th>Purpose</th></tr>
+    <tr>
+      <th>Function</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>ts_create_web_contents</code></td><td>Create a browser tab</td></tr>
-    <tr><td><code>ts_create_devtools_web_contents</code></td><td>Create a DevTools tab</td></tr>
-    <tr><td><code>ts_destroy_web_contents</code></td><td>Close a tab</td></tr>
+    <tr>
+      <td>
+        <code>ts_create_web_contents</code>
+      </td>
+      <td>Create a browser tab</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_create_devtools_web_contents</code>
+      </td>
+      <td>Create a DevTools tab</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_destroy_web_contents</code>
+      </td>
+      <td>Close a tab</td>
+    </tr>
   </tbody>
 </table>
 
@@ -117,14 +217,42 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Function</th><th>Purpose</th></tr>
+    <tr>
+      <th>Function</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>ts_load_url</code></td><td>Navigate to a URL</td></tr>
-    <tr><td><code>ts_forward_mouse_event</code></td><td>Forward a mouse click</td></tr>
-    <tr><td><code>ts_forward_mouse_move</code></td><td>Forward mouse movement</td></tr>
-    <tr><td><code>ts_forward_scroll_event</code></td><td>Forward a scroll</td></tr>
-    <tr><td><code>ts_forward_key_event</code></td><td>Forward keyboard input</td></tr>
+    <tr>
+      <td>
+        <code>ts_load_url</code>
+      </td>
+      <td>Navigate to a URL</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_forward_mouse_event</code>
+      </td>
+      <td>Forward a mouse click</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_forward_mouse_move</code>
+      </td>
+      <td>Forward mouse movement</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_forward_scroll_event</code>
+      </td>
+      <td>Forward a scroll</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_forward_key_event</code>
+      </td>
+      <td>Forward keyboard input</td>
+    </tr>
   </tbody>
 </table>
 
@@ -132,13 +260,36 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Function</th><th>Purpose</th></tr>
+    <tr>
+      <th>Function</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>ts_set_focus</code></td><td>Set focus state (browse vs. control)</td></tr>
-    <tr><td><code>ts_set_color_scheme</code></td><td>Set dark/light mode</td></tr>
-    <tr><td><code>ts_set_view_size</code></td><td>Resize the viewport</td></tr>
-    <tr><td><code>ts_set_gui_active</code></td><td>Set whether the GUI is active/foreground</td></tr>
+    <tr>
+      <td>
+        <code>ts_set_focus</code>
+      </td>
+      <td>Set focus state (browse vs. control)</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_set_color_scheme</code>
+      </td>
+      <td>Set dark/light mode</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_set_view_size</code>
+      </td>
+      <td>Resize the viewport</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_set_gui_active</code>
+      </td>
+      <td>Set whether the GUI is active/foreground</td>
+    </tr>
   </tbody>
 </table>
 
@@ -146,11 +297,24 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Function</th><th>Purpose</th></tr>
+    <tr>
+      <th>Function</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>ts_reply_javascript_dialog</code></td><td>Answer a JavaScript dialog (accept/cancel + prompt text)</td></tr>
-    <tr><td><code>ts_reply_http_auth</code></td><td>Answer an HTTP authentication challenge (credentials)</td></tr>
+    <tr>
+      <td>
+        <code>ts_reply_javascript_dialog</code>
+      </td>
+      <td>Answer a JavaScript dialog (accept/cancel + prompt text)</td>
+    </tr>
+    <tr>
+      <td>
+        <code>ts_reply_http_auth</code>
+      </td>
+      <td>Answer an HTTP authentication challenge (credentials)</td>
+    </tr>
   </tbody>
 </table>
 
@@ -164,39 +328,134 @@ order: 2
 
 <table>
   <thead>
-    <tr><th>Callback</th><th>Protobuf message</th><th>Purpose</th></tr>
+    <tr>
+      <th>Callback</th>
+      <th>Protobuf message</th>
+      <th>Purpose</th>
+    </tr>
   </thead>
   <tbody>
-    <tr><td><code>on_tab_ready</code></td><td><code>TabReady</code></td><td>Tab created, tab_id assigned</td></tr>
-    <tr><td><code>on_ca_context_id</code></td><td><code>CaContext</code></td><td>GPU layer ready for compositing</td></tr>
-    <tr><td><code>on_url_changed</code></td><td><code>UrlChanged</code></td><td>Page navigated</td></tr>
-    <tr><td><code>on_loading_state</code></td><td><code>LoadingState</code></td><td>Loading started/finished</td></tr>
-    <tr><td><code>on_title_changed</code></td><td><code>TitleChanged</code></td><td>Page title updated</td></tr>
-    <tr><td><code>on_cursor_changed</code></td><td><code>CursorChanged</code></td><td>Cursor type changed (pointer, text, …)</td></tr>
-    <tr><td><code>on_target_url_changed</code></td><td><code>TargetUrlChanged</code></td><td>Link hover target</td></tr>
-    <tr><td><code>on_console_message</code></td><td><code>ConsoleMessage</code></td><td>Console log entry from the page</td></tr>
-    <tr><td><code>on_renderer_crashed</code></td><td><code>RendererCrashed</code></td><td>Renderer process crashed (recovery)</td></tr>
-    <tr><td><code>on_http_auth_request</code></td><td><code>HttpAuthRequest</code></td><td>Server requested HTTP authentication</td></tr>
-    <tr><td><code>on_javascript_dialog_request</code></td><td><code>JavaScriptDialogRequest</code></td><td>Page opened a JavaScript dialog</td></tr>
+    <tr>
+      <td>
+        <code>on_tab_ready</code>
+      </td>
+      <td>
+        <code>TabReady</code>
+      </td>
+      <td>Tab created, tab_id assigned</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_ca_context_id</code>
+      </td>
+      <td>
+        <code>CaContext</code>
+      </td>
+      <td>GPU layer ready for compositing</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_url_changed</code>
+      </td>
+      <td>
+        <code>UrlChanged</code>
+      </td>
+      <td>Page navigated</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_loading_state</code>
+      </td>
+      <td>
+        <code>LoadingState</code>
+      </td>
+      <td>Loading started/finished</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_title_changed</code>
+      </td>
+      <td>
+        <code>TitleChanged</code>
+      </td>
+      <td>Page title updated</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_cursor_changed</code>
+      </td>
+      <td>
+        <code>CursorChanged</code>
+      </td>
+      <td>Cursor type changed (pointer, text, …)</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_target_url_changed</code>
+      </td>
+      <td>
+        <code>TargetUrlChanged</code>
+      </td>
+      <td>Link hover target</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_console_message</code>
+      </td>
+      <td>
+        <code>ConsoleMessage</code>
+      </td>
+      <td>Console log entry from the page</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_renderer_crashed</code>
+      </td>
+      <td>
+        <code>RendererCrashed</code>
+      </td>
+      <td>Renderer process crashed (recovery)</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_http_auth_request</code>
+      </td>
+      <td>
+        <code>HttpAuthRequest</code>
+      </td>
+      <td>Server requested HTTP authentication</td>
+    </tr>
+    <tr>
+      <td>
+        <code>on_javascript_dialog_request</code>
+      </td>
+      <td>
+        <code>JavaScriptDialogRequest</code>
+      </td>
+      <td>Page opened a JavaScript dialog</td>
+    </tr>
   </tbody>
 </table>
 
 <p>
   The auth and dialog callbacks are request/reply round trips: the
   <code>*_request</code> callback notifies the GUI and the
-  <a href="/docs/components/webtui"><code>web</code> TUI</a>, which collects the
-  answer and replies via <code>ts_reply_http_auth</code> /
+  <a href="/docs/components/webtui">
+    <code>web</code> TUI
+  </a>
+  , which collects the answer and replies via <code>ts_reply_http_auth</code> /
   <code>ts_reply_javascript_dialog</code>.
 </p>
 
 <h2>Multi-engine pattern</h2>
 
 <p>
-  Roamium is the first engine binary, but the architecture is built for several.
-  Each engine pairs a C shared library wrapping the engine's embedding API (the
-  <code>ts_*</code> functions) with the reusable ~400-line Rust binary — only the
-  C library changes per engine. Planned engines: Surfari (WebKit), Waterwolf
-  (Gecko), Girlbat (Ladybird) — see the <a href="/docs/roadmap">roadmap</a>.
+  Roamium is the Chromium engine binary, and Surfari is the WebKit engine
+  binary. Each engine pairs a C shared library wrapping the engine's embedding
+  API (the <code>ts_*</code> functions) with the reusable ~400-line Rust binary
+  — only the C library changes per engine. Future researched engines include
+  Waterwolf (Gecko) and Girlbat (Ladybird) — see the
+  <a href="/docs/roadmap">roadmap</a>.
 </p>
 
 <h2>Installation</h2>
@@ -211,5 +470,6 @@ order: 2
   <a href="/docs/getting-started">Getting Started</a> to install.
 </p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">scripts/build.sh</span> roamium --release
 <span class="text-primary">sudo</span> scripts/install.sh roamium</code></pre>

@@ -1,6 +1,8 @@
 ---
 title: Getting Started
-description: Install TermSurf with Homebrew or build it from source, then open a browser in your terminal.
+description:
+  Install TermSurf with Homebrew or build it from source, then open a browser in
+  your terminal.
 order: 1
 ---
 
@@ -15,70 +17,92 @@ order: 1
 
 <p>The fastest way to install on macOS:</p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">brew</span> tap termsurf/termsurf
 <span class="text-primary">brew</span> trust termsurf/termsurf
 <span class="text-primary">brew</span> install --cask termsurf</code></pre>
 
 <p>
-  The Homebrew cask currently installs TermSurf <code>1.0.0</code>. It puts the
+  The Homebrew cask currently installs TermSurf <code>1.4.0</code>. It puts the
   TermSurf app at <code>/Applications/TermSurf.app</code>, the <code>web</code>
-  CLI at <code>/opt/homebrew/bin/web</code>, and Roamium (Chromium engine) under
-  <code>/opt/homebrew/opt/termsurf-roamium/</code>.
+  CLI at <code>/opt/homebrew/bin/web</code>, Roamium (Chromium engine) under
+  <code>/opt/homebrew/opt/termsurf-roamium/</code>, and Surfari (WebKit engine)
+  under <code>/opt/homebrew/opt/termsurf-surfari/</code>.
 </p>
 
 <p>To upgrade to a new version:</p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">brew</span> update && <span class="text-primary">brew</span> upgrade --cask termsurf</code></pre>
 
 <h2>Build from Source</h2>
 
 <p>
-  For development or if you want to build from source. Requires macOS, the
-  <a href="https://www.rust-lang.org/tools/install">Rust toolchain</a>, and a
-  Chromium build (~100 GB disk space).
+  For development or if you want to build from source. Requires macOS, Xcode,
+  Zig, the <a href="https://www.rust-lang.org/tools/install">Rust toolchain</a>,
+  a Chromium build, and a WebKit build if you are building Surfari.
 </p>
 
 <h3>Clone</h3>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">git</span> clone <span class="text-success">https://github.com/termsurf/termsurf.git</span>
 <span class="text-primary">cd</span> termsurf</code></pre>
 
 <h2>Build</h2>
 
 <p>
-  Build all components (Chromium, Roamium, Ghostboard, and the <code>web</code>
-  TUI) with:
+  Build all components (Chromium, Roamium, Surfari, Ghostboard, and the
+  <code>web</code> TUI) with:
 </p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">scripts/build.sh</span> all --release</code></pre>
 
 <p>Or build components individually:</p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">scripts/build.sh</span> chromium --release   <span class="text-muted"># Chromium + libtermsurf_chromium</span>
 <span class="text-primary">scripts/build.sh</span> roamium --release    <span class="text-muted"># Roamium (Chromium engine binary)</span>
+<span class="text-primary">scripts/build.sh</span> surfari --release    <span class="text-muted"># Surfari (WebKit engine binary)</span>
 <span class="text-primary">scripts/build.sh</span> ghostboard --release <span class="text-muted"># TermSurf GUI</span>
 <span class="text-primary">scripts/build.sh</span> webtui --release     <span class="text-muted"># web TUI</span></code></pre>
 
 <h2>Install</h2>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">sudo</span> scripts/install.sh all</code></pre>
 
 <p>This installs:</p>
 
 <ul>
-  <li><strong>TermSurf</strong> to <code>/Applications/TermSurf.app</code></li>
-  <li><strong>Roamium</strong> + Chromium dylibs to <code>/opt/homebrew/opt/termsurf-roamium/</code></li>
-  <li><strong>web</strong> TUI to <code>/usr/local/bin/web</code> for source installs</li>
+  <li>
+    <strong>TermSurf</strong> to <code>/Applications/TermSurf.app</code>
+  </li>
+  <li>
+    <strong>Roamium</strong> + Chromium dylibs to{" "}
+    <code>/opt/homebrew/opt/termsurf-roamium/</code>
+  </li>
+  <li>
+    <strong>Surfari</strong> + WebKit runtime to{" "}
+    <code>/opt/homebrew/opt/termsurf-surfari/</code>
+  </li>
+  <li>
+    <strong>web</strong> TUI to <code>/usr/local/bin/web</code> for source
+    installs
+  </li>
 </ul>
 
 <h2>Usage</h2>
 
 <p>Launch TermSurf:</p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">open</span> <span class="text-success">"/Applications/TermSurf.app"</span></code></pre>
 
 <p>In any TermSurf pane, open a browser:</p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">web</span> ryanxcharles.com</code></pre>
 
 <p>
@@ -95,6 +119,7 @@ order: 1
   the macOS SDK version — a stale build will crash child processes.
 </p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code><span class="text-primary">scripts/build.sh</span> chromium --clean
 <span class="text-primary">scripts/build.sh</span> all --release
 <span class="text-primary">sudo</span> scripts/install.sh all</code></pre>

@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-22"
+closed = "2026-06-22"
 +++
 
 # Issue 838: Deploy Next Homebrew Version
@@ -105,7 +106,7 @@ This issue covers the next Homebrew deployment. It may include:
 - [x] **Stage 8: Homebrew install verification** — install or upgrade through
       Homebrew and verify WebTUI top controls plus `web --browser surfari`
       without `TERMSURF_SURFARI_PATH`.
-- [ ] **Stage 9: Closeout** — record final verification evidence, update docs if
+- [x] **Stage 9: Closeout** — record final verification evidence, update docs if
       deployment changed install instructions, close the issue, and regenerate
       `issues/README.md`.
 
@@ -144,3 +145,37 @@ This issue covers the next Homebrew deployment. It may include:
 - Installed TermSurf includes the WebTUI top-controls fix.
 - Installed Surfari can be launched through `web --browser surfari` without
   relying on a development-only `TERMSURF_SURFARI_PATH`.
+
+## Conclusion
+
+Issue 838 is complete. TermSurf `1.4.0` was built, packaged, published to GitHub
+Releases, pushed to the `termsurf/homebrew-termsurf` tap, and verified through a
+real Homebrew upgrade/reinstall on this machine.
+
+Final release evidence:
+
+- GitHub Release `v1.4.0` exists and is not draft or prerelease.
+- Release asset `termsurf-1.4.0-aarch64-apple-darwin.tar.gz` has SHA
+  `efb72712b962c77605df9ee2b67cfda2e116fd39cb863588b62df1b1857ea260`.
+- Homebrew tap `main` is pushed to `1113ef1b3f790a7e51991c5389b35c93700b3e79`.
+- Installed cask `termsurf` reports version `1.4.0`.
+- Installed artifacts include `TermSurf.app`, `web`, Roamium, Surfari,
+  `libtermsurf_webkit.dylib`, `libWebKitSwift.dylib`, and the required Surfari
+  WebKit runtime closure.
+- Installed WebTUI carries the Issue 836 top-controls fix; the installed `web`
+  binary matches the release build by Mach-O UUID, and the Issue 836 regression
+  tests pass.
+- Installed Surfari has no broken symlinks and passes strict code-signature
+  verification.
+- Installed Ghostboard launches installed `web --browser surfari` without
+  `TERMSURF_SURFARI_PATH`, both through the explicit installed-path harness
+  override and through Ghostboard's production default `/opt/homebrew` Surfari
+  path.
+
+Two release-quality fixes were found and completed during final validation:
+
+- release packaging now signs the staged Surfari runtime after path rewriting,
+  includes `libWebKitSwift.dylib`, materializes WebKit framework runtime
+  symlinks, and fails closed on signing errors;
+- the Homebrew cask now clears quarantine before signing, so WebKit `.tbd`
+  detached signatures survive postflight.

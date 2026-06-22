@@ -1,6 +1,8 @@
 ---
 title: Architecture
-description: TermSurf's multi-process design, process topology, Unix-socket + protobuf IPC, and GPU compositing.
+description:
+  TermSurf's multi-process design, process topology, Unix-socket + protobuf IPC,
+  and GPU compositing.
 order: 2
 ---
 
@@ -36,6 +38,7 @@ order: 2
   serving one profile. Different profiles can use different engines.
 </p>
 
+{/* prettier-ignore */}
 <pre class="bg-background-dark p-3 border-l-2 border-border text-foreground-dark text-xs mb-6 overflow-x-auto"><code>┌─────────┐  ┌─────────┐  ┌─────────┐
 │  TUI 1  │  │  TUI 2  │  │  TUI N  │    N TUIs (e.g., web)
 └────┬────┘  └────┬────┘  └────┬────┘
@@ -120,25 +123,33 @@ order: 2
   <tbody>
     <tr>
       <td>Chromium</td>
-      <td><code>libtermsurf_chromium</code></td>
+      <td>
+        <code>libtermsurf_chromium</code>
+      </td>
       <td>Roamium</td>
       <td class="text-success">Done</td>
     </tr>
     <tr>
       <td>WebKit</td>
-      <td><code>libtermsurf_webkit</code></td>
+      <td>
+        <code>libtermsurf_webkit</code>
+      </td>
       <td>Surfari</td>
-      <td class="text-muted">Planned</td>
+      <td class="text-success">Done</td>
     </tr>
     <tr>
       <td>Gecko</td>
-      <td><code>libtermsurf_gecko</code></td>
+      <td>
+        <code>libtermsurf_gecko</code>
+      </td>
       <td>Waterwolf</td>
       <td class="text-muted">Researched</td>
     </tr>
     <tr>
       <td>Ladybird</td>
-      <td><code>libtermsurf_ladybird</code></td>
+      <td>
+        <code>libtermsurf_ladybird</code>
+      </td>
       <td>Girlbat</td>
       <td class="text-muted">Researched</td>
     </tr>
@@ -153,11 +164,22 @@ order: 2
 </p>
 
 <ul>
-  <li><strong>Ghostboard</strong> — Active. Ghostty fork, Zig/Swift.</li>
-  <li><strong>Wezboard</strong> — Archived in git history. Former WezTerm fork, Rust.</li>
-  <li><strong>Kitty</strong> — Planned.</li>
-  <li><strong>Alacritty</strong> — Planned.</li>
-  <li><strong>iTerm2</strong> — Planned.</li>
+  <li>
+    <strong>Ghostboard</strong> — Active. Ghostty fork, Zig/Swift.
+  </li>
+  <li>
+    <strong>Wezboard</strong> — Archived in git history. Former WezTerm fork,
+    Rust.
+  </li>
+  <li>
+    <strong>Kitty</strong> — Planned.
+  </li>
+  <li>
+    <strong>Alacritty</strong> — Planned.
+  </li>
+  <li>
+    <strong>iTerm2</strong> — Planned.
+  </li>
 </ul>
 
 <h2>Many TUIs</h2>
@@ -169,6 +191,11 @@ order: 2
 </p>
 
 <ul>
-  <li><code>web</code> — general-purpose web browser TUI (current)</li>
-  <li>Future: documentation viewers, API explorers, email clients, dashboard monitors</li>
+  <li>
+    <code>web</code> — general-purpose web browser TUI (current)
+  </li>
+  <li>
+    Future: documentation viewers, API explorers, email clients, dashboard
+    monitors
+  </li>
 </ul>

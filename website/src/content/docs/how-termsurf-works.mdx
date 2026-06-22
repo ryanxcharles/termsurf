@@ -1,7 +1,10 @@
 ---
 title: How TermSurf Works
 navLabel: How TermSurf Works
-description: The end-to-end flow when you run web <url> — the TUI connects to the GUI, an engine renders the page, and it's composited as a GPU overlay in your pane. No alt+tab.
+description:
+  The end-to-end flow when you run web <url> — the TUI connects to the GUI, an
+  engine renders the page, and it's composited as a GPU overlay in your pane. No
+  alt+tab.
 order: 1.6
 ---
 
@@ -15,14 +18,19 @@ order: 1.6
   a couple of modes.
 </p>
 
-<h2>What happens when you run <code>web example.com</code></h2>
+<h2>
+  What happens when you run <code>web example.com</code>
+</h2>
 
 <ol>
   <li>
-    The <a href="/docs/components/webtui"><code>web</code> TUI</a> starts in the
-    pane and connects to the GUI (Ghostboard) over a Unix socket (it finds the
-    socket via the <code>TERMSURF_SOCKET</code> environment variable the GUI
-    sets).
+    The{" "}
+    <a href="/docs/components/webtui">
+      <code>web</code> TUI
+    </a>{" "}
+    starts in the pane and connects to the GUI (Ghostboard) over a Unix socket
+    (it finds the socket via the <code>TERMSURF_SOCKET</code> environment
+    variable the GUI sets).
   </li>
   <li>
     The GUI launches — or reuses — a browser engine process for your
@@ -63,10 +71,11 @@ order: 1.6
 </p>
 
 <p>
-  Today the shipping engine is <a href="/docs/components/roamium">Roamium</a>
-  (Chromium) on macOS. Because the GUI talks to engines only through the
-  protocol, additional engines are a planned extension rather than a rewrite —
-  see the engine table in <a href="/docs/architecture">Architecture</a>.
+  Today the shipping engines are <a href="/docs/components/roamium">Roamium</a>
+  (Chromium) and Surfari (WebKit) on macOS. Because the GUI talks to engines
+  only through the protocol, additional engines are an extension rather than a
+  rewrite — see the engine table in
+  <a href="/docs/architecture">Architecture</a>.
 </p>
 
 <p>
