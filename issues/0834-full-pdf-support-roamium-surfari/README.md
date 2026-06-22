@@ -171,7 +171,7 @@ Each feature row should ultimately record:
 - [Experiment 25: Promote Roamium AppKit activation policy](25-promote-roamium-appkit-activation-policy.md)
   — **Partial**
 - [Experiment 26: Retry parent-window print sheet after activation](26-retry-parent-window-print-sheet-after-activation.md)
-  — **Designed**
+  — **Partial**
 
 ## Roamium Phase
 

@@ -169,3 +169,102 @@ Verification, and Pass / Partial / Failure criteria, the experiment follows
 directly from Experiment 25, the current Chromium print path still presents the
 traced sheet with `modalForWindow:nil`, AppKit activation promotion exists in
 the Experiment 25 code, and no implementation had started before design review.
+
+## Result
+
+**Result:** Partial
+
+The print presentation path now retries a real parent-window sheet after the
+Experiment 25 AppKit activation fix. The guarded probe still does not pass, but
+it proves the behavior of the corrected presentation mode:
+
+- `gui_active_sent=true`;
+- `setActivationPolicy` still succeeds before shell activation;
+- before native print, `NSApp.activationPolicy=regular` and `active=true`;
+- the parent window is present, key, main, visible, and matches both
+  `NSApp.keyWindow` and `NSApp.mainWindow`;
+- `mac-ask-user-begin-parent-window-sheet-enter` is recorded;
+- `mac-ask-user-begin-parent-window-sheet-exit` is recorded;
+- no `mac-ask-user-parent-window-sheet-response-*` callback is recorded;
+- the watcher does not observe a native print dialog;
+- print queue state is unchanged;
+- no print job is submitted;
+- Roamium remains alive until harness shutdown.
+
+The first failing hop is now `mac-print-parent-window-sheet-response-missing`,
+which is more precise than the Experiment 25
+`mac-print-app-modal-response-missing` result. Parent-window sheet presentation
+behaves like the nil-window app-modal sheet: it enters and exits the begin call,
+but neither the dialog nor the delegate callback appears before the guarded
+harness times out.
+
+Verification run:
+
+```bash
+git status --short
+git -C chromium/src status --short
+git -C chromium/src rev-parse --abbrev-ref HEAD
+git -C chromium/src rev-parse HEAD
+git diff --check
+
+cd chromium/src
+export PATH="/Users/astrohacker/dev/termsurf/chromium/depot_tools:$PATH"
+autoninja -C out/Default libtermsurf_chromium
+
+cd /Users/astrohacker/dev/termsurf
+rm -rf scripts/__pycache__
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-pdf-native-print.py
+rm -rf scripts/__pycache__
+node --check scripts/probe-pdf-save-print-title-local.mjs
+
+rm -rf logs/issue-834-exp26-parent-window-print-sheet
+python3 scripts/test-issue-834-pdf-native-print.py \
+  --log-dir logs/issue-834-exp26-parent-window-print-sheet \
+  --probe native-dialog \
+  --allow-native-dialog-click
+```
+
+The final probe returned nonzero because the experiment did not reach safe
+native-dialog cancellation. Its summary is at
+`logs/issue-834-exp26-parent-window-print-sheet/pdf-native-print-summary.json`.
+
+The Chromium branch `148.0.7778.97-issue-834-exp26` was committed at
+`c35de398223fb2a70c9cf47fe41d489323a2c54b`, and `chromium/patches/issue-834/`
+was regenerated through `0083-Retry-parent-print-sheet.patch`.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment and initially
+required two fixes:
+
+- The missing-parent fallback still reached `beginSheetWithPrintInfo:` with a
+  nil parent window. The implementation now returns before delegate creation and
+  before sheet presentation when the parent window is missing.
+- The missing-parent early return skipped restoration of the temporary AppKit
+  activation policy. The implementation now restores
+  `previous_activation_policy` with the same restore trace events before
+  reporting cancellation.
+
+The same reviewer rechecked the final patch after those fixes.
+
+Verdict: **Approved**.
+
+The reviewer confirmed that the prior Required findings are resolved, Chromium
+is on `148.0.7778.97-issue-834-exp26` at
+`c35de398223fb2a70c9cf47fe41d489323a2c54b`, patch `0083` starts from that hash,
+the experiment document records the hash, and both `git diff --check` and
+`git -C chromium/src diff --check` pass. The reviewer did not rerun `autoninja`
+or compile checks because the review was read-only.
+
+## Conclusion
+
+Experiment 26 proves that parent-window sheet presentation is not sufficient
+even after AppKit activation policy, app active state, and key/main parent
+window state are correct. The next experiment should investigate why
+`NSPrintPanel` itself is not producing an observable panel or delegate response
+after a successful `beginSheetWithPrintInfo:` call. Likely next probes include
+instrumenting panel/window visibility and ordered-window state after the begin
+call, comparing `NSPrintPanel` against a simple `NSPanel`/`NSAlert` sheet in the
+same parent window, or scheduling presentation onto the next AppKit run-loop
+turn instead of only the CATransaction completion block.

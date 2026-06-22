@@ -999,6 +999,11 @@ def classify(
             or has_native_event("mac-ask-user-app-modal-sheet-response-cancel")
         ):
             state.first_failing_hop = "mac-print-app-modal-response-missing"
+        elif has_native_event("mac-ask-user-begin-parent-window-sheet-enter") and not (
+            has_native_event("mac-ask-user-parent-window-sheet-response-printed")
+            or has_native_event("mac-ask-user-parent-window-sheet-response-cancel")
+        ):
+            state.first_failing_hop = "mac-print-parent-window-sheet-response-missing"
         elif has_native_event("mac-ask-user-begin-sheet-enter") and not (
             has_native_event("mac-ask-user-sheet-response-printed")
             or has_native_event("mac-ask-user-sheet-response-cancel")
@@ -1012,6 +1017,7 @@ def classify(
         elif (
             has_native_event("mac-ask-user-modal-response-ok")
             or has_native_event("mac-ask-user-app-modal-sheet-response-printed")
+            or has_native_event("mac-ask-user-parent-window-sheet-response-printed")
             or has_native_event("mac-ask-user-sheet-response-printed")
             or has_native_event("mac-ask-user-callback-success")
             or has_native_event("ts-scripted-print-callback-result-success")
@@ -1024,12 +1030,17 @@ def classify(
         elif (
             has_native_event("mac-ask-user-modal-response-cancel")
             or has_native_event("mac-ask-user-app-modal-sheet-response-cancel")
+            or has_native_event("mac-ask-user-parent-window-sheet-response-cancel")
             or has_native_event("mac-ask-user-sheet-response-cancel")
             or has_native_event("mac-ask-user-callback-canceled")
             or has_native_event("ts-scripted-print-callback-result-canceled")
         ):
             if has_native_event("mac-ask-user-app-modal-sheet-response-cancel"):
                 state.first_failing_hop = "mac-print-app-modal-response-cancel-no-observed-dialog"
+            elif has_native_event("mac-ask-user-parent-window-sheet-response-cancel"):
+                state.first_failing_hop = (
+                    "mac-print-parent-window-sheet-response-cancel-no-observed-dialog"
+                )
             else:
                 state.first_failing_hop = "mac-print-dialog-cancel-no-observed-dialog"
         else:
