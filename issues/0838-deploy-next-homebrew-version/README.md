@@ -88,11 +88,9 @@ This issue covers the next Homebrew deployment. It may include:
       `webkit/patches/issue-756/`, and record the resulting WebKit state.
 - [x] **Stage 2: WebKit build** — verify Xcode/Metal prerequisites and build
       WebKit with `webkit/src/Tools/Scripts/build-webkit --debug`.
-- [ ] **Stage 3: Surfari local build** — build
+- [x] **Stage 3: Surfari local build** — build
       `surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib`, run its smoke
-      test, and build the `surfari` Rust binary. `libtermsurf_webkit` and the
-      Rust binary build, but the smoke test currently fails because focus is not
-      observed.
+      test, and build the `surfari` Rust binary.
 - [ ] **Stage 4: Surfari packaging integration** — wire Surfari into
       `scripts/build.sh`, `scripts/install.sh`, `scripts/release.sh`,
       `homebrew/Casks/termsurf.rb`, and Ghostboard's installed browser
@@ -116,7 +114,7 @@ This issue covers the next Homebrew deployment. It may include:
 - [Experiment 1: Bootstrap WebKit and Surfari](01-bootstrap-webkit-surfari.md) —
   **Partial** (smoke test fails on focus observation)
 - [Experiment 2: Restore Surfari focus activation](02-restore-surfari-focus-activation.md)
-  — **Designed**
+  — **Pass**
 
 ## Acceptance Criteria
 

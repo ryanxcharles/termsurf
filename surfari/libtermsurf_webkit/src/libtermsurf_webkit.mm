@@ -56,16 +56,12 @@ static bool pdfResponderProbeModeIs(NSString *mode)
 @implementation TSHostWindow
 - (BOOL)canBecomeKeyWindow
 {
-    if (pdfResponderProbeModeIs(@"key-window") || pdfResponderProbeModeIs(@"key-main-window"))
-        return YES;
-    return NO;
+    return YES;
 }
 
 - (BOOL)canBecomeMainWindow
 {
-    if (pdfResponderProbeModeIs(@"main-window") || pdfResponderProbeModeIs(@"key-main-window"))
-        return YES;
-    return NO;
+    return YES;
 }
 @end
 
@@ -952,6 +948,23 @@ static void deliverMouseEvent(WebContents *contents, NSEvent *event, NSString *p
         appendMouseDispatchTrace(contents, event, phase, effectiveMode, hit, target, target != nil);
     }
     restoreMouseEventSwizzles();
+}
+
+static void applyFocusState(WebContents *contents)
+{
+    if (!contents)
+        return;
+
+    if (!contents->focused || !contents->gui_active) {
+        [contents->window makeFirstResponder:nil];
+        [contents->window resignKeyWindow];
+        return;
+    }
+
+    [NSApp activateIgnoringOtherApps:YES];
+    [contents->window makeKeyAndOrderFront:nil];
+    [contents->window makeMainWindow];
+    [contents->window makeFirstResponder:contents->web_view];
 }
 
 static void withCString(NSString *value, void (^block)(const char *))
@@ -2126,10 +2139,7 @@ void ts_set_focus(ts_web_contents_t wc, bool focused)
 
     contents->focused = focused;
     traceCopyState(contents, focused ? @"focus-true" : @"focus-false");
-    if (!focused) {
-        [contents->window makeFirstResponder:nil];
-        [contents->window resignKeyWindow];
-    }
+    applyFocusState(contents);
 }
 
 void ts_set_gui_active(ts_web_contents_t wc, bool active, const char *reason)
@@ -2140,10 +2150,7 @@ void ts_set_gui_active(ts_web_contents_t wc, bool active, const char *reason)
         return;
 
     contents->gui_active = active;
-    if (!active) {
-        [contents->window makeFirstResponder:nil];
-        [contents->window resignKeyWindow];
-    }
+    applyFocusState(contents);
 }
 
 void ts_set_color_scheme(ts_web_contents_t wc, bool dark)

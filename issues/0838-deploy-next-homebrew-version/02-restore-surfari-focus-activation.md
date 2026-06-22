@@ -119,3 +119,106 @@ Resolution:
 - Accepted the AppKit-sequence note for result recording. The implementation
   will keep the experiment narrow and the result will document the exact calls
   used.
+
+## Result
+
+**Result:** Pass
+
+The implementation restored page-visible WebKit focus without weakening the
+smoke test.
+
+Changed `surfari/libtermsurf_webkit/src/libtermsurf_webkit.mm`:
+
+- `TSHostWindow` now returns `YES` from `canBecomeKeyWindow` and
+  `canBecomeMainWindow`.
+- Added `applyFocusState(WebContents *)` so focus and GUI-active state share the
+  same AppKit behavior.
+- On active focus, Surfari now calls:
+  - `[NSApp activateIgnoringOtherApps:YES]`;
+  - `[contents->window makeKeyAndOrderFront:nil]`;
+  - `[contents->window makeMainWindow]`;
+  - `[contents->window makeFirstResponder:contents->web_view]`.
+- On inactive or unfocused state, Surfari preserves the existing behavior:
+  - `[contents->window makeFirstResponder:nil]`;
+  - `[contents->window resignKeyWindow]`.
+
+`surfari/libtermsurf_webkit/build.sh` completed and produced the expected
+artifacts. It still emitted the pre-existing SDK-version linker warning:
+
+```text
+ld: warning: building for macOS-26.0, but linking with dylib
+'/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit' which was built
+for newer version 26.5
+built surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib
+built surfari/libtermsurf_webkit/build/smoke-test
+```
+
+The unchanged smoke test passed:
+
+```text
+CALLBACK focus_state {"focus":true,"focusIn":false,"hasFocus":true,"activeElement":""}
+CALLBACK input_state {"focus":true,"focusIn":false,"blur":true,"move":"120,130","click":"140,150,0","scroll":-120,"key":"a","colorScheme":"dark"}
+SMOKE_PASS initialized=1 tab_ready=1 ca_context=5 url=6 loading_started=4 loading_finished=4 title=3 navigations=4 resized=1 focus=1 input=1 target_url=1 cursor=1 console=1 js_dialogs=1 http_auth=1 renderer_crash=1
+```
+
+The smoke test also completed cursor, target URL, console, JavaScript dialog,
+HTTP auth, and renderer-crash checks. It printed one non-fatal WebKit navigation
+log while canceling the expected auth-reject navigation:
+
+```text
+[libtermsurf_webkit] provisional navigation failed: Error Domain=NSURLErrorDomain Code=-999 "cancelled"
+```
+
+`cargo build -p surfari` succeeded:
+
+```text
+Compiling surfari v0.1.0 (/Users/astrohacker/dev/termsurf/surfari)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.56s
+```
+
+`git diff --check` reported no whitespace errors.
+
+`xcrun clang-format --dry-run --Werror surfari/libtermsurf_webkit/src/libtermsurf_webkit.mm`
+was attempted and failed because the existing Objective-C++ file is not
+clang-format-clean as a whole and the repo does not currently carry a
+`.clang-format` baseline for this file. This is not evidence of a new formatting
+regression in the focused patch; the result therefore relies on the successful
+build, strict smoke test, Rust build, and `git diff --check`.
+
+## Conclusion
+
+Stage 3 is complete. This machine now builds WebKit, builds
+`libtermsurf_webkit`, passes the strict Surfari C ABI smoke test, and builds the
+Rust `surfari` binary.
+
+The next experiment should move to Stage 4: wire Surfari into the build,
+install, release, Homebrew cask, and installed Ghostboard browser-resolution
+paths. The production integration should pay attention to the fact that WebKit
+page-visible focus currently requires activating the Surfari process; installed
+app testing should verify that this does not steal usable keyboard focus from
+Ghostboard when `web --browser surfari` is running.
+
+## Completion Review
+
+Adversarial subagent review, fresh context, completed after implementation and
+result recording.
+
+Verdict: **Approved**.
+
+Findings:
+
+- No required fixes.
+
+Independent checks:
+
+- `surfari/libtermsurf_webkit/build.sh` passed.
+- The unchanged smoke test passed with `focus_state` showing `focus` and
+  `hasFocus` true, and printed `SMOKE_PASS`.
+- `cargo build -p surfari` passed.
+- `git diff --check` passed.
+- `xcrun clang-format --dry-run --Werror` failed across the whole pre-existing
+  Objective-C++ file, matching the recorded formatting-baseline limitation.
+
+Resolution:
+
+- No changes required.
