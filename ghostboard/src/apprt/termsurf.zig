@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_config = @import("../build_config.zig");
 const internal_os = @import("../os/main.zig");
 
 const c = @cImport({
+    @cInclude("stdlib.h");
     @cInclude("sys/socket.h");
     @cInclude("unistd.h");
     @cInclude("termsurf.pb-c.h");
@@ -33,16 +35,17 @@ const geometry_trace_env = "TERMSURF_GEOMETRY_TRACE";
 const devtools_reservation_timeout_env = "TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS";
 const default_devtools_reservation_timeout_ms: i64 = 15_000;
 const roamium_path_env = "TERMSURF_ROAMIUM_PATH";
+const surfari_path_env = "TERMSURF_SURFARI_PATH";
 const installed_roamium_path_env = "TERMSURF_INSTALLED_ROAMIUM_PATH";
 const installed_roamium_path = "/opt/homebrew/opt/termsurf-roamium/roamium";
 
-extern "c" fn termsurf_open_split(
+const termsurf_open_split = if (builtin.is_test) testTermsurfOpenSplit else @extern(*const fn (
     pane_id: [*:0]const u8,
     direction: [*:0]const u8,
     command: [*:0]const u8,
-) void;
+) callconv(.c) void, .{ .name = "termsurf_open_split" });
 
-extern "c" fn termsurf_present_overlay(
+const termsurf_present_overlay = if (builtin.is_test) testTermsurfPresentOverlay else @extern(*const fn (
     pane_id: [*:0]const u8,
     context_id: u64,
     col: u64,
@@ -51,10 +54,55 @@ extern "c" fn termsurf_present_overlay(
     height: u64,
     pixel_width: u64,
     pixel_height: u64,
-) void;
+) callconv(.c) void, .{ .name = "termsurf_present_overlay" });
 
-extern "c" fn termsurf_clear_overlay(pane_id: [*:0]const u8) void;
-extern "c" fn termsurf_set_cursor(pane_id: [*:0]const u8, cursor_type: i64) void;
+const termsurf_clear_overlay = if (builtin.is_test) testTermsurfClearOverlay else @extern(*const fn (
+    pane_id: [*:0]const u8,
+) callconv(.c) void, .{ .name = "termsurf_clear_overlay" });
+
+const termsurf_set_cursor = if (builtin.is_test) testTermsurfSetCursor else @extern(*const fn (
+    pane_id: [*:0]const u8,
+    cursor_type: i64,
+) callconv(.c) void, .{ .name = "termsurf_set_cursor" });
+
+fn testTermsurfOpenSplit(
+    pane_id: [*:0]const u8,
+    direction: [*:0]const u8,
+    command: [*:0]const u8,
+) callconv(.c) void {
+    _ = pane_id;
+    _ = direction;
+    _ = command;
+}
+
+fn testTermsurfPresentOverlay(
+    pane_id: [*:0]const u8,
+    context_id: u64,
+    col: u64,
+    row: u64,
+    width: u64,
+    height: u64,
+    pixel_width: u64,
+    pixel_height: u64,
+) callconv(.c) void {
+    _ = pane_id;
+    _ = context_id;
+    _ = col;
+    _ = row;
+    _ = width;
+    _ = height;
+    _ = pixel_width;
+    _ = pixel_height;
+}
+
+fn testTermsurfClearOverlay(pane_id: [*:0]const u8) callconv(.c) void {
+    _ = pane_id;
+}
+
+fn testTermsurfSetCursor(pane_id: [*:0]const u8, cursor_type: i64) callconv(.c) void {
+    _ = pane_id;
+    _ = cursor_type;
+}
 
 const ConnType = enum {
     unknown,
@@ -1254,12 +1302,13 @@ fn countQueryTabsGuiPanes(req: ?*c.Termsurf__QueryTabsRequest) i64 {
 
 fn handleServerRegister(fd: std.posix.fd_t, req: ?*c.Termsurf__ServerRegister) void {
     const profile = serverRegisterProfile(req);
-    log.info("ServerRegister: profile={s}", .{profile});
+    const browser = serverRegisterBrowser(req);
+    log.info("ServerRegister: profile={s} browser={s}", .{ profile, browser });
 
     state_mutex.lock();
     defer state_mutex.unlock();
 
-    if (findAttachableServerByProfile(profile)) |index| {
+    if (findAttachableServer(profile, browser)) |index| {
         servers[index].attached_fd = fd;
         log.info(
             "ServerRegister: matched server key={s}/{s}",
@@ -1271,12 +1320,19 @@ fn handleServerRegister(fd: std.posix.fd_t, req: ?*c.Termsurf__ServerRegister) v
         return;
     }
 
-    log.warn("ServerRegister: no matching server for profile={s}", .{profile});
+    log.warn("ServerRegister: no matching server for profile={s} browser={s}", .{ profile, browser });
 }
 
 fn serverRegisterProfile(req: ?*c.Termsurf__ServerRegister) []const u8 {
     if (req) |server| {
         if (server.*.profile) |profile| return std.mem.span(profile);
+    }
+    return "";
+}
+
+fn serverRegisterBrowser(req: ?*c.Termsurf__ServerRegister) []const u8 {
+    if (req) |server| {
+        if (server.*.browser) |browser| return std.mem.span(browser);
     }
     return "";
 }
@@ -1301,8 +1357,10 @@ fn handleSetOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetOverlay) void 
     var should_spawn = false;
     var spawn_profile_buf: [max_profile_len]u8 = undefined;
     var spawn_profile_len: usize = 0;
-    var spawn_browser_buf: [max_browser_len]u8 = undefined;
-    var spawn_browser_len: usize = 0;
+    var spawn_browser_name_buf: [max_browser_len]u8 = undefined;
+    var spawn_browser_name_len: usize = 0;
+    var spawn_browser_executable_buf: [max_browser_len]u8 = undefined;
+    var spawn_browser_executable_len: usize = 0;
     var spawn_listen_socket_buf: [max_listen_socket_len]u8 = undefined;
     var spawn_listen_socket_len: usize = 0;
     var should_record_child: bool = false;
@@ -1377,7 +1435,8 @@ fn handleSetOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetOverlay) void 
         }
         if (buildListenSocket(&servers[server_index])) {
             if (!copyText(&spawn_profile_buf, &spawn_profile_len, servers[server_index].profileName()) or
-                !copyText(&spawn_browser_buf, &spawn_browser_len, browser_executable) or
+                !copyText(&spawn_browser_name_buf, &spawn_browser_name_len, servers[server_index].browserName()) or
+                !copyText(&spawn_browser_executable_buf, &spawn_browser_executable_len, browser_executable) or
                 !copyText(&spawn_listen_socket_buf, &spawn_listen_socket_len, servers[server_index].listenSocket()))
             {
                 log.warn("SetOverlay: spawn arguments too long profile={s} browser={s}", .{ profile, browser });
@@ -1404,9 +1463,10 @@ fn handleSetOverlay(tui_fd: std.posix.fd_t, req: ?*c.Termsurf__SetOverlay) void 
 
     if (should_spawn) {
         const profile_z = spawn_profile_buf[0..spawn_profile_len :0];
-        const browser_z = spawn_browser_buf[0..spawn_browser_len :0];
+        const browser_name_z = spawn_browser_name_buf[0..spawn_browser_name_len :0];
+        const browser_executable_z = spawn_browser_executable_buf[0..spawn_browser_executable_len :0];
         const listen_socket_z = spawn_listen_socket_buf[0..spawn_listen_socket_len :0];
-        if (spawnBrowserProcess(profile_z, browser_z, listen_socket_z)) |pid| {
+        if (spawnBrowserProcess(profile_z, browser_name_z, browser_executable_z, listen_socket_z)) |pid| {
             if (should_record_child) recordServerChild(profile_z, browser, pid);
         }
     }
@@ -1459,6 +1519,29 @@ fn resolveBrowserExecutable(browser: []const u8) ?[]const u8 {
             .{ browser, installed_roamium_path },
         );
         return installed_roamium_path;
+    }
+
+    if (std.mem.eql(u8, browser, "surfari")) {
+        if (std.posix.getenv(surfari_path_env)) |resolved| {
+            if (resolved.len != 0 and isAbsolutePath(resolved)) {
+                log.info(
+                    "SetOverlay: named browser resolved browser={s} env={s} path={s}",
+                    .{ browser, surfari_path_env, resolved },
+                );
+                return resolved;
+            }
+            log.warn(
+                "SetOverlay: named browser unresolved browser={s} env={s} value={s}",
+                .{ browser, surfari_path_env, resolved },
+            );
+            return null;
+        }
+
+        log.warn(
+            "SetOverlay: named browser unresolved browser={s} env={s}",
+            .{ browser, surfari_path_env },
+        );
+        return null;
     }
 
     log.warn("SetOverlay: named browser unsupported browser={s}", .{browser});
@@ -2841,7 +2924,12 @@ fn removeTabLookupForPane(profile: []const u8, browser: []const u8, tab_id: i64,
     }
 }
 
-fn spawnBrowserProcess(profile_z: [:0]const u8, browser_z: [:0]const u8, listen_socket_z: [:0]const u8) ?std.process.Child.Id {
+fn spawnBrowserProcess(
+    profile_z: [:0]const u8,
+    browser_name_z: [:0]const u8,
+    browser_executable_z: [:0]const u8,
+    listen_socket_z: [:0]const u8,
+) ?std.process.Child.Id {
     const gui_socket = socket_path_buf[0..socket_path_len];
     if (gui_socket.len == 0) {
         log.warn("browser spawn skipped: GUI socket path is empty", .{});
@@ -2860,8 +2948,14 @@ fn spawnBrowserProcess(profile_z: [:0]const u8, browser_z: [:0]const u8, listen_
         return null;
     };
 
+    var browser_name_arg_buf: [max_browser_len + 32]u8 = undefined;
+    const browser_name_arg = std.fmt.bufPrintZ(&browser_name_arg_buf, "--browser-name={s}", .{browser_name_z}) catch {
+        log.warn("browser spawn skipped: browser-name arg too long", .{});
+        return null;
+    };
+
     var user_data_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const user_data_dir = buildUserDataDir(&user_data_dir_buf, profile_z) orelse return null;
+    const user_data_dir = buildUserDataDir(&user_data_dir_buf, browser_name_z, profile_z) orelse return null;
     var data_arg_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
     const data_arg = std.fmt.bufPrintZ(&data_arg_buf, "--user-data-dir={s}", .{user_data_dir}) catch {
         log.warn("browser spawn skipped: user-data-dir arg too long", .{});
@@ -2877,8 +2971,9 @@ fn spawnBrowserProcess(profile_z: [:0]const u8, browser_z: [:0]const u8, listen_
     };
 
     const argv = [_][]const u8{
-        browser_z,
+        browser_executable_z,
         ipc_arg,
+        browser_name_arg,
         data_arg,
         listen_arg,
         "--hidden",
@@ -2892,27 +2987,34 @@ fn spawnBrowserProcess(profile_z: [:0]const u8, browser_z: [:0]const u8, listen_
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
     child.spawn() catch |err| {
-        log.warn("browser spawn failed path={s} profile={s} err={}", .{ browser_z, profile_z, err });
+        log.warn("browser spawn failed path={s} profile={s} browser={s} err={}", .{ browser_executable_z, profile_z, browser_name_z, err });
         return null;
     };
 
     log.info(
-        "spawned browser path={s} pid={} profile={s} argv={s} {s} {s} {s} --hidden --no-sandbox --enable-logging {s}",
-        .{ browser_z, child.id, profile_z, browser_z, ipc_arg, data_arg, listen_arg, log_arg },
+        "spawned browser path={s} pid={} profile={s} browser={s} argv={s} {s} {s} {s} {s} --hidden --no-sandbox --enable-logging {s}",
+        .{ browser_executable_z, child.id, profile_z, browser_name_z, browser_executable_z, ipc_arg, browser_name_arg, data_arg, listen_arg, log_arg },
     );
     return child.id;
 }
 
-fn buildUserDataDir(buf: []u8, profile: []const u8) ?[:0]u8 {
+fn buildUserDataDir(buf: []u8, browser: []const u8, profile: []const u8) ?[:0]u8 {
     const home = std.posix.getenv("HOME") orelse {
         log.warn("browser spawn skipped: HOME is not set", .{});
         return null;
     };
     const data_home = std.posix.getenv("XDG_DATA_HOME");
+    const profile_dir = browserProfileDirName(browser);
     return if (data_home) |base|
-        std.fmt.bufPrintZ(buf, "{s}/termsurf/chromium-profiles/{s}", .{ base, profile }) catch null
+        std.fmt.bufPrintZ(buf, "{s}/termsurf/{s}/{s}", .{ base, profile_dir, profile }) catch null
     else
-        std.fmt.bufPrintZ(buf, "{s}/.local/share/termsurf/chromium-profiles/{s}", .{ home, profile }) catch null;
+        std.fmt.bufPrintZ(buf, "{s}/.local/share/termsurf/{s}/{s}", .{ home, profile_dir, profile }) catch null;
+}
+
+fn browserProfileDirName(browser: []const u8) []const u8 {
+    if (std.mem.eql(u8, browser, "surfari")) return "webkit-profiles";
+    if (std.mem.eql(u8, browser, default_browser)) return "chromium-profiles";
+    return "browser-profiles";
 }
 
 fn buildBrowserLogFile(buf: []u8) ?[:0]u8 {
@@ -3025,11 +3127,12 @@ fn findServerByFd(fd: std.posix.fd_t) ?usize {
     return null;
 }
 
-fn findAttachableServerByProfile(profile: []const u8) ?usize {
+fn findAttachableServer(profile: []const u8, browser: []const u8) ?usize {
     for (&servers, 0..) |*server, i| {
         if (server.in_use and
             server.attached_fd < 0 and
-            std.mem.eql(u8, server.profileName(), profile))
+            std.mem.eql(u8, server.profileName(), profile) and
+            std.mem.eql(u8, server.browserName(), browser))
         {
             return i;
         }
@@ -3171,4 +3274,221 @@ fn socketPath(tmpdir: []const u8, sep: []const u8) ![:0]u8 {
     ) catch return error.SocketPathTooLong;
     socket_path_len = path_z.len;
     return path_z;
+}
+
+test "termsurf server register matches profile and browser" {
+    const testing = std.testing;
+
+    resetTermsurfStateForTest();
+    defer resetTermsurfStateForTest();
+
+    const profile: [:0]const u8 = "default";
+    const surfari: [:0]const u8 = "surfari";
+    const roamium: [:0]const u8 = "roamium";
+
+    try testWithRestoredEnv(surfari_path_env, testSurfariResolution);
+
+    var surfari_data_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const surfari_data_dir = buildUserDataDir(&surfari_data_dir_buf, surfari, profile) orelse return error.UserDataDirFailed;
+    try testing.expect(std.mem.indexOf(u8, surfari_data_dir, "webkit-profiles") != null);
+    try testing.expect(std.mem.indexOf(u8, surfari_data_dir, "chromium-profiles") == null);
+
+    var roamium_data_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const roamium_data_dir = buildUserDataDir(&roamium_data_dir_buf, roamium, profile) orelse return error.UserDataDirFailed;
+    try testing.expect(std.mem.indexOf(u8, roamium_data_dir, "chromium-profiles") != null);
+
+    var surfari_browser = try testSocketPair();
+    defer testCloseSocketPair(&surfari_browser);
+    var roamium_browser = try testSocketPair();
+    defer testCloseSocketPair(&roamium_browser);
+    var surfari_tui = try testSocketPair();
+    defer testCloseSocketPair(&surfari_tui);
+    var roamium_tui = try testSocketPair();
+    defer testCloseSocketPair(&roamium_tui);
+
+    try testSetPendingServer(0, profile, surfari);
+    try testSetPendingServer(1, profile, roamium);
+    try testSetPane(0, "pane-surfari", profile, surfari, "https://example.test/surfari", surfari_tui[0]);
+    try testSetPane(1, "pane-roamium", profile, roamium, "https://example.test/roamium", roamium_tui[0]);
+
+    var roamium_register: c.Termsurf__ServerRegister = undefined;
+    c.termsurf__server_register__init(&roamium_register);
+    roamium_register.profile = @constCast(profile.ptr);
+    roamium_register.browser = @constCast(roamium.ptr);
+    handleServerRegister(roamium_browser[0], &roamium_register);
+
+    try testing.expectEqual(@as(std.posix.fd_t, -1), servers[0].attached_fd);
+    try testing.expectEqual(roamium_browser[0], servers[1].attached_fd);
+
+    const roamium_create = try readTestMessage(roamium_browser[1], testing.allocator);
+    defer c.termsurf__term_surf_message__free_unpacked(roamium_create, null);
+    try testing.expectEqual(
+        @as(c.Termsurf__TermSurfMessage__MsgCase, c.TERMSURF__TERM_SURF_MESSAGE__MSG_CREATE_TAB),
+        roamium_create.*.msg_case,
+    );
+    try testing.expectEqualStrings("pane-roamium", cString(roamium_create.*.unnamed_0.create_tab.*.pane_id));
+
+    var surfari_register: c.Termsurf__ServerRegister = undefined;
+    c.termsurf__server_register__init(&surfari_register);
+    surfari_register.profile = @constCast(profile.ptr);
+    surfari_register.browser = @constCast(surfari.ptr);
+    handleServerRegister(surfari_browser[0], &surfari_register);
+
+    try testing.expectEqual(surfari_browser[0], servers[0].attached_fd);
+    try testing.expectEqual(roamium_browser[0], servers[1].attached_fd);
+
+    const surfari_create = try readTestMessage(surfari_browser[1], testing.allocator);
+    defer c.termsurf__term_surf_message__free_unpacked(surfari_create, null);
+    try testing.expectEqual(
+        @as(c.Termsurf__TermSurfMessage__MsgCase, c.TERMSURF__TERM_SURF_MESSAGE__MSG_CREATE_TAB),
+        surfari_create.*.msg_case,
+    );
+    try testing.expectEqualStrings("pane-surfari", cString(surfari_create.*.unnamed_0.create_tab.*.pane_id));
+
+    var surfari_ready: c.Termsurf__TabReady = undefined;
+    c.termsurf__tab_ready__init(&surfari_ready);
+    surfari_ready.tab_id = 42;
+    surfari_ready.pane_id = @constCast("pane-surfari");
+    handleTabReady(&surfari_ready);
+
+    const ready = try readTestMessage(surfari_tui[1], testing.allocator);
+    defer c.termsurf__term_surf_message__free_unpacked(ready, null);
+    try testing.expectEqual(
+        @as(c.Termsurf__TermSurfMessage__MsgCase, c.TERMSURF__TERM_SURF_MESSAGE__MSG_BROWSER_READY),
+        ready.*.msg_case,
+    );
+    try testing.expectEqualStrings("surfari", cString(ready.*.unnamed_0.browser_ready.*.browser));
+    try testing.expectEqualStrings(servers[0].listenSocket(), cString(ready.*.unnamed_0.browser_ready.*.browser_socket));
+
+    var surfari_context: c.Termsurf__CaContext = undefined;
+    c.termsurf__ca_context__init(&surfari_context);
+    surfari_context.tab_id = 42;
+    surfari_context.ca_context_id = 1234;
+    surfari_context.pixel_width = 800;
+    surfari_context.pixel_height = 600;
+    handleCaContext(surfari_browser[0], &surfari_context);
+
+    try testing.expectEqual(@as(u64, 1234), panes[0].ca_context_id);
+    try testing.expectEqual(@as(u64, 0), panes[1].ca_context_id);
+}
+
+fn testSurfariResolution() !void {
+    const testing = std.testing;
+    const surfari: [:0]const u8 = "surfari";
+    const fake_path: [:0]const u8 = "/tmp/termsurf-test-surfari";
+
+    _ = c.unsetenv(surfari_path_env);
+    try testing.expect(resolveBrowserExecutable(surfari) == null);
+    try testing.expect(resolveBrowserExecutable("unknown-browser") == null);
+    try testing.expectEqualStrings("/tmp/absolute-browser", resolveBrowserExecutable("/tmp/absolute-browser").?);
+
+    if (c.setenv(surfari_path_env, fake_path, 1) != 0) return error.SetenvFailed;
+    try testing.expectEqualStrings(fake_path, resolveBrowserExecutable(surfari).?);
+}
+
+fn testWithRestoredEnv(name: [:0]const u8, callback: *const fn () anyerror!void) !void {
+    var previous_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var previous_len: usize = 0;
+    const had_previous = if (std.posix.getenv(name)) |value|
+        copyText(&previous_buf, &previous_len, value)
+    else
+        false;
+
+    defer {
+        if (had_previous) {
+            const previous_z = previous_buf[0..previous_len :0];
+            _ = c.setenv(name, previous_z, 1);
+        } else {
+            _ = c.unsetenv(name);
+        }
+    }
+
+    try callback();
+}
+
+fn resetTermsurfStateForTest() void {
+    clients = [_]ClientSlot{.{}} ** max_clients;
+    panes = [_]PaneState{.{}} ** max_panes;
+    closed_panes = [_]ClosedPaneState{.{}} ** max_closed_panes;
+    servers = [_]ServerState{.{}} ** max_servers;
+    tab_lookups = [_]TabLookupState{.{}} ** max_tab_lookups;
+    devtools_reservations = [_]DevtoolsReservationState{.{}} ** max_devtools_reservations;
+    last_browser_pane_len = 0;
+    hello_homepage_len = 0;
+    hello_browser_count = 0;
+    gui_active = false;
+    pending_gui_activation = false;
+}
+
+fn testSocketPair() ![2]std.posix.fd_t {
+    var fds: [2]c_int = undefined;
+    if (c.socketpair(c.AF_UNIX, c.SOCK_STREAM, 0, &fds) != 0) return error.SocketPairFailed;
+    return .{ fds[0], fds[1] };
+}
+
+fn testCloseSocketPair(fds: *[2]std.posix.fd_t) void {
+    if (fds[0] >= 0) {
+        std.posix.close(fds[0]);
+        fds[0] = -1;
+    }
+    if (fds[1] >= 0) {
+        std.posix.close(fds[1]);
+        fds[1] = -1;
+    }
+}
+
+fn testSetPendingServer(index: usize, profile: []const u8, browser: []const u8) !void {
+    servers[index] = .{};
+    try testingCopyText(&servers[index].profile, &servers[index].profile_len, profile);
+    try testingCopyText(&servers[index].browser, &servers[index].browser_len, browser);
+    servers[index].in_use = true;
+    servers[index].pane_count = 1;
+    servers[index].attached_fd = -1;
+    if (!buildListenSocket(&servers[index])) return error.ListenSocketTooLong;
+}
+
+fn testSetPane(
+    index: usize,
+    pane_id: []const u8,
+    profile: []const u8,
+    browser: []const u8,
+    url: []const u8,
+    tui_fd: std.posix.fd_t,
+) !void {
+    panes[index] = .{};
+    try testingCopyText(&panes[index].pane_id, &panes[index].pane_id_len, pane_id);
+    try testingCopyText(&panes[index].profile, &panes[index].profile_len, profile);
+    try testingCopyText(&panes[index].browser, &panes[index].browser_len, browser);
+    try testingCopyText(&panes[index].url, &panes[index].url_len, url);
+    panes[index].in_use = true;
+    panes[index].width = 80;
+    panes[index].height = 24;
+    panes[index].browsing = true;
+    panes[index].tui_fd = tui_fd;
+}
+
+fn testingCopyText(buf: []u8, len: *usize, value: []const u8) !void {
+    if (!copyText(buf, len, value)) return error.TestValueTooLong;
+}
+
+fn readTestMessage(fd: std.posix.fd_t, allocator: std.mem.Allocator) !*c.Termsurf__TermSurfMessage {
+    var len_buf: [4]u8 = undefined;
+    try readExactTest(fd, &len_buf);
+    const len = std.mem.readInt(u32, &len_buf, .little);
+    if (len > max_frame_size) return error.FrameTooLarge;
+
+    const payload = try allocator.alloc(u8, len);
+    defer allocator.free(payload);
+    try readExactTest(fd, payload);
+
+    return c.termsurf__term_surf_message__unpack(null, len, payload.ptr) orelse error.ProtobufUnpackFailed;
+}
+
+fn readExactTest(fd: std.posix.fd_t, buf: []u8) !void {
+    var offset: usize = 0;
+    while (offset < buf.len) {
+        const n = try std.posix.read(fd, buf[offset..]);
+        if (n == 0) return error.EndOfStream;
+        offset += n;
+    }
 }

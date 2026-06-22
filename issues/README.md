@@ -2,12 +2,11 @@
 
 ## Open
 
-| #                                                 | Title                                | Opened     |
-| ------------------------------------------------- | ------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)                    | Surfari — WebKit engine for TermSurf | 2026-03-16 |
-| [0795](0795-pdf-native-print/README.md)           | PDF Native Print                     | 2026-05-30 |
-| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage           | 2026-05-30 |
-| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features                | 2026-05-30 |
+| #                                                 | Title                      | Opened     |
+| ------------------------------------------------- | -------------------------- | ---------- |
+| [0795](0795-pdf-native-print/README.md)           | PDF Native Print           | 2026-05-30 |
+| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage | 2026-05-30 |
+| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features      | 2026-05-30 |
 
 ## Closed
 
@@ -87,6 +86,7 @@
 | [0759](0759-link-hover-url/README.md)                           | Show link URL on hover                                                        | 2026-03-17 | 2026-03-17 |
 | [0758](0758-tui-message-routing/README.md)                      | TUI processes messages for all tabs, not just its own                         | 2026-03-16 | 2026-03-16 |
 | [0757](0757-overlay-fade/README.md)                             | Disable overlay fade animation on tab switch                                  | 2026-03-16 | 2026-03-16 |
+| [0756](0756-surfari/README.md)                                  | Surfari — WebKit engine for TermSurf                                          | 2026-03-16 | 2026-06-21 |
 | [0755](0755-scroll-neovim/README.md)                            | Scroll broken in neovim when webviews are open                                | 2026-03-16 | 2026-03-16 |
 | [0754](0754-screenshots/README.md)                              | Screenshot pipeline and homepage hero                                         | 2026-03-15 | 2026-03-15 |
 | [0753](0753-blog-failures/README.md)                            | Blog post — everything that didn't work                                       | 2026-03-15 | 2026-03-15 |
