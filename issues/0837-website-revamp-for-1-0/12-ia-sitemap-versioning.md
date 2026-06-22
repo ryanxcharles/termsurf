@@ -53,7 +53,7 @@ page + its URL + source + phase) is recorded as the durable spec.
 
 ## Changes
 
-1. **`issues/0834-website-revamp-for-1-0/12-ia-sitemap-versioning.md`** (this
+1. **`issues/0837-website-revamp-for-1-0/12-ia-sitemap-versioning.md`** (this
    file) — the authoritative IA/sitemap spec + versioning decision (the
    deliverable).
 2. **Regroup `Reference` → `Configuration` (the coherent path, per review).**

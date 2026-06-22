@@ -90,8 +90,16 @@ browser/zig-out/
 
 # Chromium build workspace (src/, depot_tools, gclient state all ignored)
 /chromium/*
+!/chromium/AGENTS.md
 !/chromium/patches/
 !/chromium/README.md
+
+# WebKit build workspace (src/ and build products ignored)
+/webkit/*
+!/webkit/AGENTS.md
+!/webkit/README.md
+!/webkit/patches/
+!/webkit/patches/**
 
 # TermSurf 4.0 (ts4/) build outputs
 ts4/termsurf-window/.build/

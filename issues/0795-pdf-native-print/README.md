@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-30"
+closed = "2026-06-22"
 +++
 
 # Issue 795: PDF Native Print
@@ -46,3 +47,11 @@ the toolbar. The toolbar and PDF plugin entry path are already proven.
   it to `chromium/README.md`.
 - Every experiment design and every completed experiment result must be reviewed
   by Codex. Fix real issues from the review before proceeding.
+
+## Conclusion
+
+This issue is superseded by
+[Issue 834: Full PDF Support Across Roamium and Surfari](../0834-full-pdf-support-roamium-surfari/README.md).
+
+Native PDF printing remains required, but it should now be solved as part of the
+unified cross-engine PDF matrix rather than as a standalone Roamium-only issue.

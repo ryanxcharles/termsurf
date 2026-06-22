@@ -2,19 +2,17 @@
 
 ## Open
 
-| #                                                  | Title                                | Opened     |
-| -------------------------------------------------- | ------------------------------------ | ---------- |
-| [0756](0756-surfari/README.md)                     | Surfari — WebKit engine for TermSurf | 2026-03-16 |
-| [0795](0795-pdf-native-print/README.md)            | PDF Native Print                     | 2026-05-30 |
-| [0797](0797-pdf-core-workflow-coverage/README.md)  | PDF Core Workflow Coverage           | 2026-05-30 |
-| [0798](0798-pdf-advanced-features/README.md)       | PDF Advanced Features                | 2026-05-30 |
-| [0836](0836-webtui-top-browser-controls/README.md) | WebTUI Top Browser Controls          | 2026-06-22 |
+| #                                                       | Title                                       | Opened     |
+| ------------------------------------------------------- | ------------------------------------------- | ---------- |
+| [0834](0834-full-pdf-support-roamium-surfari/README.md) | Full PDF Support Across Roamium and Surfari | 2026-06-22 |
+| [0836](0836-webtui-top-browser-controls/README.md)      | WebTUI Top Browser Controls                 | 2026-06-22 |
 
 ## Closed
 
 | #                                                               | Title                                                                         | Opened     | Closed     |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
-| [0834](0834-website-revamp-for-1-0/README.md)                   | Complete Website Revamp for 1.0                                               | 2026-06-20 | 2026-06-20 |
+| [0837](0837-website-revamp-for-1-0/README.md)                   | Complete Website Revamp for 1.0                                               | 2026-06-20 | 2026-06-20 |
+| [0835](0835-engine-workspace-agent-docs/README.md)              | Engine Workspace Agent Docs                                                   | 2026-06-22 | 2026-06-22 |
 | [0833](0833-update-website-and-docs-for-1-0-0/README.md)        | Update Website and Docs for 1.0.0                                             | 2026-06-20 | 2026-06-20 |
 | [0832](0832-publish-1-0-0-to-homebrew/README.md)                | Publish 1.0.0 to Homebrew                                                     | 2026-06-19 | 2026-06-19 |
 | [0831](0831-ghostboard-webview-padding-alignment/README.md)     | Ghostboard Webview Padding Alignment                                          | 2026-06-19 | 2026-06-19 |
@@ -50,7 +48,10 @@
 | [0801](0801-roastty-libghostty-rewrite/README.md)               | Reimplement libghostty as libroastty                                          | 2026-05-31 | 2026-06-08 |
 | [0800](0800-roastty-architecture/README.md)                     | Roastty Architecture and ABI Skeleton                                         | 2026-05-31 | 2026-05-31 |
 | [0799](0799-browser-api-automation-triage/README.md)            | Browser API Automation Triage                                                 | 2026-05-30 | 2026-05-31 |
+| [0798](0798-pdf-advanced-features/README.md)                    | PDF Advanced Features                                                         | 2026-05-30 | 2026-06-22 |
+| [0797](0797-pdf-core-workflow-coverage/README.md)               | PDF Core Workflow Coverage                                                    | 2026-05-30 | 2026-06-22 |
 | [0796](0796-pdf-implementation-audit/README.md)                 | PDF Implementation Audit                                                      | 2026-05-30 | 2026-05-30 |
+| [0795](0795-pdf-native-print/README.md)                         | PDF Native Print                                                              | 2026-05-30 | 2026-06-22 |
 | [0794](0794-pdf-viewer-interactions/README.md)                  | Complete PDF Viewer Interactions                                              | 2026-05-29 | 2026-05-30 |
 | [0793](0793-pdf-iframe-size/README.md)                          | PDF viewer iframe renders at default size                                     | 2026-05-29 | 2026-05-29 |
 | [0792](0792-pdf-support/README.md)                              | Inline PDF support via a separable extensions browser system                  | 2026-05-29 | 2026-05-29 |
@@ -89,6 +90,7 @@
 | [0759](0759-link-hover-url/README.md)                           | Show link URL on hover                                                        | 2026-03-17 | 2026-03-17 |
 | [0758](0758-tui-message-routing/README.md)                      | TUI processes messages for all tabs, not just its own                         | 2026-03-16 | 2026-03-16 |
 | [0757](0757-overlay-fade/README.md)                             | Disable overlay fade animation on tab switch                                  | 2026-03-16 | 2026-03-16 |
+| [0756](0756-surfari/README.md)                                  | Surfari — WebKit engine for TermSurf                                          | 2026-03-16 | 2026-06-21 |
 | [0755](0755-scroll-neovim/README.md)                            | Scroll broken in neovim when webviews are open                                | 2026-03-16 | 2026-03-16 |
 | [0754](0754-screenshots/README.md)                              | Screenshot pipeline and homepage hero                                         | 2026-03-15 | 2026-03-15 |
 | [0753](0753-blog-failures/README.md)                            | Blog post — everything that didn't work                                       | 2026-03-15 | 2026-03-15 |

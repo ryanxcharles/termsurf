@@ -4,7 +4,7 @@ opened = "2026-06-20"
 closed = "2026-06-20"
 +++
 
-# Issue 834: Complete Website Revamp for 1.0
+# Issue 837: Complete Website Revamp for 1.0
 
 ## Goal
 

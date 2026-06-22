@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-03-16"
+closed = "2026-06-21"
 +++
 
 # Issue 756: Surfari — WebKit engine for TermSurf
@@ -91,6 +92,97 @@ libtermsurf_webkit (Objective-C/C++, C API)
 - Surfari — Rust binary handling Unix socket IPC, protobuf parsing, and process
   lifecycle. Almost entirely reusable from Roamium.
 
+### Guiding strategy
+
+Surfari should keep the same process architecture as Roamium, but WebKit has a
+different natural embedding seam than Chromium. Chromium gave us `content_shell`
+as the practical proof that an embedder can own the browser process and expose a
+surface. For WebKit, the equivalent starting point is MiniBrowser, especially
+the macOS WebKit2 implementation under `Tools/MiniBrowser/mac`.
+
+The production shape should be:
+
+```
+WebKit MiniBrowser/WKWebView/WebKit2 embedding
+        ↓ wrapped by
+libtermsurf_webkit (Objective-C++ implementation, C ABI)
+        ↓ called by
+Surfari (Rust process, shared Roamium-style IPC/protobuf lifecycle)
+```
+
+The C ABI should look as much like `libtermsurf_chromium` as possible:
+initialize the engine, create and destroy browser views, navigate, resize,
+focus, forward mouse/keyboard/wheel input, report state changes, expose
+compositing handles, and shut down cleanly. Internally, the macOS implementation
+will be Objective-C++/Cocoa because the supported WebKit embedding API is
+`WKWebView`.
+
+MiniBrowser is the WebKit analogue to Chromium `content_shell`: it shows the
+smallest supported browser embedder. WebKitTestRunner is the automation and test
+harness reference: it shows how WebKit injects input, toggles runtime flags, and
+drives browser behavior under test. WebKitGTK and WPE are cross-platform
+embedding references, but they are not the primary macOS implementation path.
+
+Putting `WKWebView` directly inside Ghostboard is useful only as a temporary
+prototype if we need to validate terminal overlay behavior quickly. It is not
+the production Surfari architecture because it collapses the engine into the GUI
+process and breaks the one-engine-process-per-profile model that keeps TermSurf
+uniform across Chromium, WebKit, Gecko, and future engines.
+
+The first deep WebKit question is compositor export, not basic embedding.
+Surfari should first try to use WebKit's existing `RemoteLayerTree`,
+`LayerHostingContext`, and `HostingContext` machinery to expose a renderable
+surface to Ghostboard. Only if that path cannot satisfy the TermSurf compositor
+contract should we patch lower-level WebKit internals.
+
+### End-to-end completion checklist
+
+This checklist tracks the full Surfari strategy from proof-of-concept through
+production TermSurf integration. Items must be checked off as they are finished,
+and the experiment that proves each item should be linked or referenced in the
+surrounding issue text.
+
+- [x] Shallow clone WebKit into `webkit/src` and prove the checkout builds on
+      macOS.
+- [x] Prove WebKit content can be hosted outside its original WebKit process
+      boundary by exporting a WebKit render surface or hosting context and
+      displaying it in a separate host window/process.
+- [x] Confirm the hosted WebKit surface resizes correctly, animates, scrolls,
+      survives navigation, and remains stable across repeated show/hide cycles.
+- [x] Establish WebKit branch and patch management analogous to Chromium:
+      issue-specific branches, documented upstream commit ancestry, build
+      commands, and a clear record of each TermSurf patch.
+- [x] Create `libtermsurf_webkit` with a C ABI backed by Objective-C++/Cocoa on
+      macOS.
+- [x] Implement the core `libtermsurf_webkit` API: initialize, shutdown, create
+      and destroy browser views, navigate, reload, stop, resize, focus, forward
+      mouse/keyboard/wheel input, report browser state, and expose compositing
+      handles (Experiments 5-14, 18).
+- [x] Create the Surfari Rust binary by reusing the Roamium-style Unix socket,
+      protobuf dispatch, process lifecycle, and profile management code
+      (Experiment 15).
+- [x] Run Surfari outside Ghostboard with a small test driver or harness and
+      prove the Rust process can drive WebKit through `libtermsurf_webkit`
+      (Experiment 16).
+- [x] Audit Surfari against Roamium and the existing TermSurf protobuf messages;
+      mark every message supported, unsupported, or requiring a protocol
+      extension (Experiment 17).
+- [x] Modify `termsurf.proto` only where the current protocol cannot express the
+      required engine behavior; Experiments 17-18 found no WebKit browser
+      capability gaps, and Experiment 19 added `ServerRegister.browser` so
+      Ghostboard can deterministically route same-profile engines.
+- [x] Integrate Surfari with Ghostboard engine launching, profile selection,
+      socket routing, and overlay hosting.
+- [x] Test Surfari inside the real TermSurf app with navigation, keyboard input,
+      click, drag, scroll, resize, pane resize, split panes, tab switching,
+      window switching, focus changes, shutdown, restart, profile isolation, and
+      crash handling.
+- [x] Add focused regression guards for behavior that is proven to work, keeping
+      the tests small enough that the suite remains practical to run (Experiment
+      23).
+- [x] Re-run the full Ghostboard/Roamium feature matrix against
+      Ghostboard/Surfari and document any engine-specific differences.
+
 ### Compositing: the key open question
 
 Chromium uses CALayerHost for zero-copy GPU compositing. A `CAContext` ID
@@ -172,3 +264,88 @@ recovery. Much of this code can inform Surfari's implementation.
 5. Update Ghostboard to launch Surfari processes for WebKit profiles
 6. Update the `web` TUI to support `--browser webkit` (or similar)
 7. Test with all existing protocol messages
+
+## Experiments
+
+- [Experiment 1: Shallow clone and build WebKit](01-shallow-clone-and-build-webkit.md)
+  — **Pass**
+- [Experiment 2: Prove WebKit hosting context export](02-webkit-hosting-context-proof.md)
+  — **Pass**
+- [Experiment 3: Stress hosted WebKit surface lifecycle](03-hosted-surface-lifecycle.md)
+  — **Pass**
+- [Experiment 4: Establish WebKit branch workflow](04-webkit-branch-workflow.md)
+  — **Pass**
+- [Experiment 5: Create initial libtermsurf_webkit ABI](05-initial-libtermsurf-webkit-abi.md)
+  — **Pass**
+- [Experiment 6: Implement core WebKit input API](06-core-webkit-input-api.md) —
+  **Partial**
+- [Experiment 7: Resolve WebKit focus semantics](07-webkit-focus-semantics.md) —
+  **Pass**
+- [Experiment 8: Implement WebKit browser state callbacks](08-webkit-browser-state-callbacks.md)
+  — **Partial**
+- [Experiment 9: Implement WebKit HTTP auth callbacks](09-webkit-http-auth.md) —
+  **Pass**
+- [Experiment 10: Implement WebKit target URL hover callbacks](10-webkit-target-url-hover.md)
+  — **Pass**
+- [Experiment 11: Implement WebKit cursor callbacks](11-webkit-cursor-callbacks.md)
+  — **Partial**
+- [Experiment 12: Hook WebKit cursor changes](12-webkit-cursor-hook.md) —
+  **Pass**
+- [Experiment 13: Implement WebKit console messages](13-webkit-console-messages.md)
+  — **Pass**
+- [Experiment 14: Implement WebKit renderer crash callbacks](14-webkit-renderer-crash.md)
+  — **Pass**
+- [Experiment 15: Stand up the Surfari Rust binary](15-surfari-rust-binary.md) —
+  **Pass**
+- [Experiment 16: Prove Surfari fake-GUI IPC](16-surfari-fake-gui-ipc.md) —
+  **Pass**
+- [Experiment 17: Audit Surfari protocol parity](17-surfari-protocol-parity-audit.md)
+  — **Pass**
+- [Experiment 18: Implement Surfari DevTools Path](18-surfari-devtools-path.md)
+  — **Pass**
+- [Experiment 19: Add Ghostboard Surfari Launch Path](19-ghostboard-surfari-launch.md)
+  — **Pass**
+- [Experiment 20: Run Surfari in the real TermSurf app](20-real-app-surfari-smoke.md)
+  — **Pass**
+- [Experiment 21: Prove real-app Surfari input routing](21-real-app-surfari-input-routing.md)
+  — **Partial**
+- [Experiment 22: Prove WebKit pointer injection](22-webkit-pointer-injection.md)
+  — **Pass**
+- [Experiment 23: Add focused Surfari input regression guard](23-surfari-input-regression-guard.md)
+  — **Pass**
+- [Experiment 24: Define Surfari real-app matrix](24-surfari-real-app-matrix.md)
+  — **Pass**
+- [Experiment 25: Run Surfari lifecycle tranche](25-surfari-lifecycle-tranche.md)
+  — **Pass**
+- [Experiment 26: Run Surfari pane and split geometry](26-surfari-pane-split-geometry.md)
+  — **Pass**
+- [Experiment 27: Run Surfari tab, window, and focus geometry](27-surfari-tab-window-focus-geometry.md)
+  — **Pass**
+- [Experiment 28: Prove Surfari click and drag input details](28-surfari-click-drag-input-details.md)
+  — **Pass**
+- [Experiment 29: Prove Surfari profile isolation](29-surfari-profile-isolation.md)
+  — **Pass**
+- [Experiment 30: Prove Surfari crash handling](30-surfari-crash-handling.md) —
+  **Pass**
+- [Experiment 31: Compare Surfari against the Roamium matrix](31-surfari-roamium-comparison.md)
+  — **Pass**
+
+## Conclusion
+
+Surfari is complete for Issue 756. The WebKit source checkout builds, the
+TermSurf WebKit C ABI is implemented, the Surfari Rust process speaks the shared
+protobuf/Unix-socket protocol, and Ghostboard can launch Surfari for WebKit
+profiles.
+
+The final real-app evidence suite proves navigation, keyboard input, click,
+drag, scroll, resize, pane resize, split panes, tab switching, window switching,
+focus changes, shutdown, restart, profile isolation, crash handling, and
+DevTools support. Experiment 31 compares Surfari against every scenario in the
+Roamium/Ghostboard matrix, accounts for all 51 scenarios, and leaves no `Gap`
+rows.
+
+The final aggregate run was `20260621-212614`:
+
+- `logs/issue-756-exp31-surfari-roamium-comparison/harness-20260621-212614.log`
+
+All rows in `real-app-matrix.md` are now `Proven`.

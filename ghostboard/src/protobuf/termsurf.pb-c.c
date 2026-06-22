@@ -3399,7 +3399,7 @@ const ProtobufCMessageDescriptor termsurf__set_gui_active__descriptor =
   (ProtobufCMessageInit) termsurf__set_gui_active__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
-static const ProtobufCFieldDescriptor termsurf__server_register__field_descriptors[1] =
+static const ProtobufCFieldDescriptor termsurf__server_register__field_descriptors[2] =
 {
   {
     "profile",
@@ -3413,14 +3413,27 @@ static const ProtobufCFieldDescriptor termsurf__server_register__field_descripto
     0,             /* flags */
     0,NULL,NULL    /* reserved1,reserved2, etc */
   },
+  {
+    "browser",
+    2,
+    PROTOBUF_C_LABEL_NONE,
+    PROTOBUF_C_TYPE_STRING,
+    0,   /* quantifier_offset */
+    offsetof(Termsurf__ServerRegister, browser),
+    NULL,
+    &protobuf_c_empty_string,
+    0,             /* flags */
+    0,NULL,NULL    /* reserved1,reserved2, etc */
+  },
 };
 static const unsigned termsurf__server_register__field_indices_by_name[] = {
+  1,   /* field[1] = browser */
   0,   /* field[0] = profile */
 };
 static const ProtobufCIntRange termsurf__server_register__number_ranges[1 + 1] =
 {
   { 1, 0 },
-  { 0, 1 }
+  { 0, 2 }
 };
 const ProtobufCMessageDescriptor termsurf__server_register__descriptor =
 {
@@ -3430,7 +3443,7 @@ const ProtobufCMessageDescriptor termsurf__server_register__descriptor =
   "Termsurf__ServerRegister",
   "termsurf",
   sizeof(Termsurf__ServerRegister),
-  1,
+  2,
   termsurf__server_register__field_descriptors,
   termsurf__server_register__field_indices_by_name,
   1,  termsurf__server_register__number_ranges,

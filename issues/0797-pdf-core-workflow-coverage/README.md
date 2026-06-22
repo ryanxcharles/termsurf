@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-30"
+closed = "2026-06-22"
 +++
 
 # Issue 797: PDF Core Workflow Coverage
@@ -53,3 +54,12 @@ small integration fixes if a probe proves a TermSurf-specific gap.
 The first experiment should add deterministic fixtures and probes before making
 product changes. If a probe fails, design the next experiment around the exact
 failed layer.
+
+## Conclusion
+
+This issue is superseded by
+[Issue 834: Full PDF Support Across Roamium and Surfari](../0834-full-pdf-support-roamium-surfari/README.md).
+
+The core workflow coverage listed here remains required, but it should now be
+tracked in the unified cross-engine PDF matrix so Roamium and Surfari can be
+completed and regression-tested together.

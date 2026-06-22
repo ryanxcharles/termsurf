@@ -2,6 +2,7 @@
 members = [
     "webtui",
     "roamium",
+    "surfari",
     "roastty",
 ]
 exclude = [

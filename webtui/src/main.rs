@@ -605,17 +605,22 @@ fn main() -> io::Result<()> {
         })?;
         if let Some(trace) = state_trace.as_mut() {
             let latest_console = console_log.last();
-            let (renderer_crash_active, renderer_crash_tab_id, renderer_crash_status) =
-                renderer_crash
-                    .as_ref()
-                    .map(|crash| {
-                        (
-                            true,
-                            crash.tab_id.to_string(),
-                            crash.termination_status.clone(),
-                        )
-                    })
-                    .unwrap_or_else(|| (false, String::new(), String::new()));
+            let (
+                renderer_crash_active,
+                renderer_crash_tab_id,
+                renderer_crash_status,
+                renderer_crash_can_reload,
+            ) = renderer_crash
+                .as_ref()
+                .map(|crash| {
+                    (
+                        true,
+                        crash.tab_id.to_string(),
+                        crash.termination_status.clone(),
+                        crash.can_reload.to_string(),
+                    )
+                })
+                .unwrap_or_else(|| (false, String::new(), String::new(), String::new()));
             let identity_label = viewport_identity_label(
                 browser_label,
                 &profile,
@@ -624,7 +629,7 @@ fn main() -> io::Result<()> {
                 current_tab_id,
             );
             let render_trace = format!(
-                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 url,
                 page_title,
                 target_url,
@@ -634,6 +639,7 @@ fn main() -> io::Result<()> {
                 renderer_crash_active,
                 renderer_crash_tab_id,
                 renderer_crash_status,
+                renderer_crash_can_reload,
                 latest_console
                     .map(|entry| entry.message.as_str())
                     .unwrap_or_default(),
@@ -657,6 +663,7 @@ fn main() -> io::Result<()> {
                         ("renderer_crash_active", renderer_crash_active.to_string()),
                         ("renderer_crash_tab_id", renderer_crash_tab_id),
                         ("renderer_crash_status", renderer_crash_status),
+                        ("renderer_crash_can_reload", renderer_crash_can_reload),
                         (
                             "latest_console",
                             latest_console
