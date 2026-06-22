@@ -115,6 +115,8 @@ This issue covers the next Homebrew deployment. It may include:
   **Partial** (smoke test fails on focus observation)
 - [Experiment 2: Restore Surfari focus activation](02-restore-surfari-focus-activation.md)
   — **Pass**
+- [Experiment 3: Wire Surfari into packaging paths](03-wire-surfari-packaging-paths.md)
+  — **Designed**
 
 ## Acceptance Criteria
 
