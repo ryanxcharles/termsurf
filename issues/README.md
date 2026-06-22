@@ -5,6 +5,7 @@
 | #                                                       | Title                                       | Opened     |
 | ------------------------------------------------------- | ------------------------------------------- | ---------- |
 | [0834](0834-full-pdf-support-roamium-surfari/README.md) | Full PDF Support Across Roamium and Surfari | 2026-06-22 |
+| [0835](0835-engine-workspace-agent-docs/README.md)      | Engine Workspace Agent Docs                 | 2026-06-22 |
 
 ## Closed
 
