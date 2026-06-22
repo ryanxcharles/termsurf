@@ -190,6 +190,8 @@ Each feature row should ultimately record:
   — **Pass**
 - [Experiment 35: Prove basic Surfari PDF rendering](35-prove-basic-surfari-pdf-rendering.md)
   — **Partial**
+- [Experiment 36: Diagnose Surfari visual compositing](36-diagnose-surfari-visual-compositing.md)
+  — **Designed**
 
 ## Roamium Phase
 
