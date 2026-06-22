@@ -2,6 +2,12 @@
 
 This directory is TermSurf's local WebKit build workspace for Surfari research.
 
+## Agent Instructions
+
+Agent-facing build, branch, and patch workflow instructions live in
+[AGENTS.md](AGENTS.md). Read that file before modifying or building WebKit. This
+README is the human workspace overview and branch ledger.
+
 ## Repository
 
 | Remote | URL                                  |
@@ -15,7 +21,7 @@ tracked.
 ## Current State
 
 - Upstream commit: `1452a43959523449099b2616793fd2c5b6a6487e`
-- Local branch: `webkit-1452a439-issue-756`
+- Local branch: `webkit-1452a439-issue-756-exp12`
 - Shallow checkout: `true`
 - Purpose: Issue 756 Surfari research and future `libtermsurf_webkit` patches
 

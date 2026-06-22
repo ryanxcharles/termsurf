@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-05-30"
+closed = "2026-06-22"
 +++
 
 # Issue 798: PDF Advanced Features
@@ -41,3 +42,12 @@ the missing embedder integration needed for the in-pane terminal browser model.
 The first experiment should be diagnostic: inventory upstream support, identify
 the TermSurf integration points, and choose the smallest feature slice to prove
 end to end.
+
+## Conclusion
+
+This issue is superseded by
+[Issue 834: Full PDF Support Across Roamium and Surfari](../0834-full-pdf-support-roamium-surfari/README.md).
+
+The advanced PDF surfaces listed here remain part of the PDF roadmap, but they
+should now be audited, implemented, and regression-tested through the unified
+cross-engine PDF matrix.

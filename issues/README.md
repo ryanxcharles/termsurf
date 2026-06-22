@@ -2,16 +2,15 @@
 
 ## Open
 
-| #                                                 | Title                      | Opened     |
-| ------------------------------------------------- | -------------------------- | ---------- |
-| [0795](0795-pdf-native-print/README.md)           | PDF Native Print           | 2026-05-30 |
-| [0797](0797-pdf-core-workflow-coverage/README.md) | PDF Core Workflow Coverage | 2026-05-30 |
-| [0798](0798-pdf-advanced-features/README.md)      | PDF Advanced Features      | 2026-05-30 |
+| #                                                       | Title                                       | Opened     |
+| ------------------------------------------------------- | ------------------------------------------- | ---------- |
+| [0834](0834-full-pdf-support-roamium-surfari/README.md) | Full PDF Support Across Roamium and Surfari | 2026-06-22 |
 
 ## Closed
 
 | #                                                               | Title                                                                         | Opened     | Closed     |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- | ---------- |
+| [0835](0835-engine-workspace-agent-docs/README.md)              | Engine Workspace Agent Docs                                                   | 2026-06-22 | 2026-06-22 |
 | [0833](0833-update-website-and-docs-for-1-0-0/README.md)        | Update Website and Docs for 1.0.0                                             | 2026-06-20 | 2026-06-20 |
 | [0832](0832-publish-1-0-0-to-homebrew/README.md)                | Publish 1.0.0 to Homebrew                                                     | 2026-06-19 | 2026-06-19 |
 | [0831](0831-ghostboard-webview-padding-alignment/README.md)     | Ghostboard Webview Padding Alignment                                          | 2026-06-19 | 2026-06-19 |
@@ -47,7 +46,10 @@
 | [0801](0801-roastty-libghostty-rewrite/README.md)               | Reimplement libghostty as libroastty                                          | 2026-05-31 | 2026-06-08 |
 | [0800](0800-roastty-architecture/README.md)                     | Roastty Architecture and ABI Skeleton                                         | 2026-05-31 | 2026-05-31 |
 | [0799](0799-browser-api-automation-triage/README.md)            | Browser API Automation Triage                                                 | 2026-05-30 | 2026-05-31 |
+| [0798](0798-pdf-advanced-features/README.md)                    | PDF Advanced Features                                                         | 2026-05-30 | 2026-06-22 |
+| [0797](0797-pdf-core-workflow-coverage/README.md)               | PDF Core Workflow Coverage                                                    | 2026-05-30 | 2026-06-22 |
 | [0796](0796-pdf-implementation-audit/README.md)                 | PDF Implementation Audit                                                      | 2026-05-30 | 2026-05-30 |
+| [0795](0795-pdf-native-print/README.md)                         | PDF Native Print                                                              | 2026-05-30 | 2026-06-22 |
 | [0794](0794-pdf-viewer-interactions/README.md)                  | Complete PDF Viewer Interactions                                              | 2026-05-29 | 2026-05-30 |
 | [0793](0793-pdf-iframe-size/README.md)                          | PDF viewer iframe renders at default size                                     | 2026-05-29 | 2026-05-29 |
 | [0792](0792-pdf-support/README.md)                              | Inline PDF support via a separable extensions browser system                  | 2026-05-29 | 2026-05-29 |

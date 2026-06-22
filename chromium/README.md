@@ -4,6 +4,12 @@ TermSurf's Chromium fork. The full source tree (`src/`) and build tools
 (`depot_tools/`) are gitignored — only this README and the `patches/` directory
 are tracked.
 
+## Agent Instructions
+
+Agent-facing build, branch, and patch workflow instructions live in
+[AGENTS.md](AGENTS.md). Read that file before modifying or building Chromium.
+This README is the human workspace overview and branch ledger.
+
 ## Repository
 
 | Remote   | URL                                                |
@@ -14,15 +20,15 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 
 ## Current State
 
-- Branch: `148.0.7778.97-issue-816`
+- Current fully archived build baseline: `148.0.7778.97-issue-794-exp19`
+- Latest documented branch: `148.0.7778.97-issue-816`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
 > experimental inline-PDF work, **parked** (Issue 790 Exp 7). They are preserved
-> as history. The current active/buildable inline-PDF foundation branch is
-> `148.0.7778.97-issue-793-exp1`, forked from the protected
-> `148.0.7778.97-issue-784` baseline. See
-> [Issue 792](../issues/0792-pdf-support/README.md).
+> as history. The current fully archived build baseline is
+> `148.0.7778.97-issue-794-exp19`, which can be reconstructed from the vanilla
+> `148.0.7778.97` tag with `chromium/patches/issue-794-exp19/`.
 
 ## Branch Strategy
 
@@ -190,8 +196,13 @@ patches/
 └── issue-{N}/         — Issue branch patch archive
 ```
 
-Each patch set is cumulative — it contains all commits from the base tag to the
-branch tip, including inherited commits from parent branches.
+Patch sets should be cumulative: a fully archived issue patch directory contains
+all commits from the base tag to the branch tip, including inherited commits
+from parent branches.
+
+Some historical patch directories after Issue 794 are incremental rather than
+cumulative. Treat those as branch history records, not fresh setup recipes,
+until they are regenerated and verified as full-stack archives.
 
 ### Applying patches
 
@@ -204,7 +215,7 @@ git checkout -b 148.0.7778.97-issue-{N}
 git am ../../chromium/patches/issue-{N}/*.patch
 ```
 
-For the current TermSurf Chromium branch, use:
+For the current fully archived TermSurf Chromium baseline, use:
 
 ```bash
 git checkout -b 148.0.7778.97-issue-794-exp19 148.0.7778.97
