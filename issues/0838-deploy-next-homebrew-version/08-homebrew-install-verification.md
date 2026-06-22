@@ -15,7 +15,22 @@ plus installed Surfari launch test.
 
 ## Changes
 
-No TermSurf source-code changes are planned. Expected system changes:
+The initial design expected no TermSurf source-code changes, but install
+verification found one real Homebrew postflight bug and one test-harness gap.
+
+- `homebrew/Casks/termsurf.rb` — move `xattr -cr` before `codesign`, because
+  clearing extended attributes after signing removed detached signature xattrs
+  from WebKit `.tbd` files.
+- `scripts/ghostboard-geometry-matrix.sh` — add
+  `TERMSURF_USE_DEFAULT_INSTALLED_SURFARI_PATH=1` so the installed Surfari
+  harness can omit `TERMSURF_INSTALLED_SURFARI_PATH` and verify Ghostboard's
+  production default `/opt/homebrew` resolver path.
+- `issues/0838-deploy-next-homebrew-version/README.md` — mark Stage 8 and
+  Experiment 8 as pass.
+- `issues/0838-deploy-next-homebrew-version/08-homebrew-install-verification.md`
+  — record the final verification result.
+
+Expected system changes:
 
 - Homebrew tap `termsurf/termsurf` updates to include the pushed `v1.4.0` cask.
 - Installed cask `termsurf` upgrades from `1.0.0` to `1.4.0`.
@@ -73,8 +88,8 @@ installed WebTUI to the release build that contains the Issue 836 top-controls
 fix and was tested in source:
 
 ```bash
-test "$(shasum -a 256 /opt/homebrew/bin/web | awk '{print $1}')" = \
-  "$(shasum -a 256 dist/release/web | awk '{print $1}')"
+test "$(dwarfdump --uuid /opt/homebrew/bin/web | awk '{print $2}')" = \
+  "$(dwarfdump --uuid dist/release/web | awk '{print $2}')"
 cargo test -p webtui issue_836_after_ -- --nocapture
 ```
 
@@ -119,6 +134,7 @@ env -u TERMSURF_SURFARI_PATH \
   -u TERMSURF_INSTALLED_SURFARI_PATH \
   TERMSURF_GHOSTBOARD_APP=/Applications/TermSurf.app \
   TERMSURF_WEB=/opt/homebrew/bin/web \
+  TERMSURF_USE_DEFAULT_INSTALLED_SURFARI_PATH=1 \
   scripts/ghostboard-geometry-matrix.sh installed-surfari-release-launch
 ```
 
@@ -170,3 +186,178 @@ The reviewer had no Required findings. I accepted both optional suggestions:
 - Added a second installed Surfari launch run that omits
   `TERMSURF_INSTALLED_SURFARI` and `TERMSURF_INSTALLED_SURFARI_PATH`, so
   Ghostboard must use its production default `/opt/homebrew` Surfari path.
+
+## Result
+
+**Result:** Pass
+
+Homebrew install verification succeeded after fixing one cask postflight bug.
+
+Preflight confirmed this machine had TermSurf `1.0.0` installed and the local
+`termsurf/termsurf` tap was stale at commit `a59df297`.
+
+The first upgrade command updated Homebrew and upgraded the cask from `1.0.0` to
+`1.4.0`:
+
+```bash
+brew update
+brew upgrade --cask termsurf 2>&1 | tee /tmp/termsurf-issue838-exp8-brew-upgrade.log
+```
+
+Homebrew reported:
+
+```text
+termsurf/termsurf/termsurf 1.0.0 -> 1.4.0
+Moving Generic Artifact 'surfari' to '/opt/homebrew/opt/termsurf-surfari'
+termsurf was successfully upgraded
+```
+
+The installed cask metadata then reported version `1.4.0`, and installed
+artifacts existed at:
+
+- `/Applications/TermSurf.app`
+- `/opt/homebrew/bin/web`
+- `/opt/homebrew/opt/termsurf-roamium/roamium`
+- `/opt/homebrew/opt/termsurf-surfari/surfari`
+- `/opt/homebrew/opt/termsurf-surfari/libtermsurf_webkit.dylib`
+- `/opt/homebrew/opt/termsurf-surfari/libWebKitSwift.dylib`
+- the required Surfari WebKit frameworks under
+  `/opt/homebrew/opt/termsurf-surfari/`
+
+The first strict Surfari signature verification failed:
+
+```text
+/opt/homebrew/opt/termsurf-surfari/WebKit.framework: code object is not signed at all
+In subcomponent: /opt/homebrew/opt/termsurf-surfari/WebKit.framework/Versions/Current/WebKit.tbd
+```
+
+The root cause was cask postflight ordering. The cask signed Surfari runtime
+artifacts and then ran `xattr -cr`; clearing xattrs removed the detached
+signature xattrs from WebKit `.tbd` files. The Homebrew cask now clears
+quarantine first and signs afterward. That tap fix was committed and pushed as:
+
+```text
+1113ef1 Sign after clearing quarantine
+```
+
+After `brew update`, reinstalling the same `1.4.0` cask succeeded:
+
+```bash
+brew reinstall --cask termsurf 2>&1 | tee /tmp/termsurf-issue838-exp8-brew-reinstall.log
+```
+
+The local tap now points at the fixed cask:
+
+```text
+HEAD: 1113ef1b3f790a7e51991c5389b35c93700b3e79
+```
+
+Installed WebTUI verification passed. A byte-for-byte hash comparison between
+`/opt/homebrew/bin/web` and `dist/release/web` is not valid after Homebrew
+postflight signing, but their Mach-O UUIDs match:
+
+```text
+ACF9F4F3-DDD1-3DE7-86B7-FF355B3F260D
+```
+
+The Issue 836 top-controls regression tests passed:
+
+```bash
+cargo test -p webtui issue_836_after_ -- --nocapture
+```
+
+Result:
+
+```text
+2 passed; 0 failed
+```
+
+Installed Surfari runtime verification passed after the cask fix:
+
+- no broken symlinks under `/opt/homebrew/opt/termsurf-surfari`;
+- strict `codesign --verify --deep --strict` passed for the installed Surfari
+  executable, bridge dylib, frameworks, dylibs, and XPC bundles.
+
+The installed app plus installed WebTUI plus installed Surfari launch passed
+with an explicit installed-path override:
+
+```bash
+env -u TERMSURF_SURFARI_PATH \
+  TERMSURF_GHOSTBOARD_APP=/Applications/TermSurf.app \
+  TERMSURF_WEB=/opt/homebrew/bin/web \
+  TERMSURF_INSTALLED_SURFARI=/opt/homebrew/opt/termsurf-surfari/surfari \
+  scripts/ghostboard-geometry-matrix.sh installed-surfari-release-launch
+```
+
+Key results:
+
+```text
+PASS: release installed Surfari scenario did not resolve through TERMSURF_SURFARI_PATH
+PASS: observed release Ghostboard resolved Surfari through installed override
+PASS: observed release Ghostboard spawned installed override Surfari path
+PASS: observed AppKit overlay presentation
+PASS: release BrowserReady preserved named Surfari key
+PASS: scenario installed-surfari-release-launch
+```
+
+The installed app launch also passed through Ghostboard's production default
+installed Surfari path, without `TERMSURF_SURFARI_PATH`,
+`TERMSURF_INSTALLED_SURFARI`, or `TERMSURF_INSTALLED_SURFARI_PATH`:
+
+```bash
+env -u TERMSURF_SURFARI_PATH \
+  -u TERMSURF_INSTALLED_SURFARI \
+  -u TERMSURF_INSTALLED_SURFARI_PATH \
+  TERMSURF_GHOSTBOARD_APP=/Applications/TermSurf.app \
+  TERMSURF_WEB=/opt/homebrew/bin/web \
+  TERMSURF_USE_DEFAULT_INSTALLED_SURFARI_PATH=1 \
+  scripts/ghostboard-geometry-matrix.sh installed-surfari-release-launch
+```
+
+Key results:
+
+```text
+PASS: release installed Surfari scenario did not resolve through TERMSURF_SURFARI_PATH
+PASS: release installed Surfari scenario did not resolve through TERMSURF_INSTALLED_SURFARI_PATH
+PASS: observed release Ghostboard resolved Surfari through default installed path
+PASS: observed release Ghostboard spawned default installed Surfari path
+PASS: observed AppKit overlay presentation
+PASS: release BrowserReady preserved named Surfari key
+PASS: scenario installed-surfari-release-launch
+```
+
+Final hygiene passed:
+
+```bash
+prettier --check issues/0838-deploy-next-homebrew-version/README.md \
+  issues/0838-deploy-next-homebrew-version/08-homebrew-install-verification.md
+git diff --check
+```
+
+Before result documentation, `git status --short` showed only expected changes:
+
+```text
+ M homebrew
+ M issues/0838-deploy-next-homebrew-version/08-homebrew-install-verification.md
+ M scripts/ghostboard-geometry-matrix.sh
+```
+
+The completion reviewer returned `VERDICT: APPROVED` with no Required findings.
+The reviewer independently verified the Homebrew upgrade and reinstall logs,
+installed cask metadata, pushed cask postflight fix, installed artifact layout,
+strict Surfari signatures, both installed Surfari launch modes, README status,
+and that the result commit had not yet been made. I accepted the reviewer's
+optional cleanup to update the Verification section from a byte-hash comparison
+to a Mach-O UUID comparison for `web`, because Homebrew postflight signing
+changes the installed binary hash.
+
+## Conclusion
+
+Stage 8 is complete. Homebrew installs TermSurf `1.4.0` with TermSurf.app,
+WebTUI, Roamium, and Surfari. Installed Surfari's runtime closure has no broken
+symlinks and passes strict signature verification. Installed Ghostboard can
+launch installed `web --browser surfari` without `TERMSURF_SURFARI_PATH`,
+including through the production default `/opt/homebrew` Surfari path.
+
+The next step is Stage 9 closeout: audit the acceptance criteria, record the
+final conclusion, close the issue, and regenerate `issues/README.md`.

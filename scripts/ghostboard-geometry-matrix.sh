@@ -15,7 +15,12 @@ WEB="${TERMSURF_WEB:-$ROOT/target/debug/web}"
 ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
 INSTALLED_ROAMIUM="${TERMSURF_INSTALLED_ROAMIUM:-$ROAMIUM}"
 SURFARI="${TERMSURF_SURFARI:-$ROOT/target/release/surfari}"
+DEFAULT_INSTALLED_SURFARI="/opt/homebrew/opt/termsurf-surfari/surfari"
+USE_DEFAULT_INSTALLED_SURFARI_PATH="${TERMSURF_USE_DEFAULT_INSTALLED_SURFARI_PATH:-0}"
 INSTALLED_SURFARI="${TERMSURF_INSTALLED_SURFARI:-${TERMSURF_INSTALLED_SURFARI_PATH:-$SURFARI}}"
+if [ "$USE_DEFAULT_INSTALLED_SURFARI_PATH" = "1" ]; then
+  INSTALLED_SURFARI="$DEFAULT_INSTALLED_SURFARI"
+fi
 ROAMIUM_PATH_FOR_APP="$ROAMIUM"
 POINTER_DRIVER="${TERMSURF_GEOMETRY_POINTER_DRIVER:-cgevent}"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
@@ -3933,7 +3938,19 @@ if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   log "mouse_tui_reset_screenshot=$SCREENSHOT_TUI_RESET"
 fi
 
-if [ "$SCENARIO" = "installed-roamium-release-launch" ] || [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
+if [ "$SCENARIO" = "installed-surfari-release-launch" ] && [ "$USE_DEFAULT_INSTALLED_SURFARI_PATH" = "1" ]; then
+  XDG_CONFIG_HOME="$RELEASE_XDG_CONFIG_HOME" \
+  GHOSTTY_LOG=stderr \
+  TERMSURF_GEOMETRY_TRACE=1 \
+  TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
+  TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
+  TERMSURF_INSTALLED_ROAMIUM_PATH="$INSTALLED_ROAMIUM" \
+  TERMSURF_WEBTUI_STATE_TRACE_FILE="$WEBTUI_STATE_TRACE" \
+  TERMSURF_INPUT_TRACE=1 \
+  TERMSURF_PDF_INPUT_TRACE=1 \
+  TERMSURF_PDF_INPUT_TRACE_FILE="$ROAMIUM_TRACE" \
+    "$APP_BIN" >"$APP_LOG" 2>&1 &
+elif [ "$SCENARIO" = "installed-roamium-release-launch" ] || [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
   XDG_CONFIG_HOME="$RELEASE_XDG_CONFIG_HOME" \
   GHOSTTY_LOG=stderr \
   TERMSURF_GEOMETRY_TRACE=1 \
@@ -3987,8 +4004,17 @@ if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
     fail "release installed Surfari scenario unexpectedly resolved through TERMSURF_SURFARI_PATH"
   fi
   log "PASS: release installed Surfari scenario did not resolve through TERMSURF_SURFARI_PATH"
-  wait_for_log "SetOverlay: named browser resolved browser=surfari env=TERMSURF_INSTALLED_SURFARI_PATH path=${INSTALLED_SURFARI}" "release Ghostboard resolved Surfari through installed override" 45
-  wait_for_log "spawned browser path=${INSTALLED_SURFARI} pid=[0-9]+ profile=default browser=surfari" "release Ghostboard spawned installed override Surfari path" 45
+  if [ "$USE_DEFAULT_INSTALLED_SURFARI_PATH" = "1" ]; then
+    if grep -F "env=TERMSURF_INSTALLED_SURFARI_PATH path=" "$APP_LOG" >/dev/null 2>&1; then
+      fail "release installed Surfari default-path scenario unexpectedly resolved through TERMSURF_INSTALLED_SURFARI_PATH"
+    fi
+    log "PASS: release installed Surfari scenario did not resolve through TERMSURF_INSTALLED_SURFARI_PATH"
+    wait_for_log "SetOverlay: named browser resolved browser=surfari installed_path=${INSTALLED_SURFARI}" "release Ghostboard resolved Surfari through default installed path" 45
+    wait_for_log "spawned browser path=${INSTALLED_SURFARI} pid=[0-9]+ profile=default browser=surfari" "release Ghostboard spawned default installed Surfari path" 45
+  else
+    wait_for_log "SetOverlay: named browser resolved browser=surfari env=TERMSURF_INSTALLED_SURFARI_PATH path=${INSTALLED_SURFARI}" "release Ghostboard resolved Surfari through installed override" 45
+    wait_for_log "spawned browser path=${INSTALLED_SURFARI} pid=[0-9]+ profile=default browser=surfari" "release Ghostboard spawned installed override Surfari path" 45
+  fi
 fi
 
 wait_for_log 'TermSurf geometry layer=appkit event=presented ' "AppKit overlay presentation"

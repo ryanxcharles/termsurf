@@ -102,7 +102,7 @@ This issue covers the next Homebrew deployment. It may include:
       Roamium, Surfari, and required runtime resources.
 - [x] **Stage 7: Publish release** — publish GitHub Release `v1.4.0`, update and
       push the Homebrew cask, and record the generated SHA.
-- [ ] **Stage 8: Homebrew install verification** — install or upgrade through
+- [x] **Stage 8: Homebrew install verification** — install or upgrade through
       Homebrew and verify WebTUI top controls plus `web --browser surfari`
       without `TERMSURF_SURFARI_PATH`.
 - [ ] **Stage 9: Closeout** — record final verification evidence, update docs if
@@ -125,7 +125,7 @@ This issue covers the next Homebrew deployment. It may include:
   — **Pass**
 - [Experiment 7: Publish release 1.4.0](07-publish-release-1-4-0.md) — **Pass**
 - [Experiment 8: Homebrew install verification](08-homebrew-install-verification.md)
-  — **Designed**
+  — **Pass**
 
 ## Acceptance Criteria
 
