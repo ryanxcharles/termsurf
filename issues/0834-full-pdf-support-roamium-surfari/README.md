@@ -166,6 +166,8 @@ Each feature row should ultimately record:
   — **Partial**
 - [Experiment 23: Probe Roamium app-modal print presentation](23-probe-roamium-app-modal-print-presentation.md)
   — **Partial**
+- [Experiment 24: Bridge GUI active state into Roamium app activation](24-bridge-gui-active-app-activation.md)
+  — **Designed**
 
 ## Roamium Phase
 
