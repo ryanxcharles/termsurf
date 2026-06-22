@@ -148,6 +148,8 @@ Each feature row should ultimately record:
   — **Partial**
 - [Experiment 14: Compare Roamium PDF form input paths](14-compare-roamium-pdf-form-input-paths.md)
   — **Pass**
+- [Experiment 15: Add Roamium PDF regression guard](15-add-roamium-pdf-regression-guard.md)
+  — **Designed**
 
 ## Roamium Phase
 
