@@ -187,7 +187,7 @@ Each feature row should ultimately record:
 - [Experiment 33: Add Roamium advanced PDF regression guard](33-add-roamium-advanced-pdf-regression-guard.md)
   — **Pass**
 - [Experiment 34: Audit Surfari and WebKit PDF capabilities](34-audit-surfari-webkit-pdf-capabilities.md)
-  — **Designed**
+  — **Pass**
 
 ## Roamium Phase
 
