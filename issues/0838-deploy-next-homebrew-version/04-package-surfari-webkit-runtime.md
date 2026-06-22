@@ -305,3 +305,69 @@ codesign/xattr coverage inside the actual `surfari_runtime_artifacts.each`
 blocks. The design was updated with per-artifact tarball checks and a Ruby cask
 parser that extracts the runtime artifact list and validates codesign/xattr loop
 bodies. Final re-review returned **Approved** with no required findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented a shared Surfari runtime resource helper and wired it into install
+and release staging. The helper copies the required patched WebKit frameworks,
+dylibs, and XPC services into the Surfari install/package directory, rewrites
+the copied install names and rpaths so the runtime resolves from that packaged
+directory instead of `webkit/src/WebKitBuild/Debug`, and signs every Surfari
+runtime artifact after mutation.
+
+Verification passed:
+
+- `bash -n scripts/build.sh scripts/install.sh scripts/uninstall.sh scripts/release.sh scripts/ghostboard-geometry-matrix.sh scripts/surfari-resources.sh`
+- `prettier --check issues/0838-deploy-next-homebrew-version/README.md issues/0838-deploy-next-homebrew-version/04-package-surfari-webkit-runtime.md docs/ghostboard-launch-discovery.md`
+- `zig fmt --check ghostboard/src/apprt/termsurf.zig`
+- `git diff --check`
+- `./scripts/build.sh surfari --release`
+- non-root `scripts/install.sh surfari` with `TERMSURF_SURFARI_INSTALL_DIR`
+- installed artifact checks for Surfari, `libtermsurf_webkit.dylib`, six WebKit
+  frameworks, two dylibs, and seven WebKit XPC bundles
+- `otool -l` rejection of `/webkit/src/WebKitBuild/Debug` in the installed
+  `libtermsurf_webkit.dylib`
+- `codesign --verify` for every installed Surfari runtime artifact
+- `TERMSURF_RELEASE_PACKAGE_ONLY=1 scripts/release.sh 1.4.0`
+- package-only tarball creation with SHA256
+  `fea71ae08236d1be834e3f3c33c0dd6144e1ce2e89277cf93b08a579b5d3a93e`
+- per-artifact `dist/release/surfari` and tarball checks for every Surfari
+  runtime artifact
+- `otool -l` rejection of `/webkit/src/WebKitBuild/Debug` in the staged
+  `dist/release/surfari/libtermsurf_webkit.dylib`
+- Ruby static cask verification proving `surfari_runtime_artifacts` lists every
+  runtime artifact and that postflight loops over that list for both `codesign`
+  and `xattr`
+- fresh temp install, release-mode Ghostboard launch, and uninstall:
+
+```bash
+TERMSURF_SURFARI_INSTALL_DIR="$tmpdir/surfari" ./scripts/install.sh surfari
+TERMSURF_INSTALLED_SURFARI_PATH="$tmpdir/surfari/surfari" \
+  scripts/ghostboard-geometry-matrix.sh installed-surfari-release-launch
+TERMSURF_SURFARI_INSTALL_DIR="$tmpdir/surfari" ./scripts/uninstall.sh surfari
+```
+
+The installed-style release launch passed. The harness proved that Release
+Ghostboard resolved named `surfari` through the installed override, did not use
+`TERMSURF_SURFARI_PATH`, spawned the installed Surfari binary, reached AppKit
+overlay presentation, correlated Zig/bridge/AppKit geometry, and preserved the
+named `surfari` browser key in `BrowserReady`.
+
+## Conclusion
+
+Surfari's packaged runtime now includes the custom patched WebKit closure needed
+for an installed-style launch. The previous dyld JavaScriptCore mismatch is
+resolved by packaging matching WebKit, WebCore, JavaScriptCore, related
+frameworks/dylibs, and WebKit XPC services together with Surfari and by removing
+the development WebKit build rpath from the packaged bridge dylib.
+
+Issue 838 can move from Surfari packaging integration to the full release build
+and package validation stages.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **Approved** with no
+findings. The reviewer accepted the Pass result and the Stage 4 completion
+claim.

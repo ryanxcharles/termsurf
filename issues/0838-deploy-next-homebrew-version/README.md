@@ -91,7 +91,7 @@ This issue covers the next Homebrew deployment. It may include:
 - [x] **Stage 3: Surfari local build** — build
       `surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib`, run its smoke
       test, and build the `surfari` Rust binary.
-- [ ] **Stage 4: Surfari packaging integration** — wire Surfari into
+- [x] **Stage 4: Surfari packaging integration** — wire Surfari into
       `scripts/build.sh`, `scripts/install.sh`, `scripts/release.sh`,
       `homebrew/Casks/termsurf.rb`, and Ghostboard's installed browser
       resolution.
@@ -119,7 +119,7 @@ This issue covers the next Homebrew deployment. It may include:
   — **Partial** (Surfari wiring works, but packaged runtime needs WebKit
   closure)
 - [Experiment 4: Package Surfari WebKit runtime](04-package-surfari-webkit-runtime.md)
-  — **Designed**
+  — **Pass**
 
 ## Acceptance Criteria
 

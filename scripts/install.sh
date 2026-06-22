@@ -4,7 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 CHROMIUM_OUT="$REPO_DIR/chromium/src/out/Default"
+WEBKIT_BUILD="$REPO_DIR/webkit/src/WebKitBuild/Debug"
 source "$SCRIPT_DIR/roamium-resources.sh"
+source "$SCRIPT_DIR/surfari-resources.sh"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 GHOSTBOARD_RELEASE_APP="$REPO_DIR/ghostboard/macos/build/Release/TermSurf.app"
 APPLICATIONS_DIR="${TERMSURF_APPLICATIONS_DIR:-/Applications}"
@@ -123,10 +125,11 @@ install_surfari() {
   mkdir -p "$INSTALL_DIR"
   cp "$SURFARI_SRC" "$INSTALL_DIR/surfari"
   cp "$SURFARI_DYLIB" "$INSTALL_DIR/libtermsurf_webkit.dylib"
+  copy_surfari_runtime_resources "$WEBKIT_BUILD" "$INSTALL_DIR"
+  rewrite_surfari_runtime_paths "$WEBKIT_BUILD" "$INSTALL_DIR"
 
   echo "==> Codesigning Surfari..."
-  codesign --force --sign - "$INSTALL_DIR/surfari" || true
-  codesign --force --sign - "$INSTALL_DIR/libtermsurf_webkit.dylib" || true
+  sign_surfari_runtime_artifacts "$INSTALL_DIR"
 
   echo "  Dir: $INSTALL_DIR"
   echo "  Bin: $INSTALL_DIR/surfari"

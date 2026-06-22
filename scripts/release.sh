@@ -8,11 +8,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/roamium-resources.sh"
+source "$SCRIPT_DIR/surfari-resources.sh"
 VERSION="${1:-0.1.0}"
 ARCH="aarch64-apple-darwin"
 TARBALL_NAME="termsurf-${VERSION}-${ARCH}.tar.gz"
 STAGING_DIR="$REPO_DIR/dist/release"
 CHROMIUM_OUT="$REPO_DIR/chromium/src/out/Default"
+WEBKIT_BUILD="$REPO_DIR/webkit/src/WebKitBuild/Debug"
 GHOSTBOARD_APP="$REPO_DIR/ghostboard/macos/build/Release/TermSurf.app"
 CASK_FILE="$REPO_DIR/homebrew/Casks/termsurf.rb"
 
@@ -24,8 +26,9 @@ for f in \
   "$GHOSTBOARD_APP/Contents/MacOS/termsurf" \
   "$REPO_DIR/target/release/roamium" \
   "$REPO_DIR/target/release/surfari" \
-  "$REPO_DIR/surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib"; do
-  if [ ! -f "$f" ]; then
+  "$REPO_DIR/surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib" \
+  "$WEBKIT_BUILD/WebKit.framework"; do
+  if [ ! -e "$f" ]; then
     echo "Error: Release build not found: $f"
     echo "Run: scripts/build.sh all --release"
     exit 1
@@ -43,6 +46,8 @@ cp "$REPO_DIR/target/release/web" "$STAGING_DIR/"
 cp "$REPO_DIR/target/release/roamium" "$STAGING_DIR/roamium/"
 cp "$REPO_DIR/target/release/surfari" "$STAGING_DIR/surfari/"
 cp "$REPO_DIR/surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib" "$STAGING_DIR/surfari/"
+copy_surfari_runtime_resources "$WEBKIT_BUILD" "$STAGING_DIR/surfari"
+rewrite_surfari_runtime_paths "$WEBKIT_BUILD" "$STAGING_DIR/surfari"
 
 # Copy Chromium dylibs and resources
 copy_roamium_runtime_resources "$CHROMIUM_OUT" "$STAGING_DIR/roamium"

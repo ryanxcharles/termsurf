@@ -3989,8 +3989,6 @@ if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
   log "PASS: release installed Surfari scenario did not resolve through TERMSURF_SURFARI_PATH"
   wait_for_log "SetOverlay: named browser resolved browser=surfari env=TERMSURF_INSTALLED_SURFARI_PATH path=${INSTALLED_SURFARI}" "release Ghostboard resolved Surfari through installed override" 45
   wait_for_log "spawned browser path=${INSTALLED_SURFARI} pid=[0-9]+ profile=default browser=surfari" "release Ghostboard spawned installed override Surfari path" 45
-  log "PASS: scenario installed-surfari-release-launch"
-  exit 0
 fi
 
 wait_for_log 'TermSurf geometry layer=appkit event=presented ' "AppKit overlay presentation"
@@ -4009,8 +4007,12 @@ WIN_LINE="$(window_bounds)" || fail "failed to resolve bounds for window id=$WID
 IFS=$'\t' read -r WID WX WY WW WH <<<"$WIN_LINE"
 log "window=$WIN_LINE"
 
-screencapture -x -o -l"$WID" "$SCREENSHOT"
-log "screenshot_exit=$?"
+if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
+  log "PASS: installed Surfari release launch skipped screenshot capture"
+else
+  screencapture -x -o -l"$WID" "$SCREENSHOT"
+  log "screenshot_exit=$?"
+fi
 
 if [ "$SKIP_INITIAL_HIT_TEST" = "0" ]; then
   click_window_center "$WIN_LINE" "initial"
@@ -5034,6 +5036,10 @@ if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
   require_log "SetOverlay: named browser resolved browser=roamium env=TERMSURF_INSTALLED_ROAMIUM_PATH path=${INSTALLED_ROAMIUM}" "release Ghostboard resolved Roamium through installed override"
   require_log "spawned browser path=${INSTALLED_ROAMIUM} pid=[0-9]+ profile=default" "release Ghostboard spawned installed override Roamium path"
   require_log "BrowserReady: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} socket=.* browser=roamium" "release BrowserReady preserved named Roamium key"
+fi
+
+if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
+  require_log "BrowserReady: pane_id=${PANE_ID} tab_id=${BROWSER_TAB_ID} socket=.* browser=surfari" "release BrowserReady preserved named Surfari key"
 fi
 
 if [ "$SCENARIO" = "hello-config-homepage" ]; then
