@@ -120,3 +120,66 @@ Result classification:
 Adversarial design review returned `APPROVED` with no findings. The reviewer
 confirmed that the plan is still uncommitted and that read-only
 `git diff --check` and Prettier checks passed.
+
+## Result
+
+**Result:** Pass
+
+Run `20260621-194431` passed with the new real-app harness:
+
+```bash
+bash -n scripts/test-issue-756-surfari-tab-window-focus-geometry.sh
+scripts/test-issue-756-surfari-tab-window-focus-geometry.sh
+```
+
+Logs:
+
+- `logs/issue-756-exp27-surfari-tab-window-focus/harness-20260621-194431.log`
+- `logs/issue-756-exp27-surfari-tab-window-focus/app-20260621-194431.log`
+- `logs/issue-756-exp27-surfari-tab-window-focus/surfari-trace-20260621-194431.log`
+- `logs/issue-756-exp27-surfari-tab-window-focus/webtui-20260621-194431.log`
+
+The harness launched the real Debug `TermSurf.app` with repo-built
+`web --browser surfari` and repo-built `surfari`, then proved:
+
+- browser A was hidden and not hit-testable after switching to a plain terminal
+  tab;
+- keyboard input in the plain terminal tab did not reach Surfari;
+- switching back restored browser A hit testing and keyboard routing;
+- browser B opened in the second native tab with a distinct pane ID, browser tab
+  ID, and CA context ID;
+- browser A stayed hidden while browser B's tab was selected;
+- browser B hit testing and keyboard input routed only to browser B;
+- switching back restored browser A hit testing and keyboard input without
+  leaking to browser B;
+- a new native window was created and browser C opened there with a distinct
+  pane ID, browser tab ID, and CA context ID;
+- browser C presented on the new window, not the original window;
+- browser C hit testing and keyboard input routed only to browser C;
+- browse/control mode transitions produced Surfari focus true/false for the
+  selected pane and keyboard events reached only the selected Surfari browser.
+
+One harness assertion was corrected during implementation: tab restoration does
+not always emit a fresh AppKit `presented` line because the existing overlay
+view can simply become visible again when the native tab is selected. The final
+harness therefore proves restoration by reusing the known tab-adjusted frame and
+requiring a fresh hit test plus keyboard routing on the restored tab.
+
+## Conclusion
+
+Surfari now has real-app evidence for tab switching, window switching, and focus
+routing across selected panes/tabs/windows. The real-app matrix marks those rows
+`Proven`. Remaining Issue 756 matrix gaps are click DOM proof, drag, profile
+isolation, crash handling, and the final Ghostboard/Roamium comparison.
+
+## Completion Review
+
+Adversarial completion review returned `APPROVED` with no Required findings. The
+reviewer had one Optional finding: the harness claimed browser C used a distinct
+browser tab ID, but the script did not explicitly assert `C_TAB_ID` differed
+from browser A and B. The harness was updated to assert distinct C tab IDs, to
+select browser C's CA context while excluding both browser A and B panes, and to
+scope the browser-A-in-window-C negative grep to the C window identity.
+
+The focused re-review returned `APPROVED`; it confirmed the optional finding was
+resolved and that no new Required findings were introduced.
