@@ -5,6 +5,7 @@
 | #                                                       | Title                                       | Opened     |
 | ------------------------------------------------------- | ------------------------------------------- | ---------- |
 | [0834](0834-full-pdf-support-roamium-surfari/README.md) | Full PDF Support Across Roamium and Surfari | 2026-06-22 |
+| [0838](0838-deploy-next-homebrew-version/README.md)     | Deploy Next Homebrew Version                | 2026-06-22 |
 
 ## Closed
 
