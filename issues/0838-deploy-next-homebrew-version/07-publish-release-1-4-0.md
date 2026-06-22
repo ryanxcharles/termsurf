@@ -156,3 +156,114 @@ inside that block.
 
 The reviewer re-reviewed those fixes and returned `VERDICT: APPROVED` with no
 findings.
+
+## Result
+
+**Result:** Pass
+
+Release publication succeeded.
+
+Preflight confirmed:
+
+- the main repo was clean;
+- the Homebrew submodule was clean on `main`;
+- the Homebrew submodule was ahead of `origin/main` only by the three reviewed
+  Surfari packaging commits from this issue;
+- GitHub auth was active for account `ryanxcharles`;
+- GitHub Release `v1.4.0` did not exist before publishing.
+
+The real release command completed successfully:
+
+```bash
+scripts/release.sh 1.4.0 2>&1 | tee /tmp/termsurf-issue838-exp7-release.log
+```
+
+The release script created and uploaded the tarball, updated the Homebrew cask,
+committed the tap update, and pushed `termsurf/homebrew-termsurf`:
+
+```text
+==> SHA256: efb72712b962c77605df9ee2b67cfda2e116fd39cb863588b62df1b1857ea260
+==> Uploading to GitHub...
+https://github.com/termsurf/termsurf/releases/tag/v1.4.0
+==> Updating Homebrew cask...
+[main 0c52904] v1.4.0
+To github.com:termsurf/homebrew-termsurf.git
+   a59df29..0c52904  main -> main
+==> Released TermSurf v1.4.0
+```
+
+GitHub release verification passed:
+
+```json
+{
+  "isDraft": false,
+  "isPrerelease": false,
+  "name": "v1.4.0",
+  "tagName": "v1.4.0",
+  "url": "https://github.com/termsurf/termsurf/releases/tag/v1.4.0"
+}
+```
+
+The GitHub release contains asset `termsurf-1.4.0-aarch64-apple-darwin.tar.gz`
+with digest
+`sha256:efb72712b962c77605df9ee2b67cfda2e116fd39cb863588b62df1b1857ea260` and
+size `443907861` bytes.
+
+The Homebrew cask now contains:
+
+```ruby
+version "1.4.0"
+sha256 "efb72712b962c77605df9ee2b67cfda2e116fd39cb863588b62df1b1857ea260"
+```
+
+The tap is pushed and aligned:
+
+```text
+## main...origin/main
+0c52904 v1.4.0
+0c52904d57d118f878abff564c6037300a2fb88b refs/heads/main
+```
+
+The parent repo submodule diff points at the pushed tap commit:
+
+```text
+Submodule homebrew d91e075a8..0c52904d5:
+  > v1.4.0
+```
+
+Downloading the release asset back from GitHub produced the same SHA:
+
+```text
+efb72712b962c77605df9ee2b67cfda2e116fd39cb863588b62df1b1857ea260  termsurf-1.4.0-aarch64-apple-darwin.tar.gz
+```
+
+Final hygiene passed:
+
+```bash
+prettier --check issues/0838-deploy-next-homebrew-version/README.md \
+  issues/0838-deploy-next-homebrew-version/07-publish-release-1-4-0.md
+git diff --check
+git -C homebrew status --short
+```
+
+Before result documentation, `git status --short` showed only the expected
+parent submodule pointer update:
+
+```text
+ M homebrew
+```
+
+The completion reviewer returned `VERDICT: APPROVED` with no findings. The
+reviewer independently verified the GitHub release, asset digest, local tarball
+SHA, Homebrew cask SHA, pushed tap commit, parent submodule diff, README status,
+and that the result commit had not yet been made.
+
+## Conclusion
+
+Stage 7 is complete. GitHub Release `v1.4.0` exists, its uploaded asset SHA
+matches the local tarball and cask SHA, and the Homebrew tap is pushed to commit
+`0c52904`.
+
+The next experiment should verify installing or upgrading TermSurf through
+Homebrew and confirm the installed WebTUI top controls plus installed Surfari
+launch via `web --browser surfari` without `TERMSURF_SURFARI_PATH`.
