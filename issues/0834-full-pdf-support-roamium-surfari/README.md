@@ -152,6 +152,8 @@ Each feature row should ultimately record:
   — **Pass**
 - [Experiment 16: Prove native dialog watcher preflight](16-prove-native-dialog-watcher-preflight.md)
   — **Partial**
+- [Experiment 17: Prove native dialog cancellation](17-prove-native-dialog-cancellation.md)
+  — **Designed**
 
 ## Roamium Phase
 
