@@ -184,6 +184,8 @@ Each feature row should ultimately record:
   — **Pass**
 - [Experiment 32: Prove Roamium PDF context-menu safety](32-prove-roamium-pdf-context-menu-safety.md)
   — **Pass**
+- [Experiment 33: Add Roamium advanced PDF regression guard](33-add-roamium-advanced-pdf-regression-guard.md)
+  — **Designed**
 
 ## Roamium Phase
 
