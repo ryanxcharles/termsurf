@@ -225,3 +225,135 @@ Fixes:
 Final verdict after re-review: **Approved**.
 
 The re-review found no findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented a compact Roamium PDF context-menu safety classifier in the advanced
+PDF harness.
+
+Changes:
+
+- `scripts/test-issue-834-pdf-advanced.py` now runs a Swift Accessibility
+  targeted-menu preflight for the Roamium process when `--probe context-menu` is
+  selected.
+- The context-menu path records a compact `context_menu` object with:
+  - `classification`;
+  - `watcher_preflight`;
+  - `pdf_load_proof`;
+  - `right_click`;
+  - `native_menu`;
+  - `cleanup`;
+  - Chromium PDF context-menu source-audit evidence.
+- The harness only permits the product right-click path when watcher readiness
+  is proven. In the current run readiness was not proven, so no PDF right-click
+  was sent.
+
+Verification run:
+
+```bash
+rm -rf logs/issue-834-exp32-context-menu
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp32-context-menu \
+  --probe context-menu
+
+rm -rf logs/issue-834-exp32-annotations-smoke
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp32-annotations-smoke \
+  --probe annotations
+
+rm -rf logs/issue-834-exp32-accessibility-smoke
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp32-accessibility-smoke \
+  --probe accessibility-searchify
+
+rm -rf logs/issue-834-exp32-forms-smoke
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp32-forms-smoke \
+  --probe forms
+
+rm -rf scripts/__pycache__
+node --check scripts/probe-pdf-advanced.mjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-pdf-advanced.py
+rm -rf scripts/__pycache__
+git diff --check
+git -C chromium/src diff --check
+```
+
+Final context-menu evidence:
+
+- `logs/issue-834-exp32-context-menu/pdf-advanced-summary.json` recorded
+  `probe_status = "ok"` and
+  `first_failing_hop = "context-menu-native-watcher-missing"`.
+- `context_menu.pdf_load_proof.status = "pass"` with all checks true:
+  `valid.pdf` loaded, file name and original URL matched, and plugin/toolbar
+  rectangles were non-zero.
+- `context_menu.watcher_preflight` recorded:
+  - mechanism: `swift-accessibility-targeted-menu-scan`;
+  - target pid: the Roamium process id from the run;
+  - `trusted = true`;
+  - `observed_menu = false`;
+  - `ready = false`;
+  - reason: `targeted-native-menu-not-observed`.
+- Since the watcher was not ready:
+  - `context_menu.right_click.sent = false`;
+  - `protocol_mouse_messages_sent = 0`;
+  - `roamium_mouse_event_line = false`;
+  - `context_menu.native_menu.observed = false`;
+  - `context_menu.cleanup.menu_gone = true` with reason `no-native-menu-opened`.
+- Source-audit paths for Chromium PDF context-menu hooks existed:
+  `pdf_document_helper.h`, `pdf_document_helper.cc`, and `gesture_detector.ts`.
+
+Shared-harness sanity:
+
+- `logs/issue-834-exp32-annotations-smoke/pdf-advanced-summary.json` recorded
+  `first_failing_hop = "no-failure-observed"`,
+  `annotation_rendering.status = "pass"`, and `probe_status = "ok"`.
+- `logs/issue-834-exp32-accessibility-smoke/pdf-advanced-summary.json` recorded
+  `first_failing_hop = "accessibility-searchify-disabled-by-flags"`,
+  `accessibility_searchify.classification = "accessibility-searchify-disabled-by-flags"`,
+  and `probe_status = "ok"`.
+- `logs/issue-834-exp32-forms-smoke/pdf-advanced-summary.json` recorded the
+  prior expected classification, `form-value-observable-missing`, with
+  `probe_status = "ok"` and `roamium_mouse_event_line = true`.
+
+## Conclusion
+
+Roamium PDF context-menu automation is now safely classified. The current VM has
+Accessibility trust for the targeted watcher, but the watcher did not observe a
+targeted native menu surface before the PDF right-click. The harness therefore
+sent no right-click into the PDF plugin and left no native menu open.
+
+This is a safety pass, not a claim that PDF context-menu product behavior is
+proven. It closes the unsafe gap from Experiment 11 by making the safety gate
+explicit and machine-checkable. To prove product context-menu behavior later, a
+future experiment must first make a targeted watcher observe and dismiss the
+actual native menu, then enable the right-click path.
+
+With forms, annotations, accessibility/searchify, native print, and context-menu
+safety now classified for Roamium, the next Issue 834 experiment should either
+add the remaining Roamium advanced guards to the regression runner or begin the
+Surfari/WebKit PDF audit phase.
+
+## Completion Review
+
+An external Codex review checked the completed implementation and result.
+
+Verdict: **Approved**.
+
+The review found no findings. It specifically confirmed that the two prior
+completion-review findings were fixed:
+
+- watcher readiness now requires `trusted`, `observed_menu`, and
+  `dismissal_proven`, with `dismissal_proven` explicitly false in the current
+  preflight, so broad/static menu observation cannot unlock the right-click
+  path;
+- the gated success path now exists, sends the right-click only after watcher
+  readiness and PDF load proof, and wraps native-menu probing in a cleanup path.
+
+The review also confirmed that recording Experiment 32 as **Pass** is acceptable
+as a safety classification because the docs do not claim product context-menu
+support and the logs prove no PDF right-click was sent when the watcher was not
+ready.

@@ -14,6 +14,7 @@ import socketserver
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import zlib
@@ -36,6 +37,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ROAMIUM = ROOT / "chromium/src/out/Default/roamium"
 BITCOIN_PDF = ROOT / "test-html/public/bitcoin.pdf"
 ADVANCED_PROBE = ROOT / "scripts/probe-pdf-advanced.mjs"
+CGEVENT_INJECT = ROOT / "scripts/ghostty-app/inject.swift"
 DEVTOOLS_RE = re.compile(r"DevTools listening on ws://127\.0\.0\.1:(\d+)/")
 
 
@@ -182,6 +184,34 @@ def run_checked(cmd: list[str], log_path: pathlib.Path) -> dict[str, Any]:
         "stdout": proc.stdout,
         "stderr": proc.stderr,
     }
+
+
+def run_cmd(cmd: list[str], timeout: float) -> dict[str, Any]:
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "cmd": cmd,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "timed_out": False,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "cmd": cmd,
+            "returncode": None,
+            "stdout": exc.stdout or "",
+            "stderr": exc.stderr or "",
+            "timed_out": True,
+        }
 
 
 def write_minimal_pdf(path: pathlib.Path, title: str) -> None:
@@ -859,6 +889,189 @@ def accessibility_searchify_state(summary: dict[str, Any] | None) -> dict[str, A
     }
 
 
+def swift_ax_menu_preflight(log_dir: pathlib.Path, pid: int, timeout: float) -> dict[str, Any]:
+    source = r'''
+import ApplicationServices
+import Foundation
+
+let pid = pid_t(Int(CommandLine.arguments[1])!)
+let timeout = Double(CommandLine.arguments[2])!
+let deadline = Date().addingTimeInterval(timeout)
+let app = AXUIElementCreateApplication(pid)
+let trusted = AXIsProcessTrusted()
+
+func stringAttr(_ element: AXUIElement, _ attr: String) -> String {
+    var value: AnyObject?
+    let err = AXUIElementCopyAttributeValue(element, attr as CFString, &value)
+    if err != .success {
+        return ""
+    }
+    return (value as? String) ?? ""
+}
+
+func children(_ element: AXUIElement) -> [AXUIElement] {
+    var value: AnyObject?
+    let err = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
+    if err != .success {
+        return []
+    }
+    return (value as? [AXUIElement]) ?? []
+}
+
+func walk(_ element: AXUIElement, _ depth: Int, _ limit: Int, _ out: inout [[String: Any]]) {
+    if depth > limit || out.count > 80 {
+        return
+    }
+    let role = stringAttr(element, kAXRoleAttribute)
+    let title = stringAttr(element, kAXTitleAttribute)
+    if role.localizedCaseInsensitiveContains("menu") {
+        out.append(["role": role, "title": title, "depth": depth])
+    }
+    for child in children(element) {
+        walk(child, depth + 1, limit, &out)
+    }
+}
+
+var menus: [[String: Any]] = []
+var windowsCount = 0
+var lastError = ""
+
+while Date() < deadline {
+    var value: AnyObject?
+    let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+    if err != .success {
+        lastError = "\(err.rawValue)"
+    }
+    let windows = (value as? [AXUIElement]) ?? []
+    windowsCount = windows.count
+    for window in windows {
+        walk(window, 0, 8, &menus)
+    }
+    if !menus.isEmpty {
+        break
+    }
+    Thread.sleep(forTimeInterval: 0.2)
+}
+
+let result: [String: Any] = [
+    "trusted": trusted,
+    "targetPid": Int(pid),
+    "observedMenu": !menus.isEmpty,
+    "windowsCount": windowsCount,
+    "menus": menus,
+    "lastError": lastError
+]
+let data = try! JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+FileHandle.standardOutput.write(data)
+FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+'''
+    with tempfile.TemporaryDirectory(prefix="ts834-context-menu-") as tmp:
+        script = pathlib.Path(tmp) / "ax_menu_preflight.swift"
+        script.write_text(source, encoding="utf-8")
+        result = run_cmd(["swift", str(script), str(pid), str(timeout)], timeout + 5)
+    parsed: dict[str, Any] = {}
+    try:
+        parsed = json.loads(result["stdout"])
+    except json.JSONDecodeError:
+        parsed = {}
+    trusted = parsed.get("trusted") is True
+    observed = parsed.get("observedMenu") is True
+    dismissal_proven = False
+    reason = "ready" if trusted and observed and dismissal_proven else "targeted-native-menu-not-observed"
+    if not trusted:
+        reason = "accessibility-not-trusted"
+    elif observed and not dismissal_proven:
+        reason = "harmless-menu-dismissal-not-proven"
+    if result.get("timed_out"):
+        reason = "watcher-preflight-timeout"
+    elif result.get("returncode") not in (0, None) and not parsed:
+        reason = "watcher-preflight-error"
+    return {
+        "mechanism": "swift-accessibility-targeted-menu-scan",
+        "target_pid": pid,
+        "ready": trusted and observed and dismissal_proven,
+        "trusted": trusted,
+        "observed_menu": observed,
+        "dismissal_proven": dismissal_proven,
+        "reason": reason,
+        "result": result,
+        "parsed": parsed,
+    }
+
+
+def swift_escape_cleanup(timeout: float) -> dict[str, Any]:
+    if not CGEVENT_INJECT.exists():
+        return {
+            "mechanism": "swift-cgevent-escape",
+            "ran": False,
+            "reason": "inject-helper-missing",
+        }
+    result = run_cmd(["swift", str(CGEVENT_INJECT), "key", "53"], timeout)
+    return {
+        "mechanism": "swift-cgevent-escape",
+        "ran": True,
+        "result": result,
+        "sent": result.get("returncode") == 0 and not result.get("timed_out"),
+    }
+
+
+def context_menu_state(
+    summary: dict[str, Any] | None,
+    preflight: dict[str, Any],
+    right_click: dict[str, Any] | None = None,
+    native_menu: dict[str, Any] | None = None,
+    cleanup: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    load_proof = pdf_load_proof(summary or {}, "valid.pdf")
+    right_click = right_click or {
+        "sent": False,
+        "reason": "watcher-preflight-not-ready",
+    }
+    native_menu = native_menu or {
+        "observed": False,
+        "reason": "not-probed-without-ready-watcher",
+    }
+    cleanup = cleanup or {
+        "ran": False,
+        "menu_gone": True,
+        "reason": "no-native-menu-opened",
+    }
+    if not preflight.get("trusted"):
+        classification = "context-menu-permission-denied"
+    elif not preflight.get("ready"):
+        classification = "context-menu-native-watcher-missing"
+    elif load_proof.get("status") != "pass":
+        classification = load_proof.get("first_failing_hop") or "pdf-load-proof-missing"
+    elif right_click.get("sent") and not right_click.get("trace_seen"):
+        classification = "context-menu-right-click-not-routed"
+    elif right_click.get("sent") and not native_menu.get("observed"):
+        classification = "context-menu-native-menu-not-observed"
+    elif native_menu.get("observed") and not cleanup.get("menu_gone"):
+        classification = "context-menu-cleanup-failed"
+    elif right_click.get("sent") and native_menu.get("observed") and cleanup.get("menu_gone"):
+        classification = "no-failure-observed"
+    else:
+        classification = "context-menu-native-watcher-missing"
+    return {
+        "classification": classification,
+        "watcher_preflight": preflight,
+        "pdf_load_proof": load_proof,
+        "right_click": right_click,
+        "native_menu": native_menu,
+        "cleanup": cleanup,
+        "source_audit": {
+            "hooks": SOURCE_AUDIT["context_menu"],
+            "paths_exist": source_paths_exist(
+                [
+                    "components/pdf/browser/pdf_document_helper.h",
+                    "components/pdf/browser/pdf_document_helper.cc",
+                    "chrome/browser/resources/pdf/gesture_detector.ts",
+                ]
+            ),
+        },
+    }
+
+
 SOURCE_AUDIT = {
     "forms": [
         "chrome/browser/resources/pdf/pdf_internal_plugin_wrapper.ts relays formFocusChange and tracks isFormFieldFocused.",
@@ -955,7 +1168,8 @@ def classify(
         else:
             state.first_failing_hop = editing.get("status") or "annotation-editing-state-observable-missing"
     elif args.probe == "context-menu":
-        state.first_failing_hop = "context-menu-native-watcher-missing"
+        result = extra.get("context_menu") or {}
+        state.first_failing_hop = result.get("classification") or "context-menu-native-watcher-missing"
     elif args.probe == "accessibility-searchify":
         result = extra.get("accessibility_searchify") or {}
         load_proof = result.get("load_proof") or {}
@@ -1075,11 +1289,9 @@ def main() -> int:
                 send_key(conn, state, "down", ord(ch), ch)
                 send_key(conn, state, "up", ord(ch), "")
         elif args.probe == "context-menu":
-            extra["context_menu_watcher"] = {
-                "ready": False,
-                "right_click_sent": False,
-                "reason": "native menu watcher not available in this VM session",
-            }
+            extra["context_menu_preflight"] = swift_ax_menu_preflight(
+                log_dir, proc.pid, min(3.0, args.setup_timeout)
+            )
         state.devtools_port = wait_for_devtools_port(log_dir, args.setup_timeout)
         devtools_summary = None
         if state.devtools_port:
@@ -1154,7 +1366,76 @@ def main() -> int:
                     ),
                     "load_proof": load_proof,
                 }
+            elif args.probe == "context-menu" and devtools_summary:
+                preflight = extra.get("context_menu_preflight") or {}
+                load_proof = pdf_load_proof(devtools_summary, pathlib.Path(request_path).name)
+                right_click: dict[str, Any] = {
+                    "sent": False,
+                    "reason": "watcher-preflight-not-ready",
+                }
+                native_menu: dict[str, Any] = {
+                    "observed": False,
+                    "reason": "not-probed-without-ready-watcher",
+                }
+                cleanup: dict[str, Any] = {
+                    "ran": False,
+                    "menu_gone": True,
+                    "reason": "no-native-menu-opened",
+                }
+                if preflight.get("ready") and load_proof.get("status") == "pass":
+                    value = pdf_value(devtools_summary)
+                    rect = value.get("pluginRect") or {}
+                    x = float(rect.get("x", 0)) + float(rect.get("width", 0)) / 2
+                    y = float(rect.get("y", 0)) + float(rect.get("height", 0)) / 2
+                    cleanup = {
+                        "ran": False,
+                        "menu_gone": False,
+                        "reason": "cleanup-not-yet-run",
+                    }
+                    try:
+                        send_mouse(conn, state, "down", "right", x, y)
+                        send_mouse(conn, state, "up", "right", x, y)
+                        right_click = {
+                            "sent": True,
+                            "x": x,
+                            "y": y,
+                            "messages_sent": len(state.mouse_messages_sent),
+                        }
+                        time.sleep(0.5)
+                        native_menu = swift_ax_menu_preflight(log_dir, proc.pid, 2)
+                        native_menu["observed"] = native_menu.get("observed_menu") is True
+                    finally:
+                        cleanup_result = swift_escape_cleanup(5)
+                        disappearance = swift_ax_menu_preflight(log_dir, proc.pid, 1)
+                        cleanup = {
+                            "ran": True,
+                            "dismiss": cleanup_result,
+                            "post_cleanup_observation": disappearance,
+                            "menu_gone": disappearance.get("observed_menu") is not True,
+                        }
+                        if cleanup["menu_gone"]:
+                            cleanup["reason"] = "menu-not-observed-after-cleanup"
+                        else:
+                            cleanup["reason"] = "menu-still-observed-after-cleanup"
+                extra["context_menu_pending"] = {
+                    "devtools_summary": devtools_summary,
+                    "right_click": right_click,
+                    "native_menu": native_menu,
+                    "cleanup": cleanup,
+                }
         trace_flags(log_dir, state)
+        if args.probe == "context-menu" and devtools_summary:
+            pending = extra.pop("context_menu_pending", {})
+            right_click = pending.get("right_click") or None
+            if right_click and right_click.get("sent"):
+                right_click["trace_seen"] = state.roamium_mouse_event_line
+            extra["context_menu"] = context_menu_state(
+                devtools_summary,
+                extra.get("context_menu_preflight") or {},
+                right_click,
+                pending.get("native_menu"),
+                pending.get("cleanup"),
+            )
         extra["http_requests"] = AdvancedPdfHandler.requests
         classify(args, state, devtools_summary, fixtures, extra)
         write_summary(log_dir, args, state, extra)
