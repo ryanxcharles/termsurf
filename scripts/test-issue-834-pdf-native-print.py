@@ -630,7 +630,14 @@ def mechanism_coregraphics_click_cancel(log_dir: pathlib.Path, title: str, timeo
     }
 
 
-def swift_ax_press_cancel(log_dir: pathlib.Path, pid: int, title: str, timeout: float) -> dict[str, Any]:
+def swift_ax_press_cancel(
+    log_dir: pathlib.Path,
+    pid: int,
+    title: str,
+    timeout: float,
+    *,
+    require_sheet: bool = False,
+) -> dict[str, Any]:
     source = r'''
 import ApplicationServices
 import Foundation
@@ -638,6 +645,7 @@ import Foundation
 let pid = pid_t(Int(CommandLine.arguments[1]) ?? -1)
 let title = CommandLine.arguments[2]
 let deadline = Date().addingTimeInterval(Double(CommandLine.arguments[3]) ?? 5.0)
+let requireSheet = CommandLine.arguments.count > 4 && CommandLine.arguments[4] == "require-sheet"
 
 func stringAttr(_ element: AXUIElement, _ attr: String) -> String {
     var value: CFTypeRef?
@@ -653,15 +661,22 @@ func children(_ element: AXUIElement) -> [AXUIElement] {
     return (value as? [AXUIElement]) ?? []
 }
 
-func findCancel(_ element: AXUIElement) -> AXUIElement? {
+func isSheetLike(_ element: AXUIElement) -> Bool {
+    let role = stringAttr(element, kAXRoleAttribute)
+    let subrole = stringAttr(element, kAXSubroleAttribute)
+    return role == "AXSheet" || role == "AXDialog" || subrole == "AXDialog" || subrole == "AXSystemDialog"
+}
+
+func findCancel(_ element: AXUIElement, _ insideSheet: Bool) -> AXUIElement? {
     let role = stringAttr(element, kAXRoleAttribute)
     let elementTitle = stringAttr(element, kAXTitleAttribute)
     let description = stringAttr(element, kAXDescriptionAttribute)
-    if role == kAXButtonRole && (elementTitle == "Cancel" || description == "Cancel") {
+    let sheetScope = insideSheet || isSheetLike(element)
+    if role == kAXButtonRole && (elementTitle == "Cancel" || description == "Cancel") && (!requireSheet || sheetScope) {
         return element
     }
     for child in children(element) {
-        if let match = findCancel(child) { return match }
+        if let match = findCancel(child, sheetScope) { return match }
     }
     return nil
 }
@@ -679,9 +694,9 @@ while Date() < deadline {
     let windows = (value as? [AXUIElement]) ?? []
     for window in windows {
         let windowTitle = stringAttr(window, kAXTitleAttribute)
-        if windowTitle.contains(title), let button = findCancel(window) {
+        if (title.isEmpty || windowTitle.contains(title)), let button = findCancel(window, false) {
             let pressErr = AXUIElementPerformAction(button, kAXPressAction as CFString)
-            print("{\"trusted\":\(trusted),\"pressed\":\(pressErr == .success),\"pressError\":\(pressErr.rawValue),\"windowTitle\":\"\(windowTitle)\"}")
+            print("{\"trusted\":\(trusted),\"pressed\":\(pressErr == .success),\"pressError\":\(pressErr.rawValue),\"windowTitle\":\"\(windowTitle)\",\"requireSheet\":\(requireSheet)}")
             exit(pressErr == .success ? 0 : 1)
         }
     }
@@ -694,13 +709,66 @@ exit(1)
     with tempfile.TemporaryDirectory(prefix="ts834-axcancel-") as tmp:
         script = pathlib.Path(tmp) / "press_cancel.swift"
         script.write_text(source, encoding="utf-8")
-        result = run_cmd(["swift", str(script), str(pid), title, str(timeout)], timeout=timeout + 3)
+        cmd = ["swift", str(script), str(pid), title, str(timeout)]
+        if require_sheet:
+            cmd.append("require-sheet")
+        result = run_cmd(cmd, timeout=timeout + 3)
     parsed: dict[str, Any] = {"pressed": False}
     try:
         parsed = json.loads(result.get("stdout") or "{}")
     except json.JSONDecodeError:
         parsed = {"pressed": False, "parse_error": result.get("stdout")}
     return {"mechanism": "swift-accessibility-press-cancel", "result": result, **parsed}
+
+
+def swift_ax_press_cancel_in_process(log_dir: pathlib.Path, pid: int, timeout: float) -> dict[str, Any]:
+    result = swift_ax_press_cancel(
+        log_dir,
+        pid,
+        "",
+        timeout,
+        require_sheet=True,
+    )
+    return {
+        **result,
+        "mechanism": "swift-accessibility-press-cancel-in-process",
+        "target_pid": pid,
+    }
+
+
+def wait_for_parent_print_sheet_trace(
+    native_trace_file: pathlib.Path,
+    timeout: float,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last_error: str | None = None
+    while time.monotonic() < deadline:
+        try:
+            text = native_trace_file.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            last_error = "trace-file-missing"
+            text = ""
+        lines = text.splitlines()
+        for line in lines:
+            if (
+                "mac-ask-user-parent-window-sheet" in line
+                and "attached-sheet ptr=" in line
+                and "class=NSPanel" in line
+                and "visible=true" in line
+                and "sheet=true" in line
+                and "title=Print" in line
+            ):
+                return {
+                    "observed": True,
+                    "mechanism": "native-print-trace-parent-sheet",
+                    "line": line,
+                }
+        time.sleep(0.2)
+    return {
+        "observed": False,
+        "mechanism": "native-print-trace-parent-sheet",
+        "error": last_error or "not-found",
+    }
 
 
 def mechanism_accessibility_press_cancel(log_dir: pathlib.Path, title: str, timeout: float) -> dict[str, Any]:
@@ -829,11 +897,23 @@ def preflight_dialog(timeout: float) -> dict[str, Any]:
         return preflight_result_from_mechanisms(pathlib.Path(tmp), timeout)
 
 
-def watch_and_cancel_print_dialog(timeout: float) -> dict[str, Any]:
+def watch_and_cancel_print_dialog(
+    timeout: float,
+    target_pid: int | None = None,
+    native_trace_file: pathlib.Path | None = None,
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="ts834-print-watch-") as tmp:
         log_dir = pathlib.Path(tmp)
         observed = swift_cgwindow_observe_any(log_dir, ["Print", "Printer"], timeout)
         cancel = {"pressed": False, "result": {"returncode": 1, "stdout": "", "stderr": ""}}
+        sheet_cancel: dict[str, Any] = {
+            "pressed": False,
+            "skipped": "missing-target-pid",
+        }
+        sheet_evidence: dict[str, Any] = {
+            "observed": False,
+            "skipped": "coregraphics-observed-dialog",
+        }
         if observed.get("observed"):
             cancel = swift_ax_press_cancel(
                 log_dir,
@@ -842,15 +922,40 @@ def watch_and_cancel_print_dialog(timeout: float) -> dict[str, Any]:
                 timeout,
             )
             time.sleep(0.5)
+        elif target_pid is not None:
+            if native_trace_file is None:
+                sheet_evidence = {"observed": False, "skipped": "missing-native-trace-file"}
+            else:
+                sheet_evidence = wait_for_parent_print_sheet_trace(native_trace_file, timeout)
+            if sheet_evidence.get("observed"):
+                sheet_cancel = swift_ax_press_cancel_in_process(log_dir, target_pid, timeout)
+                time.sleep(0.5)
+            else:
+                sheet_cancel = {
+                    "pressed": False,
+                    "skipped": "parent-sheet-trace-not-observed",
+                }
         disappearance = swift_cgwindow_observe_any(log_dir, ["Print", "Printer"], 1)
+    active_cancel = cancel if observed.get("observed") else sheet_cancel
     return {
-        "mechanism": "coregraphics-print-window-accessibility-press-cancel",
+        "mechanism": (
+            "coregraphics-print-window-accessibility-press-cancel"
+            if observed.get("observed")
+            else "roamium-process-accessibility-press-cancel"
+        ),
+        "target_pid": target_pid,
         "observation": observed,
         "disappearance": disappearance,
-        "result": cancel.get("result"),
+        "result": active_cancel.get("result"),
         "cancel": cancel,
+        "sheet_cancel": sheet_cancel,
+        "sheet_evidence": sheet_evidence,
         "dialog_observed": bool(observed.get("observed")),
-        "cancel_sent": bool(observed.get("observed") and cancel.get("pressed")),
+        "sheet_cancel_sent": bool(sheet_cancel.get("pressed")),
+        "cancel_sent": bool(
+            (observed.get("observed") and cancel.get("pressed"))
+            or sheet_cancel.get("pressed")
+        ),
         "disappeared": bool(not disappearance.get("observed")),
     }
 
@@ -1010,7 +1115,9 @@ def classify(
                 and "title=Print" in line
                 for line in native_lines
             )
-            if parent_sheet_visible and print_watch and not print_watch.get("dialog_observed"):
+            if parent_sheet_visible and print_watch and print_watch.get("sheet_cancel_sent"):
+                state.first_failing_hop = "mac-print-parent-window-sheet-cancel-callback-missing"
+            elif parent_sheet_visible and print_watch and not print_watch.get("dialog_observed"):
                 state.first_failing_hop = "mac-print-parent-window-sheet-visible-watcher-missed"
             elif parent_sheet_visible:
                 state.first_failing_hop = "mac-print-parent-window-sheet-visible-response-missing"
@@ -1035,7 +1142,7 @@ def classify(
             or has_native_event("ts-scripted-print-callback-result-success")
         ):
             state.first_failing_hop = "mac-print-dialog-ok-safety-failure"
-        elif print_watch and print_watch.get("dialog_observed") and print_watch.get("cancel_sent"):
+        elif print_watch and print_watch.get("cancel_sent"):
             state.first_failing_hop = "native-print-dialog-seen-cancelled"
         elif print_watch and print_watch.get("dialog_observed"):
             state.first_failing_hop = "native-print-dialog-seen-cancel-failed"
@@ -1213,7 +1320,11 @@ def main() -> int:
 
             def run_watcher() -> None:
                 nonlocal watcher_result
-                watcher_result = watch_and_cancel_print_dialog(args.watch_timeout)
+                watcher_result = watch_and_cancel_print_dialog(
+                    args.watch_timeout,
+                    proc.pid,
+                    log_dir / "roamium.stderr",
+                )
 
             watcher_thread = threading.Thread(target=run_watcher)
             watcher_thread.start()

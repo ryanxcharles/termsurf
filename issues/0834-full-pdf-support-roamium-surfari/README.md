@@ -175,7 +175,7 @@ Each feature row should ultimately record:
 - [Experiment 27: Inspect parent print sheet visibility](27-inspect-parent-print-sheet-visibility.md)
   — **Partial**
 - [Experiment 28: Cancel parent print sheet through Accessibility](28-cancel-parent-print-sheet-accessibility.md)
-  — **Designed**
+  — **Pass**
 
 ## Roamium Phase
 
