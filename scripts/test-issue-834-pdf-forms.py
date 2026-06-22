@@ -37,6 +37,7 @@ ROAMIUM = ROOT / "chromium/src/out/Default/roamium"
 FORMS_PROBE = ROOT / "scripts/probe-pdf-forms.mjs"
 DEVTOOLS_RE = re.compile(r"DevTools listening on ws://127\.0\.0\.1:(\d+)/")
 TEXT_VALUE = "TermSurf834"
+VKEY_ESCAPE = 27
 PAGE_WIDTH = 612.0
 PAGE_HEIGHT = 792.0
 FIELD_RECTS = {
@@ -221,11 +222,38 @@ def prepare_fixture(log_dir: pathlib.Path) -> dict[str, Any]:
         "page": {"width": PAGE_WIDTH, "height": PAGE_HEIGHT},
         "fields": FIELD_RECTS,
     }
+    qpdf = shutil_which("qpdf")
+    if qpdf:
+        proc = subprocess.run(
+            [qpdf, "--check", str(fixture_path)],
+            cwd=str(ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        metadata["qpdf_check"] = {
+            "cmd": [qpdf, "--check", str(fixture_path)],
+            "returncode": proc.returncode,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "ok": proc.returncode == 0,
+        }
+    else:
+        metadata["qpdf_check"] = {"ok": None, "reason": "qpdf-not-found"}
     (log_dir / "fixture.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return metadata
+
+
+def shutil_which(name: str) -> str | None:
+    for part in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = pathlib.Path(part) / name
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -363,6 +391,11 @@ def send_text(conn: socket.socket, state: HarnessState, text: str) -> None:
         keycode = ord(ch.upper()) if ch.isalpha() else ord(ch)
         send_key(conn, state, "down", keycode, ch)
         send_key(conn, state, "up", keycode, "")
+
+
+def send_escape(conn: socket.socket, state: HarnessState) -> None:
+    send_key(conn, state, "down", VKEY_ESCAPE, "")
+    send_key(conn, state, "up", VKEY_ESCAPE, "")
 
 
 def run_snapshot(
@@ -584,6 +617,34 @@ def localized(diff: dict[str, Any]) -> bool:
     )
 
 
+def scenario_needs_text(scenario: str) -> bool:
+    return scenario in (
+        "text",
+        "text-then-checkbox",
+        "checkbox-then-text",
+        "text-bg-checkbox",
+        "text-escape-checkbox",
+        "text-double-checkbox",
+        "checkbox-bg-text",
+        "checkbox-escape-text",
+        "checkbox-double-text",
+    )
+
+
+def scenario_needs_checkbox(scenario: str) -> bool:
+    return scenario in (
+        "checkbox",
+        "text-then-checkbox",
+        "checkbox-then-text",
+        "text-bg-checkbox",
+        "text-escape-checkbox",
+        "text-double-checkbox",
+        "checkbox-bg-text",
+        "checkbox-escape-text",
+        "checkbox-double-text",
+    )
+
+
 def classify(
     scenario: str,
     state: HarnessState,
@@ -604,15 +665,15 @@ def classify(
         state.first_failing_hop = "pdf-load-failed"
     elif not geometry.get("ok"):
         state.first_failing_hop = "form-geometry-observable-missing"
-    elif not state.mouse_messages_sent or (scenario in ("text", "text-then-checkbox", "checkbox-then-text") and not state.key_messages_sent):
+    elif not state.mouse_messages_sent or (scenario_needs_text(scenario) and not state.key_messages_sent):
         state.first_failing_hop = "protocol-input-not-sent"
-    elif not state.roamium_mouse_event_line or (scenario in ("text", "text-then-checkbox", "checkbox-then-text") and not state.roamium_key_event_line):
+    elif not state.roamium_mouse_event_line or (scenario_needs_text(scenario) and not state.roamium_key_event_line):
         state.first_failing_hop = "roamium-input-trace-missing"
-    elif scenario in ("text", "text-then-checkbox", "checkbox-then-text") and not localized(text_diff):
+    elif scenario_needs_text(scenario) and not localized(text_diff):
         state.first_failing_hop = "form-text-value-missing"
-    elif scenario in ("checkbox", "text-then-checkbox", "checkbox-then-text") and not localized(checkbox_diff):
+    elif scenario_needs_checkbox(scenario) and not localized(checkbox_diff):
         state.first_failing_hop = "form-checkbox-state-missing"
-    elif scenario not in ("text", "checkbox", "text-then-checkbox", "checkbox-then-text"):
+    elif not scenario_needs_text(scenario) and not scenario_needs_checkbox(scenario):
         state.first_failing_hop = "automation-gap"
     else:
         state.first_failing_hop = "no-failure-observed"
@@ -647,7 +708,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-dir", required=True)
     parser.add_argument(
         "--scenario",
-        choices=["combined", "text", "checkbox", "text-then-checkbox", "checkbox-then-text"],
+        choices=[
+            "combined",
+            "text",
+            "checkbox",
+            "text-then-checkbox",
+            "checkbox-then-text",
+            "text-bg-checkbox",
+            "text-escape-checkbox",
+            "text-double-checkbox",
+            "checkbox-bg-text",
+            "checkbox-escape-text",
+            "checkbox-double-text",
+        ],
         default="combined",
     )
     parser.add_argument("--width", type=int, default=1200)
@@ -664,12 +737,29 @@ def run_combined(args: argparse.Namespace) -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     runs: dict[str, dict[str, Any]] = {}
     commands: dict[str, dict[str, Any]] = {}
-    scenarios = ("text", "checkbox", "text-then-checkbox", "checkbox-then-text")
+    scenarios = (
+        "text",
+        "checkbox",
+        "text-then-checkbox",
+        "checkbox-then-text",
+        "text-bg-checkbox",
+        "text-escape-checkbox",
+        "text-double-checkbox",
+        "checkbox-bg-text",
+        "checkbox-escape-text",
+        "checkbox-double-text",
+    )
     scenario_dirs = {
         "text": "text",
         "checkbox": "checkbox",
         "text-then-checkbox": "ttc",
         "checkbox-then-text": "ctt",
+        "text-bg-checkbox": "tbc",
+        "text-escape-checkbox": "tec",
+        "text-double-checkbox": "tdc",
+        "checkbox-bg-text": "cbt",
+        "checkbox-escape-text": "cet",
+        "checkbox-double-text": "cdt",
     }
     for scenario in scenarios:
         scenario_dir = log_dir / scenario_dirs[scenario]
@@ -714,12 +804,26 @@ def run_combined(args: argparse.Namespace) -> int:
         for name in ("text-then-checkbox", "checkbox-then-text")
         if runs.get(name, {}).get("first_failing_hop") != "no-failure-observed"
     }
+    reset_variants = (
+        "text-bg-checkbox",
+        "text-escape-checkbox",
+        "text-double-checkbox",
+        "checkbox-bg-text",
+        "checkbox-escape-text",
+        "checkbox-double-text",
+    )
+    focus_reset_results = {name: runs.get(name, {}).get("first_failing_hop") for name in reset_variants}
+    focus_reset_successes = [
+        name for name, result in focus_reset_results.items() if result == "no-failure-observed"
+    ]
     if text_ok and checkbox_ok and not sequence_failures:
         first_failing_hop = "no-failure-observed"
     elif not text_ok:
         first_failing_hop = runs.get("text", {}).get("first_failing_hop") or "text-scenario-missing"
     elif not checkbox_ok:
         first_failing_hop = runs.get("checkbox", {}).get("first_failing_hop") or "checkbox-scenario-missing"
+    elif focus_reset_successes:
+        first_failing_hop = "form-sequence-workaround-required"
     else:
         first_failing_hop = next(iter(sequence_failures.values()), "sequence-scenario-missing")
     data = {
@@ -730,6 +834,9 @@ def run_combined(args: argparse.Namespace) -> int:
         "text_then_checkbox_scenario": runs.get("text-then-checkbox"),
         "checkbox_then_text_scenario": runs.get("checkbox-then-text"),
         "sequence_failures": sequence_failures,
+        "focus_reset_results": focus_reset_results,
+        "focus_reset_successes": focus_reset_successes,
+        "focus_reset_scenarios": {name: runs.get(name) for name in reset_variants},
         "scenario_commands": commands,
         "protocol_mouse_messages_sent": sum(
             int((runs.get(name) or {}).get("protocol_mouse_messages_sent") or 0)
@@ -813,6 +920,7 @@ def main() -> int:
         before = None
         after_text = None
         after_checkbox = None
+        after_reset = None
         geometry: dict[str, Any] = {"ok": False, "reason": "not-run"}
         text_diff: dict[str, Any] = {"ok": False, "reason": "not-run"}
         checkbox_diff: dict[str, Any] = {"ok": False, "reason": "not-run"}
@@ -829,8 +937,21 @@ def main() -> int:
                 geometry = compute_field_geometry(before, fixture)
                 extra["geometry"] = geometry
                 if geometry.get("ok"):
-                    if args.scenario in ("checkbox", "checkbox-then-text"):
-                        checkbox_click = geometry["fields"]["agree"]["click"]
+                    name_click = geometry["fields"]["name"]["click"]
+                    checkbox_click = geometry["fields"]["agree"]["click"]
+                    page_rect = geometry["page_rect"]
+                    background_click = {
+                        "x": page_rect["x"] + page_rect["width"] * 0.72,
+                        "y": page_rect["y"] + page_rect["height"] * 0.62,
+                    }
+
+                    if args.scenario in (
+                        "checkbox",
+                        "checkbox-then-text",
+                        "checkbox-bg-text",
+                        "checkbox-escape-text",
+                        "checkbox-double-text",
+                    ):
                         send_click(conn, state, checkbox_click["x"], checkbox_click["y"], "agree")
                         time.sleep(0.5)
                         after_checkbox = run_snapshot(
@@ -841,9 +962,42 @@ def main() -> int:
                             args.capture_timeout_seconds,
                             args.settle_seconds,
                         )
-                    if args.scenario in ("text", "text-then-checkbox", "checkbox-then-text"):
-                        name_click = geometry["fields"]["name"]["click"]
+                        if args.scenario == "checkbox-bg-text":
+                            send_click(conn, state, background_click["x"], background_click["y"], "background")
+                            time.sleep(0.2)
+                            after_reset = run_snapshot(
+                                log_dir,
+                                state.devtools_port,
+                                "form.pdf",
+                                "after-reset",
+                                args.capture_timeout_seconds,
+                                args.settle_seconds,
+                            )
+                        elif args.scenario == "checkbox-escape-text":
+                            send_escape(conn, state)
+                            time.sleep(0.2)
+                            after_reset = run_snapshot(
+                                log_dir,
+                                state.devtools_port,
+                                "form.pdf",
+                                "after-reset",
+                                args.capture_timeout_seconds,
+                                args.settle_seconds,
+                            )
+                    if args.scenario in (
+                        "text",
+                        "text-then-checkbox",
+                        "checkbox-then-text",
+                        "text-bg-checkbox",
+                        "text-escape-checkbox",
+                        "text-double-checkbox",
+                        "checkbox-bg-text",
+                        "checkbox-escape-text",
+                        "checkbox-double-text",
+                    ):
                         send_click(conn, state, name_click["x"], name_click["y"], "name")
+                        if args.scenario == "checkbox-double-text":
+                            send_click(conn, state, name_click["x"], name_click["y"], "name-double")
                         send_text(conn, state, TEXT_VALUE)
                         time.sleep(0.5)
                         after_text = run_snapshot(
@@ -854,9 +1008,37 @@ def main() -> int:
                             args.capture_timeout_seconds,
                             args.settle_seconds,
                         )
-                    if args.scenario == "text-then-checkbox":
-                        checkbox_click = geometry["fields"]["agree"]["click"]
+                    if args.scenario in (
+                        "text-then-checkbox",
+                        "text-bg-checkbox",
+                        "text-escape-checkbox",
+                        "text-double-checkbox",
+                    ):
+                        if args.scenario == "text-bg-checkbox":
+                            send_click(conn, state, background_click["x"], background_click["y"], "background")
+                            time.sleep(0.2)
+                            after_reset = run_snapshot(
+                                log_dir,
+                                state.devtools_port,
+                                "form.pdf",
+                                "after-reset",
+                                args.capture_timeout_seconds,
+                                args.settle_seconds,
+                            )
+                        elif args.scenario == "text-escape-checkbox":
+                            send_escape(conn, state)
+                            time.sleep(0.2)
+                            after_reset = run_snapshot(
+                                log_dir,
+                                state.devtools_port,
+                                "form.pdf",
+                                "after-reset",
+                                args.capture_timeout_seconds,
+                                args.settle_seconds,
+                            )
                         send_click(conn, state, checkbox_click["x"], checkbox_click["y"], "agree")
+                        if args.scenario == "text-double-checkbox":
+                            send_click(conn, state, checkbox_click["x"], checkbox_click["y"], "agree-double")
                         time.sleep(0.5)
                         after_checkbox = run_snapshot(
                             log_dir,
@@ -868,7 +1050,11 @@ def main() -> int:
                         )
                     dpr = float((pdf_value(before).get("viewport") or {}).get("devicePixelRatio") or 1)
                     if after_text:
-                        text_before = after_checkbox if args.scenario == "checkbox-then-text" else before
+                        text_before = before
+                        if args.scenario in ("checkbox-then-text", "checkbox-double-text"):
+                            text_before = after_checkbox
+                        elif args.scenario in ("checkbox-bg-text", "checkbox-escape-text"):
+                            text_before = after_reset or after_checkbox
                         text_diff = screenshot_diff(
                             log_dir,
                             text_before,
@@ -877,7 +1063,11 @@ def main() -> int:
                             dpr,
                         )
                     if after_checkbox:
-                        checkbox_before = after_text if args.scenario == "text-then-checkbox" else before
+                        checkbox_before = before
+                        if args.scenario in ("text-then-checkbox", "text-double-checkbox"):
+                            checkbox_before = after_text
+                        elif args.scenario in ("text-bg-checkbox", "text-escape-checkbox"):
+                            checkbox_before = after_reset or after_text
                         checkbox_diff = screenshot_diff(
                             log_dir,
                             checkbox_before,
@@ -891,6 +1081,7 @@ def main() -> int:
                 "before": before,
                 "after_text": after_text,
                 "after_checkbox": after_checkbox,
+                "after_reset": after_reset,
                 "text_diff": text_diff,
                 "checkbox_diff": checkbox_diff,
                 "http_requests": FormPdfHandler.requests,

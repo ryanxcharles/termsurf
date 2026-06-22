@@ -173,3 +173,110 @@ Required finding:
   review.
 
 Re-review verdict: **Approved**.
+
+## Result
+
+**Result:** Partial
+
+The harness now validates the generated fixture and runs the individual
+controls, the two direct same-document sequences, and six focus-reset variants
+in one aggregate command:
+
+```bash
+python3 scripts/test-issue-834-pdf-forms.py \
+  --log-dir logs/issue-834-exp13-roamium-pdf-form-sequences
+```
+
+The final summary is:
+
+`logs/issue-834-exp13-roamium-pdf-form-sequences/pdf-forms-summary.json`
+
+It records:
+
+- `first_failing_hop = "form-sequence-workaround-required"`;
+- `text_scenario.first_failing_hop = "no-failure-observed"`;
+- `checkbox_scenario.first_failing_hop = "no-failure-observed"`;
+- direct `text-then-checkbox = "form-checkbox-state-missing"`;
+- direct `checkbox-then-text = "form-text-value-missing"`;
+- successful focus-reset variants:
+  - `text-bg-checkbox`;
+  - `text-escape-checkbox`;
+  - `checkbox-bg-text`.
+
+Fixture validation is recorded in each child summary. `qpdf --check` passes for
+the generated AcroForm fixture:
+
+```text
+PDF Version: 1.7
+File is not encrypted
+File is not linearized
+No syntax or stream encoding errors found; the file may still contain
+errors that qpdf cannot detect
+```
+
+The key scenario evidence is:
+
+- individual text scenario: `5112` changed pixels inside the text-field region
+  and `0` outside;
+- individual checkbox scenario: `2655` changed pixels inside the checkbox region
+  and `0` outside;
+- direct `text-then-checkbox`: text still changes, but checkbox has `0` changed
+  pixels inside the checkbox region;
+- direct `checkbox-then-text`: checkbox still changes, but text has `0` changed
+  pixels inside the text-field region;
+- `text-bg-checkbox`: both text and checkbox regions change after an
+  intermediate page-background click;
+- `text-escape-checkbox`: both text and checkbox regions change after
+  intermediate Escape;
+- `checkbox-bg-text`: both checkbox and text regions change after an
+  intermediate page-background click;
+- `checkbox-escape-text` still fails text entry;
+- double-clicking the second control does not fix either direction.
+
+No product source changed. The first failing layer is classified as focus
+transfer behavior rather than fixture generation or basic input routing: the
+fixture is syntactically valid, individual controls work, TermSurf/Roamium input
+traces are present, and realistic reset actions can restore the next control in
+some directions.
+
+Verification commands:
+
+```bash
+node --check scripts/probe-pdf-forms.mjs
+
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-pdf-forms.py
+
+python3 scripts/test-issue-834-pdf-forms.py \
+  --log-dir logs/issue-834-exp13-roamium-pdf-form-sequences
+
+git diff --check
+```
+
+## Completion Review
+
+Initial verdict: **Changes Required**.
+
+Required finding:
+
+- `scripts/__pycache__/` was present after the reviewer's `py_compile` check.
+  The generated cache directory was removed before commit.
+
+Re-review verdict: **Approved**.
+
+The reviewer verified that `scripts/__pycache__/` was gone and that no new
+required finding was introduced by the cleanup.
+
+## Conclusion
+
+Experiment 13 narrows the Roamium PDF forms gap. Basic form input is not broken:
+individual text and checkbox controls work, and the generated fixture passes
+`qpdf --check`. The remaining issue is same-document focus transfer between PDF
+form controls. Direct control-to-control switching fails in both directions, but
+clicking the page background between controls succeeds in both directions, and
+Escape succeeds for text-to-checkbox.
+
+The next experiment should decide whether TermSurf should send or emulate a
+focus-reset behavior when moving between PDF form controls, or whether the
+correct product behavior is to document this as Chromium PDF viewer focus
+semantics and keep a regression guard for the working reset paths.
