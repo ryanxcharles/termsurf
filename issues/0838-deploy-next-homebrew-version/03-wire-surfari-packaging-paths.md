@@ -203,3 +203,75 @@ Re-review returned **Approved** with no required findings. The reviewer
 confirmed that the revised design now proves release-mode Surfari discovery,
 concretely checks package-only release and cask staging, makes launch-discovery
 docs required, and includes markdown hygiene checks.
+
+## Result
+
+**Result:** Partial
+
+Implemented the Surfari build, install, uninstall, release-staging, Homebrew
+cask, installed Ghostboard resolver, release resolver harness, and launch
+discovery documentation wiring.
+
+Verification passed:
+
+- `bash -n scripts/build.sh scripts/install.sh scripts/uninstall.sh scripts/release.sh scripts/ghostboard-geometry-matrix.sh`
+- `prettier --check issues/0838-deploy-next-homebrew-version/README.md issues/0838-deploy-next-homebrew-version/03-wire-surfari-packaging-paths.md docs/ghostboard-launch-discovery.md`
+- `zig fmt --check ghostboard/src/apprt/termsurf.zig`
+- `git diff --check`
+- `./scripts/build.sh surfari --release`
+- direct artifact checks for `target/release/surfari` and
+  `surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib`
+- `otool -L target/release/surfari`, which confirms Surfari loads
+  `@rpath/libtermsurf_webkit.dylib`
+- `cd ghostboard && zig build test`
+- non-root `scripts/install.sh surfari` / `scripts/uninstall.sh surfari` with
+  `TERMSURF_SURFARI_INSTALL_DIR`
+- `TERMSURF_RELEASE_PACKAGE_ONLY=1 scripts/release.sh 1.4.0`
+- tarball inspection for `./surfari/surfari` and
+  `./surfari/libtermsurf_webkit.dylib`
+- static Homebrew cask assertions for Surfari artifact, codesign, and xattr
+  handling
+- `TERMSURF_INSTALLED_SURFARI_PATH="$PWD/target/release/surfari" scripts/ghostboard-geometry-matrix.sh installed-surfari-release-launch`
+
+The release resolver harness proves that Release Ghostboard resolves named
+`surfari` through `TERMSURF_INSTALLED_SURFARI_PATH`, does not use
+`TERMSURF_SURFARI_PATH`, and spawns the installed Surfari binary.
+
+During verification, the first release harness implementation waited for full
+overlay presentation. That exposed a larger runtime dependency issue: Surfari
+spawned, but dyld failed inside the repo-built custom WebKit framework because
+it loaded WebKit from `webkit/src/WebKitBuild/Debug` while resolving
+JavaScriptCore from the system framework:
+
+```text
+dyld: Symbol not found: __Z20WTFCrashWithInfoImpliPKcS0_y
+Referenced from: webkit/src/WebKitBuild/Debug/WebKit.framework/Versions/A/WebKit
+Expected in: /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/JavaScriptCore
+```
+
+Inspection confirmed that `libtermsurf_webkit.dylib` carries an rpath to
+`webkit/src/WebKitBuild/Debug` and depends on
+`@rpath/WebKit.framework/Versions/A/WebKit`. Packaging only the Surfari binary
+and `libtermsurf_webkit.dylib` is therefore not enough to make installed Surfari
+render pages with the patched WebKit build. The next experiment needs to decide
+and verify the WebKit runtime packaging strategy.
+
+## Conclusion
+
+Experiment 3 successfully made Surfari first-class in the local build,
+install/uninstall, release staging, Homebrew cask, Ghostboard installed
+resolver, release resolver harness, and launch discovery docs. It did not finish
+the complete Surfari deployment path because a real installed-style launch
+showed that the package also needs a correct custom WebKit runtime closure, or a
+different deliberate runtime-linking strategy.
+
+The next experiment should focus specifically on Surfari's packaged WebKit
+runtime: which frameworks and dylibs must ship, how their install names/rpaths
+must be arranged, and how to prove `web --browser surfari` can reach
+`BrowserReady` and overlay presentation without development-only paths.
+
+## Completion Review
+
+Fresh-context adversarial completion review returned **Approved** with no
+findings. The reviewer accepted the Partial result, including the Surfari
+packaging/resolver progress and the recorded WebKit runtime closure blocker.

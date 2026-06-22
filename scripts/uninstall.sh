@@ -4,18 +4,19 @@ set -euo pipefail
 COMPONENT="${1:-}"
 APPLICATIONS_DIR="${TERMSURF_APPLICATIONS_DIR:-/Applications}"
 ROAMIUM_INSTALL_DIR="${TERMSURF_ROAMIUM_INSTALL_DIR:-/opt/homebrew/opt/termsurf-roamium}"
+SURFARI_INSTALL_DIR="${TERMSURF_SURFARI_INSTALL_DIR:-/opt/homebrew/opt/termsurf-surfari}"
 
 if [ -z "$COMPONENT" ]; then
   echo "Usage: $0 <component>"
-  echo "Components: ghostboard, roamium, webtui, all"
+  echo "Components: ghostboard, roamium, surfari, webtui, all"
   exit 1
 fi
 
 case "$COMPONENT" in
-  roamium | ghostboard | webtui | all) ;;
+  roamium | surfari | ghostboard | webtui | all) ;;
   *)
     echo "Unknown component: $COMPONENT"
-    echo "Components: ghostboard, roamium, webtui, all"
+    echo "Components: ghostboard, roamium, surfari, webtui, all"
     exit 1
     ;;
 esac
@@ -28,6 +29,15 @@ needs_root() {
     }
     [ -w "$ROAMIUM_INSTALL_DIR" ] && return 1
     echo "Error: TERMSURF_ROAMIUM_INSTALL_DIR is not writable: $ROAMIUM_INSTALL_DIR"
+    exit 1
+  fi
+  if [ "$COMPONENT" = "surfari" ] && [ "$SURFARI_INSTALL_DIR" != "/opt/homebrew/opt/termsurf-surfari" ]; then
+    mkdir -p "$SURFARI_INSTALL_DIR" || {
+      echo "Error: TERMSURF_SURFARI_INSTALL_DIR is not writable: $SURFARI_INSTALL_DIR"
+      exit 1
+    }
+    [ -w "$SURFARI_INSTALL_DIR" ] && return 1
+    echo "Error: TERMSURF_SURFARI_INSTALL_DIR is not writable: $SURFARI_INSTALL_DIR"
     exit 1
   fi
   if [ "$COMPONENT" = "ghostboard" ] && [ "$APPLICATIONS_DIR" != "/Applications" ]; then
@@ -47,6 +57,7 @@ if [ "$(id -u)" -ne 0 ] && needs_root; then
   exec sudo env \
     TERMSURF_APPLICATIONS_DIR="$APPLICATIONS_DIR" \
     TERMSURF_ROAMIUM_INSTALL_DIR="$ROAMIUM_INSTALL_DIR" \
+    TERMSURF_SURFARI_INSTALL_DIR="$SURFARI_INSTALL_DIR" \
     "$0" "$@"
 fi
 
@@ -60,6 +71,13 @@ uninstall_roamium() {
   rm -rf /usr/local/lib/roamium
 
   echo "  Removed: $ROAMIUM_INSTALL_DIR"
+}
+
+uninstall_surfari() {
+  echo "==> Uninstalling Surfari..."
+  rm -rf "$SURFARI_INSTALL_DIR"
+
+  echo "  Removed: $SURFARI_INSTALL_DIR"
 }
 
 uninstall_ghostboard() {
@@ -84,10 +102,12 @@ uninstall_webtui() {
 
 case "$COMPONENT" in
   roamium)    uninstall_roamium ;;
+  surfari)    uninstall_surfari ;;
   ghostboard) uninstall_ghostboard ;;
   webtui)     uninstall_webtui ;;
   all)
     uninstall_roamium
+    uninstall_surfari
     uninstall_ghostboard
     uninstall_webtui
     echo ""

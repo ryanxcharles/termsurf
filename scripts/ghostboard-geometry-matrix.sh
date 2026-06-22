@@ -7,13 +7,15 @@ TS="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="$ROOT/logs"
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/termsurf-ghostboard-geometry-${SCENARIO}.XXXXXX")"
 APP="${TERMSURF_GHOSTBOARD_APP:-$ROOT/ghostboard/macos/build/Debug/TermSurf.app}"
-if [ "$SCENARIO" = "installed-roamium-release-launch" ] && [ -z "${TERMSURF_GHOSTBOARD_APP:-}" ]; then
+if { [ "$SCENARIO" = "installed-roamium-release-launch" ] || [ "$SCENARIO" = "installed-surfari-release-launch" ]; } && [ -z "${TERMSURF_GHOSTBOARD_APP:-}" ]; then
   APP="$ROOT/ghostboard/macos/build/Release/TermSurf.app"
 fi
 APP_BIN="$APP/Contents/MacOS/termsurf"
 WEB="${TERMSURF_WEB:-$ROOT/target/debug/web}"
 ROAMIUM="${TERMSURF_ROAMIUM:-$ROOT/chromium/src/out/Default/roamium}"
 INSTALLED_ROAMIUM="${TERMSURF_INSTALLED_ROAMIUM:-$ROAMIUM}"
+SURFARI="${TERMSURF_SURFARI:-$ROOT/target/release/surfari}"
+INSTALLED_SURFARI="${TERMSURF_INSTALLED_SURFARI:-${TERMSURF_INSTALLED_SURFARI_PATH:-$SURFARI}}"
 ROAMIUM_PATH_FOR_APP="$ROAMIUM"
 POINTER_DRIVER="${TERMSURF_GEOMETRY_POINTER_DRIVER:-cgevent}"
 URL="${TERMSURF_GEOMETRY_URL:-https://example.com}"
@@ -1824,14 +1826,14 @@ devtools_overlay_probe() {
 }
 
 case "$SCENARIO" in
-  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|browser-command-navigation|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|split-right-border-config|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
+  initial-open|launch-discovery-contract|named-roamium-debug-launch|named-roamium-invalid-env|installed-roamium-release-launch|installed-surfari-release-launch|hello-config-homepage|hello-config-browser-list|hello-empty-browser-list|ghostboard-config-paths|browser-state-smoke|browser-command-navigation|javascript-dialog-smoke|http-auth-smoke|renderer-crash-smoke|color-scheme-smoke|copy-current-url-smoke|browser-input-granularity|multi-profile-isolation|same-profile-server-lifecycle|tui-disconnect-reconnect|visible-profile-identity|two-browser-split-routing|window-resize|performance-window-resize|split-right|split-right-border-config|performance-split-right|split-down|split-right-resize|split-right-equalize|split-right-zoom|split-right-close-sibling|split-right-close-browser-pane|split-right-focus-switch|new-terminal-tab-visibility|open-browser-in-new-tab|close-browser-tab|open-browser-in-new-window|multiple-windows-with-browsers|display-move-backing-scale|fullscreen-unfullscreen|minimize-hide-restore|font-size-cell-metrics|tui-overlay-resize-command|terminal-scrollback-movement|browser-navigation-geometry|devtools-split-geometry|devtools-singleton-guard|mouse-after-geometry-change|keyboard-after-tab-window-switch|gui-active-multi-tab) ;;
   *)
     fail "unsupported scenario: $SCENARIO"
     ;;
 esac
 
 RESOLVER_ONLY_SCENARIO=0
-if [ "$SCENARIO" = "named-roamium-debug-launch" ] || [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+if [ "$SCENARIO" = "named-roamium-debug-launch" ] || [ "$SCENARIO" = "installed-roamium-release-launch" ] || [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
   RESOLVER_ONLY_SCENARIO=1
 fi
 
@@ -1845,6 +1847,9 @@ require_file "$WEB"
 require_file "$ROAMIUM"
 if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
   require_file "$INSTALLED_ROAMIUM"
+fi
+if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
+  require_file "$INSTALLED_SURFARI"
 fi
 require_readable "$ROOT/scripts/ghostty-app/inject.swift"
 require_readable "$ROOT/scripts/ghostty-app/winid.swift"
@@ -2661,6 +2666,14 @@ EOF
   chmod +x "$COMMAND"
 fi
 
+if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
+  cat >"$COMMAND" <<EOF
+#!/usr/bin/env bash
+exec "$WEB" --browser surfari "$URL"
+EOF
+  chmod +x "$COMMAND"
+fi
+
 if [ "$SCENARIO" = "hello-config-homepage" ]; then
   cat >"$COMMAND" <<EOF
 #!/usr/bin/env bash
@@ -2850,7 +2863,7 @@ browser = ""
 EOF
 fi
 
-if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+if [ "$SCENARIO" = "installed-roamium-release-launch" ] || [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
   mkdir -p "$RELEASE_XDG_CONFIG_HOME/termsurf"
   cp "$CONFIG" "$RELEASE_XDG_CONFIG_HOME/termsurf/config"
 fi
@@ -3920,13 +3933,14 @@ if [ "$SCENARIO" = "mouse-after-geometry-change" ]; then
   log "mouse_tui_reset_screenshot=$SCREENSHOT_TUI_RESET"
 fi
 
-if [ "$SCENARIO" = "installed-roamium-release-launch" ]; then
+if [ "$SCENARIO" = "installed-roamium-release-launch" ] || [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
   XDG_CONFIG_HOME="$RELEASE_XDG_CONFIG_HOME" \
   GHOSTTY_LOG=stderr \
   TERMSURF_GEOMETRY_TRACE=1 \
   TERMSURF_GEOMETRY_SCENARIO="$SCENARIO" \
   TERMSURF_DEVTOOLS_RESERVATION_TIMEOUT_MS=1000 \
   TERMSURF_INSTALLED_ROAMIUM_PATH="$INSTALLED_ROAMIUM" \
+  TERMSURF_INSTALLED_SURFARI_PATH="$INSTALLED_SURFARI" \
   TERMSURF_WEBTUI_STATE_TRACE_FILE="$WEBTUI_STATE_TRACE" \
   TERMSURF_INPUT_TRACE=1 \
   TERMSURF_PDF_INPUT_TRACE=1 \
@@ -3961,6 +3975,21 @@ if [ "$SCENARIO" = "named-roamium-invalid-env" ]; then
   fi
   log "PASS: invalid named Roamium env did not spawn a browser"
   log "PASS: scenario named-roamium-invalid-env"
+  exit 0
+fi
+
+if [ "$SCENARIO" = "installed-surfari-release-launch" ]; then
+  grep -F -- "--browser surfari" "$COMMAND" >/dev/null 2>&1 || fail "installed Surfari release launch command does not use named surfari"
+  log "PASS: installed Surfari release launch command uses named surfari"
+  wait_for_log "TermSurf message decoded type=HelloRequest" "release webtui discovered TERMSURF_SOCKET" 45
+  wait_for_log "SetOverlay: pane_id=.* profile=default browser=surfari url=${URL}" "release named Surfari SetOverlay" 45
+  if grep -F "env=TERMSURF_SURFARI_PATH path=" "$APP_LOG" >/dev/null 2>&1; then
+    fail "release installed Surfari scenario unexpectedly resolved through TERMSURF_SURFARI_PATH"
+  fi
+  log "PASS: release installed Surfari scenario did not resolve through TERMSURF_SURFARI_PATH"
+  wait_for_log "SetOverlay: named browser resolved browser=surfari env=TERMSURF_INSTALLED_SURFARI_PATH path=${INSTALLED_SURFARI}" "release Ghostboard resolved Surfari through installed override" 45
+  wait_for_log "spawned browser path=${INSTALLED_SURFARI} pid=[0-9]+ profile=default browser=surfari" "release Ghostboard spawned installed override Surfari path" 45
+  log "PASS: scenario installed-surfari-release-launch"
   exit 0
 fi
 

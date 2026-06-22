@@ -20,7 +20,7 @@ for arg in "$@"; do
     -*)
       echo "Unknown flag: $arg"
       echo "Usage: $0 <component> [--release] [--clean] [--open]"
-      echo "Components: ghostboard, roamium, webtui, chromium, all"
+      echo "Components: ghostboard, roamium, surfari, webtui, chromium, all"
       exit 1
       ;;
     *)
@@ -36,7 +36,7 @@ done
 
 if [ -z "$COMPONENT" ]; then
   echo "Usage: $0 <component> [--release] [--clean] [--open]"
-  echo "Components: ghostboard, roamium, webtui, chromium, all"
+  echo "Components: ghostboard, roamium, surfari, webtui, chromium, all"
   exit 1
 fi
 
@@ -96,6 +96,29 @@ build_roamium() {
   echo "  Roamium: $CHROMIUM_OUT/roamium"
 }
 
+build_surfari() {
+  cd "$REPO_DIR"
+  if $CLEAN; then
+    echo "==> Cleaning Surfari..."
+    cargo clean -p surfari
+    rm -rf "$REPO_DIR/surfari/libtermsurf_webkit/build"
+  fi
+
+  echo "==> Building libtermsurf_webkit..."
+  "$REPO_DIR/surfari/libtermsurf_webkit/build.sh"
+
+  if $RELEASE; then
+    echo "==> Building Surfari (release)..."
+    cargo build --release -p surfari
+    echo "  Surfari: $REPO_DIR/target/release/surfari"
+  else
+    echo "==> Building Surfari (debug)..."
+    cargo build -p surfari
+    echo "  Surfari: $REPO_DIR/target/debug/surfari"
+  fi
+  echo "  libtermsurf_webkit: $REPO_DIR/surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib"
+}
+
 build_ghostboard() {
   local CONFIGURATION="Debug"
   local ZIG_OPTIMIZE="Debug"
@@ -127,18 +150,20 @@ case "$COMPONENT" in
   chromium)   build_chromium ;;
   webtui)     build_webtui ;;
   roamium)    build_roamium ;;
+  surfari)    build_surfari ;;
   ghostboard) build_ghostboard ;;
   all)
     build_chromium
     build_webtui
     build_roamium
+    build_surfari
     build_ghostboard
     echo ""
     echo "Done (all)."
     ;;
   *)
     echo "Unknown component: $COMPONENT"
-    echo "Components: ghostboard, roamium, webtui, chromium, all"
+    echo "Components: ghostboard, roamium, surfari, webtui, chromium, all"
     exit 1
     ;;
 esac

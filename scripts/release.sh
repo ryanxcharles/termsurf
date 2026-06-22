@@ -22,7 +22,9 @@ echo "==> Packaging TermSurf v${VERSION} for ${ARCH}..."
 for f in \
   "$REPO_DIR/target/release/web" \
   "$GHOSTBOARD_APP/Contents/MacOS/termsurf" \
-  "$REPO_DIR/target/release/roamium"; do
+  "$REPO_DIR/target/release/roamium" \
+  "$REPO_DIR/target/release/surfari" \
+  "$REPO_DIR/surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib"; do
   if [ ! -f "$f" ]; then
     echo "Error: Release build not found: $f"
     echo "Run: scripts/build.sh all --release"
@@ -33,11 +35,14 @@ done
 # Clean and create staging directory
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR/roamium"
+mkdir -p "$STAGING_DIR/surfari"
 
 # Copy binaries
 echo "==> Copying binaries..."
 cp "$REPO_DIR/target/release/web" "$STAGING_DIR/"
 cp "$REPO_DIR/target/release/roamium" "$STAGING_DIR/roamium/"
+cp "$REPO_DIR/target/release/surfari" "$STAGING_DIR/surfari/"
+cp "$REPO_DIR/surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib" "$STAGING_DIR/surfari/"
 
 # Copy Chromium dylibs and resources
 copy_roamium_runtime_resources "$CHROMIUM_OUT" "$STAGING_DIR/roamium"

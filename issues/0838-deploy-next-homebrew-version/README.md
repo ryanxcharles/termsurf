@@ -116,7 +116,8 @@ This issue covers the next Homebrew deployment. It may include:
 - [Experiment 2: Restore Surfari focus activation](02-restore-surfari-focus-activation.md)
   — **Pass**
 - [Experiment 3: Wire Surfari into packaging paths](03-wire-surfari-packaging-paths.md)
-  — **Designed**
+  — **Partial** (Surfari wiring works, but packaged runtime needs WebKit
+  closure)
 
 ## Acceptance Criteria
 
