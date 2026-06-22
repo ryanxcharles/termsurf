@@ -135,3 +135,91 @@ references, and manual inspection criteria for `chromium/README.md`,
 
 Focused re-review returned `APPROVED` with no Required findings. The reviewer
 confirmed the verification plan is now concrete enough for the design gate.
+
+## Result
+
+**Result:** Pass
+
+Implemented the documentation alignment:
+
+- Added `chromium/AGENTS.md` as the agent-facing source of truth for Chromium
+  workspace layout, prerequisites, setup, build rules, branch workflow, patch
+  archives, verification, and cautions.
+- Added `webkit/AGENTS.md` with the analogous WebKit workspace layout,
+  prerequisites, setup, build rules, branch workflow, patch archives,
+  verification, and cautions.
+- Updated `chromium/README.md` and `webkit/README.md` with `Agent Instructions`
+  sections pointing agents to the new workspace-local `AGENTS.md` files.
+- Updated `webkit/README.md` so the current branch summary matches the actual
+  local WebKit branch: `webkit-1452a439-issue-756-exp12`.
+- Reduced `skills/chromium/SKILL.md` to a short redirect to `chromium/AGENTS.md`
+  so it no longer contains a separate detailed build, branch, or patch workflow.
+- Updated `.gitignore` to allow `chromium/AGENTS.md` and `webkit/AGENTS.md` to
+  be tracked while keeping the rest of the engine workspaces ignored.
+
+Verification:
+
+```bash
+prettier --check --prose-wrap always --print-width 80 \
+  issues/0835-engine-workspace-agent-docs/README.md \
+  issues/0835-engine-workspace-agent-docs/01-add-engine-agents-docs.md \
+  chromium/AGENTS.md \
+  webkit/AGENTS.md \
+  chromium/README.md \
+  webkit/README.md \
+  skills/chromium/SKILL.md
+
+test -f chromium/AGENTS.md
+test -f webkit/AGENTS.md
+test ! -e skills/webkit
+rg -n "AGENTS.md" chromium/README.md webkit/README.md skills/chromium/SKILL.md
+test "$(rg -c "autoninja|gn gen|gclient sync|build-webkit|format-patch|git am" skills/chromium/SKILL.md)" -le 1
+test "$(rg -c "AGENTS.md" skills/chromium/SKILL.md)" -ge 1
+git diff --check
+git status --short -- chromium/src webkit/src
+git check-ignore -v chromium/AGENTS.md webkit/AGENTS.md || true
+```
+
+All checks passed. The engine source checkout status check produced no output,
+confirming no `chromium/src` or `webkit/src` changes. `git check-ignore`
+reported the explicit `.gitignore` negation rules for both new `AGENTS.md`
+files, confirming they are intentionally trackable.
+
+Manual consistency inspection:
+
+- `chromium/README.md` now points agents to `chromium/AGENTS.md`; its current
+  branch summary still matches `chromium/AGENTS.md`.
+- `webkit/README.md` now points agents to `webkit/AGENTS.md`; its current branch
+  summary now matches `webkit/AGENTS.md`.
+- `skills/chromium/SKILL.md` is now only a redirect/locator and contains no
+  independent detailed Chromium build, branch, or patch workflow.
+- No `skills/webkit/` directory exists.
+
+## Conclusion
+
+Chromium and WebKit now have analogous root `AGENTS.md` files that make the
+engine workspace instructions local to each engine folder. The separate Chromium
+skill no longer acts as a competing workflow source, and no WebKit skill was
+created.
+
+## Completion Review
+
+Adversarial completion review initially returned `CHANGES REQUIRED` with one
+Required finding: `chromium/AGENTS.md` documented an invalid fresh setup path by
+checking out `148.0.7778.97-issue-816` from the vanilla tag and applying only
+`chromium/patches/issue-816/*.patch`, even though that patch archive contains
+one incremental patch.
+
+The fix aligned `chromium/AGENTS.md` and `chromium/README.md` around the actual
+full-stack reconstruction path:
+
+- `148.0.7778.97-issue-794-exp19` is now documented as the current fully
+  archived build baseline;
+- `148.0.7778.97-issue-816` remains documented as the latest documented branch;
+- the fresh setup path applies `chromium/patches/issue-794-exp19/*.patch`;
+- both docs warn that later patch directories may be incremental and must not be
+  treated as fresh setup recipes unless regenerated and verified as cumulative.
+
+Focused re-review returned `APPROVED` with no Required findings. The reviewer
+confirmed the reconstruction-path issue is fixed and noted the verified patch
+counts: `issue-794-exp19` has 60 patches and `issue-816` has 1 patch.

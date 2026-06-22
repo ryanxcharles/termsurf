@@ -1,6 +1,7 @@
 +++
-status = "open"
+status = "closed"
 opened = "2026-06-22"
+closed = "2026-06-22"
 +++
 
 # Issue 835: Engine Workspace Agent Docs
@@ -103,4 +104,17 @@ workflow.
 ## Experiments
 
 - [Experiment 1: Add engine AGENTS docs](01-add-engine-agents-docs.md) —
-  **Designed**
+  **Pass**
+
+## Conclusion
+
+Issue 835 is complete. Chromium and WebKit now both have root `AGENTS.md` files
+that serve as workspace-local agent instructions for build, branch, patch, and
+verification workflows.
+
+The old Chromium skill is now only a redirect to `chromium/AGENTS.md`; no WebKit
+skill was created. `chromium/README.md` and `webkit/README.md` now point agents
+to the workspace-local instructions and remain human workspace overviews and
+branch ledgers.
+
+The implementation did not modify `chromium/src` or `webkit/src`.
