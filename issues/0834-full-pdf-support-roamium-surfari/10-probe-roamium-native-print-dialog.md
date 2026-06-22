@@ -203,3 +203,110 @@ Required findings:
   PDF print click.
 
 Re-review verdict: **Approved**.
+
+## Result
+
+**Result:** Partial
+
+Implemented a probe-only native print harness:
+
+- `scripts/test-issue-834-pdf-native-print.py` owns the safety gate, harmless
+  native-dialog preflight, print queue snapshots, Roamium launch, TermSurf
+  protocol tab creation, and final `pdf-native-print-summary.json`.
+- `scripts/probe-pdf-save-print-title-local.mjs` gained a narrow
+  `--allow-native-print-click` path. Without that explicit flag, it preserves
+  the previous behavior and refuses to click production print when no contained
+  intercept file is configured.
+
+No Chromium, Roamium, Ghostboard, protocol, or other product source files were
+changed.
+
+Final verification commands:
+
+```bash
+python3 scripts/test-issue-794-pdf-toolbar.py \
+  --probe save-print-title-local \
+  --log-dir logs/issue-834-exp10-contained-print \
+  --serve-bitcoin-pdf \
+  --enable-pdf-print-intercept
+
+python3 scripts/test-issue-834-pdf-native-print.py \
+  --log-dir logs/issue-834-exp10-native-print-safety-gate \
+  --probe safety-gate
+
+python3 scripts/test-issue-834-pdf-native-print.py \
+  --log-dir logs/issue-834-exp10-native-print-dialog \
+  --probe native-dialog \
+  --allow-native-dialog-click
+```
+
+Additional checks:
+
+```bash
+node --check scripts/probe-pdf-save-print-title-local.mjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile scripts/test-issue-834-pdf-native-print.py
+git diff --check
+```
+
+Final evidence:
+
+- `logs/issue-834-exp10-contained-print/pdf-toolbar-summary.json`:
+  `first_failing_hop = "no-failure-observed"`,
+  `print.status = "print-contained-callback"`,
+  `print.bridgeClassification = "print-reaches-contained-intercept"`,
+  `print.printGuardState.has_engine = "1"`,
+  `print.printGuardState.can_print = "1"`, and four fresh contained intercept
+  lines were written. No native print dialog was opened by this contained run.
+- `logs/issue-834-exp10-native-print-safety-gate/pdf-native-print-summary.json`:
+  `first_failing_hop = "native-print-safety-gate-not-ready"`,
+  `safety_gate_passed = false`, the harmless preflight used
+  `osascript-display-dialog-plus-system-events`, and System Events returned
+  `osascript is not allowed assistive access. (-25211)`. The print queues
+  reported by `lpstat -o` and `lpstat -W completed -o` were empty.
+- `logs/issue-834-exp10-native-print-dialog/pdf-native-print-summary.json`: even
+  with `--allow-native-dialog-click`,
+  `first_failing_hop = "native-print-safety-gate-not-ready"`,
+  `safety_gate_passed = false`, `server_register_received = false`, and
+  `devtools_port = null`. This proves the harness refused to launch/click
+  production print because the harmless preflight did not pass.
+
+The experiment did not prove native print dialog support because the cancel-only
+watcher could not pass the required harmless-dialog preflight on this VM.
+Specifically, macOS denied assistive access to `osascript`/System Events, so the
+watcher could not objectively observe and dismiss even a harmless non-print
+dialog. The approved design forbids production print clicks unless that
+preflight passes, so the native print click was correctly blocked.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+Initial verdict: **Changes Required**.
+
+Required finding:
+
+- `scripts/__pycache__/test-issue-834-pdf-native-print.cpython-314.pyc` was
+  present after `py_compile`, violating the verification requirement to remove
+  `scripts/__pycache__/`.
+
+Fix:
+
+- Removed `scripts/__pycache__/`.
+
+Re-review verdict: **Approved**. The reviewer confirmed no Required findings
+remained and the working tree contained only the intended experiment files.
+
+## Conclusion
+
+Roamium's contained PDF print bridge remains healthy, but the real native print
+dialog row is still unproven. The current blocker is automation safety, not yet
+product behavior: the VM needs an approved watcher mechanism, most likely
+granting assistive access to the `osascript`/System Events path or replacing the
+watcher with another mechanism that can objectively observe and cancel a
+harmless native dialog before any production print click.
+
+The next experiment should either establish a working macOS native-dialog
+watcher preflight or use a different objectively safe observation/cancel
+mechanism. Only after that preflight passes should we click the production PDF
+print control.

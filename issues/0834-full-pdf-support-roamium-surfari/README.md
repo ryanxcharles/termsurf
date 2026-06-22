@@ -139,7 +139,7 @@ Each feature row should ultimately record:
 - [Experiment 9: Prove Roamium malformed PDF errors](09-prove-roamium-malformed-pdf-errors.md)
   — **Pass**
 - [Experiment 10: Probe Roamium native print dialog safely](10-probe-roamium-native-print-dialog.md)
-  — **Designed**
+  — **Partial**
 
 ## Roamium Phase
 
