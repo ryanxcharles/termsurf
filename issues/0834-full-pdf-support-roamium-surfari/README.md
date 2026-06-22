@@ -181,7 +181,7 @@ Each feature row should ultimately record:
 - [Experiment 30: Prove Roamium PDF annotations](30-prove-roamium-pdf-annotations.md)
   — **Pass**
 - [Experiment 31: Classify Roamium PDF accessibility and searchify](31-classify-roamium-pdf-accessibility-searchify.md)
-  — **Designed**
+  — **Pass**
 
 ## Roamium Phase
 

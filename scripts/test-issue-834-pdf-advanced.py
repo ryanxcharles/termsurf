@@ -751,6 +751,114 @@ def annotation_load_proof(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def pdf_load_proof(summary: dict[str, Any], expected_filename: str) -> dict[str, Any]:
+    value = pdf_value(summary)
+    viewer_props = value.get("viewerProps") or {}
+    plugin_rect = value.get("pluginRect") or {}
+    toolbar_rect = value.get("toolbarRect") or {}
+    checks = {
+        "plugin_loaded": plugin_loaded(summary),
+        "title": value.get("title") == expected_filename,
+        "file_name": nested_value(viewer_props, "fileName_") == expected_filename,
+        "original_url": str(nested_value(viewer_props, "originalUrl") or "").endswith(
+            f"/{expected_filename}"
+        ),
+        "plugin_rect_nonzero": plugin_rect.get("width", 0) > 0
+        and plugin_rect.get("height", 0) > 0,
+        "toolbar_rect_nonzero": toolbar_rect.get("width", 0) > 0
+        and toolbar_rect.get("height", 0) > 0,
+    }
+    return {
+        "status": "pass" if all(checks.values()) else "fail",
+        "checks": checks,
+        "first_failing_hop": (
+            "no-failure-observed" if all(checks.values()) else "pdf-load-proof-missing"
+        ),
+    }
+
+
+def source_paths_exist(paths: list[str]) -> dict[str, bool]:
+    return {path: (ROOT / "chromium/src" / path).exists() for path in paths}
+
+
+def accessibility_searchify_state(summary: dict[str, Any] | None) -> dict[str, Any]:
+    value = pdf_value(summary)
+    viewer_props = value.get("viewerProps") or {}
+    searchify_progress = value.get("searchifyProgress")
+    accessibility = (summary or {}).get("accessibility") or []
+    ax_targets = []
+    ax_observable = False
+    pdf_iframe_ax_observable = False
+    for target in accessibility:
+        tree = target.get("getFullAXTree") or {}
+        node_count = tree.get("nodeCount") if tree.get("ok") else 0
+        if node_count:
+            ax_observable = True
+        target_info = target.get("targetInfo") or {}
+        target_type = target_info.get("type")
+        target_url = target_info.get("url")
+        if (
+            target_type == "iframe"
+            and isinstance(target_url, str)
+            and target_url.startswith("chrome-extension://")
+            and node_count
+        ):
+            pdf_iframe_ax_observable = True
+        ax_targets.append(
+            {
+                "label": target.get("label"),
+                "target_type": target_type,
+                "target_url": target_url,
+                "enable_ok": (target.get("enable") or {}).get("ok"),
+                "tree_ok": tree.get("ok"),
+                "node_count": node_count,
+                "interesting_nodes": tree.get("interestingNodes") or [],
+                "error": tree.get("error"),
+            }
+        )
+    searchify = {
+        "progress": searchify_progress,
+        "has_searchify_text": nested_value(viewer_props, "hasSearchifyText_"),
+        "pdf_searchify_save_enabled": nested_value(viewer_props, "pdfSearchifySaveEnabled_"),
+        "load_time_flags": value.get("loadTimeFlags") or {},
+    }
+    source_paths = source_paths_exist(
+        [
+            "pdf/pdf_view_web_plugin.h",
+            "chrome/browser/resources/pdf/pdf_viewer.ts",
+            "components/pdf/browser/pdf_document_helper.h",
+            "components/pdf/renderer/pdf_accessibility_tree.cc",
+            "components/pdf/renderer/pdf_accessibility_tree_builder.cc",
+        ]
+    )
+    classification = "accessibility-searchify-source-only"
+    if not pdf_iframe_ax_observable:
+        classification = "accessibility-tree-observable-missing"
+    elif searchify["pdf_searchify_save_enabled"] is False:
+        classification = "accessibility-searchify-disabled-by-flags"
+    elif searchify_progress and searchify_progress.get("hidden") and not searchify["has_searchify_text"]:
+        classification = "accessibility-searchify-inactive"
+    elif not ax_observable:
+        classification = "accessibility-tree-observable-missing"
+    elif searchify["has_searchify_text"] is True or (
+        searchify_progress and searchify_progress.get("hidden") is False
+    ):
+        classification = "no-failure-observed"
+    return {
+        "classification": classification,
+        "searchify": searchify,
+        "accessibility": {
+            "devtools_targets": ax_targets,
+            "ax_tree_observable": ax_observable,
+            "pdf_iframe_ax_tree_observable": pdf_iframe_ax_observable,
+        },
+        "source_audit": {
+            "paths_exist": source_paths,
+            "hooks": SOURCE_AUDIT["accessibility_searchify"],
+        },
+    }
+
+
 SOURCE_AUDIT = {
     "forms": [
         "chrome/browser/resources/pdf/pdf_internal_plugin_wrapper.ts relays formFocusChange and tracks isFormFieldFocused.",
@@ -849,17 +957,12 @@ def classify(
     elif args.probe == "context-menu":
         state.first_failing_hop = "context-menu-native-watcher-missing"
     elif args.probe == "accessibility-searchify":
-        value = pdf_value(summary)
-        flags = value.get("loadTimeFlags", {})
-        searchify = value.get("searchifyProgress")
-        if not searchify:
-            state.first_failing_hop = "accessibility-searchify-observable-missing"
-        elif searchify.get("hidden"):
-            state.first_failing_hop = "accessibility-searchify-source-only"
-        elif flags.get("pdfSearchifySaveEnabled") is not True:
-            state.first_failing_hop = "accessibility-searchify-disabled-by-flags"
+        result = extra.get("accessibility_searchify") or {}
+        load_proof = result.get("load_proof") or {}
+        if load_proof.get("status") != "pass":
+            state.first_failing_hop = load_proof.get("first_failing_hop") or "pdf-load-proof-missing"
         else:
-            state.first_failing_hop = "accessibility-searchify-source-only"
+            state.first_failing_hop = result.get("classification") or "accessibility-searchify-source-only"
 
 
 def write_summary(log_dir: pathlib.Path, args: argparse.Namespace, state: HarnessState, extra: dict[str, Any]) -> None:
@@ -1038,6 +1141,18 @@ def main() -> int:
                 extra["annotation_editing"] = {
                     "status": editing_status,
                     "state": editing_state,
+                }
+            elif args.probe == "accessibility-searchify" and devtools_summary:
+                state_summary = accessibility_searchify_state(devtools_summary)
+                load_proof = pdf_load_proof(devtools_summary, pathlib.Path(request_path).name)
+                extra["accessibility_searchify"] = {
+                    **state_summary,
+                    "classification": (
+                        state_summary["classification"]
+                        if load_proof.get("status") == "pass"
+                        else load_proof["first_failing_hop"]
+                    ),
+                    "load_proof": load_proof,
                 }
         trace_flags(log_dir, state)
         extra["http_requests"] = AdvancedPdfHandler.requests

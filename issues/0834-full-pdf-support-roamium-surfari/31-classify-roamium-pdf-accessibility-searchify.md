@@ -180,3 +180,132 @@ Fix:
 Final verdict after Codex re-review: **Approved**.
 
 The re-review found no findings.
+
+## Result
+
+**Result:** Pass
+
+Implemented a compact Roamium PDF accessibility/searchify classifier in the
+advanced PDF harness.
+
+Changes:
+
+- `scripts/probe-pdf-advanced.mjs` now collects DevTools Accessibility data for
+  the main page and attached PDF extension iframe when running
+  `--probe accessibility-searchify`.
+- `scripts/test-issue-834-pdf-advanced.py` now summarizes:
+  - PDF load proof for the expected PDF;
+  - Searchify progress, text, and viewer flag state;
+  - DevTools accessibility tree availability and compact interesting AX nodes;
+  - source-audit paths and hooks for Chromium PDF accessibility/searchify;
+  - a named `accessibility_searchify.classification`.
+
+Verification run:
+
+```bash
+rm -rf logs/issue-834-exp31-accessibility-searchify
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp31-accessibility-searchify \
+  --probe accessibility-searchify
+
+rm -rf logs/issue-834-exp31-annotations-smoke
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp31-annotations-smoke \
+  --probe annotations
+
+rm -rf logs/issue-834-exp31-forms-smoke
+python3 scripts/test-issue-834-pdf-advanced.py \
+  --log-dir logs/issue-834-exp31-forms-smoke \
+  --probe forms
+
+rm -rf scripts/__pycache__
+node --check scripts/probe-pdf-advanced.mjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-pdf-advanced.py
+rm -rf scripts/__pycache__
+git diff --check
+git -C chromium/src diff --check
+```
+
+Final accessibility/searchify evidence:
+
+- `logs/issue-834-exp31-accessibility-searchify/pdf-advanced-summary.json`
+  recorded `probe_status = "ok"` and
+  `first_failing_hop = "accessibility-searchify-disabled-by-flags"`.
+- `accessibility_searchify.load_proof.status = "pass"` with all checks true:
+  plugin loaded, title/file name/original URL matched `valid.pdf`, and plugin
+  and toolbar rectangles were non-zero.
+- DevTools Accessibility was observable:
+  - page target: `Accessibility.enable` succeeded, `getFullAXTree` succeeded,
+    node count `6`;
+  - PDF extension iframe target: `Accessibility.enable` succeeded,
+    `getFullAXTree` succeeded, node count `108`, including `RootWebArea`,
+    page-number textbox/static text nodes, and an `EmbeddedObject`.
+  - `accessibility_searchify.accessibility.pdf_iframe_ax_tree_observable = true`.
+- Searchify state was disabled/inactive:
+  - `searchifyProgress` was present but hidden;
+  - `has_searchify_text = false`;
+  - `pdf_searchify_save_enabled = false`;
+  - `pdfSearchifySaveEnabled` load-time flag was absent/null.
+- Source-audit paths for `pdf_view_web_plugin.h`, `pdf_viewer.ts`,
+  `pdf_document_helper.h`, `pdf_accessibility_tree.cc`, and
+  `pdf_accessibility_tree_builder.cc` all existed.
+
+Shared-harness sanity:
+
+- `logs/issue-834-exp31-annotations-smoke/pdf-advanced-summary.json` recorded
+  `first_failing_hop = "no-failure-observed"`,
+  `annotation_rendering.status = "pass"`, and `probe_status = "ok"`.
+- `logs/issue-834-exp31-forms-smoke/pdf-advanced-summary.json` recorded the
+  prior expected classification, `form-value-observable-missing`, with
+  `probe_status = "ok"` and `roamium_mouse_event_line = true`.
+
+## Conclusion
+
+Roamium's current PDF path exposes a DevTools accessibility tree for the PDF
+viewer and extension iframe, so accessibility inspection itself is observable.
+However, Searchify-specific runtime state is disabled/inactive in this build:
+the Searchify progress element is hidden, `hasSearchifyText_` is false, and
+`pdfSearchifySaveEnabled_` is false.
+
+The accessibility/searchify row is now classified more precisely than Experiment
+11: `accessibility-searchify-disabled-by-flags`. This is not a TermSurf
+integration failure. It is a current Chromium PDF viewer capability
+classification for this build.
+
+The remaining Roamium advanced row from Experiment 11 is context menus. The next
+experiment should design a safe native-menu watcher or otherwise classify why
+PDF context-menu automation cannot be made safe in this VM.
+
+## Completion Review
+
+An external Codex review checked the completed experiment before the result
+commit.
+
+Initial verdict: **Changes required**.
+
+Required finding:
+
+- The classifier could report `accessibility-searchify-disabled-by-flags` even
+  if DevTools accessibility data for the PDF extension iframe was missing,
+  because it treated any AX tree, including the outer page tree, as sufficient
+  accessibility observability.
+
+Fix:
+
+- The classifier now requires an observable AX tree on the PDF extension iframe
+  target before returning disabled, inactive, or passing classifications.
+- If the PDF iframe AX tree is missing, the classifier returns
+  `accessibility-tree-observable-missing`.
+
+Additional verification after the fix:
+
+- The full accessibility/searchify probe was rerun and still produced
+  `accessibility-searchify-disabled-by-flags`.
+- The rerun summary includes
+  `accessibility_searchify.accessibility.pdf_iframe_ax_tree_observable = true`.
+- The annotation and forms shared-harness smoke checks were rerun.
+
+Final verdict after re-review: **Approved**.
+
+The re-review found no findings.

@@ -339,6 +339,72 @@ function pluginLoaded(collected) {
   });
 }
 
+function compactAxNode(node) {
+  const nameProperty = (node.properties || []).find(
+    (property) => property.name === "name",
+  );
+  return {
+    role: node.role?.value || "",
+    name: node.name?.value || nameProperty?.value?.value || "",
+    ignored: !!node.ignored,
+    childIds: node.childIds?.length || 0,
+  };
+}
+
+async function collectAccessibility(client, collected) {
+  const targets = [
+    {
+      label: "page",
+      sessionId: undefined,
+      targetInfo: null,
+    },
+    ...(collected.children || []).map((child) => ({
+      label: "child",
+      sessionId: child.sessionId,
+      targetInfo: child.targetInfo,
+    })),
+  ];
+  const results = [];
+  for (const target of targets) {
+    const enable = await safeSend(
+      client,
+      "Accessibility.enable",
+      {},
+      target.sessionId,
+    );
+    const tree = await safeSend(
+      client,
+      "Accessibility.getFullAXTree",
+      { depth: 6 },
+      target.sessionId,
+    );
+    const nodes = tree.ok ? tree.result?.nodes || [] : [];
+    results.push({
+      label: target.label,
+      sessionId: target.sessionId || null,
+      targetInfo: target.targetInfo,
+      enable,
+      getFullAXTree: tree.ok
+        ? {
+            ok: true,
+            nodeCount: nodes.length,
+            interestingNodes: nodes
+              .filter((node) => {
+                const role = node.role?.value || "";
+                const name = node.name?.value || "";
+                return /document|pdf|embedded|image|text|root|web/i.test(
+                  `${role} ${name}`,
+                );
+              })
+              .slice(0, 40)
+              .map(compactAxNode),
+          }
+        : tree,
+    });
+  }
+  return results;
+}
+
 function pdfValue(collected) {
   return (
     (collected.values || []).find(
@@ -445,6 +511,9 @@ async function main() {
       summary.states = collected.states;
       summary.values = collected.values;
       summary.pluginLoaded = pluginLoaded(collected);
+      if (args.probe === "accessibility-searchify") {
+        summary.accessibility = await collectAccessibility(client, collected);
+      }
       summary.screenshot = await captureScreenshot(
         client,
         args,
