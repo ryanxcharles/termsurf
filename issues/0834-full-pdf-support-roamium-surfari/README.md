@@ -189,7 +189,7 @@ Each feature row should ultimately record:
 - [Experiment 34: Audit Surfari and WebKit PDF capabilities](34-audit-surfari-webkit-pdf-capabilities.md)
   — **Pass**
 - [Experiment 35: Prove basic Surfari PDF rendering](35-prove-basic-surfari-pdf-rendering.md)
-  — **Designed**
+  — **Partial**
 
 ## Roamium Phase
 
