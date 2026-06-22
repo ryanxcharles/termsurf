@@ -195,3 +195,154 @@ Fix:
 Final verdict after re-review: **Approved**.
 
 The re-review found no findings.
+
+## Result
+
+**Result:** Pass
+
+Added an explicit `advanced` tier to
+`scripts/test-issue-834-roamium-pdf-regression.py`. The tier orchestrates the
+existing advanced PDF harness instead of duplicating probe logic.
+
+The new tier runs:
+
+- `advanced-annotations`;
+- `advanced-accessibility-searchify`;
+- `advanced-context-menu-safety`;
+- `advanced-forms-smoke`.
+
+The runner now has dedicated advanced classifiers:
+
+- annotation rendering passes only when the child exits `0`, records
+  `probe_status = "ok"`, has `first_failing_hop = "no-failure-observed"`, and
+  proves `annotation_rendering.status = "pass"` with a passing load proof;
+- accessibility/searchify is an accepted limitation only when the child exits
+  `0`, records `probe_status = "ok"`, reports
+  `accessibility_searchify.classification = "accessibility-searchify-disabled-by-flags"`,
+  and has a passing PDF load proof;
+- context-menu safety is an accepted limitation only when the child exits `0`,
+  records `probe_status = "ok"`, reports
+  `context_menu.classification = "context-menu-native-watcher-missing"`, sends
+  no PDF right-click, sends zero protocol mouse messages, and proves no native
+  menu is left open;
+- the shared advanced forms smoke is an accepted limitation only when the child
+  exits `0`, records `probe_status = "ok"`, preserves the known
+  `form-value-observable-missing` classification, and records
+  `roamium_mouse_event_line = true`.
+
+The runner also now fails nonzero child commands that would otherwise classify
+as `pass` or `accepted-limitation`, preventing failed advanced children from
+passing because of stale or partial summary content.
+
+Verification run:
+
+```bash
+rm -rf logs/issue-834-exp33-advanced
+python3 scripts/test-issue-834-roamium-pdf-regression.py \
+  --log-dir logs/issue-834-exp33-advanced \
+  --tier advanced
+
+rm -rf logs/issue-834-exp33-smoke
+python3 scripts/test-issue-834-roamium-pdf-regression.py \
+  --log-dir logs/issue-834-exp33-smoke \
+  --tier smoke
+
+rm -rf scripts/__pycache__
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-roamium-pdf-regression.py \
+  scripts/test-issue-834-pdf-advanced.py
+rm -rf scripts/__pycache__
+node --check scripts/probe-pdf-advanced.mjs
+git diff --check
+git -C chromium/src diff --check
+```
+
+Final advanced-tier evidence:
+
+- `logs/issue-834-exp33-advanced/roamium-pdf-regression-summary.json` recorded
+  `overall_result = "pass"`, `first_failing_hop = "no-failure-observed"`, and
+  duration `29.918` seconds.
+- `advanced-annotations` exited `0`, recorded `summary_status = "ok"`,
+  `first_failing_hop = "no-failure-observed"`, and result `pass`.
+- `advanced-accessibility-searchify` exited `0`, recorded
+  `summary_status = "ok"`,
+  `first_failing_hop = "accessibility-searchify-disabled-by-flags"`, and result
+  `accepted-limitation`.
+- `advanced-context-menu-safety` exited `0`, recorded `summary_status = "ok"`,
+  `first_failing_hop = "context-menu-native-watcher-missing"`, and result
+  `accepted-limitation`.
+- `advanced-forms-smoke` exited `0`, recorded `summary_status = "ok"`,
+  `first_failing_hop = "form-value-observable-missing"`, and result
+  `accepted-limitation`.
+
+Existing-tier sanity:
+
+- `logs/issue-834-exp33-smoke/roamium-pdf-regression-summary.json` recorded
+  `overall_result = "pass"`, `first_failing_hop = "no-failure-observed"`,
+  duration `31.984` seconds, and the existing two smoke checks still passing.
+
+## Conclusion
+
+Roamium's advanced PDF classifications are now protected by the durable
+regression runner. The new tier keeps routine smoke/focused runs unchanged while
+giving advanced PDF work a direct guard that captures real passes separately
+from accepted current limitations.
+
+The Roamium phase now has durable guards for the latest advanced rows from
+Experiments 30 through 32. The next Issue 834 experiment can begin the
+Surfari/WebKit PDF audit phase unless a completion review identifies a remaining
+Roamium guard gap.
+
+## Completion Review
+
+An external Codex review checked the completed implementation and result.
+
+Initial verdict: **Changes required**.
+
+Required finding:
+
+- Some future product-support branches could still report `pass` without
+  checking compact proof objects. In particular, accessibility/searchify could
+  pass on top-level `no-failure-observed` without accessibility/searchify proof,
+  context menus could pass on
+  `context_menu.classification = "no-failure-observed"` without verifying routed
+  click, native menu, and cleanup proof, and advanced forms could pass on
+  top-level `no-failure-observed` without forms-specific proof.
+
+Fix:
+
+- Accessibility/searchify product pass now requires a passing load proof, an
+  observable PDF iframe accessibility tree, and active Searchify text evidence.
+- Context-menu product pass now requires passing load proof, a sent right-click,
+  protocol mouse messages, Roamium mouse trace evidence, native menu
+  observation, cleanup execution, and proof that the menu is gone.
+- Advanced forms no longer has a generic top-level `no-failure-observed` pass
+  branch; the current shared forms smoke is only accepted through the explicit
+  known-limitation path.
+
+Additional verification after the fix:
+
+```bash
+rm -rf logs/issue-834-exp33-advanced
+python3 scripts/test-issue-834-roamium-pdf-regression.py \
+  --log-dir logs/issue-834-exp33-advanced \
+  --tier advanced
+
+rm -rf logs/issue-834-exp33-smoke
+python3 scripts/test-issue-834-roamium-pdf-regression.py \
+  --log-dir logs/issue-834-exp33-smoke \
+  --tier smoke
+
+rm -rf scripts/__pycache__
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-roamium-pdf-regression.py \
+  scripts/test-issue-834-pdf-advanced.py
+rm -rf scripts/__pycache__
+git diff --check
+```
+
+Final verdict after re-review: **Approved**.
+
+The re-review found no findings and confirmed that accessibility/searchify,
+context-menu, and forms no longer have generic top-level `no-failure-observed`
+pass paths without compact proof.

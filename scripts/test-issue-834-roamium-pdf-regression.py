@@ -315,6 +315,66 @@ def checks() -> list[Check]:
             tiers=("native-print",),
             classifier="native-print",
         ),
+        Check(
+            name="advanced-annotations",
+            short_dir="aan",
+            command=py_script(
+                "scripts/test-issue-834-pdf-advanced.py",
+                "--probe",
+                "annotations",
+            ),
+            summary_file="pdf-advanced-summary.json",
+            tiers=("advanced",),
+            classifier="advanced-annotations",
+        ),
+        Check(
+            name="advanced-accessibility-searchify",
+            short_dir="aas",
+            command=py_script(
+                "scripts/test-issue-834-pdf-advanced.py",
+                "--probe",
+                "accessibility-searchify",
+            ),
+            summary_file="pdf-advanced-summary.json",
+            accepted_limitation=(
+                "Chromium exposes the PDF accessibility tree, but Searchify is "
+                "disabled or inactive by current viewer flags."
+            ),
+            tiers=("advanced",),
+            classifier="advanced-accessibility-searchify",
+        ),
+        Check(
+            name="advanced-context-menu-safety",
+            short_dir="acm",
+            command=py_script(
+                "scripts/test-issue-834-pdf-advanced.py",
+                "--probe",
+                "context-menu",
+            ),
+            summary_file="pdf-advanced-summary.json",
+            accepted_limitation=(
+                "PDF context menus are safety-classified: no right-click is sent "
+                "until the native-menu watcher proves observe-and-dismiss readiness."
+            ),
+            tiers=("advanced",),
+            classifier="advanced-context-menu-safety",
+        ),
+        Check(
+            name="advanced-forms-smoke",
+            short_dir="afs",
+            command=py_script(
+                "scripts/test-issue-834-pdf-advanced.py",
+                "--probe",
+                "forms",
+            ),
+            summary_file="pdf-advanced-summary.json",
+            accepted_limitation=(
+                "The shared advanced forms smoke preserves protocol mouse trace "
+                "evidence while the form value remains unobservable in this path."
+            ),
+            tiers=("advanced",),
+            classifier="advanced-forms-smoke",
+        ),
     ]
 
 
@@ -390,6 +450,120 @@ def classify_native_print(summary: dict[str, Any]) -> tuple[str, str | None, str
     return "fail", f"native-print-safety-proof-missing:{','.join(missing)}", status
 
 
+def load_proof_pass(proof: Any) -> bool:
+    return (
+        isinstance(proof, dict)
+        and proof.get("status") == "pass"
+        and all((proof.get("checks") or {}).values())
+    )
+
+
+def advanced_probe_status(summary: dict[str, Any]) -> tuple[bool, str | None]:
+    status = summary.get("probe_status")
+    if status != "ok":
+        return False, f"advanced-probe-status-{status or 'missing'}"
+    return True, None
+
+
+def classify_advanced_annotations(
+    summary: dict[str, Any],
+) -> tuple[str, str | None, str | None]:
+    ok, hop = advanced_probe_status(summary)
+    if not ok:
+        return "fail", hop, summary.get("probe_status")
+    rendering = summary.get("annotation_rendering") or {}
+    if (
+        summary.get("first_failing_hop") == "no-failure-observed"
+        and rendering.get("status") == "pass"
+        and load_proof_pass(rendering.get("load_proof"))
+    ):
+        return "pass", summary.get("first_failing_hop"), summary.get("probe_status")
+    return (
+        "fail",
+        rendering.get("first_failing_hop") or summary.get("first_failing_hop"),
+        summary.get("probe_status"),
+    )
+
+
+def classify_advanced_accessibility_searchify(
+    summary: dict[str, Any],
+) -> tuple[str, str | None, str | None]:
+    ok, hop = advanced_probe_status(summary)
+    if not ok:
+        return "fail", hop, summary.get("probe_status")
+    state = summary.get("accessibility_searchify") or {}
+    if (
+        state.get("classification") == "accessibility-searchify-disabled-by-flags"
+        and load_proof_pass(state.get("load_proof"))
+    ):
+        return "accepted-limitation", summary.get("first_failing_hop"), summary.get(
+            "probe_status"
+        )
+    if (
+        state.get("classification") == "no-failure-observed"
+        and load_proof_pass(state.get("load_proof"))
+        and (state.get("accessibility") or {}).get("pdf_iframe_ax_tree_observable")
+        is True
+        and (state.get("searchify") or {}).get("has_searchify_text") is True
+    ):
+        return "pass", summary.get("first_failing_hop"), summary.get("probe_status")
+    return "fail", state.get("classification") or summary.get("first_failing_hop"), summary.get(
+        "probe_status"
+    )
+
+
+def classify_advanced_context_menu(
+    summary: dict[str, Any],
+) -> tuple[str, str | None, str | None]:
+    ok, hop = advanced_probe_status(summary)
+    if not ok:
+        return "fail", hop, summary.get("probe_status")
+    state = summary.get("context_menu") or {}
+    right_click = state.get("right_click") or {}
+    cleanup = state.get("cleanup") or {}
+    if (
+        state.get("classification") == "context-menu-native-watcher-missing"
+        and load_proof_pass(state.get("pdf_load_proof"))
+        and right_click.get("sent") is False
+        and summary.get("protocol_mouse_messages_sent") == 0
+        and cleanup.get("menu_gone") is True
+    ):
+        return "accepted-limitation", summary.get("first_failing_hop"), summary.get(
+            "probe_status"
+        )
+    native_menu = state.get("native_menu") or {}
+    if (
+        state.get("classification") == "no-failure-observed"
+        and load_proof_pass(state.get("pdf_load_proof"))
+        and right_click.get("sent") is True
+        and summary.get("protocol_mouse_messages_sent", 0) > 0
+        and summary.get("roamium_mouse_event_line") is True
+        and native_menu.get("observed") is True
+        and cleanup.get("ran") is True
+        and cleanup.get("menu_gone") is True
+    ):
+        return "pass", summary.get("first_failing_hop"), summary.get("probe_status")
+    return "fail", state.get("classification") or summary.get("first_failing_hop"), summary.get(
+        "probe_status"
+    )
+
+
+def classify_advanced_forms(
+    summary: dict[str, Any],
+) -> tuple[str, str | None, str | None]:
+    ok, hop = advanced_probe_status(summary)
+    if not ok:
+        return "fail", hop, summary.get("probe_status")
+    if (
+        summary.get("first_failing_hop") == "form-value-observable-missing"
+        and summary.get("roamium_mouse_event_line") is True
+    ):
+        return "accepted-limitation", summary.get("first_failing_hop"), summary.get(
+            "probe_status"
+        )
+    return "fail", summary.get("first_failing_hop"), summary.get("probe_status")
+
+
 def classify(
     check: Check,
     returncode: int,
@@ -400,8 +574,16 @@ def classify(
         return "automation-gap", None, None
     if check.classifier == "native-print":
         return classify_native_print(summary)
+    if check.classifier == "advanced-annotations":
+        return classify_advanced_annotations(summary)
+    if check.classifier == "advanced-accessibility-searchify":
+        return classify_advanced_accessibility_searchify(summary)
+    if check.classifier == "advanced-context-menu-safety":
+        return classify_advanced_context_menu(summary)
+    if check.classifier == "advanced-forms-smoke":
+        return classify_advanced_forms(summary)
     hop = summary.get("first_failing_hop")
-    status = summary.get("status")
+    status = summary.get("status") or summary.get("probe_status")
     if check.accepted_limitation and hop in check.accepted_hops:
         return "accepted-limitation", hop, status
     if hop in check.accepted_hops or status in check.accepted_statuses:
@@ -445,7 +627,7 @@ def run_check(log_dir: pathlib.Path, check: Check) -> CheckResult:
         if temp_log:
             temp_log.cleanup()
     result, hop, status = classify(check, proc.returncode, summary, error is not None)
-    if proc.returncode != 0 and result == "pass":
+    if proc.returncode != 0 and result in ("pass", "accepted-limitation"):
         result = "fail"
     return CheckResult(
         name=check.name,
@@ -513,7 +695,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-dir", required=True)
     parser.add_argument(
         "--tier",
-        choices=["smoke", "focused", "forms", "native-print", "unsafe-manual"],
+        choices=[
+            "smoke",
+            "focused",
+            "forms",
+            "native-print",
+            "advanced",
+            "unsafe-manual",
+        ],
         required=True,
     )
     return parser.parse_args()
