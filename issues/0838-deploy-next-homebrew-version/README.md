@@ -33,27 +33,47 @@ at TermSurf `1.0.0`. The existing release pipeline is:
 The WebTUI top-controls fix from Issue 836 is in the repo and should be included
 in the next Homebrew deployment.
 
-Surfari support is present in the repo and Ghostboard can resolve Surfari via
+The target version for this deployment is **TermSurf `1.4.0`**. Local tags
+already include `v1.0.1` through `v1.3.1`, so `1.4.0` is the next non-colliding
+minor version for a release that adds Surfari packaging.
+
+Surfari is a required part of this release. This Homebrew version must ship with
+Surfari, not just Roamium plus the WebTUI top-controls fix. Surfari support is
+present in the repo and Ghostboard can resolve Surfari via
 `TERMSURF_SURFARI_PATH`, but Surfari is not currently wired into the main
 release packaging path:
 
-- `scripts/build.sh all` does not build Surfari.
+- `scripts/build.sh all` does not build Surfari or `libtermsurf_webkit`.
 - `scripts/install.sh all` does not install Surfari.
-- `scripts/release.sh` does not package Surfari.
+- `scripts/release.sh` does not package Surfari or `libtermsurf_webkit`.
 - `homebrew/Casks/termsurf.rb` does not install Surfari.
 - Ghostboard does not currently resolve an installed Surfari path analogous to
   the installed Roamium path.
 
-This issue should decide whether the next Homebrew version is a
-WebTUI/Ghostboard release only, or whether Surfari packaging must be completed
-first in a separate issue before deployment.
+This machine has not yet built Surfari. Before publishing `1.4.0`, the issue
+must bootstrap the local WebKit workspace and prove Surfari builds here:
+
+1. Shallow clone WebKit into `webkit/src`.
+2. Fetch and switch to the documented WebKit base commit
+   `1452a43959523449099b2616793fd2c5b6a6487e`.
+3. Apply TermSurf's WebKit patch archive from `webkit/patches/issue-756/`.
+4. Install or verify the required macOS build prerequisites, including full
+   Xcode and the Metal toolchain.
+5. Build WebKit with `webkit/src/Tools/Scripts/build-webkit --debug`.
+6. Build `surfari/libtermsurf_webkit/build/libtermsurf_webkit.dylib`.
+7. Build the `surfari` Rust binary.
+8. Wire Surfari into TermSurf build, install, release, Homebrew, and installed
+   Ghostboard browser resolution before deployment.
 
 ## Scope
 
 This issue covers the next Homebrew deployment. It may include:
 
-- choosing the next version number;
+- deploying version `1.4.0`;
 - confirming the release contents;
+- bootstrapping and building WebKit on this machine;
+- building `libtermsurf_webkit` and `surfari`;
+- wiring Surfari into build/install/release/Homebrew flows;
 - verifying release builds;
 - running the release script;
 - verifying the generated GitHub release artifact;
@@ -61,19 +81,20 @@ This issue covers the next Homebrew deployment. It may include:
 - installing the cask from a clean or existing Homebrew install;
 - documenting any deployment blockers.
 
-If Surfari must ship in this Homebrew version, open or complete a packaging
-issue first rather than silently omitting required Surfari installation work.
-
 ## Acceptance Criteria
 
-- The issue records the intended next version number.
-- The issue records whether Surfari is included in this deployment.
+- The issue records the intended next version number: `1.4.0`.
+- Surfari is included in this deployment.
+- WebKit is shallow-cloned, patched, and built on this machine.
+- `libtermsurf_webkit` builds on this machine.
+- The `surfari` Rust binary builds on this machine.
+- `scripts/build.sh all --release` includes Surfari.
 - Release builds complete successfully.
-- The packaged tarball contains the expected installable artifacts.
+- The packaged tarball contains the expected installable artifacts, including
+  Surfari and its required `libtermsurf_webkit` runtime dependency.
 - GitHub Release upload succeeds for the chosen version.
 - The Homebrew cask is updated and pushed to the Homebrew tap.
 - A Homebrew install or upgrade test succeeds.
 - Installed TermSurf includes the WebTUI top-controls fix.
-- If Surfari is included, installed Surfari can be launched through
-  `web --browser surfari` without relying on a development-only
-  `TERMSURF_SURFARI_PATH`.
+- Installed Surfari can be launched through `web --browser surfari` without
+  relying on a development-only `TERMSURF_SURFARI_PATH`.
