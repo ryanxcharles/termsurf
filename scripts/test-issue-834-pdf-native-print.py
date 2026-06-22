@@ -936,10 +936,8 @@ def classify(
         state.first_failing_hop = "native-print-observation-gap"
     elif state.roamium_exited_before_shutdown:
         state.first_failing_hop = "native-print-observation-gap"
-    elif (
-        json.dumps(queue_before, sort_keys=True)
-        != json.dumps(queue_after or {}, sort_keys=True)
-        and (print_watch or {}).get("dialog_observed") is not True
+    elif json.dumps(queue_before, sort_keys=True) != json.dumps(
+        queue_after or {}, sort_keys=True
     ):
         state.first_failing_hop = "native-print-job-submitted-unexpectedly"
     else:
@@ -975,22 +973,33 @@ def classify(
             "mac-ask-user-completion-block-enter"
         ):
             state.first_failing_hop = "mac-print-completion-block-not-run"
+        elif has_native_event("mac-ask-user-begin-sheet-enter") and not (
+            has_native_event("mac-ask-user-sheet-response-printed")
+            or has_native_event("mac-ask-user-sheet-response-cancel")
+        ):
+            state.first_failing_hop = "mac-print-sheet-response-missing"
         elif has_native_event("mac-ask-user-run-modal-enter") and not (
             has_native_event("mac-ask-user-modal-response-ok")
             or has_native_event("mac-ask-user-modal-response-cancel")
         ):
             state.first_failing_hop = "mac-print-modal-response-missing"
-        elif has_native_event("mac-ask-user-modal-response-ok") or has_native_event(
-            "mac-ask-user-callback-success"
-        ) or has_native_event("ts-scripted-print-callback-result-success"):
+        elif (
+            has_native_event("mac-ask-user-modal-response-ok")
+            or has_native_event("mac-ask-user-sheet-response-printed")
+            or has_native_event("mac-ask-user-callback-success")
+            or has_native_event("ts-scripted-print-callback-result-success")
+        ):
             state.first_failing_hop = "mac-print-dialog-ok-safety-failure"
         elif print_watch and print_watch.get("dialog_observed") and print_watch.get("cancel_sent"):
             state.first_failing_hop = "native-print-dialog-seen-cancelled"
         elif print_watch and print_watch.get("dialog_observed"):
             state.first_failing_hop = "native-print-dialog-seen-cancel-failed"
-        elif has_native_event("mac-ask-user-modal-response-cancel") or has_native_event(
-            "mac-ask-user-callback-canceled"
-        ) or has_native_event("ts-scripted-print-callback-result-canceled"):
+        elif (
+            has_native_event("mac-ask-user-modal-response-cancel")
+            or has_native_event("mac-ask-user-sheet-response-cancel")
+            or has_native_event("mac-ask-user-callback-canceled")
+            or has_native_event("ts-scripted-print-callback-result-canceled")
+        ):
             state.first_failing_hop = "mac-print-dialog-cancel-no-observed-dialog"
         else:
             state.first_failing_hop = "native-print-click-sent-no-dialog"

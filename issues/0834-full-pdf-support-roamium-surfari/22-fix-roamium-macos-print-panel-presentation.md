@@ -178,3 +178,150 @@ An adversarial Codex subagent reviewed the design with fresh context.
 Verdict: **Approved**.
 
 The reviewer found no Required findings.
+
+## Result
+
+**Result:** Partial
+
+Chromium branch `148.0.7778.97-issue-834-exp22` was created from
+`148.0.7778.97-issue-834-exp21`, and `chromium/README.md` was updated with the
+new branch. Chromium commit `184e100840738ce30e7fe6e542b14d602493c05e` records
+the fork change, and the cumulative patch archive was regenerated through
+`chromium/patches/issue-834/0079-Probe-macOS-print-sheet-presentation.patch`.
+
+The implementation added AppKit presentation tracing immediately before native
+print-panel presentation:
+
+- `NSApp.activationPolicy`;
+- `NSApp.isActive`;
+- whether the parent window is present, key, main, visible, miniaturized, able
+  to become key/main, and equal to `NSApp.keyWindow` / `NSApp.mainWindow`;
+- the print-panel class.
+
+The first attempted presentation adjustment made Roamium temporarily switch from
+`NSApplicationActivationPolicyProhibited` to
+`NSApplicationActivationPolicyRegular`, ordered the parent window front, and
+called `activateIgnoringOtherApps:` before presenting the print panel. This
+built successfully, but the guarded native-print probe still reported
+`mac-print-modal-response-missing`: Roamium became `activation_policy=regular`,
+but `NSApp.active` stayed `false`, the parent window stayed non-key/non-main,
+and `[panel runModalWithPrintInfo:]` still did not return a modal response or
+create an observable print-panel candidate.
+
+The second attempted presentation adjustment used
+`beginSheetUsingPrintInfo:onWindow:completionHandler:` when running on macOS 14
+or newer, with the existing modal path preserved as the fallback for older macOS
+deployment targets. The probe result changed to
+`mac-print-sheet-response-missing`.
+
+Verification run:
+
+```bash
+cd chromium/src
+/Users/astrohacker/dev/termsurf/chromium/depot_tools/autoninja \
+  -C out/Default libtermsurf_chromium
+
+cd /Users/astrohacker/dev/termsurf
+rm -rf scripts/__pycache__
+PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
+  scripts/test-issue-834-pdf-native-print.py
+rm -rf scripts/__pycache__
+node --check scripts/probe-pdf-save-print-title-local.mjs
+
+rm -rf logs/issue-834-exp22-macos-print-panel-presentation scripts/__pycache__
+python3 scripts/test-issue-834-pdf-native-print.py \
+  --log-dir logs/issue-834-exp22-macos-print-panel-presentation \
+  --probe native-dialog \
+  --allow-native-dialog-click
+```
+
+Evidence from
+`logs/issue-834-exp22-macos-print-panel-presentation/pdf-native-print-summary.json`:
+
+- `first_failing_hop`: `mac-print-sheet-response-missing`;
+- `safety_gate_passed`: `true`;
+- `probe_status`: `ok`;
+- `server_register_received`: `true`;
+- `tab_ready_id`: `1`;
+- `devtools_port`: `50273`;
+- `roamium_exited_before_shutdown`: `false`;
+- `print_dialog_watch.dialog_observed`: `false`;
+- `print_dialog_watch.cancel_sent`: `false`;
+- `print_queue_before.lpstat_o.stdout`: empty;
+- `print_queue_after.lpstat_o.stdout`: empty;
+- `print_queue_before.lpstat_W_completed_o.stdout`: empty;
+- `print_queue_after.lpstat_W_completed_o.stdout`: empty.
+
+The native trace reached:
+
+```text
+mac-ask-user-before-activation-app activation_policy=prohibited active=false
+mac-ask-user-before-activation-window present=true key=false main=false visible=true miniaturized=false can_key=true can_main=true matches_key=false matches_main=false
+mac-ask-user-set-activation-policy-regular-enter
+mac-ask-user-set-activation-policy-regular-exit
+mac-ask-user-after-activation-app activation_policy=regular active=false
+mac-ask-user-after-activation-window present=true key=false main=false visible=true miniaturized=false can_key=true can_main=true matches_key=false matches_main=false
+mac-ask-user-begin-sheet-enter
+mac-ask-user-begin-sheet-exit
+```
+
+No `mac-ask-user-sheet-response-cancel`, `mac-ask-user-sheet-response-printed`,
+or `mac-ask-user-callback-*` event was observed before the harness shut down
+Roamium. No print job was submitted.
+
+## Conclusion
+
+Experiment 22 did not complete native PDF print cancellation, but it narrowed
+the macOS failure from a blocking `runModalWithPrintInfo:` call to a more
+specific AppKit presentation problem: Roamium can create an `NSPrintPanel`, can
+enter AppKit sheet presentation, and returns from the sheet begin call, but the
+process still never becomes an active app with a key/main parent window and the
+sheet completion handler never fires.
+
+The next experiment should focus on why Roamium's AppKit application/window
+state remains inactive even after changing activation policy and ordering the
+window front. Likely targets include how the Roamium content-shell process is
+launched as an app, whether it has the right bundle/process activation
+configuration for AppKit panels, and whether the print panel must be presented
+through an existing Chromium/browser window modal mechanism rather than directly
+from `PrintingContextMac`.
+
+## Completion Review
+
+An adversarial Codex subagent reviewed the completed experiment with fresh
+context.
+
+Initial verdict: **Changes Required**.
+
+Required finding:
+
+- The Chromium source change had not yet been committed on
+  `148.0.7778.97-issue-834-exp22`, and the cumulative Issue 834 patch archive
+  still ended at `0078-Trace-macOS-PDF-print-modal.patch`.
+
+Fix:
+
+- Committed the Chromium source change as
+  `184e100840738ce30e7fe6e542b14d602493c05e`.
+- Regenerated `chromium/patches/issue-834`, adding
+  `0079-Probe-macOS-print-sheet-presentation.patch`.
+
+Optional finding accepted:
+
+- The harness previously classified a queue delta as an unexpected submitted
+  print job only when no dialog was observed. That was weaker than the safety
+  contract.
+
+Fix:
+
+- Updated `scripts/test-issue-834-pdf-native-print.py` so any before/after print
+  queue delta is classified as `native-print-job-submitted-unexpectedly` before
+  dialog observations are considered.
+
+Re-review verdict: **Approved**.
+
+The reviewer confirmed that Chromium is clean on `148.0.7778.97-issue-834-exp22`
+at `184e100840738ce30e7fe6e542b14d602493c05e`, the patch archive includes
+`0079-Probe-macOS-print-sheet-presentation.patch`, Experiment 22 is marked
+Partial in the issue README, the prior findings are recorded with fixes, and the
+queue-delta safety guard now runs before dialog-observed logic.
