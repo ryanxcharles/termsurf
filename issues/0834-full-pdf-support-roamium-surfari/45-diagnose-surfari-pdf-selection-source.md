@@ -180,3 +180,119 @@ Follow-up verdict: **Approved**.
 
 The reviewer found no remaining required findings and approved the design for
 the Experiment 45 plan commit.
+
+## Result
+
+**Result:** Pass
+
+The diagnostic harness was added as
+`scripts/test-issue-834-surfari-pdf-selection-source.sh` and run from a clean
+log directory.
+
+Verification:
+
+```bash
+bash -n scripts/test-issue-834-surfari-pdf-selection-source.sh
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp45-surfari-pdf-selection-source
+scripts/test-issue-834-surfari-pdf-selection-source.sh
+```
+
+The successful diagnostic run was `20260622-222140`. Its summary is:
+
+```text
+logs/issue-834-exp45-surfari-pdf-selection-source/surfari-pdf-selection-source-summary.json
+```
+
+The run classified the first failing layer as:
+
+```json
+{
+  "classification": "automation-problem",
+  "overall_result": "pass"
+}
+```
+
+Key evidence:
+
+- `PDFDocument.string` extracted `TS834PDFCOPYQXJZ` from the generated PDF, so
+  the fixture is real selectable PDF text, not raster-only text.
+- The known-good `NSTextView` probe visibly selected the marker, but the
+  clipboard remained `ISSUE834_EXP45_text-control_SENTINEL_20260622-222140`
+  after automated `Cmd+C`.
+- The standalone PDFKit `PDFView` probe visibly selected the marker, but the
+  clipboard remained `ISSUE834_EXP45_pdfkit-view_SENTINEL_20260622-222140` after
+  automated `Cmd+C`.
+- The standalone `WKWebView` PDF probe visibly selected the marker, but the
+  clipboard remained `ISSUE834_EXP45_wkwebview-pdf_SENTINEL_20260622-222140`
+  after automated `Cmd+C`.
+- The nested Surfari probe reproduced Experiment 44's partial result: Ghostboard
+  forwarded drag input and Browse-mode `Cmd+C`, Surfari received the events, but
+  the clipboard remained unchanged.
+- The harness restored the original clipboard at the end of the multi-probe run.
+
+Important screenshot evidence:
+
+- `logs/issue-834-exp45-surfari-pdf-selection-source/text-control-after-20260622-222140.png`
+- `logs/issue-834-exp45-surfari-pdf-selection-source/pdfkit-view-after-20260622-222140.png`
+- `logs/issue-834-exp45-surfari-pdf-selection-source/wkwebview-pdf-after-20260622-222140.png`
+
+Those screenshots matter because earlier runs used incorrect target ratios and
+made the known-good control appear to fail before the drag actually crossed the
+text. The final run corrected the ratios and proved that mouse selection itself
+works in standalone controls; the unresolved part is the automated copy command.
+
+No Ghostboard, Surfari, WebKit, protocol, or product code was changed.
+
+## Conclusion
+
+Experiment 45 eliminated the fixture as the cause and showed that Surfari's
+remaining PDF copy failure cannot yet be cleanly separated from the automation
+copy path. The visible standalone controls can select text, including PDF text,
+but automated `Cmd+C` does not update the pasteboard in those controls.
+
+The next experiment should avoid treating standalone CGEvent `Cmd+C` as a
+trusted copy oracle. It should either prove a different copy oracle first
+(`performKeyEquivalent`, Accessibility menu command, AppleScript/System Events,
+or direct first-responder copy in a standalone probe) or diagnose why the
+current CGEvent key path does not trigger AppKit/WebKit copy despite visible
+selection.
+
+## Completion Review
+
+An external Codex review checked the completed experiment, harness, logs, and
+issue text.
+
+Initial verdict: **Changes required**.
+
+Findings:
+
+- the harness wrote `overall_result: pass` unconditionally, so missing probes or
+  a clipboard restore failure could still produce a false pass;
+- the experiment file had not yet recorded this completion review;
+- the result verification listed a narrower `git diff --check` command and did
+  not record the WebKit worktree check from the plan.
+
+Resolution:
+
+- updated the harness so the overall result becomes `fail` when clipboard
+  restore fails and `partial` when required probes are missing;
+- fixed the harness stdout summary to print the computed overall result instead
+  of hardcoding `pass`, and to exit nonzero on a real harness failure;
+- reran the diagnostic after that fix, producing run `20260622-222140`;
+- recorded the full hygiene commands:
+
+```bash
+bash -n scripts/test-issue-834-surfari-pdf-selection-source.sh
+git diff --check
+git -C webkit/src status --short
+```
+
+Follow-up disposition: **Approved after fixes**.
+
+The valid findings were addressed before the result commit. The reviewer also
+confirmed that marking Experiment 45 as Pass is justified as a diagnostic result
+for the recorded run: the fixture is extractable, standalone controls visibly
+select text, clipboard sentinels remain unchanged after automated copy, and no
+product code changed.
