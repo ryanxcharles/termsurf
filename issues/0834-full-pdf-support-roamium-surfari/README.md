@@ -214,6 +214,8 @@ Each feature row should ultimately record:
   **Pass**
 - [Experiment 47: Trace Surfari PDF copy target](47-trace-surfari-pdf-copy-target.md)
   — **Partial**
+- [Experiment 48: Probe Surfari direct copy fix](48-probe-surfari-direct-copy-fix.md)
+  — **Designed**
 
 ## Roamium Phase
 
