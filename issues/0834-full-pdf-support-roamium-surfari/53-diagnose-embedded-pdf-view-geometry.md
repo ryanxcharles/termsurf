@@ -150,3 +150,92 @@ plan fixes before commit:
 
 Both findings were addressed. A follow-up Codex review approved the design for
 the plan commit.
+
+## Result
+
+**Result:** Partial
+
+Experiment 53 added diagnostic-only embedded Surfari PDF view geometry tracing
+behind `TERMSURF_SURFARI_PDF_VIEW_GEOMETRY_TRACE=1` and added
+`scripts/test-issue-834-pdf-view-geometry-compare.sh`.
+
+The final harness run wrote:
+
+`logs/issue-834-exp53-pdf-view-geometry-compare/pdf-view-geometry-compare-summary.json`
+
+The summary reported:
+
+- `overall_result = partial`
+- `classification = harness-insufficient`
+- `oracle_gate_open = true`
+- `fixture_identity_match = true`
+- `embedded_reproduced_missing_right = true`
+- `traces_complete = true`
+- `standalone_contains_all_tokens = false`
+- `gesture_equivalence = false`
+- `clipboard_restore_status = restored`
+
+This means the experiment successfully reproduced the embedded Surfari failure
+with the exact separated-token fixture: embedded Surfari copied only
+`LEFT834 MID834`, not `RIGHT834`. It also produced complete embedded and
+standalone view tree, hit-test, scroll, coordinate, responder, and copy-target
+traces.
+
+However, the standalone `WKWebView` control did not copy any tokens when driven
+with the same normalized all-token/over-wide gesture ratios used by embedded
+Surfari. The standalone oracle from Experiment 50 still proves the exact fixture
+is selectable/copyable in standalone `WKWebView`, but this Experiment 53
+comparison did not prove that the embedded and standalone gestures are
+equivalent. The correct classification is therefore `harness-insufficient`, not
+a product-level geometry finding.
+
+Useful secondary observations from the trace:
+
+- Embedded Surfari's `TSHostWindow` is not key or main during the selection/copy
+  sequence.
+- Embedded Surfari reports `target_nil=nil` and `target_webview=nil` for the
+  copy action in the traced state, while standalone `WKWebView` reports
+  `WKWebView` as the copy target.
+- Both embedded and standalone traces hit the top-level `WKWebView`; the current
+  AppKit subview tree does not expose a deeper public PDF document view suitable
+  for direct comparison.
+
+Verification run:
+
+```bash
+bash -n scripts/test-issue-834-pdf-view-geometry-compare.sh
+cargo fmt -p surfari -- --check
+surfari/libtermsurf_webkit/build.sh
+cargo build -p surfari
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp53-pdf-view-geometry-compare
+scripts/test-issue-834-pdf-view-geometry-compare.sh
+```
+
+`surfari/libtermsurf_webkit/build.sh` passed with the existing macOS SDK/WebKit
+version warning. `cargo build -p surfari` passed.
+`git -C webkit/src status --short` was clean.
+
+## Conclusion
+
+Experiment 53 improved the diagnostics but did not yet identify a root cause.
+The next experiment should make the standalone control comparable before
+classifying embedded geometry. A good next step is to derive or sweep standalone
+`WKWebView` PDF selection coordinates until the same control copies all three
+tokens, then compare that successful standalone gesture against the embedded
+gesture and responder/copy-target state. The embedded trace's not-key/not-main
+host window and nil copy targets are suspicious, but they should be isolated in
+a focused experiment rather than accepted as the root cause from this partial
+comparison.
+
+## Completion Review
+
+Codex reviewed the completed experiment and found no required issues. The review
+agreed that `Partial` / `harness-insufficient` is justified because the oracle
+and fixture gates were open, embedded Surfari reproduced `LEFT834 MID834`
+without `RIGHT834`, and traces were complete, but standalone `WKWebView` did not
+copy all tokens under the same normalized gesture. The review also agreed that
+the result does not overclaim and that the next step should make the standalone
+selection gesture comparable before classifying embedded geometry or responder
+state.

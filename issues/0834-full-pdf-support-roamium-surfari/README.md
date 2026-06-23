@@ -225,7 +225,7 @@ Each feature row should ultimately record:
 - [Experiment 52: Probe embedded right-edge correction](52-probe-embedded-right-edge-correction.md)
   — **Pass**
 - [Experiment 53: Diagnose embedded PDF view geometry](53-diagnose-embedded-pdf-view-geometry.md)
-  — **Designed**
+  — **Partial**
 
 ## Roamium Phase
 
