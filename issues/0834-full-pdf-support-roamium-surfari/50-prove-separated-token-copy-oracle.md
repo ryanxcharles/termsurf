@@ -164,3 +164,92 @@ Follow-up verdict: **Approved**.
 
 The reviewer found no remaining must-fix design issues and approved the
 Experiment 50 plan commit.
+
+## Result
+
+**Result:** Pass
+
+Added `scripts/test-issue-834-separated-token-copy-oracle.sh`, a standalone
+oracle harness for the exact separated-token PDF fixture used by Experiment 49.
+The harness launches temporary `NSTextView`, PDFKit `PDFView`, and standalone
+`WKWebView` controls, then tests CGEvent `Cmd+C`, in-process AppKit `copy:`, and
+Edit > Copy menu routes with independent clipboard sentinels.
+
+Verification:
+
+```bash
+bash -n scripts/test-issue-834-separated-token-copy-oracle.sh
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp50-separated-token-copy-oracle
+scripts/test-issue-834-separated-token-copy-oracle.sh
+```
+
+The successful run was `20260623-000356`. Its summary is:
+
+```text
+logs/issue-834-exp50-separated-token-copy-oracle/separated-token-copy-oracle-summary.json
+```
+
+The run classified the result as:
+
+```json
+{
+  "classification": "separated-token-oracle-pass",
+  "embedded_interpretation_gate": "open",
+  "overall_result": "pass",
+  "trusted_routes": ["cg-event", "inprocess", "menu"]
+}
+```
+
+Key evidence:
+
+- The fixture identity preflight passed.
+- The generated PDF text operators extracted `LEFT834 MID834 RIGHT834`.
+- The fixture metadata records the expected page geometry, Helvetica 24 pt font,
+  token positions, and token boxes matching the Experiment 49 embedded fixture
+  metadata.
+- Standalone PDFKit copied `LEFT834 MID834 RIGHT834` through CGEvent, in-process
+  AppKit copy, and menu copy routes.
+- Standalone `WKWebView` copied `LEFT834 MID834 RIGHT834` through CGEvent,
+  in-process AppKit copy, and menu copy routes.
+- The `NSTextView` known-good control copied the same text through all tested
+  routes.
+- Clipboard restoration succeeded.
+
+The only non-failing noise was Swift's macOS deprecation warning for
+`activateIgnoringOtherApps`; it did not affect the oracle result.
+
+## Conclusion
+
+The separated-token oracle gap from Experiment 49 is closed. The exact fixture
+is extractable and copyable outside Ghostboard/Surfari, including in standalone
+`WKWebView`, through the same CGEvent route that TermSurf automation uses.
+
+The embedded interpretation gate is now open: the next experiment should rerun
+the embedded Surfari separated-token matrix and, if it again copies
+`LEFT834 MID834` while missing `RIGHT834`, classify that as a real embedded
+right-edge selection gap rather than a fixture/oracle problem.
+
+## Completion Review
+
+An external Codex completion review checked the harness, result language, and
+final summary.
+
+Verdict: **Approved after recording this review**.
+
+Finding:
+
+- the experiment file needed to record the completion review before the result
+  commit.
+
+Resolution:
+
+- this section records the completion review verdict and finding.
+
+The reviewer found no implementation must-fix issues. It agreed that `Pass` /
+`separated-token-oracle-pass` is supported because PDFKit and standalone
+`WKWebView` both copied `LEFT834 MID834 RIGHT834` through CGEvent, in-process,
+and menu routes; `missing_probes` is empty; and clipboard restoration succeeded.
+It also agreed that the fixture identity evidence is strong enough and that the
+embedded interpretation gate is correctly open for this outcome.
