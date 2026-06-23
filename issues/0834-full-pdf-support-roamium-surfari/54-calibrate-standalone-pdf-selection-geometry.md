@@ -153,3 +153,93 @@ requires a comparable-geometry outcome such as
 
 A follow-up Codex review confirmed the required finding was resolved and
 approved the design for the plan commit.
+
+## Result
+
+**Result:** Pass
+
+Experiment 54 added
+`scripts/test-issue-834-pdf-standalone-geometry-calibration.sh` and ran a fresh
+standalone `WKWebView` calibration matrix against the exact separated-token PDF
+fixture.
+
+The final harness run wrote:
+
+`logs/issue-834-exp54-pdf-standalone-geometry-calibration/pdf-standalone-geometry-calibration-summary.json`
+
+The summary reported:
+
+- `overall_result = pass`
+- `classification = embedded-gesture-outside-standalone-band`
+- `oracle_gate_open = true`
+- `fixture_identity_match = true`
+- `standalone_success_count = 5`
+- `standalone_success_names = [oracle-base, oracle-x-tight, oracle-x-wide, oracle-y-high, oracle-y-low]`
+- `standalone_success_y_ratios = [0.21, 0.25, 0.29]`
+- `standalone_embedded_ratio_success = false`
+- `embedded_reproduced_missing_right = true`
+- `embedded_outside_success_y_band = true`
+- `clipboard_restore_status = restored`
+
+The calibrated standalone `WKWebView` control copied all three tokens for the
+known-good oracle gesture family:
+
+- `oracle-base`: `start_x=0.18`, `end_x=0.86`, `y=0.25`
+- `oracle-y-low`: `start_x=0.18`, `end_x=0.86`, `y=0.21`
+- `oracle-y-high`: `start_x=0.18`, `end_x=0.86`, `y=0.29`
+- `oracle-x-wide`: `start_x=0.16`, `end_x=0.90`, `y=0.25`
+- `oracle-x-tight`: `start_x=0.20`, `end_x=0.82`, `y=0.25`
+
+The standalone `embedded-ratio` cell, using Experiment 53's embedded gesture
+(`start_x=0.58`, `end_x=0.99`, `y=0.43`), did not copy all tokens. Its clipboard
+sample was `HT834`, not `LEFT834 MID834 RIGHT834`.
+
+Embedded Surfari reproduced the real failure in the same run: it copied only
+`LEFT834 MID834`, not `RIGHT834`. Therefore the prior Experiment 53 comparison
+should be treated as non-comparable because the embedded-ratio gesture was not a
+successful standalone selection gesture. The next product-facing experiment
+should use the calibrated standalone band as the control when deciding whether
+Surfari's embedded failure is due to coordinate selection geometry,
+responder/copy-target state, or deeper WebKit/PDFKit selection behavior.
+
+Verification run:
+
+```bash
+bash -n scripts/test-issue-834-pdf-standalone-geometry-calibration.sh
+cargo fmt -p surfari -- --check
+surfari/libtermsurf_webkit/build.sh
+cargo build -p surfari
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp54-pdf-standalone-geometry-calibration
+scripts/test-issue-834-pdf-standalone-geometry-calibration.sh
+```
+
+`surfari/libtermsurf_webkit/build.sh` passed with the existing macOS SDK/WebKit
+version warning. `cargo build -p surfari` passed.
+`git -C webkit/src status --short` was clean.
+
+## Conclusion
+
+The standalone PDF selection control is now calibrated. The embedded Surfari
+gesture that was used in Experiments 51 through 53 is outside the standalone
+success band and should no longer be treated as comparable to the standalone
+oracle. The next experiment should drive embedded Surfari with calibrated
+standalone-band gestures, especially around `start_x≈0.18`, `end_x≈0.86`, and
+`y≈0.21..0.29`, then determine whether embedded Surfari still misses `RIGHT834`.
+If calibrated embedded gestures still fail, the responder/copy-target gap from
+Experiment 53 becomes a stronger fix candidate. If calibrated embedded gestures
+pass, the immediate issue is the TUI/harness gesture geometry rather than PDF
+selection/copy behavior itself.
+
+## Completion Review
+
+Codex reviewed the completed experiment and initially required one harness fix:
+each standalone cell needed to record its copy route. The harness now records
+`copy_route = "cg-event-command-c"` for every standalone cell, the calibration
+was rerun, and the summary confirmed that all standalone cells used that route.
+
+A follow-up Codex review confirmed the copy-route finding was resolved and
+approved the Experiment 54 result for commit. The review also accepted the
+`Pass` / `embedded-gesture-outside-standalone-band` classification and found no
+remaining blocking issues.

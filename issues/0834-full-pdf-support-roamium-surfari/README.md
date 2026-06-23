@@ -227,7 +227,7 @@ Each feature row should ultimately record:
 - [Experiment 53: Diagnose embedded PDF view geometry](53-diagnose-embedded-pdf-view-geometry.md)
   — **Partial**
 - [Experiment 54: Calibrate standalone PDF selection geometry](54-calibrate-standalone-pdf-selection-geometry.md)
-  — **Designed**
+  — **Pass**
 
 ## Roamium Phase
 
