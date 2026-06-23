@@ -216,3 +216,130 @@ Follow-up verdict: **Approved**.
 
 The reviewer found no remaining required findings and approved the design for
 the Experiment 44 plan commit.
+
+## Result
+
+**Result:** Partial
+
+Implemented `scripts/test-issue-834-surfari-pdf-selection-copy.sh`, a focused
+Surfari PDF selection/copy harness. The harness generates a deterministic PDF
+with real PDF text operators, launches repo-built Ghostboard, WebTUI, and
+Surfari, saves and restores the system clipboard, drag-selects the intended PDF
+text region through real TermSurf-routed mouse input, sends Browse-mode `Cmd+C`,
+and records clipboard plus routing evidence.
+
+Final run:
+
+```bash
+rm -rf logs/issue-834-exp44-surfari-pdf-selection-copy
+env -u TERMSURF_SURFARI_CACONTEXT_LAYER \
+  scripts/test-issue-834-surfari-pdf-selection-copy.sh
+```
+
+Run ID: `20260622-215254`
+
+Summary:
+
+- summary JSON:
+  `logs/issue-834-exp44-surfari-pdf-selection-copy/surfari-pdf-selection-copy-summary.json`;
+- overall result: `partial`;
+- classification: `surfari-pdf-selection-copy-partial`;
+- `TERMSURF_SURFARI_CACONTEXT_LAYER`: unset;
+- repo binaries:
+  - Ghostboard:
+    `ghostboard/macos/build/Debug/TermSurf.app/Contents/MacOS/termsurf`;
+  - WebTUI: `target/debug/web`;
+  - Surfari: `target/debug/surfari`;
+  - WebKit debug framework: `webkit/src/WebKitBuild/Debug`;
+- cleanup: Ghostboard/WebTUI/Surfari and the fixture server terminated;
+- clipboard restoration status: `restored`.
+
+What passed:
+
+- WebTUI requested `browser=surfari`;
+- Surfari emitted `BrowserReady`;
+- WebTUI reached ready state;
+- Surfari trace recorded the PDF URL;
+- Surfari emitted nonzero CAContext;
+- Surfari internal render proof passed;
+- the fixture server recorded
+  `REQUEST path=/selectable.pdf status=200 content_type=application/pdf`;
+- baseline Ghostboard-window overlay-cropped proof showed the PDF page and text
+  region:
+  - cyan page pixels: `813115`;
+  - black text pixels: `9062`;
+- the generated PDF text operator was
+  `BT /F1 24 Tf 72 620 Td (TS834PDFCOPYQXJZ) Tj ET`;
+- the recorded PDF-space text box was `x=72`, `y=604`, `width=280`, `height=32`;
+- the drag used web points `593.9,233.9` to `918.7,233.9`, which crossed the
+  measured glyph band;
+- Ghostboard forwarded mouse down, drag move, and mouse up to the overlay with
+  `terminal_fallback=false`;
+- Surfari trace recorded mouse down, mouse move, and mouse up for the target
+  pane;
+- Ghostboard observed Browse-mode `Cmd+C` and did not run copy-current-url;
+- Surfari trace recorded `Cmd+C` as `windows_key_code=67` with command modifier;
+- the system clipboard was saved, primed with the sentinel, checked before copy,
+  and restored after the run.
+
+What did not pass:
+
+- after drag-select plus `Cmd+C`, the clipboard still contained the sentinel
+  `ISSUE834_EXP44_CLIPBOARD_SENTINEL_20260622-215254`;
+- the accepted PDF marker `TS834PDFCOPYQXJZ` was absent from the clipboard;
+- a diagnostic fallback attempted `Cmd+A` then `Cmd+C`, but the clipboard still
+  contained the sentinel;
+- the post-drag screenshot had the same cyan and black counts as the baseline,
+  so there was no stable visible selection-highlight proof.
+
+Hygiene and verification:
+
+```bash
+./surfari/libtermsurf_webkit/build.sh
+cargo fmt -p surfari
+cargo build -p surfari
+cargo build -p webtui
+(cd ghostboard && macos/build.nu --configuration Debug --action build)
+bash -n scripts/test-issue-834-surfari-pdf-selection-copy.sh
+git diff --check
+git -C webkit/src status --short
+```
+
+All checks passed. The WebKit shim build emitted the existing SDK-version linker
+warning, and the Ghostboard build emitted the existing SwiftLint warning in
+`SurfaceView_AppKit.swift`; neither blocked the build.
+
+## Conclusion
+
+Experiment 44 proves that Surfari PDF selection/copy input routing reaches the
+right place: the PDF is visible, the intended text region is visible, drag input
+is forwarded by Ghostboard and received by Surfari, and Browse-mode `Cmd+C`
+reaches Surfari without falling back to terminal or copy-current-url handling.
+
+It does not prove successful PDF text selection/copy. The clipboard remains
+unchanged after both drag-select/`Cmd+C` and the diagnostic `Cmd+A`/`Cmd+C`
+fallback. The next experiment should diagnose why WebKit/PDFKit is not creating
+or copying a text selection from Surfari's PDF surface. Likely directions are:
+compare the same generated PDF in a standalone `WKWebView`/Safari control,
+inspect whether PDFKit selection is disabled in the embedded WebKit path, and
+determine whether Surfari needs an explicit PDF selection/copy bridge.
+
+## Completion Review
+
+An external Codex review checked the completed Experiment 44 implementation,
+result, and evidence.
+
+Verdict: **Approved after recording this section**.
+
+Findings:
+
+- Partial is the correct classification because Surfari received the drag and
+  `Cmd+C` routing, but the clipboard remained the sentinel and never contained
+  `TS834PDFCOPYQXJZ`;
+- clipboard handling, routing evidence, and the next-step conclusion are
+  adequate;
+- the only required fix was to record the completion review in this file.
+
+Resolution:
+
+- this section records the completion review and its verdict.
