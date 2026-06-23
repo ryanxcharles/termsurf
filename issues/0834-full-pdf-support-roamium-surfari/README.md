@@ -230,6 +230,8 @@ Each feature row should ultimately record:
   — **Pass**
 - [Experiment 55: Test embedded PDF calibrated gestures](55-test-embedded-pdf-calibrated-gestures.md)
   — **Pass**
+- [Experiment 56: Probe embedded PDF responder activation](56-probe-embedded-pdf-responder-activation.md)
+  — **Designed**
 
 ## Roamium Phase
 
