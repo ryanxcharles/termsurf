@@ -139,3 +139,129 @@ The review required two stronger gates before the plan could be committed:
 
 Both requirements were added to the design. The plan is approved for
 implementation after the plan commit.
+
+## Result
+
+**Result:** Fail
+
+The focused harness reproduced the embedded Surfari PDF selection/copy failure
+in all three calibrated cells, but it did not produce any WebKit PDF plugin
+trace records from the patched local WebKit build.
+
+Latest summary:
+
+- `logs/issue-834-exp58-webkit-pdf-selection-trace/webkit-pdf-selection-trace-summary.json`
+- run id: `20260623-040511`
+- classification: `harness-insufficient`
+- overall result: `fail`
+- oracle gate: open
+- standalone calibration gate: open
+- matched cells: true
+- fixture identity match: true
+- repo stack paths: repo-built Surfari and
+  `webkit/src/WebKitBuild/Debug/WebKit.framework`
+- trace records: `0`
+
+The user-visible failure remained stable:
+
+- `oracle-base`: clipboard contained only `LEFT834`
+- `oracle-x-tight`: clipboard contained only `LEFT834`
+- `oracle-x-wide`: clipboard contained only `LEFT834`
+
+The experiment also proved that the patched trace strings were present in the
+local debug framework:
+
+```bash
+strings webkit/src/WebKitBuild/Debug/WebKit.framework/WebKit \
+  | rg "termsurf-webkit-pdf-selection|performCopyEditingOperation-before"
+```
+
+However, live process inspection showed existing WebContent processes mapped
+system WebKit and system JavaScriptCore images, not the local debug framework:
+
+```text
+/System/Library/Frameworks/WebKit.framework/Versions/A/WebKit
+/System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebCore.framework/Versions/A/WebCore
+/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/JavaScriptCore
+```
+
+The harness was updated to mirror WebKit's own local-run environment more
+closely by passing:
+
+- `DYLD_FRAMEWORK_PATH`
+- `DYLD_LIBRARY_PATH`
+- `__XPC_DYLD_FRAMEWORK_PATH`
+- `__XPC_DYLD_LIBRARY_PATH`
+- `WEBKIT_UNSET_DYLD_FRAMEWORK_PATH=YES`
+
+Those changes were not sufficient to make the patched WebKit PDF plugin active
+inside the WebContent process. Because the trace gate required nonempty records
+from the active patched PDF plugin path, this experiment failed.
+
+No WebKit patch was archived for this experiment. The temporary WebKit source
+trace diff was reverted after the failed proof because it did not become active
+in the process under test.
+
+Final repository state:
+
+- top-level status contained only the Experiment 58 documentation and harness
+  changes;
+- WebKit branch: `webkit-1452a439-issue-834-exp58`;
+- WebKit HEAD: `1452a43959523449099b2616793fd2c5b6a6487e`;
+- WebKit shallow checkout: `true`;
+- WebKit source status: clean;
+- WebKit patch archive: none, because the temporary trace diff was reverted and
+  never became active in WebContent.
+
+Verification run:
+
+```bash
+bash -n scripts/test-issue-834-webkit-pdf-selection-trace.sh
+bash -n scripts/test-issue-834-surfari-pdf-selection-copy.sh
+cargo fmt -p surfari -- --check
+cargo build -p surfari
+scripts/test-issue-834-webkit-pdf-selection-trace.sh
+git diff --check
+git -C webkit/src status --short
+git -C webkit/src rev-parse --abbrev-ref HEAD
+git -C webkit/src rev-parse HEAD
+git -C webkit/src rev-parse --is-shallow-repository
+```
+
+## Completion Review
+
+Codex reviewed the completed Experiment 58 result before the result commit.
+
+The review agreed that the `Fail` / `harness-insufficient` classification was
+justified because the embedded baseline failure reproduced, the oracle and
+calibration gates remained open, fixture identity matched, and the required
+trace gate failed with zero trace records.
+
+The review required two fixes before commit:
+
+- gate the extra local-WebKit XPC/library environment variables so the shared
+  Experiment 44 selection-copy harness does not change behavior for every
+  baseline run;
+- add the required WebKit branch, HEAD, shallow-check, clean-status, and
+  `git diff --check` evidence to this result.
+
+Both fixes were applied. The extra local-WebKit environment is now enabled only
+when `TERMSURF_SURFARI_USE_LOCAL_WEBKIT_ENV=1`, and the Experiment 58 wrapper
+sets that flag explicitly.
+
+## Conclusion
+
+Experiment 58 did not give the desired WebKit-internal selection trace. The
+strongest direct finding is that local WebKit tracing is blocked by the
+WebContent process continuing to use system WebKit despite the local framework
+path being present in the harness.
+
+The next experiment should not depend on WebKit-internal trace records. Source
+inspection of Surfari's current AppKit embedding path exposed a more direct
+hypothesis: `ts_set_view_size` receives browser dimensions in pixels but applies
+them directly as AppKit points, and the mouse forwarding path likewise treats
+pixel-space input as point-space `NSEvent` coordinates. On a 2x Retina display,
+that can make the hidden `WKWebView` twice as large in point space and make a
+visually full-width drag select only the left side of the PDF. The next
+experiment should test and, if proven, fix Surfari's point/pixel conversion for
+view sizing and mouse input.
