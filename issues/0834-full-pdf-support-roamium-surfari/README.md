@@ -222,6 +222,8 @@ Each feature row should ultimately record:
   — **Pass**
 - [Experiment 51: Rerun embedded selection bounds with oracle](51-rerun-embedded-selection-bounds-with-oracle.md)
   — **Pass**
+- [Experiment 52: Probe embedded right-edge correction](52-probe-embedded-right-edge-correction.md)
+  — **Designed**
 
 ## Roamium Phase
 
