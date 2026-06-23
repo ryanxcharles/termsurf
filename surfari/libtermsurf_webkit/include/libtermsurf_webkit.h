@@ -54,6 +54,18 @@ typedef void (*ts_renderer_crashed_cb)(
     const char *url,
     bool visible,
     void *user_data);
+typedef void (*ts_render_probe_cb)(
+    ts_web_contents_t wc,
+    const char *method,
+    const char *status,
+    int width,
+    int height,
+    int magenta,
+    int cyan,
+    int yellow,
+    int webkit_green,
+    const char *error,
+    void *user_data);
 
 int ts_content_main(int argc, const char *const *argv);
 void ts_set_on_initialized(ts_initialized_cb callback, void *user_data);
@@ -137,6 +149,9 @@ void ts_set_on_javascript_dialog_request(ts_javascript_dialog_request_cb cb, voi
 void ts_set_on_console_message(ts_console_message_cb cb, void *user_data);
 void ts_set_on_http_auth_request(ts_http_auth_request_cb cb, void *user_data);
 void ts_set_on_renderer_crashed(ts_renderer_crashed_cb cb, void *user_data);
+void ts_set_on_render_probe(ts_render_probe_cb cb, void *user_data);
+
+void ts_webkit_test_capture_render_probe(ts_web_contents_t wc);
 
 #ifdef __cplusplus
 }

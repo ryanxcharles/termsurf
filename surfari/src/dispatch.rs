@@ -19,6 +19,7 @@ struct TabEntry {
 }
 
 static PDF_INPUT_TRACE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+static RENDER_PROOF_TRACE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_LOADING_STATES: Mutex<Vec<TermSurfMessage>> = Mutex::new(Vec::new());
 
 struct DeferredHttpAuthCancel {
@@ -69,6 +70,24 @@ fn trace_pdf_input(line: impl AsRef<str>) {
         let path = std::env::var_os("TERMSURF_PDF_INPUT_TRACE_FILE")
             .map(PathBuf::from)
             .unwrap_or_else(|| std::env::temp_dir().join("termsurf").join("pdf-input.log"));
+        if let Some(parent) = path.parent() {
+            let _ = create_dir_all(parent);
+        }
+        Some(path)
+    });
+
+    let Some(path) = path else {
+        return;
+    };
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "surfari {}", line.as_ref());
+    }
+}
+
+fn trace_render_proof(line: impl AsRef<str>) {
+    let path = RENDER_PROOF_TRACE_PATH.get_or_init(|| {
+        let path =
+            std::env::var_os("TERMSURF_SURFARI_RENDER_PROOF_TRACE_FILE").map(PathBuf::from)?;
         if let Some(parent) = path.parent() {
             let _ = create_dir_all(parent);
         }
@@ -735,6 +754,46 @@ pub unsafe extern "C" fn on_renderer_crashed(
         })),
     };
     crate::ipc::send(&msg);
+}
+
+pub unsafe extern "C" fn on_render_probe(
+    wc: TsWebContents,
+    method: *const std::os::raw::c_char,
+    status: *const std::os::raw::c_char,
+    width: i32,
+    height: i32,
+    magenta: i32,
+    cyan: i32,
+    yellow: i32,
+    webkit_green: i32,
+    error: *const std::os::raw::c_char,
+    _user_data: *mut c_void,
+) {
+    let Some(t) = find_by_handle(wc) else { return };
+    let method = unsafe { std::ffi::CStr::from_ptr(method) }
+        .to_string_lossy()
+        .into_owned();
+    let status = unsafe { std::ffi::CStr::from_ptr(status) }
+        .to_string_lossy()
+        .into_owned();
+    let error = unsafe { std::ffi::CStr::from_ptr(error) }
+        .to_string_lossy()
+        .into_owned();
+    trace_render_proof(format!(
+        "render-proof tab={} pane={} url={} method={} status={} width={} height={} magenta={} cyan={} yellow={} webkit_green={} error={}",
+        t.tab_id,
+        t.pane_id,
+        t.last_url,
+        method,
+        status,
+        width,
+        height,
+        magenta,
+        cyan,
+        yellow,
+        webkit_green,
+        error
+    ));
 }
 
 pub unsafe extern "C" fn on_title_changed(

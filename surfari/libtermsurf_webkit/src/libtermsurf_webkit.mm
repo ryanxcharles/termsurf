@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
+#include <cstdlib>
 #include <vector>
 #include <objc/runtime.h>
 
@@ -38,14 +40,31 @@
 @interface TSHostWindow : NSWindow
 @end
 
+static NSString *pdfResponderProbeModeRaw()
+{
+    if (NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_RESPONDER_PROBE"].length == 0)
+        return nil;
+    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_RESPONDER_MODE"];
+    return mode.length ? mode : @"baseline";
+}
+
+static bool pdfResponderProbeModeIs(NSString *mode)
+{
+    return [pdfResponderProbeModeRaw() isEqualToString:mode];
+}
+
 @implementation TSHostWindow
 - (BOOL)canBecomeKeyWindow
 {
+    if (pdfResponderProbeModeIs(@"key-window") || pdfResponderProbeModeIs(@"key-main-window"))
+        return YES;
     return NO;
 }
 
 - (BOOL)canBecomeMainWindow
 {
+    if (pdfResponderProbeModeIs(@"main-window") || pdfResponderProbeModeIs(@"key-main-window"))
+        return YES;
     return NO;
 }
 @end
@@ -75,6 +94,8 @@ struct CallbackState {
     void *on_http_auth_request_data = nullptr;
     ts_renderer_crashed_cb on_renderer_crashed = nullptr;
     void *on_renderer_crashed_data = nullptr;
+    ts_render_probe_cb on_render_probe = nullptr;
+    void *on_render_probe_data = nullptr;
 };
 
 static CallbackState g_callbacks;
@@ -91,6 +112,19 @@ static NSURL *profileURL(NSString *basePath, NSString *component, bool directory
 {
     NSURL *baseURL = [NSURL fileURLWithPath:basePath isDirectory:YES];
     return [baseURL URLByAppendingPathComponent:component isDirectory:directory];
+}
+
+static CGFloat hostWindowAlpha()
+{
+    NSString *value = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_HOST_WINDOW_ALPHA"];
+    if (!value.length)
+        return 0.0;
+    double alpha = value.doubleValue;
+    if (alpha < 0.0)
+        alpha = 0.0;
+    if (alpha > 1.0)
+        alpha = 1.0;
+    return (CGFloat)alpha;
 }
 
 static void createProfileDirectory(NSURL *url)
@@ -186,6 +220,9 @@ struct WebContents {
     bool suppress_cursor_notifications;
     bool renderer_crash_reported;
     CAContext *remote_context;
+    CALayer *snapshot_layer;
+    bool snapshot_refresh_pending;
+    bool snapshot_refresh_again;
     int width;
     int height;
     bool gui_active;
@@ -199,6 +236,426 @@ struct WebContents {
     int mouse_last_button = 0;
     NSUInteger mouse_buttons_down = 0;
 };
+
+static void scheduleSnapshotLayerRefresh(WebContents *contents, NSString *reason);
+
+static bool pdfCopyTraceEnabled()
+{
+    return NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_TRACE"].length > 0;
+}
+
+static bool pdfCopyInProcessProbeEnabled()
+{
+    return NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_INPROCESS"].length > 0;
+}
+
+static bool pdfCopyDirectEnabled()
+{
+    return NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_DIRECT"].length > 0;
+}
+
+static NSString *pdfMouseDispatchProbeMode()
+{
+    if (NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_MOUSE_DISPATCH_PROBE"].length == 0)
+        return nil;
+    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_MOUSE_DISPATCH_MODE"];
+    return mode.length ? mode : @"current";
+}
+
+static NSString *pdfSelectionEdgeProbeMode()
+{
+    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_SELECTION_EDGE_MODE"];
+    if (mode.length == 0)
+        return nil;
+    if (NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_SELECTION_EDGE_PROBE"].length == 0)
+        return nil;
+    return mode;
+}
+
+static CGFloat pdfSelectionEdgeDeltaX()
+{
+    NSString *value = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_SELECTION_EDGE_DELTA_X"];
+    if (value.length == 0)
+        return 0;
+    return value.doubleValue;
+}
+
+static bool pdfViewGeometryTraceEnabled()
+{
+    return NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_VIEW_GEOMETRY_TRACE"].length > 0;
+}
+
+static NSString *pdfResponderProbeMode()
+{
+    return pdfResponderProbeModeRaw();
+}
+
+static NSString *describeObject(id object)
+{
+    if (!object)
+        return @"nil";
+    return [NSString stringWithFormat:@"%@:%p", NSStringFromClass([object class]), object];
+}
+
+static NSString *describeView(NSView *view)
+{
+    if (!view)
+        return @"nil";
+    return [NSString stringWithFormat:@"%@:%p frame=%@ bounds=%@ hidden=%d alpha=%.3f",
+                     NSStringFromClass([view class]),
+                     view,
+                     NSStringFromRect(view.frame),
+                     NSStringFromRect(view.bounds),
+                     view.hidden ? 1 : 0,
+                     view.alphaValue];
+}
+
+static NSString *responderChain(NSResponder *responder)
+{
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    NSResponder *current = responder;
+    for (int i = 0; current && i < 12; i++) {
+        [items addObject:describeObject(current)];
+        current = current.nextResponder;
+    }
+    if (current)
+        [items addObject:@"..."];
+    return [items componentsJoinedByString:@">"];
+}
+
+static NSString *clipboardSample()
+{
+    NSString *value = [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] ?: @"";
+    NSString *sample = value.length > 120 ? [value substringToIndex:120] : value;
+    sample = [[sample stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\t" withString:@" "];
+    return [NSString stringWithFormat:@"len=%lu change=%ld sample=%@", (unsigned long)value.length, (long)NSPasteboard.generalPasteboard.changeCount, sample];
+}
+
+static void appendPdfCopyTrace(NSString *line)
+{
+    if (!pdfCopyTraceEnabled())
+        return;
+    NSString *path = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_TRACE_FILE"];
+    if (!path.length)
+        path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"termsurf-surfari-pdf-copy-trace.log"];
+    NSString *entry = [line stringByAppendingString:@"\n"];
+    NSData *data = [entry dataUsingEncoding:NSUTF8StringEncoding];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *parent = path.stringByDeletingLastPathComponent;
+    if (parent.length)
+        [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![fm fileExistsAtPath:path])
+        [data writeToFile:path atomically:YES];
+    else {
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        [handle seekToEndOfFile];
+        [handle writeData:data];
+        [handle closeFile];
+    }
+}
+
+static void appendPdfViewGeometryTrace(NSString *line)
+{
+    if (!pdfViewGeometryTraceEnabled())
+        return;
+    NSString *path = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_VIEW_GEOMETRY_TRACE_FILE"];
+    if (!path.length)
+        path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"termsurf-surfari-pdf-view-geometry-trace.log"];
+    NSString *entry = [line stringByAppendingString:@"\n"];
+    NSData *data = [entry dataUsingEncoding:NSUTF8StringEncoding];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *parent = path.stringByDeletingLastPathComponent;
+    if (parent.length)
+        [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![fm fileExistsAtPath:path])
+        [data writeToFile:path atomically:YES];
+    else {
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        [handle seekToEndOfFile];
+        [handle writeData:data];
+        [handle closeFile];
+    }
+}
+
+static NSString *describeViewTree(NSView *view, NSUInteger depth)
+{
+    if (!view || depth > 5)
+        return @"";
+
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    NSString *layerBacked = view.wantsLayer ? @"layered" : @"not-layered";
+    NSString *hidden = view.hidden ? @"hidden" : @"visible";
+    [items addObject:[NSString stringWithFormat:@"%@:%p frame=%@ bounds=%@ %@ alpha=%.3f %@",
+                               NSStringFromClass([view class]),
+                               view,
+                               NSStringFromRect(view.frame),
+                               NSStringFromRect(view.bounds),
+                               hidden,
+                               view.alphaValue,
+                               layerBacked]];
+    for (NSView *subview in view.subviews) {
+        NSString *child = describeViewTree(subview, depth + 1);
+        if (child.length)
+            [items addObject:[NSString stringWithFormat:@"[%@]", child]];
+    }
+    return [items componentsJoinedByString:@" "];
+}
+
+static NSView *findDescendantViewWithClassName(NSView *view, NSString *className)
+{
+    if (!view || !className.length)
+        return nil;
+    if ([NSStringFromClass([view class]) isEqualToString:className])
+        return view;
+    for (NSView *subview in view.subviews) {
+        NSView *found = findDescendantViewWithClassName(subview, className);
+        if (found)
+            return found;
+    }
+    return nil;
+}
+
+static NSString *describeScrollViews(NSView *view)
+{
+    if (!view)
+        return @"";
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    if ([view isKindOfClass:NSScrollView.class]) {
+        NSScrollView *scroll = (NSScrollView *)view;
+        NSClipView *clip = scroll.contentView;
+        [items addObject:[NSString stringWithFormat:@"%@:%p frame=%@ bounds=%@ document=%@ document_frame=%@ document_bounds=%@ clip_bounds=%@",
+                                   NSStringFromClass([scroll class]),
+                                   scroll,
+                                   NSStringFromRect(scroll.frame),
+                                   NSStringFromRect(scroll.bounds),
+                                   describeObject(scroll.documentView),
+                                   NSStringFromRect(scroll.documentView.frame),
+                                   NSStringFromRect(scroll.documentView.bounds),
+                                   NSStringFromRect(clip.bounds)]];
+    }
+    for (NSView *subview in view.subviews) {
+        NSString *child = describeScrollViews(subview);
+        if (child.length)
+            [items addObject:child];
+    }
+    return [items componentsJoinedByString:@" | "];
+}
+
+static NSString *describePointInViewChain(NSView *view, NSPoint windowPoint)
+{
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    NSView *current = view;
+    for (int i = 0; current && i < 12; i++) {
+        NSPoint local = [current convertPoint:windowPoint fromView:nil];
+        [items addObject:[NSString stringWithFormat:@"%@:%p point=%@ frame=%@ bounds=%@",
+                                   NSStringFromClass([current class]),
+                                   current,
+                                   NSStringFromPoint(local),
+                                   NSStringFromRect(current.frame),
+                                   NSStringFromRect(current.bounds)]];
+        current = current.superview;
+    }
+    return [items componentsJoinedByString:@">"];
+}
+
+static void tracePdfViewGeometry(WebContents *contents, NSString *label, int x, int y, NSPoint windowPoint)
+{
+    if (!pdfViewGeometryTraceEnabled() || !contents || !contents->web_view)
+        return;
+
+    NSView *hit = [contents->web_view hitTest:windowPoint] ?: contents->web_view;
+    NSPoint webPoint = [contents->web_view convertPoint:windowPoint fromView:nil];
+    NSWindow *window = contents->window;
+    NSScreen *screen = window.screen ?: NSScreen.mainScreen;
+    SEL copySelector = @selector(copy:);
+    id targetFromNil = [NSApp targetForAction:copySelector to:nil from:nil];
+    id targetFromWebView = [NSApp targetForAction:copySelector to:nil from:contents->web_view];
+    NSResponder *firstResponder = window.firstResponder;
+    appendPdfViewGeometryTrace([NSString stringWithFormat:
+        @"surfari-pdf-view-geometry-state tab=%d label=%@ url=%@ input=%d,%d window_point=%@ web_point=%@ hit=%@ window=%@ window_frame=%@ key_window=%d main_window=%d app_key_window=%@ app_main_window=%@ backing_scale=%.3f web_view=%@ web_frame=%@ web_bounds=%@ first_responder=%@ responder_chain=%@ target_nil=%@ target_webview=%@ clipboard={%@}",
+        contents->tab_id,
+        label,
+        contents->web_view.URL.absoluteString ?: @"",
+        x,
+        y,
+        NSStringFromPoint(windowPoint),
+        NSStringFromPoint(webPoint),
+        describeObject(hit),
+        describeObject(window),
+        NSStringFromRect(window.frame),
+        window.isKeyWindow ? 1 : 0,
+        window.isMainWindow ? 1 : 0,
+        describeObject(NSApp.keyWindow),
+        describeObject(NSApp.mainWindow),
+        screen.backingScaleFactor ?: 1.0,
+        describeObject(contents->web_view),
+        NSStringFromRect(contents->web_view.frame),
+        NSStringFromRect(contents->web_view.bounds),
+        describeObject(firstResponder),
+        responderChain(firstResponder),
+        describeObject(targetFromNil),
+        describeObject(targetFromWebView),
+        clipboardSample()]);
+    appendPdfViewGeometryTrace([NSString stringWithFormat:@"surfari-pdf-view-geometry-hit-chain tab=%d label=%@ chain=%@", contents->tab_id, label, describePointInViewChain(hit, windowPoint)]);
+    appendPdfViewGeometryTrace([NSString stringWithFormat:@"surfari-pdf-view-geometry-tree tab=%d label=%@ tree=%@", contents->tab_id, label, describeViewTree(contents->web_view, 0)]);
+    appendPdfViewGeometryTrace([NSString stringWithFormat:@"surfari-pdf-view-geometry-scroll tab=%d label=%@ scroll=%@", contents->tab_id, label, describeScrollViews(contents->web_view)]);
+}
+
+static void applyPdfResponderProbe(WebContents *contents, NSString *phase)
+{
+    NSString *mode = pdfResponderProbeMode();
+    if (!mode.length || [mode isEqualToString:@"baseline"] || !contents || !contents->web_view)
+        return;
+
+    NSWindow *window = contents->window;
+    BOOL beforeKey = window.isKeyWindow;
+    BOOL beforeMain = window.isMainWindow;
+    id beforeTargetNil = [NSApp targetForAction:@selector(copy:) to:nil from:nil];
+    id beforeTargetWebView = [NSApp targetForAction:@selector(copy:) to:nil from:contents->web_view];
+
+    if ([mode isEqualToString:@"activate-app"]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        [NSApp activateIgnoringOtherApps:YES];
+#pragma clang diagnostic pop
+    } else if ([mode isEqualToString:@"key-window"]) {
+        [window makeKeyWindow];
+    } else if ([mode isEqualToString:@"main-window"]) {
+        [window makeMainWindow];
+    } else if ([mode isEqualToString:@"key-main-window"]) {
+        [window makeKeyAndOrderFront:nil];
+        [window makeMainWindow];
+    } else if ([mode isEqualToString:@"explicit-first-responder"]) {
+        [window makeFirstResponder:contents->web_view];
+    }
+
+    id afterTargetNil = [NSApp targetForAction:@selector(copy:) to:nil from:nil];
+    id afterTargetWebView = [NSApp targetForAction:@selector(copy:) to:nil from:contents->web_view];
+    appendPdfViewGeometryTrace([NSString stringWithFormat:
+        @"surfari-pdf-responder-probe tab=%d phase=%@ mode=%@ before_key=%d before_main=%d after_key=%d after_main=%d app_key_window=%@ app_main_window=%@ before_target_nil=%@ before_target_webview=%@ after_target_nil=%@ after_target_webview=%@ first_responder=%@ responder_chain=%@",
+        contents->tab_id,
+        phase ?: @"unknown",
+        mode,
+        beforeKey ? 1 : 0,
+        beforeMain ? 1 : 0,
+        window.isKeyWindow ? 1 : 0,
+        window.isMainWindow ? 1 : 0,
+        describeObject(NSApp.keyWindow),
+        describeObject(NSApp.mainWindow),
+        describeObject(beforeTargetNil),
+        describeObject(beforeTargetWebView),
+        describeObject(afterTargetNil),
+        describeObject(afterTargetWebView),
+        describeObject(window.firstResponder),
+        responderChain(window.firstResponder)]);
+}
+
+static void traceJavaScriptSelection(WebContents *contents, NSString *label)
+{
+    if (!pdfCopyTraceEnabled() || !contents || !contents->web_view)
+        return;
+    NSString *script = @"(() => { const s = window.getSelection ? String(window.getSelection()) : ''; return JSON.stringify({ length: s.length, sample: s.slice(0, 120), activeElement: document.activeElement ? document.activeElement.tagName : '', hasFocus: document.hasFocus ? document.hasFocus() : false }); })()";
+    int tab_id = contents->tab_id;
+    [contents->web_view evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+        NSString *resultString = result ? [NSString stringWithFormat:@"%@", result] : @"";
+        NSString *errorString = error ? error.localizedDescription : @"";
+        appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-js tab=%d label=%@ result=%@ error=%@", tab_id, label, resultString, errorString]);
+    }];
+}
+
+static void traceCopyState(WebContents *contents, NSString *label)
+{
+    if (!pdfCopyTraceEnabled() || !contents)
+        return;
+    SEL copySelector = @selector(copy:);
+    id targetFromNil = [NSApp targetForAction:copySelector to:nil from:nil];
+    id targetFromWebView = [NSApp targetForAction:copySelector to:nil from:contents->web_view];
+    NSResponder *firstResponder = contents->window.firstResponder;
+    appendPdfCopyTrace([NSString stringWithFormat:
+        @"surfari-pdf-copy-state tab=%d label=%@ url=%@ focused=%d gui_active=%d window=%@ key_window=%d main_window=%d app_key_window=%@ web_view=%@ web_frame=%@ first_responder=%@ responder_chain=%@ target_nil=%@ target_webview=%@ clipboard={%@}",
+        contents->tab_id,
+        label,
+        contents->web_view.URL.absoluteString ?: @"",
+        contents->focused ? 1 : 0,
+        contents->gui_active ? 1 : 0,
+        describeObject(contents->window),
+        contents->window.isKeyWindow ? 1 : 0,
+        contents->window.isMainWindow ? 1 : 0,
+        describeObject(NSApp.keyWindow),
+        describeObject(contents->web_view),
+        NSStringFromRect(contents->web_view.frame),
+        describeObject(firstResponder),
+        responderChain(firstResponder),
+        describeObject(targetFromNil),
+        describeObject(targetFromWebView),
+        clipboardSample()]);
+    traceJavaScriptSelection(contents, label);
+}
+
+static NSString *caContextLayerMode()
+{
+    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_CACONTEXT_LAYER"];
+    return mode.length ? mode : @"snapshot";
+}
+
+static bool useSnapshotLayer()
+{
+    return [caContextLayerMode() isEqualToString:@"snapshot"];
+}
+
+static CALayer *snapshotLayerForContents(WebContents *contents)
+{
+    if (!contents->snapshot_layer) {
+        contents->snapshot_layer = [CALayer layer];
+        contents->snapshot_layer.name = @"TermSurfSurfariSnapshotLayer";
+        contents->snapshot_layer.contentsGravity = kCAGravityResize;
+        contents->snapshot_layer.backgroundColor = NSColor.blackColor.CGColor;
+    }
+    contents->snapshot_layer.frame = CGRectMake(0, 0, MAX(contents->width, 64), MAX(contents->height, 64));
+    contents->snapshot_layer.contentsScale = NSScreen.mainScreen.backingScaleFactor ?: 1.0;
+    return contents->snapshot_layer;
+}
+
+static CALayer *remoteContextLayerForContents(WebContents *contents)
+{
+    NSString *mode = caContextLayerMode();
+    if ([mode isEqualToString:@"snapshot"])
+        return snapshotLayerForContents(contents);
+    if ([mode isEqualToString:@"diagnostic-color"]) {
+        CALayer *root = [CALayer layer];
+        root.frame = CGRectMake(0, 0, MAX(contents->width, 64), MAX(contents->height, 64));
+        root.backgroundColor = NSColor.blackColor.CGColor;
+        root.contentsScale = NSScreen.mainScreen.backingScaleFactor ?: 1.0;
+
+        BOOL pdf = [contents->web_view.URL.pathExtension.lowercaseString isEqualToString:@"pdf"];
+        if (pdf) {
+            CALayer *green = [CALayer layer];
+            green.frame = root.bounds;
+            green.backgroundColor = [NSColor colorWithCalibratedRed:0.0 green:0.85 blue:0.25 alpha:1.0].CGColor;
+            [root addSublayer:green];
+        } else {
+            CGFloat halfWidth = root.bounds.size.width / 2.0;
+            CALayer *cyan = [CALayer layer];
+            cyan.frame = CGRectMake(0, 0, halfWidth, root.bounds.size.height);
+            cyan.backgroundColor = NSColor.cyanColor.CGColor;
+            [root addSublayer:cyan];
+
+            CALayer *yellow = [CALayer layer];
+            yellow.frame = CGRectMake(halfWidth, 0, root.bounds.size.width - halfWidth, root.bounds.size.height);
+            yellow.backgroundColor = NSColor.yellowColor.CGColor;
+            [root addSublayer:yellow];
+        }
+
+        return root;
+    }
+    if ([mode isEqualToString:@"content-view"]) {
+        NSView *content_view = contents->window.contentView;
+        content_view.wantsLayer = YES;
+        [content_view layoutSubtreeIfNeeded];
+        return content_view.layer ?: contents->web_view.layer;
+    }
+    return contents->web_view.layer;
+}
 
 static std::vector<WebContents *> g_web_contents;
 
@@ -270,6 +727,17 @@ static CGPoint eventLocationInGlobalScreen(WebContents *contents, int x, int y)
     NSPoint screenPoint = [contents->window convertPointToScreen:windowPoint];
     CGFloat screenHeight = NSScreen.screens.firstObject.frame.size.height;
     return CGPointMake(screenPoint.x, screenHeight - screenPoint.y);
+}
+
+static NSPoint adjustedPdfSelectionLocation(WebContents *contents, int x, int y, bool dragging)
+{
+    NSPoint location = eventLocationInWindow(contents, x, y);
+    NSString *mode = pdfSelectionEdgeProbeMode();
+    if (!dragging || ![mode isEqualToString:@"delta"])
+        return location;
+
+    location.x += pdfSelectionEdgeDeltaX();
+    return location;
 }
 
 static NSEventType mouseEventType(int type, int button)
@@ -372,10 +840,11 @@ static void updateClickCount(WebContents *contents, int button, NSPoint position
     contents->mouse_click_button = button;
 }
 
-static void deliverMouseEvent(WebContents *contents, NSEvent *event)
+static void invokeMouseEventOnTarget(WebContents *contents, NSEvent *event, NSView *target)
 {
-    NSView *target = [contents->web_view hitTest:event.locationInWindow] ?: contents->web_view;
-    installMouseEventSwizzles(contents);
+    (void)contents;
+    if (!target)
+        return;
     switch (event.type) {
     case NSEventTypeLeftMouseDown:
         [NSApp _setCurrentEvent:event];
@@ -385,6 +854,11 @@ static void deliverMouseEvent(WebContents *contents, NSEvent *event)
     case NSEventTypeLeftMouseUp:
         [NSApp _setCurrentEvent:event];
         [target mouseUp:event];
+        [NSApp _setCurrentEvent:nil];
+        break;
+    case NSEventTypeLeftMouseDragged:
+        [NSApp _setCurrentEvent:event];
+        [target mouseDragged:event];
         [NSApp _setCurrentEvent:nil];
         break;
     case NSEventTypeRightMouseDown:
@@ -414,6 +888,68 @@ static void deliverMouseEvent(WebContents *contents, NSEvent *event)
         break;
     default:
         break;
+    }
+}
+
+static NSView *mouseDispatchTarget(WebContents *contents, NSEvent *event, NSString *mode, NSView *hit)
+{
+    if (!contents || !contents->web_view)
+        return nil;
+    if ([mode isEqualToString:@"webview-direct"])
+        return contents->web_view;
+    if ([mode isEqualToString:@"flipped-view-direct"])
+        return findDescendantViewWithClassName(contents->web_view, @"WKFlippedView");
+    if ([mode isEqualToString:@"pdf-hud-direct"])
+        return findDescendantViewWithClassName(contents->web_view, @"WKPDFHUDView");
+    (void)event;
+    return hit ?: contents->web_view;
+}
+
+static void appendMouseDispatchTrace(WebContents *contents, NSEvent *event, NSString *phase, NSString *mode, NSView *hit, NSView *target, bool delivered)
+{
+    if (!pdfCopyTraceEnabled())
+        return;
+    NSWindow *window = contents ? contents->window : nil;
+    appendPdfCopyTrace([NSString stringWithFormat:
+        @"surfari-pdf-mouse-dispatch tab=%d phase=%@ mode=%@ type=%ld button=%ld event_number=%ld click_count=%ld modifiers=%lu location=%@ hit=%@ target=%@ target_exists=%d delivered=%d window=%@ key=%d main=%d visible=%d window_number=%ld current_event=%@ swizzle_active=%d",
+        contents ? contents->tab_id : 0,
+        phase ?: @"unknown",
+        mode ?: @"normal",
+        (long)event.type,
+        (long)event.buttonNumber,
+        (long)event.eventNumber,
+        (long)event.clickCount,
+        (unsigned long)event.modifierFlags,
+        NSStringFromPoint(event.locationInWindow),
+        describeView(hit),
+        describeView(target),
+        target ? 1 : 0,
+        delivered ? 1 : 0,
+        describeObject(window),
+        window.isKeyWindow ? 1 : 0,
+        window.isMainWindow ? 1 : 0,
+        window.isVisible ? 1 : 0,
+        (long)window.windowNumber,
+        describeObject(NSApp.currentEvent),
+        g_dispatching_mouse_contents ? 1 : 0]);
+}
+
+static void deliverMouseEvent(WebContents *contents, NSEvent *event, NSString *phase)
+{
+    NSString *mode = pdfMouseDispatchProbeMode();
+    NSView *hit = [contents->web_view hitTest:event.locationInWindow] ?: contents->web_view;
+    NSString *effectiveMode = mode ?: @"current";
+    NSView *target = mouseDispatchTarget(contents, event, effectiveMode, hit);
+
+    installMouseEventSwizzles(contents);
+    if ([effectiveMode isEqualToString:@"window-send-event"]) {
+        [NSApp _setCurrentEvent:event];
+        [contents->window sendEvent:event];
+        [NSApp _setCurrentEvent:nil];
+        appendMouseDispatchTrace(contents, event, phase, effectiveMode, hit, target, true);
+    } else {
+        invokeMouseEventOnTarget(contents, event, target);
+        appendMouseDispatchTrace(contents, event, phase, effectiveMode, hit, target, target != nil);
     }
     restoreMouseEventSwizzles();
 }
@@ -448,6 +984,184 @@ static void fireTitle(WebContents *contents, NSString *title)
     withCString(title, ^(const char *c_title) {
         g_callbacks.on_title_changed(contents, c_title, g_callbacks.on_title_changed_data);
     });
+}
+
+static bool closeToColor(NSUInteger red, NSUInteger green, NSUInteger blue, NSUInteger target_red, NSUInteger target_green, NSUInteger target_blue)
+{
+    const NSInteger threshold = 40;
+    NSInteger dr = labs((NSInteger)red - (NSInteger)target_red);
+    NSInteger dg = labs((NSInteger)green - (NSInteger)target_green);
+    NSInteger db = labs((NSInteger)blue - (NSInteger)target_blue);
+    return dr + dg + db <= threshold;
+}
+
+static void fireRenderProbe(
+    WebContents *contents,
+    NSString *method,
+    NSString *status,
+    int width,
+    int height,
+    int magenta,
+    int cyan,
+    int yellow,
+    int webkit_green,
+    NSString *error)
+{
+    if (!g_callbacks.on_render_probe)
+        return;
+
+    withCString(method ?: @"unknown", ^(const char *c_method) {
+        withCString(status ?: @"unknown", ^(const char *c_status) {
+            withCString(error ?: @"", ^(const char *c_error) {
+                g_callbacks.on_render_probe(
+                    contents,
+                    c_method,
+                    c_status,
+                    width,
+                    height,
+                    magenta,
+                    cyan,
+                    yellow,
+                    webkit_green,
+                    c_error,
+                    g_callbacks.on_render_probe_data);
+            });
+        });
+    });
+}
+
+static void classifySnapshotImage(WebContents *contents, NSString *method, NSImage *image, NSError *error)
+{
+    if (error || !image) {
+        fireRenderProbe(contents, method, @"capture-failed", 0, 0, 0, 0, 0, 0, error.localizedDescription ?: @"missing-image");
+        return;
+    }
+
+    CGImageRef cg_image = [image CGImageForProposedRect:nil context:nil hints:nil];
+    if (!cg_image) {
+        fireRenderProbe(contents, method, @"capture-failed", 0, 0, 0, 0, 0, 0, @"missing-cgimage");
+        return;
+    }
+
+    NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:cg_image];
+    NSInteger width = bitmap.pixelsWide;
+    NSInteger height = bitmap.pixelsHigh;
+    int magenta = 0;
+    int cyan = 0;
+    int yellow = 0;
+    int webkit_green = 0;
+
+    for (NSInteger y = 0; y < height; y++) {
+        for (NSInteger x = 0; x < width; x++) {
+            NSColor *color = [[bitmap colorAtX:x y:y] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+            if (!color)
+                continue;
+            NSUInteger red = (NSUInteger)lrint(color.redComponent * 255.0);
+            NSUInteger green = (NSUInteger)lrint(color.greenComponent * 255.0);
+            NSUInteger blue = (NSUInteger)lrint(color.blueComponent * 255.0);
+            if (closeToColor(red, green, blue, 255, 0, 255))
+                magenta++;
+            if (closeToColor(red, green, blue, 0, 255, 255))
+                cyan++;
+            if (closeToColor(red, green, blue, 255, 255, 0))
+                yellow++;
+            if (closeToColor(red, green, blue, 0, 128, 0))
+                webkit_green++;
+        }
+    }
+
+    NSString *status = (magenta >= 5000 || cyan >= 5000 || yellow >= 5000 || webkit_green >= 5000) ? @"pass" : @"blank";
+    fireRenderProbe(contents, method, status, (int)width, (int)height, magenta, cyan, yellow, webkit_green, @"");
+}
+
+static void refreshSnapshotLayerNow(WebContents *contents, NSString *reason)
+{
+    if (!contents || !contents->web_view || !useSnapshotLayer())
+        return;
+
+    int tab_id = contents->tab_id;
+    WKWebView *web_view = contents->web_view;
+    NSString *refresh_reason = [reason copy] ?: @"unknown";
+    WKSnapshotConfiguration *configuration = [[WKSnapshotConfiguration alloc] init];
+    configuration.rect = web_view.bounds;
+    [web_view takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage *snapshotImage, NSError *error) {
+        WebContents *current = findContentsByTabId(tab_id);
+        if (!current || current->web_view != web_view)
+            return;
+        if (error || !snapshotImage) {
+            fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh failed: %s\n", error.localizedDescription.UTF8String ?: "missing-image");
+            current->snapshot_refresh_pending = false;
+            return;
+        }
+        CGImageRef cg_image = [snapshotImage CGImageForProposedRect:nil context:nil hints:nil];
+        if (!cg_image) {
+            fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh failed: missing-cgimage\n");
+            current->snapshot_refresh_pending = false;
+            return;
+        }
+        CALayer *snapshot_layer = snapshotLayerForContents(current);
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        snapshot_layer.contents = (__bridge id)cg_image;
+        snapshot_layer.frame = CGRectMake(0, 0, MAX(current->width, 64), MAX(current->height, 64));
+        [CATransaction commit];
+        fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh reason=%s width=%d height=%d\n", refresh_reason.UTF8String, current->width, current->height);
+        current->snapshot_refresh_pending = false;
+        if (current->snapshot_refresh_again) {
+            current->snapshot_refresh_again = false;
+            scheduleSnapshotLayerRefresh(current, @"coalesced");
+        }
+    }];
+}
+
+static void scheduleSnapshotLayerRefresh(WebContents *contents, NSString *reason)
+{
+    if (!contents || !contents->web_view || !useSnapshotLayer())
+        return;
+    if (contents->snapshot_refresh_pending) {
+        contents->snapshot_refresh_again = true;
+        return;
+    }
+    contents->snapshot_refresh_pending = true;
+    int tab_id = contents->tab_id;
+    NSString *refresh_reason = [reason copy] ?: @"unknown";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        WebContents *current = findContentsByTabId(tab_id);
+        if (!current)
+            return;
+        refreshSnapshotLayerNow(current, refresh_reason);
+    });
+}
+
+static void captureRenderProbe(WebContents *contents)
+{
+    if (!contents || !contents->web_view)
+        return;
+    if (!g_callbacks.on_render_probe)
+        return;
+
+    WKSnapshotConfiguration *configuration = [[WKSnapshotConfiguration alloc] init];
+    configuration.rect = contents->web_view.bounds;
+    int tab_id = contents->tab_id;
+    WKWebView *web_view = contents->web_view;
+    [web_view takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage *snapshotImage, NSError *error) {
+        WebContents *current = findContentsByTabId(tab_id);
+        if (!current || current->web_view != web_view)
+            return;
+        if (!error && snapshotImage && useSnapshotLayer()) {
+            CGImageRef cg_image = [snapshotImage CGImageForProposedRect:nil context:nil hints:nil];
+            if (cg_image) {
+                CALayer *snapshot_layer = snapshotLayerForContents(current);
+                [CATransaction begin];
+                [CATransaction setDisableActions:YES];
+                snapshot_layer.contents = (__bridge id)cg_image;
+                snapshot_layer.frame = CGRectMake(0, 0, MAX(current->width, 64), MAX(current->height, 64));
+                [CATransaction commit];
+                fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh reason=render-probe width=%d height=%d\n", current->width, current->height);
+            }
+        }
+        classifySnapshotImage(current, @"WKWebView.takeSnapshot", snapshotImage, error);
+    }];
 }
 
 static void fireTargetUrl(WebContents *contents, NSString *url)
@@ -733,8 +1447,9 @@ static void exportContext(WebContents *contents)
         contents->remote_context = [CAContext remoteContextWithOptions:@{
             @"kCAContextCIFilterBehavior" : @"ignore",
         }];
-        contents->remote_context.layer = contents->web_view.layer;
+        contents->remote_context.layer = remoteContextLayerForContents(contents);
     }
+    scheduleSnapshotLayerRefresh(contents, @"export");
 
     if (g_callbacks.on_ca_context_id) {
         g_callbacks.on_ca_context_id(
@@ -787,6 +1502,8 @@ static void exportContext(WebContents *contents)
         fireTitle(self.owner, title);
         fireLoading(self.owner, webView.URL.absoluteString, 0);
         exportContext(self.owner);
+        scheduleSnapshotLayerRefresh(self.owner, @"navigation-finish");
+        captureRenderProbe(self.owner);
     }];
 }
 
@@ -988,6 +1705,9 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->last_cursor_type = -999;
     contents->suppress_cursor_notifications = false;
     contents->renderer_crash_reported = false;
+    contents->snapshot_layer = nil;
+    contents->snapshot_refresh_pending = false;
+    contents->snapshot_refresh_again = false;
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
@@ -997,7 +1717,7 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->window.title = @"libtermsurf_webkit";
     contents->window.acceptsMouseMovedEvents = YES;
     contents->window.ignoresMouseEvents = YES;
-    contents->window.alphaValue = 0.0;
+    contents->window.alphaValue = hostWindowAlpha();
 
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
     configuration.websiteDataStore = context->data_store;
@@ -1076,6 +1796,9 @@ ts_web_contents_t ts_create_devtools_web_contents(
     contents->last_cursor_type = -999;
     contents->suppress_cursor_notifications = false;
     contents->renderer_crash_reported = false;
+    contents->snapshot_layer = nil;
+    contents->snapshot_refresh_pending = false;
+    contents->snapshot_refresh_again = false;
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
@@ -1085,7 +1808,7 @@ ts_web_contents_t ts_create_devtools_web_contents(
     contents->window.title = @"libtermsurf_webkit_devtools";
     contents->window.acceptsMouseMovedEvents = YES;
     contents->window.ignoresMouseEvents = YES;
-    contents->window.alphaValue = 0.0;
+    contents->window.alphaValue = hostWindowAlpha();
 
     contents->web_view = inspector_web_view;
     [contents->web_view removeFromSuperview];
@@ -1175,6 +1898,7 @@ void ts_set_view_size(
     contents->web_view.frame = contents->window.contentView.bounds;
     [contents->web_view layoutSubtreeIfNeeded];
     exportContext(contents);
+    scheduleSnapshotLayerRefresh(contents, @"resize");
 }
 
 void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, int y, int click_count, int modifiers)
@@ -1183,9 +1907,12 @@ void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, i
     if (!contents)
         return;
 
-    NSPoint location = eventLocationInWindow(contents, x, y);
     bool is_up = type == 1;
+    bool was_dragging = (contents->mouse_buttons_down & mouseButtonMask(button)) != 0;
+    NSPoint original_location = eventLocationInWindow(contents, x, y);
+    NSPoint location = adjustedPdfSelectionLocation(contents, x, y, is_up && was_dragging);
     if (!is_up) {
+        applyPdfResponderProbe(contents, @"before-gesture");
         updateClickCount(contents, button, location);
         contents->mouse_buttons_down |= mouseButtonMask(button);
     } else {
@@ -1202,7 +1929,33 @@ void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, i
         eventNumber:++contents->mouse_event_number
         clickCount:MAX(click_count, (int)contents->mouse_click_count)
         pressure:type == 0 ? 1.0 : 0.0];
-    deliverMouseEvent(contents, event);
+    if (pdfCopyTraceEnabled()) {
+        appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-mouse tab=%d type=%d button=%d x=%d y=%d click_count=%d modifiers=%d location=%@ original_location=%@ edge_mode=%@ edge_delta=%.2f", contents->tab_id, type, button, x, y, click_count, modifiers, NSStringFromPoint(location), NSStringFromPoint(original_location), pdfSelectionEdgeProbeMode() ?: @"none", pdfSelectionEdgeDeltaX()]);
+    }
+    tracePdfViewGeometry(contents, type == 1 ? @"mouse-up" : @"mouse-down", x, y, original_location);
+    if (is_up && was_dragging && [pdfSelectionEdgeProbeMode() isEqualToString:@"extra-drag"]) {
+        NSPoint extra_location = original_location;
+        extra_location.x += pdfSelectionEdgeDeltaX();
+        NSEvent *extra_event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged
+            location:extra_location
+            modifierFlags:cocoaModifiers(modifiers)
+            timestamp:[[NSDate date] timeIntervalSince1970]
+            windowNumber:contents->window.windowNumber
+            context:[NSGraphicsContext currentContext]
+            eventNumber:++contents->mouse_event_number
+            clickCount:contents->mouse_click_count
+            pressure:0.0];
+        [NSApp _setCurrentEvent:extra_event];
+        [contents->web_view mouseDragged:extra_event];
+        [NSApp _setCurrentEvent:nil];
+        if (pdfCopyTraceEnabled()) {
+            appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-selection-edge tab=%d mode=extra-drag x=%d y=%d original_location=%@ adjusted_location=%@ delta=%.2f", contents->tab_id, x, y, NSStringFromPoint(original_location), NSStringFromPoint(extra_location), pdfSelectionEdgeDeltaX()]);
+        }
+    }
+    deliverMouseEvent(contents, event, type == 1 ? @"mouse-up" : @"mouse-down");
+    if (type == 1)
+        traceCopyState(contents, @"after-mouse-up");
+    scheduleSnapshotLayerRefresh(contents, @"mouse-event");
 }
 
 void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
@@ -1212,8 +1965,10 @@ void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
         return;
 
     bool is_drag = contents->mouse_buttons_down & mouseButtonMask(0);
+    NSPoint original_location = eventLocationInWindow(contents, x, y);
+    NSPoint location = adjustedPdfSelectionLocation(contents, x, y, is_drag);
     NSEvent *event = [NSEvent mouseEventWithType:is_drag ? NSEventTypeLeftMouseDragged : NSEventTypeMouseMoved
-        location:eventLocationInWindow(contents, x, y)
+        location:location
         modifierFlags:cocoaModifiers(modifiers)
         timestamp:[[NSDate date] timeIntervalSince1970]
         windowNumber:contents->window.windowNumber
@@ -1221,14 +1976,32 @@ void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
         eventNumber:++contents->mouse_event_number
         clickCount:is_drag ? contents->mouse_click_count : 0
         pressure:0.0];
-    [NSApp _setCurrentEvent:event];
-    contents->suppress_cursor_notifications = true;
+    if (pdfMouseDispatchProbeMode() && is_drag) {
+        contents->suppress_cursor_notifications = true;
+        deliverMouseEvent(contents, event, is_drag ? @"mouse-drag" : @"mouse-move");
+        contents->suppress_cursor_notifications = false;
+    } else {
+        [NSApp _setCurrentEvent:event];
+        contents->suppress_cursor_notifications = true;
+        if (is_drag) {
+            if ([pdfSelectionEdgeProbeMode() isEqualToString:@"target"]) {
+                NSView *target = [contents->web_view hitTest:event.locationInWindow] ?: contents->web_view;
+                [target mouseDragged:event];
+            } else {
+                [contents->web_view mouseDragged:event];
+            }
+        } else
+            [contents->web_view _simulateMouseMove:event];
+        contents->suppress_cursor_notifications = false;
+        [NSApp _setCurrentEvent:nil];
+    }
+    if (is_drag && pdfCopyTraceEnabled()) {
+        appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-drag tab=%d x=%d y=%d modifiers=%d location=%@ original_location=%@ edge_mode=%@ edge_delta=%.2f", contents->tab_id, x, y, modifiers, NSStringFromPoint(event.locationInWindow), NSStringFromPoint(original_location), pdfSelectionEdgeProbeMode() ?: @"none", pdfSelectionEdgeDeltaX()]);
+    }
     if (is_drag)
-        [contents->web_view mouseDragged:event];
-    else
-        [contents->web_view _simulateMouseMove:event];
-    contents->suppress_cursor_notifications = false;
-    [NSApp _setCurrentEvent:nil];
+        tracePdfViewGeometry(contents, @"mouse-drag", x, y, original_location);
+    if (is_drag)
+        scheduleSnapshotLayerRefresh(contents, @"mouse-drag");
 }
 
 void ts_forward_scroll_event(
@@ -1262,6 +2035,7 @@ void ts_forward_scroll_event(
     [NSApp _setCurrentEvent:event];
     [target scrollWheel:event];
     [NSApp _setCurrentEvent:nil];
+    scheduleSnapshotLayerRefresh(contents, @"scroll");
 }
 
 void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const char *utf8, int modifiers)
@@ -1283,6 +2057,13 @@ void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const cha
         isARepeat:type == 2
         keyCode:(unsigned short)keycode];
 
+    bool is_copy_key_down = type == 0 && keycode == 67 && (modifiers & 8) != 0;
+    if (is_copy_key_down) {
+        applyPdfResponderProbe(contents, @"before-copy");
+        traceCopyState(contents, @"before-external-copy");
+        tracePdfViewGeometry(contents, @"before-external-copy", 0, 0, NSMakePoint(0, 0));
+    }
+
     if (eventType == NSEventTypeKeyUp)
     {
         [NSApp _setCurrentEvent:event];
@@ -1293,6 +2074,48 @@ void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const cha
         [contents->web_view keyDown:event];
         [NSApp _setCurrentEvent:nil];
     }
+    if (is_copy_key_down) {
+        traceCopyState(contents, @"after-external-copy");
+        tracePdfViewGeometry(contents, @"after-external-copy", 0, 0, NSMakePoint(0, 0));
+        if ([pdfResponderProbeMode() isEqualToString:@"explicit-copy-target"]) {
+            traceCopyState(contents, @"before-explicit-copy-target");
+            tracePdfViewGeometry(contents, @"before-explicit-copy-target", 0, 0, NSMakePoint(0, 0));
+            BOOL ok_webview = [NSApp sendAction:@selector(copy:) to:contents->web_view from:nil];
+            appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-explicit-copy-target tab=%d route=sendActionWebView ok=%d clipboard={%@}", contents->tab_id, ok_webview ? 1 : 0, clipboardSample()]);
+            if ([contents->web_view respondsToSelector:@selector(copy:)]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [contents->web_view performSelector:@selector(copy:) withObject:nil];
+#pragma clang diagnostic pop
+                appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-explicit-copy-target tab=%d route=performWebViewCopy responds=1 invoked=1 clipboard={%@}", contents->tab_id, clipboardSample()]);
+            } else {
+                appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-explicit-copy-target tab=%d route=performWebViewCopy responds=0 invoked=0 reason=not-responds clipboard={%@}", contents->tab_id, clipboardSample()]);
+            }
+            traceCopyState(contents, @"after-explicit-copy-target");
+            tracePdfViewGeometry(contents, @"after-explicit-copy-target", 0, 0, NSMakePoint(0, 0));
+        }
+        if (pdfCopyInProcessProbeEnabled() || pdfCopyDirectEnabled()) {
+            NSString *copyTraceEvent = pdfCopyDirectEnabled() ? @"surfari-pdf-copy-direct" : @"surfari-pdf-copy-inprocess";
+            traceCopyState(contents, pdfCopyDirectEnabled() ? @"before-direct-copy" : @"before-inprocess-copy");
+            tracePdfViewGeometry(contents, pdfCopyDirectEnabled() ? @"before-direct-copy" : @"before-inprocess-copy", 0, 0, NSMakePoint(0, 0));
+            BOOL ok_nil = [NSApp sendAction:@selector(copy:) to:nil from:nil];
+            appendPdfCopyTrace([NSString stringWithFormat:@"%@ tab=%d route=sendActionNil ok=%d clipboard={%@}", copyTraceEvent, contents->tab_id, ok_nil ? 1 : 0, clipboardSample()]);
+            BOOL ok_webview = [NSApp sendAction:@selector(copy:) to:contents->web_view from:nil];
+            appendPdfCopyTrace([NSString stringWithFormat:@"%@ tab=%d route=sendActionWebView ok=%d clipboard={%@}", copyTraceEvent, contents->tab_id, ok_webview ? 1 : 0, clipboardSample()]);
+            if ([contents->web_view respondsToSelector:@selector(copy:)]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [contents->web_view performSelector:@selector(copy:) withObject:nil];
+#pragma clang diagnostic pop
+                appendPdfCopyTrace([NSString stringWithFormat:@"%@ tab=%d route=performWebViewCopy responds=1 invoked=1 clipboard={%@}", copyTraceEvent, contents->tab_id, clipboardSample()]);
+            } else {
+                appendPdfCopyTrace([NSString stringWithFormat:@"%@ tab=%d route=performWebViewCopy responds=0 invoked=0 reason=not-responds clipboard={%@}", copyTraceEvent, contents->tab_id, clipboardSample()]);
+            }
+            traceCopyState(contents, pdfCopyDirectEnabled() ? @"after-direct-copy" : @"after-inprocess-copy");
+            tracePdfViewGeometry(contents, pdfCopyDirectEnabled() ? @"after-direct-copy" : @"after-inprocess-copy", 0, 0, NSMakePoint(0, 0));
+        }
+    }
+    scheduleSnapshotLayerRefresh(contents, @"key-event");
 }
 
 void ts_set_focus(ts_web_contents_t wc, bool focused)
@@ -1302,6 +2125,7 @@ void ts_set_focus(ts_web_contents_t wc, bool focused)
         return;
 
     contents->focused = focused;
+    traceCopyState(contents, focused ? @"focus-true" : @"focus-false");
     if (!focused) {
         [contents->window makeFirstResponder:nil];
         [contents->window resignKeyWindow];
@@ -1446,6 +2270,17 @@ void ts_set_on_renderer_crashed(ts_renderer_crashed_cb cb, void *user_data)
 {
     g_callbacks.on_renderer_crashed = cb;
     g_callbacks.on_renderer_crashed_data = user_data;
+}
+
+void ts_set_on_render_probe(ts_render_probe_cb cb, void *user_data)
+{
+    g_callbacks.on_render_probe = cb;
+    g_callbacks.on_render_probe_data = user_data;
+}
+
+void ts_webkit_test_capture_render_probe(ts_web_contents_t wc)
+{
+    captureRenderProbe(static_cast<WebContents *>(wc));
 }
 
 extern "C" void ts_webkit_test_evaluate_javascript(

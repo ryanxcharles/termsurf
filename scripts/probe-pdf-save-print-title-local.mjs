@@ -47,6 +47,11 @@ function parseArgs(argv) {
   if (args.printBridgeTraceFile) {
     args.printBridgeTraceFile = path.resolve(args.printBridgeTraceFile);
   }
+  if (args.nativePrintTraceFile) {
+    args.nativePrintTraceFile = path.resolve(args.nativePrintTraceFile);
+  }
+  args.allowNativePrintClick =
+    args.allowNativePrintClick === "1" || args.allowNativePrintClick === "true";
   return args;
 }
 
@@ -1145,6 +1150,16 @@ function readPrintBridgeTraceLines(args) {
     .filter(Boolean);
 }
 
+function readNativePrintTraceLines(args) {
+  if (!args.nativePrintTraceFile || !fs.existsSync(args.nativePrintTraceFile)) {
+    return [];
+  }
+  return fs
+    .readFileSync(args.nativePrintTraceFile, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
 function parseTraceFields(line) {
   const fields = {};
   for (const part of line.split(/\s+/)) {
@@ -1326,6 +1341,42 @@ async function probePrint(client, args, baseline, children) {
     };
   }
   if (!args.printInterceptFile) {
+    if (args.allowNativePrintClick) {
+      const beforeNativePrintLines = readNativePrintTraceLines(args);
+      const beforePrintBridgeJsRecords = await readJsPrintBridgeTrace(
+        client,
+        baseline,
+        children,
+      );
+      const click = await clickControl(
+        client,
+        baseline,
+        children,
+        "print",
+        "native-print-1",
+      );
+      await sleep(args.actionSettleMs);
+      return {
+        status: click.ok
+          ? "print-native-click-sent"
+          : "print-native-click-failed",
+        controlFound,
+        clicked: click.ok,
+        flags,
+        loadTimePrintingEnabled,
+        bridgeTraceFile: args.printBridgeTraceFile || null,
+        nativePrintTraceFile: args.nativePrintTraceFile || null,
+        printNativeLines: readNativePrintTraceLines(args).slice(
+          beforeNativePrintLines.length,
+        ),
+        printJsRecords: (
+          await readJsPrintBridgeTrace(client, baseline, children)
+        ).slice(beforePrintBridgeJsRecords.length),
+        click,
+        notes:
+          "Production print was clicked only because --allow-native-print-click was provided by the safety-gated native print harness.",
+      };
+    }
     return {
       status: "print-production-available-not-clicked",
       controlFound,

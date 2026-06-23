@@ -213,4 +213,23 @@ extern "C" {
         >,
         user_data: *mut c_void,
     );
+
+    pub fn ts_set_on_render_probe(
+        cb: Option<
+            unsafe extern "C" fn(
+                TsWebContents,
+                *const c_char,
+                *const c_char,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                c_int,
+                *const c_char,
+                *mut c_void,
+            ),
+        >,
+        user_data: *mut c_void,
+    );
 }

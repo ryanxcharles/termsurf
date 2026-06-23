@@ -64,9 +64,9 @@ should be informed by the previous result.
       and pointing them here.
 - [x] Define the full cross-engine PDF feature matrix.
 - [ ] Finish Roamium PDF support.
-- [ ] Add durable Roamium regression guards for every completed PDF workflow.
-- [ ] Audit WebKit/Safari PDF capabilities relevant to Surfari.
-- [ ] Prove basic Surfari PDF rendering in the real TermSurf app.
+- [x] Add durable Roamium regression guards for every completed PDF workflow.
+- [x] Audit WebKit/Safari PDF capabilities relevant to Surfari.
+- [x] Prove basic Surfari PDF rendering in the real TermSurf app.
 - [ ] Implement or fix Surfari PDF behavior where probes expose TermSurf
       integration gaps.
 - [ ] Add durable Surfari regression guards for every completed PDF workflow.
@@ -123,7 +123,123 @@ Each feature row should ultimately record:
 - [Experiment 1: Define the cross-engine PDF matrix](01-define-cross-engine-pdf-matrix.md)
   — **Pass**
 - [Experiment 2: Rerun the Roamium PDF baseline](02-rerun-roamium-pdf-baseline.md)
-  — **Designed**
+  — **Pass**
+- [Experiment 3: Prove Roamium keyboard and page navigation](03-prove-roamium-keyboard-page-navigation.md)
+  — **Pass**
+- [Experiment 4: Prove Roamium PDF links](04-prove-roamium-pdf-links.md) —
+  **Pass**
+- [Experiment 5: Prove Roamium PDF find/search](05-prove-roamium-pdf-find-search.md)
+  — **Pass**
+- [Experiment 6: Prove Roamium PDF document restrictions](06-prove-roamium-pdf-document-restrictions.md)
+  — **Partial**
+- [Experiment 7: Prove Roamium password-protected PDFs](07-prove-roamium-password-pdfs.md)
+  — **Partial**
+- [Experiment 8: Fix Roamium PDF password Enter submission](08-fix-roamium-password-enter-submit.md)
+  — **Pass**
+- [Experiment 9: Prove Roamium malformed PDF errors](09-prove-roamium-malformed-pdf-errors.md)
+  — **Pass**
+- [Experiment 10: Probe Roamium native print dialog safely](10-probe-roamium-native-print-dialog.md)
+  — **Partial**
+- [Experiment 11: Inventory Roamium advanced PDF surfaces](11-inventory-roamium-advanced-pdf-surfaces.md)
+  — **Pass**
+- [Experiment 12: Prove Roamium PDF forms](12-prove-roamium-pdf-forms.md) —
+  **Partial**
+- [Experiment 13: Fix Roamium PDF form sequences](13-fix-roamium-pdf-form-sequence.md)
+  — **Partial**
+- [Experiment 14: Compare Roamium PDF form input paths](14-compare-roamium-pdf-form-input-paths.md)
+  — **Pass**
+- [Experiment 15: Add Roamium PDF regression guard](15-add-roamium-pdf-regression-guard.md)
+  — **Pass**
+- [Experiment 16: Prove native dialog watcher preflight](16-prove-native-dialog-watcher-preflight.md)
+  — **Partial**
+- [Experiment 17: Prove native dialog cancellation](17-prove-native-dialog-cancellation.md)
+  — **Pass**
+- [Experiment 18: Probe Roamium native print dialog](18-probe-roamium-native-print-dialog.md)
+  — **Partial**
+- [Experiment 19: Trace Roamium native print plumbing](19-trace-roamium-native-print-plumbing.md)
+  — **Pass**
+- [Experiment 20: Wire Roamium browser print settings](20-wire-roamium-browser-print-settings.md)
+  — **Partial**
+- [Experiment 21: Diagnose Roamium macOS print dialog](21-diagnose-roamium-macos-print-dialog.md)
+  — **Partial**
+- [Experiment 22: Fix Roamium macOS print panel presentation](22-fix-roamium-macos-print-panel-presentation.md)
+  — **Partial**
+- [Experiment 23: Probe Roamium app-modal print presentation](23-probe-roamium-app-modal-print-presentation.md)
+  — **Partial**
+- [Experiment 24: Bridge GUI active state into Roamium app activation](24-bridge-gui-active-app-activation.md)
+  — **Partial**
+- [Experiment 25: Promote Roamium AppKit activation policy](25-promote-roamium-appkit-activation-policy.md)
+  — **Partial**
+- [Experiment 26: Retry parent-window print sheet after activation](26-retry-parent-window-print-sheet-after-activation.md)
+  — **Partial**
+- [Experiment 27: Inspect parent print sheet visibility](27-inspect-parent-print-sheet-visibility.md)
+  — **Partial**
+- [Experiment 28: Cancel parent print sheet through Accessibility](28-cancel-parent-print-sheet-accessibility.md)
+  — **Pass**
+- [Experiment 29: Add native print to Roamium regression guards](29-add-native-print-regression-guard.md)
+  — **Pass**
+- [Experiment 30: Prove Roamium PDF annotations](30-prove-roamium-pdf-annotations.md)
+  — **Pass**
+- [Experiment 31: Classify Roamium PDF accessibility and searchify](31-classify-roamium-pdf-accessibility-searchify.md)
+  — **Pass**
+- [Experiment 32: Prove Roamium PDF context-menu safety](32-prove-roamium-pdf-context-menu-safety.md)
+  — **Pass**
+- [Experiment 33: Add Roamium advanced PDF regression guard](33-add-roamium-advanced-pdf-regression-guard.md)
+  — **Pass**
+- [Experiment 34: Audit Surfari and WebKit PDF capabilities](34-audit-surfari-webkit-pdf-capabilities.md)
+  — **Pass**
+- [Experiment 35: Prove basic Surfari PDF rendering](35-prove-basic-surfari-pdf-rendering.md)
+  — **Partial**
+- [Experiment 36: Diagnose Surfari visual compositing](36-diagnose-surfari-visual-compositing.md)
+  — **Pass**
+- [Experiment 37: Prove Surfari-side render pixels](37-prove-surfari-side-render-pixels.md)
+  — **Pass**
+- [Experiment 38: Diagnose Surfari CAContext hosting](38-diagnose-surfari-cacontext-hosting.md)
+  — **Pass**
+- [Experiment 39: Make Surfari snapshot presentation normal](39-make-surfari-snapshot-presentation-normal.md)
+  — **Partial**
+- [Experiment 40: Prove Surfari snapshot refresh deltas](40-prove-surfari-snapshot-refresh-deltas.md)
+  — **Pass**
+- [Experiment 41: Prove Surfari PDF load variants](41-prove-surfari-pdf-load-variants.md)
+  — **Pass**
+- [Experiment 42: Prove Surfari PDF input navigation](42-prove-surfari-pdf-input-navigation.md)
+  — **Pass**
+- [Experiment 43: Prove Surfari PDF links](43-prove-surfari-pdf-links.md) —
+  **Pass**
+- [Experiment 44: Prove Surfari PDF text selection and copy](44-prove-surfari-pdf-selection-copy.md)
+  — **Partial**
+- [Experiment 45: Diagnose Surfari PDF selection source](45-diagnose-surfari-pdf-selection-source.md)
+  — **Pass**
+- [Experiment 46: Prove PDF copy oracles](46-prove-pdf-copy-oracle.md) —
+  **Pass**
+- [Experiment 47: Trace Surfari PDF copy target](47-trace-surfari-pdf-copy-target.md)
+  — **Partial**
+- [Experiment 48: Probe Surfari direct copy fix](48-probe-surfari-direct-copy-fix.md)
+  — **Pass**
+- [Experiment 49: Map Surfari PDF selection bounds](49-map-surfari-pdf-selection-bounds.md)
+  — **Partial**
+- [Experiment 50: Prove separated-token PDF copy oracle](50-prove-separated-token-copy-oracle.md)
+  — **Pass**
+- [Experiment 51: Rerun embedded selection bounds with oracle](51-rerun-embedded-selection-bounds-with-oracle.md)
+  — **Pass**
+- [Experiment 52: Probe embedded right-edge correction](52-probe-embedded-right-edge-correction.md)
+  — **Pass**
+- [Experiment 53: Diagnose embedded PDF view geometry](53-diagnose-embedded-pdf-view-geometry.md)
+  — **Partial**
+- [Experiment 54: Calibrate standalone PDF selection geometry](54-calibrate-standalone-pdf-selection-geometry.md)
+  — **Pass**
+- [Experiment 55: Test embedded PDF calibrated gestures](55-test-embedded-pdf-calibrated-gestures.md)
+  — **Pass**
+- [Experiment 56: Probe embedded PDF responder activation](56-probe-embedded-pdf-responder-activation.md)
+  — **Partial**
+- [Experiment 57: Probe PDF mouse dispatch path](57-probe-pdf-mouse-dispatch-path.md)
+  — **Pass**
+- [Experiment 58: Trace WebKit PDF selection tracking](58-trace-webkit-pdf-selection-tracking.md)
+  — **Fail**
+- [Experiment 59: Fix Surfari PDF point scaling](59-fix-surfari-pdf-point-scaling.md)
+  — **Fail**
+- [Experiment 60: Compare PDF action paths](60-compare-pdf-action-paths.md) —
+  **Pass**
 
 ## Roamium Phase
 

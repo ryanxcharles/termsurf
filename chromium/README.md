@@ -21,7 +21,7 @@ No `origin` remote for now. Remote hosting TBD (likely patch set distribution).
 ## Current State
 
 - Current fully archived build baseline: `148.0.7778.97-issue-794-exp19`
-- Latest documented branch: `148.0.7778.97-issue-816`
+- Latest documented branch: `148.0.7778.97-issue-834-exp27`
 - Base version: `148.0.7778.97` (tracking Electron's Chromium version)
 
 > **Note:** The `…-issue-789-exp*` and `…-issue-790-exp*` branches are
@@ -158,6 +158,17 @@ find the most relevant recent branch, create a new branch from it
 | `148.0.7778.97-issue-799-exp10` | [Issue 799](../issues/0799-browser-api-automation-triage/README.md)          | Add explicit default-deny permissions       |
 | `148.0.7778.97-issue-799-exp12` | [Issue 799](../issues/0799-browser-api-automation-triage/README.md)          | Add contained file upload selection         |
 | `148.0.7778.97-issue-799-exp13` | [Issue 799](../issues/0799-browser-api-automation-triage/README.md)          | Add session isolation and incognito checks  |
+| `148.0.7778.97-issue-834-exp4`  | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Bridge PDF external link navigation         |
+| `148.0.7778.97-issue-834-exp5`  | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Add PDF find/search keyboard path           |
+| `148.0.7778.97-issue-834-exp8`  | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Submit PDF passwords with Enter             |
+| `148.0.7778.97-issue-834-exp20` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Wire Roamium PDF print manager settings     |
+| `148.0.7778.97-issue-834-exp21` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Diagnose macOS native print dialog          |
+| `148.0.7778.97-issue-834-exp22` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Fix macOS print panel presentation          |
+| `148.0.7778.97-issue-834-exp23` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Probe app-modal print presentation          |
+| `148.0.7778.97-issue-834-exp24` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Bridge GUI active app activation            |
+| `148.0.7778.97-issue-834-exp25` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Promote Roamium AppKit activation policy    |
+| `148.0.7778.97-issue-834-exp26` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Retry parent-window print sheet             |
+| `148.0.7778.97-issue-834-exp27` | [Issue 834](../issues/0834-full-pdf-support-roamium-surfari/README.md)       | Inspect parent print sheet visibility       |
 | `148.0.7778.97-issue-816`       | [Issue 816](../issues/0816-ghostboard-browser-state-interruptions/README.md) | Emit deterministic initial loading state    |
 | `148.0.7778.97-issue-781`       | [Issue 781](../issues/0781-chromium-upgrade/README.md)                       | Chromium 148 migration                      |
 | `148.0.7778.97-issue-780`       | [Issue 780](../issues/0780-link-drag-freeze/README.md)                       | Suppress native link drag in Roamium        |
