@@ -221,7 +221,7 @@ Each feature row should ultimately record:
 - [Experiment 50: Prove separated-token PDF copy oracle](50-prove-separated-token-copy-oracle.md)
   — **Pass**
 - [Experiment 51: Rerun embedded selection bounds with oracle](51-rerun-embedded-selection-bounds-with-oracle.md)
-  — **Designed**
+  — **Pass**
 
 ## Roamium Phase
 

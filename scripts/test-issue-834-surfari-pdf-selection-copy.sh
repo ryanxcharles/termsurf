@@ -561,6 +561,8 @@ data = {
         "accepted_substring": "$ACCEPTED_SUBSTRING",
         "pdf_text_operator": "$PDF_TEXT_OPERATORS_SUMMARY",
         "pdf_text_bboxes": json.loads("""$PDF_TEXT_BBOXES_JSON"""),
+        "page_geometry": {"media_box": [0, 0, 612, 792]},
+        "font": {"name": "Helvetica", "size": 24, "encoding": "WinAnsiEncoding"},
         "text_extraction_status": "$PDF_TEXT_EXTRACTION_STATUS",
         "text_extracted": "$PDF_TEXT_EXTRACTED",
     },

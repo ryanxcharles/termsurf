@@ -176,3 +176,117 @@ Follow-up verdict: **Approved**.
 
 The reviewer found no remaining must-fix design issues and approved the
 Experiment 51 plan commit.
+
+## Result
+
+**Result:** Pass
+
+Added `scripts/test-issue-834-surfari-pdf-selection-bounds-with-oracle.sh`, a
+wrapper around the existing embedded Surfari separated-token matrix. The wrapper
+loads the Experiment 50 oracle summary, verifies the oracle gate is open,
+compares the current embedded fixture metadata against the oracle fixture
+identity, then reruns the 18-cell embedded matrix and reclassifies it with the
+oracle evidence available.
+
+Verification:
+
+```bash
+bash -n scripts/test-issue-834-surfari-pdf-selection-bounds-with-oracle.sh
+bash -n scripts/test-issue-834-surfari-pdf-selection-bounds.sh
+bash -n scripts/test-issue-834-surfari-pdf-selection-copy.sh
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp51-surfari-pdf-selection-bounds-with-oracle
+scripts/test-issue-834-surfari-pdf-selection-bounds-with-oracle.sh
+```
+
+The successful run was `20260623-002902`. Its summary is:
+
+```text
+logs/issue-834-exp51-surfari-pdf-selection-bounds-with-oracle/surfari-pdf-selection-bounds-with-oracle-summary.json
+```
+
+The run classified the result as:
+
+```json
+{
+  "classification": "embedded-right-edge-selection-gap",
+  "fixture_identity_match": true,
+  "oracle_gate_open": true,
+  "overall_result": "pass",
+  "right_edge_recurrence": true,
+  "targeting_complete": true
+}
+```
+
+Key evidence:
+
+- The Experiment 50 oracle gate was open.
+- The current embedded fixture metadata matched the Experiment 50 oracle fixture
+  identity, including page geometry, font, text operators, token text, token
+  positions, and token boxes.
+- The embedded matrix ran 18 real Surfari cells.
+- No embedded cell copied `RIGHT834`.
+- Required direct all-token/over-wide cells copied `LEFT834 MID834` while
+  missing `RIGHT834`:
+  - `all-ltr`;
+  - `all-rtl`;
+  - `all-y-high`;
+  - `all-y-low`;
+  - `overwide-delay-025`;
+  - `overwide-delay-100`;
+  - `overwide-delay-200`.
+- Targeting evidence was complete for the same required cells, meaning the drag
+  paths reached safely past the expected right edge of `RIGHT834`.
+- Clipboard restoration succeeded through the embedded matrix wrapper.
+
+The repeated clipboard sample for the required direct all-token and over-wide
+cells was `LEFT834 MID834 LEFT834 MID834`. That proves embedded Surfari can
+select/copy PDF text through the direct-copy diagnostic path, but consistently
+loses the rightmost token.
+
+## Conclusion
+
+The embedded Surfari PDF copy failure is now classified as an embedded
+right-edge selection gap. It is no longer explained by a bad PDF fixture, a bad
+standalone WebKit/PDFKit copy oracle, missing embedded fixture identity, a
+simple y-offset issue, drag direction, or copy timing delay.
+
+The next experiment should diagnose and fix why embedded Surfari's PDF selection
+boundary excludes the right edge of the selected text. The fix should still be
+deliberate: this experiment only proves the failure class; it does not ship a
+product behavior change.
+
+## Completion Review
+
+An external Codex completion review checked the wrapper, result language, and
+final summary.
+
+Initial verdict: **Changes required**.
+
+Findings:
+
+- the first wrapper synthesized page geometry and font constants instead of
+  reading them from the current embedded fixture summary;
+- the result text therefore overstated the fixture identity proof;
+- the experiment file needed to record completion review before the result
+  commit.
+
+Resolution:
+
+- updated `scripts/test-issue-834-surfari-pdf-selection-copy.sh` to emit
+  `page_geometry` and `font` in every fixture summary;
+- updated `scripts/test-issue-834-surfari-pdf-selection-bounds-with-oracle.sh`
+  to read those fields from embedded cell summaries before comparing them to the
+  Experiment 50 oracle fixture identity;
+- reran the full matrix as `20260623-002902` and updated the result text to
+  reference that run.
+
+Follow-up verdict: **Approved**.
+
+The reviewer found no remaining technical must-fix issues. It agreed that the
+fixture identity gate is now sufficiently mechanical and that the rerun supports
+`Pass` / `embedded-right-edge-selection-gap`: oracle open, fixture identity
+match, 18 embedded cells, no `RIGHT834`, required direct cells copied
+`LEFT834 MID834`, recurrence and targeting true, and clipboard restoration
+succeeded.
