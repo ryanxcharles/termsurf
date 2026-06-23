@@ -213,7 +213,7 @@ Each feature row should ultimately record:
 - [Experiment 46: Prove PDF copy oracles](46-prove-pdf-copy-oracle.md) —
   **Pass**
 - [Experiment 47: Trace Surfari PDF copy target](47-trace-surfari-pdf-copy-target.md)
-  — **Designed**
+  — **Partial**
 
 ## Roamium Phase
 

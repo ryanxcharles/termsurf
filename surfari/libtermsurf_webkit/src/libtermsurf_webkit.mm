@@ -222,6 +222,109 @@ struct WebContents {
 
 static void scheduleSnapshotLayerRefresh(WebContents *contents, NSString *reason);
 
+static bool pdfCopyTraceEnabled()
+{
+    return NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_TRACE"].length > 0;
+}
+
+static bool pdfCopyInProcessProbeEnabled()
+{
+    return NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_INPROCESS"].length > 0;
+}
+
+static NSString *describeObject(id object)
+{
+    if (!object)
+        return @"nil";
+    return [NSString stringWithFormat:@"%@:%p", NSStringFromClass([object class]), object];
+}
+
+static NSString *responderChain(NSResponder *responder)
+{
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    NSResponder *current = responder;
+    for (int i = 0; current && i < 12; i++) {
+        [items addObject:describeObject(current)];
+        current = current.nextResponder;
+    }
+    if (current)
+        [items addObject:@"..."];
+    return [items componentsJoinedByString:@">"];
+}
+
+static NSString *clipboardSample()
+{
+    NSString *value = [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] ?: @"";
+    NSString *sample = value.length > 120 ? [value substringToIndex:120] : value;
+    sample = [[sample stringByReplacingOccurrencesOfString:@"\n" withString:@" "] stringByReplacingOccurrencesOfString:@"\t" withString:@" "];
+    return [NSString stringWithFormat:@"len=%lu change=%ld sample=%@", (unsigned long)value.length, (long)NSPasteboard.generalPasteboard.changeCount, sample];
+}
+
+static void appendPdfCopyTrace(NSString *line)
+{
+    if (!pdfCopyTraceEnabled())
+        return;
+    NSString *path = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_PDF_COPY_TRACE_FILE"];
+    if (!path.length)
+        path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"termsurf-surfari-pdf-copy-trace.log"];
+    NSString *entry = [line stringByAppendingString:@"\n"];
+    NSData *data = [entry dataUsingEncoding:NSUTF8StringEncoding];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *parent = path.stringByDeletingLastPathComponent;
+    if (parent.length)
+        [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:nil];
+    if (![fm fileExistsAtPath:path])
+        [data writeToFile:path atomically:YES];
+    else {
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        [handle seekToEndOfFile];
+        [handle writeData:data];
+        [handle closeFile];
+    }
+}
+
+static void traceJavaScriptSelection(WebContents *contents, NSString *label)
+{
+    if (!pdfCopyTraceEnabled() || !contents || !contents->web_view)
+        return;
+    NSString *script = @"(() => { const s = window.getSelection ? String(window.getSelection()) : ''; return JSON.stringify({ length: s.length, sample: s.slice(0, 120), activeElement: document.activeElement ? document.activeElement.tagName : '', hasFocus: document.hasFocus ? document.hasFocus() : false }); })()";
+    int tab_id = contents->tab_id;
+    [contents->web_view evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
+        NSString *resultString = result ? [NSString stringWithFormat:@"%@", result] : @"";
+        NSString *errorString = error ? error.localizedDescription : @"";
+        appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-js tab=%d label=%@ result=%@ error=%@", tab_id, label, resultString, errorString]);
+    }];
+}
+
+static void traceCopyState(WebContents *contents, NSString *label)
+{
+    if (!pdfCopyTraceEnabled() || !contents)
+        return;
+    SEL copySelector = @selector(copy:);
+    id targetFromNil = [NSApp targetForAction:copySelector to:nil from:nil];
+    id targetFromWebView = [NSApp targetForAction:copySelector to:nil from:contents->web_view];
+    NSResponder *firstResponder = contents->window.firstResponder;
+    appendPdfCopyTrace([NSString stringWithFormat:
+        @"surfari-pdf-copy-state tab=%d label=%@ url=%@ focused=%d gui_active=%d window=%@ key_window=%d main_window=%d app_key_window=%@ web_view=%@ web_frame=%@ first_responder=%@ responder_chain=%@ target_nil=%@ target_webview=%@ clipboard={%@}",
+        contents->tab_id,
+        label,
+        contents->web_view.URL.absoluteString ?: @"",
+        contents->focused ? 1 : 0,
+        contents->gui_active ? 1 : 0,
+        describeObject(contents->window),
+        contents->window.isKeyWindow ? 1 : 0,
+        contents->window.isMainWindow ? 1 : 0,
+        describeObject(NSApp.keyWindow),
+        describeObject(contents->web_view),
+        NSStringFromRect(contents->web_view.frame),
+        describeObject(firstResponder),
+        responderChain(firstResponder),
+        describeObject(targetFromNil),
+        describeObject(targetFromWebView),
+        clipboardSample()]);
+    traceJavaScriptSelection(contents, label);
+}
+
 static NSString *caContextLayerMode()
 {
     NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_CACONTEXT_LAYER"];
@@ -1477,7 +1580,12 @@ void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, i
         eventNumber:++contents->mouse_event_number
         clickCount:MAX(click_count, (int)contents->mouse_click_count)
         pressure:type == 0 ? 1.0 : 0.0];
+    if (pdfCopyTraceEnabled()) {
+        appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-mouse tab=%d type=%d button=%d x=%d y=%d click_count=%d modifiers=%d location=%@", contents->tab_id, type, button, x, y, click_count, modifiers, NSStringFromPoint(location)]);
+    }
     deliverMouseEvent(contents, event);
+    if (type == 1)
+        traceCopyState(contents, @"after-mouse-up");
     scheduleSnapshotLayerRefresh(contents, @"mouse-event");
 }
 
@@ -1505,6 +1613,9 @@ void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
         [contents->web_view _simulateMouseMove:event];
     contents->suppress_cursor_notifications = false;
     [NSApp _setCurrentEvent:nil];
+    if (is_drag && pdfCopyTraceEnabled()) {
+        appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-drag tab=%d x=%d y=%d modifiers=%d location=%@", contents->tab_id, x, y, modifiers, NSStringFromPoint(event.locationInWindow)]);
+    }
     if (is_drag)
         scheduleSnapshotLayerRefresh(contents, @"mouse-drag");
 }
@@ -1562,6 +1673,10 @@ void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const cha
         isARepeat:type == 2
         keyCode:(unsigned short)keycode];
 
+    bool is_copy_key_down = type == 0 && keycode == 67 && (modifiers & 8) != 0;
+    if (is_copy_key_down)
+        traceCopyState(contents, @"before-external-copy");
+
     if (eventType == NSEventTypeKeyUp)
     {
         [NSApp _setCurrentEvent:event];
@@ -1571,6 +1686,26 @@ void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const cha
         [NSApp _setCurrentEvent:event];
         [contents->web_view keyDown:event];
         [NSApp _setCurrentEvent:nil];
+    }
+    if (is_copy_key_down) {
+        traceCopyState(contents, @"after-external-copy");
+        if (pdfCopyInProcessProbeEnabled()) {
+            traceCopyState(contents, @"before-inprocess-copy");
+            BOOL ok_nil = [NSApp sendAction:@selector(copy:) to:nil from:nil];
+            appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-inprocess tab=%d route=sendActionNil ok=%d clipboard={%@}", contents->tab_id, ok_nil ? 1 : 0, clipboardSample()]);
+            BOOL ok_webview = [NSApp sendAction:@selector(copy:) to:contents->web_view from:nil];
+            appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-inprocess tab=%d route=sendActionWebView ok=%d clipboard={%@}", contents->tab_id, ok_webview ? 1 : 0, clipboardSample()]);
+            if ([contents->web_view respondsToSelector:@selector(copy:)]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [contents->web_view performSelector:@selector(copy:) withObject:nil];
+#pragma clang diagnostic pop
+                appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-inprocess tab=%d route=performWebViewCopy responds=1 invoked=1 clipboard={%@}", contents->tab_id, clipboardSample()]);
+            } else {
+                appendPdfCopyTrace([NSString stringWithFormat:@"surfari-pdf-copy-inprocess tab=%d route=performWebViewCopy responds=0 invoked=0 reason=not-responds clipboard={%@}", contents->tab_id, clipboardSample()]);
+            }
+            traceCopyState(contents, @"after-inprocess-copy");
+        }
     }
     scheduleSnapshotLayerRefresh(contents, @"key-event");
 }
@@ -1582,6 +1717,7 @@ void ts_set_focus(ts_web_contents_t wc, bool focused)
         return;
 
     contents->focused = focused;
+    traceCopyState(contents, focused ? @"focus-true" : @"focus-false");
     if (!focused) {
         [contents->window makeFirstResponder:nil];
         [contents->window resignKeyWindow];

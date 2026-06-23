@@ -185,3 +185,124 @@ Follow-up verdict: **Approved**.
 
 The reviewer found no remaining must-fix design issues and approved the
 Experiment 47 plan commit.
+
+## Result
+
+**Result:** Partial
+
+The Surfari copy-target trace was added behind
+`TERMSURF_SURFARI_PDF_COPY_TRACE=1`, with optional in-process copy probing
+behind `TERMSURF_SURFARI_PDF_COPY_INPROCESS=1`. The harness was added as
+`scripts/test-issue-834-surfari-pdf-copy-target.sh`.
+
+Verification:
+
+```bash
+bash -n scripts/test-issue-834-surfari-pdf-copy-target.sh
+cargo fmt -p surfari -- --check
+surfari/libtermsurf_webkit/build.sh
+cargo build -p surfari
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp47-surfari-pdf-copy-target
+scripts/test-issue-834-surfari-pdf-copy-target.sh
+```
+
+The diagnostic run was `20260622-230806`. Its summary is:
+
+```text
+logs/issue-834-exp47-surfari-pdf-copy-target/surfari-pdf-copy-target-summary.json
+```
+
+The run classified the result as:
+
+```json
+{
+  "classification": "trace-insufficient",
+  "overall_result": "partial"
+}
+```
+
+Key evidence:
+
+- The passive baseline reproduced the existing Surfari PDF copy failure:
+  `surfari-pdf-selection-copy-partial`.
+- The trace shows Surfari receives focus, drag, and `Cmd+C`, and that
+  `WKWebView` is the first responder.
+- The host `TSHostWindow` is not key or main, and `NSApp.keyWindow` is `nil`.
+- `NSApp.target(forAction: copy:, to: nil, from: nil)` and
+  `NSApp.target(forAction: copy:, to: nil, from: webView)` both returned `nil`.
+- DOM selection remained empty, while the active element became `EMBED`; this is
+  not enough to prove there is no native PDF selection.
+- In-process probe routes showed mixed behavior:
+  - responder-chain `sendAction(copy:)` returned `ok=0`;
+  - direct `sendAction(copy:)` to `WKWebView` returned `ok=1` but did not copy
+    the marker on the first copy attempt;
+  - direct `WKWebView.copy(nil)` was invoked because `WKWebView` responds to
+    `copy:`, but it did not copy the marker on the first copy attempt;
+  - on the later fallback copy attempt, the clipboard changed to
+    `TS834PDFCOPYQXJ`, missing the final `Z`, so the full accepted marker still
+    was not proven.
+- Clipboard restoration succeeded.
+
+Important artifacts:
+
+- `logs/issue-834-exp47-surfari-pdf-copy-target/baseline-copy-trace-20260622-230806.log`
+- `logs/issue-834-exp47-surfari-pdf-copy-target/inprocess-copy-trace-20260622-230806.log`
+- `logs/issue-834-exp47-surfari-pdf-copy-target/baseline-exp44-summary-20260622-230806.json`
+- `logs/issue-834-exp47-surfari-pdf-copy-target/inprocess-exp44-summary-20260622-230806.json`
+
+No non-diagnostic product behavior change was made. The new code is gated by
+experiment environment variables.
+
+## Conclusion
+
+Experiment 47 moved the failure boundary inward but did not yet prove a final
+root cause. The strongest findings are:
+
+- Surfari's hidden host window is not key/main, `NSApp.keyWindow` is `nil`, and
+  AppKit cannot find a normal `copy:` target even though the `WKWebView` is the
+  first responder.
+- DOM selection is not useful for native PDF selection here: it stays empty with
+  `EMBED` active.
+- Direct WKWebView copy calls can report success, but they still do not reliably
+  copy the full marker in the embedded Surfari path.
+
+The next experiment should test a focused candidate fix around Surfari's AppKit
+responder/key-window state or around the exact selection coordinates used by the
+Surfari PDF copy harness. That fix should be separated from tracing and verified
+against the same copy-oracle evidence from Experiment 46.
+
+## Completion Review
+
+An external Codex review checked the completed experiment, harness, trace code,
+logs, and result text.
+
+Initial verdict: **Changes required**.
+
+Findings:
+
+- the trace logged `performWebViewCopy ok=1`, which overstated what happened:
+  the probe only knew that `WKWebView` responded to `copy:` and that the call
+  was invoked, not that it returned a success value or copied text;
+- the completion review had not yet been recorded in this experiment file.
+
+Resolution:
+
+- changed the trace wording to `responds=1 invoked=1` / `responds=0 invoked=0`
+  for the direct `WKWebView.copy(nil)` probe;
+- updated the result text to say the direct `copy:` call was invoked but did not
+  copy the marker;
+- reran the diagnostic after that fix, producing run `20260622-230806`;
+- added this completion-review section before the result commit.
+
+The reviewer found no other must-fix issues. The review confirmed that `Partial`
+/ `trace-insufficient` is supported: the baseline reproduces the failure,
+in-process probing does not prove the full accepted marker, DOM selection is
+treated cautiously, copy-target traces are useful but not decisive, clipboard
+restoration is recorded as restored, and the diagnostic code is env-gated.
+
+Follow-up verdict: **Approved**.
+
+The reviewer found no remaining must-fix issues and approved the Experiment 47
+result commit.
