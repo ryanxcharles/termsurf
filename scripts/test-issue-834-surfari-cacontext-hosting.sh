@@ -57,7 +57,8 @@ case "$CANDIDATE" in
       "$ROOT/scripts/test-issue-834-surfari-side-render-pixels.sh" 2>&1 | tee -a "$HARNESS_LOG"
     ;;
   baseline)
-    "$ROOT/scripts/test-issue-834-surfari-side-render-pixels.sh" 2>&1 | tee -a "$HARNESS_LOG"
+    TERMSURF_SURFARI_CACONTEXT_LAYER=webview-layer \
+      "$ROOT/scripts/test-issue-834-surfari-side-render-pixels.sh" 2>&1 | tee -a "$HARNESS_LOG"
     ;;
   *)
     fail "unknown candidate: $CANDIDATE"

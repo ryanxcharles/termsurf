@@ -158,3 +158,113 @@ Resolution:
 Follow-up verdict: **Approved**.
 
 The reviewer found no remaining required changes before the plan commit.
+
+## Result
+
+**Result:** Partial
+
+Surfari now uses the snapshot-backed `CAContext` layer by default when
+`TERMSURF_SURFARI_CACONTEXT_LAYER` is unset. The explicit `webview-layer`
+diagnostic fallback remains available so the Experiment 38 baseline can still
+reproduce the blank raw-`WKWebView.layer` hosting behavior.
+
+Implementation notes:
+
+- `libtermsurf_webkit` now treats an unset `TERMSURF_SURFARI_CACONTEXT_LAYER` as
+  `snapshot`;
+- snapshot refreshes are scheduled after export, navigation finish, corrective
+  resize, scroll, keyboard events, mouse button events, and mouse drag events;
+- refreshes are coalesced with a pending/again flag so repeated events do not
+  create unbounded overlapping snapshot requests;
+- delayed refresh callbacks and snapshot completions re-resolve the tab from the
+  live `WebContents` registry before touching state, avoiding use-after-free if
+  a tab is destroyed while refresh work is pending;
+- the render-probe snapshot path now also updates the hosted snapshot layer,
+  which fixed the observed HTML case where WebKit's internal pixels existed but
+  the hosted layer still showed the initial blank snapshot;
+- `scripts/test-issue-834-surfari-cacontext-hosting.sh` now forces
+  `TERMSURF_SURFARI_CACONTEXT_LAYER=webview-layer` for its baseline run;
+- `scripts/test-issue-834-surfari-snapshot-presentation.sh` verifies that the
+  default presentation test runs with the env var unset and records the
+  repo-built Ghostboard, WebTUI, Surfari, and WebKit artifact paths.
+
+Verification:
+
+```bash
+./surfari/libtermsurf_webkit/build.sh
+cargo fmt -p surfari
+cargo build -p surfari
+cargo build -p webtui
+(cd ghostboard && macos/build.nu --configuration Debug --action build)
+bash -n scripts/test-issue-834-surfari-cacontext-hosting.sh
+bash -n scripts/test-issue-834-surfari-snapshot-presentation.sh
+git diff --check
+git -C webkit/src status --short
+rm -rf logs/issue-834-exp39-surfari-snapshot-presentation \
+  logs/issue-834-exp37-surfari-side-render-pixels \
+  logs/issue-834-exp36-surfari-visual-compositing
+env -u TERMSURF_SURFARI_CACONTEXT_LAYER \
+  scripts/test-issue-834-surfari-snapshot-presentation.sh
+```
+
+The native WebKit build passed with the existing SDK warning about building for
+macOS 26.0 while linking a WebKit framework built for 26.5. The Ghostboard debug
+build passed with the existing SwiftLint warning in `SurfaceView_AppKit.swift`.
+
+The final harness run was
+`logs/issue-834-exp39-surfari-snapshot-presentation/surfari-snapshot-presentation-summary.json`
+with run id `20260622-200744`. Its summary recorded:
+
+- `termsurf_surfari_cacontext_layer`: `unset`;
+- `default_export_method`: `snapshot-backed`;
+- HTML internal render: pass;
+- PDF internal render: pass;
+- HTML Ghostboard-window visible proof: pass;
+- PDF Ghostboard-window visible proof: pass;
+- HTML refresh reasons: `export`, `coalesced`, `render-probe`, `export`,
+  `coalesced`;
+- PDF refresh reasons: `export`, `coalesced`, `render-probe`;
+- classification: `default-snapshot-visible-refresh-deltas-unproven`;
+- overall result: `partial`.
+
+## Conclusion
+
+This experiment converted Surfari's proven snapshot-backed candidate into the
+default visible presentation path and proved that HTML and PDF overlays are
+visible in the real Ghostboard window without an env-gated candidate. It did not
+complete the full pass criteria because the harness still does not drive a
+deterministic PDF interaction or resize and prove a before/after pixel delta in
+the hosted overlay.
+
+The next experiment should focus only on deterministic refresh proof: create or
+reuse a fixture whose visible overlay pixels must change after a scripted scroll
+or input event, then prove both interaction refresh and resize refresh from
+Ghostboard-window captures.
+
+## Completion Review
+
+An external Codex review checked the staged result.
+
+Initial verdict: **Changes required**.
+
+Findings:
+
+- delayed snapshot refresh work captured a raw `WebContents *` across
+  `dispatch_after` and `takeSnapshotWithConfiguration` completion callbacks, so
+  tab destruction could free the struct before callbacks touched it;
+- the completion review needed to be recorded in this experiment file before the
+  result commit.
+
+Resolution:
+
+- delayed refresh callbacks now capture the tab id and re-resolve the current
+  `WebContents` from the live registry before refreshing;
+- snapshot completion callbacks now re-resolve the tab and verify the
+  `WKWebView` identity before touching refresh flags, updating the snapshot
+  layer, scheduling coalesced work, or firing the render probe;
+- this completion review section records the review result.
+
+Follow-up verdict: **Approved**.
+
+The reviewer found no remaining required fixes before committing Experiment 39
+as a Partial result.

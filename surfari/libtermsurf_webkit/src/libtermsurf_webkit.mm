@@ -204,6 +204,8 @@ struct WebContents {
     bool renderer_crash_reported;
     CAContext *remote_context;
     CALayer *snapshot_layer;
+    bool snapshot_refresh_pending;
+    bool snapshot_refresh_again;
     int width;
     int height;
     bool gui_active;
@@ -218,12 +220,17 @@ struct WebContents {
     NSUInteger mouse_buttons_down = 0;
 };
 
-static void refreshSnapshotLayer(WebContents *contents);
+static void scheduleSnapshotLayerRefresh(WebContents *contents, NSString *reason);
+
+static NSString *caContextLayerMode()
+{
+    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_CACONTEXT_LAYER"];
+    return mode.length ? mode : @"snapshot";
+}
 
 static bool useSnapshotLayer()
 {
-    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_CACONTEXT_LAYER"];
-    return [mode isEqualToString:@"snapshot"];
+    return [caContextLayerMode() isEqualToString:@"snapshot"];
 }
 
 static CALayer *snapshotLayerForContents(WebContents *contents)
@@ -241,7 +248,7 @@ static CALayer *snapshotLayerForContents(WebContents *contents)
 
 static CALayer *remoteContextLayerForContents(WebContents *contents)
 {
-    NSString *mode = NSProcessInfo.processInfo.environment[@"TERMSURF_SURFARI_CACONTEXT_LAYER"];
+    NSString *mode = caContextLayerMode();
     if ([mode isEqualToString:@"snapshot"])
         return snapshotLayerForContents(contents);
     if ([mode isEqualToString:@"diagnostic-color"]) {
@@ -618,30 +625,63 @@ static void classifySnapshotImage(WebContents *contents, NSString *method, NSIma
     fireRenderProbe(contents, method, status, (int)width, (int)height, magenta, cyan, yellow, webkit_green, @"");
 }
 
-static void refreshSnapshotLayer(WebContents *contents)
+static void refreshSnapshotLayerNow(WebContents *contents, NSString *reason)
 {
     if (!contents || !contents->web_view || !useSnapshotLayer())
         return;
 
-    CALayer *snapshot_layer = snapshotLayerForContents(contents);
+    int tab_id = contents->tab_id;
+    WKWebView *web_view = contents->web_view;
+    NSString *refresh_reason = [reason copy] ?: @"unknown";
     WKSnapshotConfiguration *configuration = [[WKSnapshotConfiguration alloc] init];
-    configuration.rect = contents->web_view.bounds;
-    [contents->web_view takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage *snapshotImage, NSError *error) {
+    configuration.rect = web_view.bounds;
+    [web_view takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage *snapshotImage, NSError *error) {
+        WebContents *current = findContentsByTabId(tab_id);
+        if (!current || current->web_view != web_view)
+            return;
         if (error || !snapshotImage) {
             fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh failed: %s\n", error.localizedDescription.UTF8String ?: "missing-image");
+            current->snapshot_refresh_pending = false;
             return;
         }
         CGImageRef cg_image = [snapshotImage CGImageForProposedRect:nil context:nil hints:nil];
         if (!cg_image) {
             fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh failed: missing-cgimage\n");
+            current->snapshot_refresh_pending = false;
             return;
         }
+        CALayer *snapshot_layer = snapshotLayerForContents(current);
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         snapshot_layer.contents = (__bridge id)cg_image;
-        snapshot_layer.frame = CGRectMake(0, 0, MAX(contents->width, 64), MAX(contents->height, 64));
+        snapshot_layer.frame = CGRectMake(0, 0, MAX(current->width, 64), MAX(current->height, 64));
         [CATransaction commit];
+        fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh reason=%s width=%d height=%d\n", refresh_reason.UTF8String, current->width, current->height);
+        current->snapshot_refresh_pending = false;
+        if (current->snapshot_refresh_again) {
+            current->snapshot_refresh_again = false;
+            scheduleSnapshotLayerRefresh(current, @"coalesced");
+        }
     }];
+}
+
+static void scheduleSnapshotLayerRefresh(WebContents *contents, NSString *reason)
+{
+    if (!contents || !contents->web_view || !useSnapshotLayer())
+        return;
+    if (contents->snapshot_refresh_pending) {
+        contents->snapshot_refresh_again = true;
+        return;
+    }
+    contents->snapshot_refresh_pending = true;
+    int tab_id = contents->tab_id;
+    NSString *refresh_reason = [reason copy] ?: @"unknown";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        WebContents *current = findContentsByTabId(tab_id);
+        if (!current)
+            return;
+        refreshSnapshotLayerNow(current, refresh_reason);
+    });
 }
 
 static void captureRenderProbe(WebContents *contents)
@@ -653,8 +693,25 @@ static void captureRenderProbe(WebContents *contents)
 
     WKSnapshotConfiguration *configuration = [[WKSnapshotConfiguration alloc] init];
     configuration.rect = contents->web_view.bounds;
-    [contents->web_view takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage *snapshotImage, NSError *error) {
-        classifySnapshotImage(contents, @"WKWebView.takeSnapshot", snapshotImage, error);
+    int tab_id = contents->tab_id;
+    WKWebView *web_view = contents->web_view;
+    [web_view takeSnapshotWithConfiguration:configuration completionHandler:^(NSImage *snapshotImage, NSError *error) {
+        WebContents *current = findContentsByTabId(tab_id);
+        if (!current || current->web_view != web_view)
+            return;
+        if (!error && snapshotImage && useSnapshotLayer()) {
+            CGImageRef cg_image = [snapshotImage CGImageForProposedRect:nil context:nil hints:nil];
+            if (cg_image) {
+                CALayer *snapshot_layer = snapshotLayerForContents(current);
+                [CATransaction begin];
+                [CATransaction setDisableActions:YES];
+                snapshot_layer.contents = (__bridge id)cg_image;
+                snapshot_layer.frame = CGRectMake(0, 0, MAX(current->width, 64), MAX(current->height, 64));
+                [CATransaction commit];
+                fprintf(stderr, "[libtermsurf_webkit] snapshot-layer-refresh reason=render-probe width=%d height=%d\n", current->width, current->height);
+            }
+        }
+        classifySnapshotImage(current, @"WKWebView.takeSnapshot", snapshotImage, error);
     }];
 }
 
@@ -943,7 +1000,7 @@ static void exportContext(WebContents *contents)
         }];
         contents->remote_context.layer = remoteContextLayerForContents(contents);
     }
-    refreshSnapshotLayer(contents);
+    scheduleSnapshotLayerRefresh(contents, @"export");
 
     if (g_callbacks.on_ca_context_id) {
         g_callbacks.on_ca_context_id(
@@ -996,7 +1053,7 @@ static void exportContext(WebContents *contents)
         fireTitle(self.owner, title);
         fireLoading(self.owner, webView.URL.absoluteString, 0);
         exportContext(self.owner);
-        refreshSnapshotLayer(self.owner);
+        scheduleSnapshotLayerRefresh(self.owner, @"navigation-finish");
         captureRenderProbe(self.owner);
     }];
 }
@@ -1199,6 +1256,9 @@ ts_web_contents_t ts_create_web_contents(ts_browser_context_t ctx, const char *u
     contents->last_cursor_type = -999;
     contents->suppress_cursor_notifications = false;
     contents->renderer_crash_reported = false;
+    contents->snapshot_layer = nil;
+    contents->snapshot_refresh_pending = false;
+    contents->snapshot_refresh_again = false;
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
@@ -1287,6 +1347,9 @@ ts_web_contents_t ts_create_devtools_web_contents(
     contents->last_cursor_type = -999;
     contents->suppress_cursor_notifications = false;
     contents->renderer_crash_reported = false;
+    contents->snapshot_layer = nil;
+    contents->snapshot_refresh_pending = false;
+    contents->snapshot_refresh_again = false;
     contents->pending_javascript_dialogs = [[NSMutableDictionary alloc] init];
     contents->pending_http_auth_requests = [[NSMutableDictionary alloc] init];
 
@@ -1386,7 +1449,7 @@ void ts_set_view_size(
     contents->web_view.frame = contents->window.contentView.bounds;
     [contents->web_view layoutSubtreeIfNeeded];
     exportContext(contents);
-    refreshSnapshotLayer(contents);
+    scheduleSnapshotLayerRefresh(contents, @"resize");
 }
 
 void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, int y, int click_count, int modifiers)
@@ -1415,6 +1478,7 @@ void ts_forward_mouse_event(ts_web_contents_t wc, int type, int button, int x, i
         clickCount:MAX(click_count, (int)contents->mouse_click_count)
         pressure:type == 0 ? 1.0 : 0.0];
     deliverMouseEvent(contents, event);
+    scheduleSnapshotLayerRefresh(contents, @"mouse-event");
 }
 
 void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
@@ -1441,6 +1505,8 @@ void ts_forward_mouse_move(ts_web_contents_t wc, int x, int y, int modifiers)
         [contents->web_view _simulateMouseMove:event];
     contents->suppress_cursor_notifications = false;
     [NSApp _setCurrentEvent:nil];
+    if (is_drag)
+        scheduleSnapshotLayerRefresh(contents, @"mouse-drag");
 }
 
 void ts_forward_scroll_event(
@@ -1474,6 +1540,7 @@ void ts_forward_scroll_event(
     [NSApp _setCurrentEvent:event];
     [target scrollWheel:event];
     [NSApp _setCurrentEvent:nil];
+    scheduleSnapshotLayerRefresh(contents, @"scroll");
 }
 
 void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const char *utf8, int modifiers)
@@ -1505,6 +1572,7 @@ void ts_forward_key_event(ts_web_contents_t wc, int type, int keycode, const cha
         [contents->web_view keyDown:event];
         [NSApp _setCurrentEvent:nil];
     }
+    scheduleSnapshotLayerRefresh(contents, @"key-event");
 }
 
 void ts_set_focus(ts_web_contents_t wc, bool focused)

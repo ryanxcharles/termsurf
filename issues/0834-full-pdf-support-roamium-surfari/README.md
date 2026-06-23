@@ -197,7 +197,7 @@ Each feature row should ultimately record:
 - [Experiment 38: Diagnose Surfari CAContext hosting](38-diagnose-surfari-cacontext-hosting.md)
   — **Pass**
 - [Experiment 39: Make Surfari snapshot presentation normal](39-make-surfari-snapshot-presentation-normal.md)
-  — **Designed**
+  — **Partial**
 
 ## Roamium Phase
 
